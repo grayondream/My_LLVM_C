@@ -1,6 +1,14 @@
+// cc
 void func(){
     return;
 }
+
+/**a
+asdasd
+asdad
+asdasd
+*/
+
 
 int main(int argc, char* argv[]){
     int a = 3;
