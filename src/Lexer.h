@@ -18,7 +18,8 @@ private:
     char peekNext() const;
     char advance();
     char advanceNextLine();
-    
+    std::string lexeme();
+
     bool match(const char expected);
     std::string lexname();
     Token makeToken(const TokenType type, const std::string& lexeme, const TokenValue value = std::monostate());
@@ -28,6 +29,10 @@ private:
     void skipComment();
     Token scanToken();
 
+    Token scanIdentifier();
+    Token scanNumber();
+    Token scanString();
+    Token scanChar();
 private:
     std::string m_source;
     std::string m_filename;

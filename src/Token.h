@@ -11,7 +11,7 @@ enum class TokenType : int32_t {
     TOKEN_NUMBER,       // 数字字面量
     TOKEN_STRING,       // 字符串字面量
     TOKEN_CHAR,         // 字符字面量
-
+  
     // 关键字
     TOKEN_INT,
     TOKEN_FLOAT,
@@ -32,6 +32,17 @@ enum class TokenType : int32_t {
     TOKEN_CONST,
     TOKEN_STATIC,
     TOKEN_EXTERN,
+    TOKEN_VOLATILE,
+    TOKEN_REGISTER,
+    TOKEN_SIZEOF,
+    TOKEN_TYPEDEF,
+    TOKEN_INLINE,
+    TOKEN_RESTRICT,
+    TOKEN_BOOL,
+    TOKEN_GOTO,
+    TOKEN_SWITCH,
+    TOKEN_CASE,
+    TOKEN_DEFAULT,
 
     // 运算符
     TOKEN_PLUS,         // +
