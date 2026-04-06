@@ -3,7 +3,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="${PROJECT_ROOT}/build"
-BUILD_TYPE="${BUILD_TYPE:-Release}"
+BUILD_TYPE="${BUILD_TYPE:-Debug}"
 
 set -e
 
@@ -28,6 +28,11 @@ cmake .. \
 
 echo "Building project..."
 cmake --build . --config "${BUILD_TYPE}" -j$(nproc)
+
+if [ -f "${BUILD_DIR}/compile_commands.json" ]; then
+    ln -sf "${BUILD_DIR}/compile_commands.json" "${PROJECT_ROOT}/compile_commands.json"
+    echo "compile_commands.json linked to project root"
+fi
 
 echo "Build completed successfully!"
 echo "Executable: ${BUILD_DIR}/bin/my_llvm_c"
