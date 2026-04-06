@@ -285,15 +285,82 @@ Token Lexer::scanToken() {
     case '%':
         return makeToken(TokenType::TOKEN_PERCENT, lexeme());
     case '=':
-    case '!=':
+        {
+            auto isMatch = match('=');
+            if(isMatch) {
+                return makeToken(TokenType::TOKEN_ASSIGN, lexeme());
+            }else{
+                return makeToken(TokenType::TOKEN_EQ, lexeme());
+            }
+        }break;
+    case '!':
+        {
+            auto isMatch = match('=');
+            if(isMatch) {
+                return makeToken(TokenType::TOKEN_NOT_EQ, lexeme());
+            }else{
+                return makeToken(TokenType::TOKEN_NOT, lexeme());
+            }
+        }break;
     case '<':
+        {
+            auto isMatch = match('=');
+            if(isMatch) {
+                return makeToken(TokenType::TOKEN_LE, lexeme());
+            }else{
+                return makeToken(TokenType::TOKEN_LT, lexeme());
+            }
+        }break;
     case '>':
-    case '&&':
-    case '||':
-        return makeToken(TokenType::TOKEN_OPERATOR, std::string(1, ch));
+        {
+            auto isMatch = match('=');
+            if(isMatch) {
+                return makeToken(TokenType::TOKEN_GE, lexeme());
+            }else{
+                return makeToken(TokenType::TOKEN_GT, lexeme());
+            }
+        }break;
+    case '&':
+        {
+            auto isMatch = match('&');
+            if(isMatch) {
+                return makeToken(TokenType::TOKEN_AND, lexeme());
+            }else{
+                return makeToken(TokenType::TOKEN_BIT_AND, lexeme());
+            }
+        }break;
+    case '|':
+        {
+            auto isMatch = match('|');
+            if(isMatch) {
+                return makeToken(TokenType::TOKEN_OR, lexeme());
+            }else{
+                return makeToken(TokenType::TOKEN_BIT_OR, lexeme());
+            }
+        }break;  
+    case '(':
+        return makeToken(TokenType::TOKEN_LPAREN, lexeme());
+    case ')':
+        return makeToken(TokenType::TOKEN_RPAREN, lexeme());
+    case '{':
+        return makeToken(TokenType::TOKEN_LBRACE, lexeme());
+    case '}':
+        return makeToken(TokenType::TOKEN_RBRACE, lexeme());
+    case '[':
+        return makeToken(TokenType::TOKEN_LBRACKET, lexeme());
+    case ']':
+        return makeToken(TokenType::TOKEN_RBRACKET, lexeme());
+    case ';':
+        return makeToken(TokenType::TOKEN_SEMICOLON, lexeme());
+    case ',':
+        return makeToken(TokenType::TOKEN_COMMA, lexeme());
+    case '.':
+        return makeToken(TokenType::TOKEN_DOT, lexeme());
     default:
         error("unknown operator");
     }
+
+    return makeToken(TokenType::TOKEN_UNKNOWN, lexeme());
 }
 
 

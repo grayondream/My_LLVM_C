@@ -6,6 +6,7 @@
 #include <cstdint>
 
 enum class TokenType : int32_t {
+    TOKEN_UNKNOWN,        // 未知的 token
     // 基本标识符与字面量
     TOKEN_IDENTIFIER,   // 变量名、函数名
     TOKEN_NUMBER,       // 数字字面量
@@ -64,6 +65,8 @@ enum class TokenType : int32_t {
     TOKEN_AND,          // &&
     TOKEN_OR,           // ||
     TOKEN_NOT,          // !
+    TOKEN_BIT_AND,      // &
+    TOKEN_BIT_OR,       // |
 
     // 分隔符
     TOKEN_SEMICOLON,    // ;
