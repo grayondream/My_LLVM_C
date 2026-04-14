@@ -38,6 +38,6 @@ private:
     std::string m_filename;
     size_t m_startPos{};
     size_t m_currentPos{};
-    size_t m_lineNum{};
-    size_t m_colNum{};
+    size_t m_lineNum{1};
+    size_t m_colNum{1};
 };

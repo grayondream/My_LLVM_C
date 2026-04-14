@@ -94,7 +94,7 @@ public:
     int line{};                // 行号
     int column{};              // 列号
 
-    // 构造函数（通用）
+    Token() = default;
     Token(TokenType type,
           const std::string& lexeme,
           TokenValue value = std::monostate{},

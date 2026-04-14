@@ -116,7 +116,7 @@ std::string Lexer::lexname() {
 
 Token Lexer::makeToken(const TokenType type, const std::string& lexeme, const TokenValue value) {
     auto token = Token{type, lexeme, value, m_filename, (int)m_lineNum, (int)m_colNum};
-    LOGD("makeToken: {}", to_string(token));
+    LOGI("makeToken: {}", to_string(token));
     return token;
 }
 
@@ -129,12 +129,15 @@ std::vector<Token> Lexer::tokenize() {
     while(!isEof()) {
         skipWhitespace();
         skipComment();
-        skipWhitespace();
         m_startPos = m_currentPos;  
         if(isEof()) {
             break;
         }
-        tokens.push_back(scanToken());
+
+        auto token = scanToken();
+        if(token.type != TokenType::TOKEN_UNKNOWN) {
+            tokens.push_back(token);
+        }
     }
         
     return tokens;
@@ -241,6 +244,7 @@ Token Lexer::scanNumber(){
 }
 
 Token Lexer::scanString() {
+    advance();
     while(true){
         const char ch = peek();
         if(ch == '"') {
@@ -276,98 +280,116 @@ Token Lexer::scanToken() {
         return scanNumber();
     }
 
+    Token token;
     switch(ch){
     case '"':
-        return scanString();
+        token = scanString();
+        break;
     case '\'':
-        return scanChar();
+        token = scanChar();
+        break;
     case '+':
-        return makeToken(TokenType::TOKEN_PLUS, lexeme());
+        token = makeToken(TokenType::TOKEN_PLUS, lexeme());
+        break;
     case '-':
-        return makeToken(TokenType::TOKEN_MINUS, lexeme());
+        token = makeToken(TokenType::TOKEN_MINUS, lexeme());
+        break;
     case '*':
-        return makeToken(TokenType::TOKEN_STAR, lexeme());
+        token = makeToken(TokenType::TOKEN_STAR, lexeme());
+        break;
     case '/':
-        return makeToken(TokenType::TOKEN_SLASH, lexeme());
+        token = makeToken(TokenType::TOKEN_SLASH, lexeme());
+        break;
     case '%':
-        return makeToken(TokenType::TOKEN_PERCENT, lexeme());
+        token = makeToken(TokenType::TOKEN_PERCENT, lexeme());
+        break;
     case '=':
         {
             auto isMatch = match('=');
             if(isMatch) {
-                return makeToken(TokenType::TOKEN_ASSIGN, lexeme());
+                token = makeToken(TokenType::TOKEN_ASSIGN, lexeme());
             }else{
-                return makeToken(TokenType::TOKEN_EQ, lexeme());
+                token = makeToken(TokenType::TOKEN_EQ, lexeme());
             }
-        }break;
+        } break;
     case '!':
         {
             auto isMatch = match('=');
             if(isMatch) {
-                return makeToken(TokenType::TOKEN_NOT_EQ, lexeme());
+                token = makeToken(TokenType::TOKEN_NOT_EQ, lexeme());
             }else{
-                return makeToken(TokenType::TOKEN_NOT, lexeme());
+                token = makeToken(TokenType::TOKEN_NOT, lexeme());
             }
-        }break;
+        } break;
     case '<':
         {
             auto isMatch = match('=');
             if(isMatch) {
-                return makeToken(TokenType::TOKEN_LE, lexeme());
+                token = makeToken(TokenType::TOKEN_LE, lexeme());
             }else{
-                return makeToken(TokenType::TOKEN_LT, lexeme());
+                token = makeToken(TokenType::TOKEN_LT, lexeme());
             }
-        }break;
+        } break;
     case '>':
         {
             auto isMatch = match('=');
             if(isMatch) {
-                return makeToken(TokenType::TOKEN_GE, lexeme());
+                token = makeToken(TokenType::TOKEN_GE, lexeme());
             }else{
-                return makeToken(TokenType::TOKEN_GT, lexeme());
+                token = makeToken(TokenType::TOKEN_GT, lexeme());
             }
-        }break;
+        } break;
     case '&':
         {
             auto isMatch = match('&');
             if(isMatch) {
-                return makeToken(TokenType::TOKEN_AND, lexeme());
+                token = makeToken(TokenType::TOKEN_AND, lexeme());
             }else{
-                return makeToken(TokenType::TOKEN_BIT_AND, lexeme());
+                token = makeToken(TokenType::TOKEN_BIT_AND, lexeme());
             }
-        }break;
+        } break;
     case '|':
         {
             auto isMatch = match('|');
             if(isMatch) {
-                return makeToken(TokenType::TOKEN_OR, lexeme());
+                token = makeToken(TokenType::TOKEN_OR, lexeme());
             }else{
-                return makeToken(TokenType::TOKEN_BIT_OR, lexeme());
+                token = makeToken(TokenType::TOKEN_BIT_OR, lexeme());
             }
-        }break;  
+        } break;
     case '(':
-        return makeToken(TokenType::TOKEN_LPAREN, lexeme());
+        token = makeToken(TokenType::TOKEN_LPAREN, lexeme());
+        break;
     case ')':
-        return makeToken(TokenType::TOKEN_RPAREN, lexeme());
+        token = makeToken(TokenType::TOKEN_RPAREN, lexeme());
     case '{':
-        return makeToken(TokenType::TOKEN_LBRACE, lexeme());
+        token = makeToken(TokenType::TOKEN_LBRACE, lexeme());
+        break;
     case '}':
-        return makeToken(TokenType::TOKEN_RBRACE, lexeme());
+        token = makeToken(TokenType::TOKEN_RBRACE, lexeme());
+        break;
     case '[':
-        return makeToken(TokenType::TOKEN_LBRACKET, lexeme());
+        token = makeToken(TokenType::TOKEN_LBRACKET, lexeme());
+        break;
     case ']':
-        return makeToken(TokenType::TOKEN_RBRACKET, lexeme());
+        token = makeToken(TokenType::TOKEN_RBRACKET, lexeme());
+        break;
     case ';':
-        return makeToken(TokenType::TOKEN_SEMICOLON, lexeme());
+        token = makeToken(TokenType::TOKEN_SEMICOLON, lexeme());
+        break;
     case ',':
-        return makeToken(TokenType::TOKEN_COMMA, lexeme());
+        token = makeToken(TokenType::TOKEN_COMMA, lexeme());
+        break;
     case '.':
-        return makeToken(TokenType::TOKEN_DOT, lexeme());
+        token = makeToken(TokenType::TOKEN_DOT, lexeme());
+        break;
     default:
-        error("unknown operator");
+        token = makeToken(TokenType::TOKEN_UNKNOWN, lexeme());
+        break;
     }
 
-    return makeToken(TokenType::TOKEN_UNKNOWN, lexeme());
+    advance();
+    return token;
 }
 
 
