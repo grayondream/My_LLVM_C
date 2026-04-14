@@ -1,9 +1,9 @@
-#include <stdio.h>
-#include <stdlib.h>
+// #include <stdio.h>
+// #include <stdlib.h>
 
-// ===== 宏 / 预处理 =====
-#define MAX(a,b) ((a) > (b) ? (a) : (b))
-#define SQUARE(x) ((x) * (x))
+// // ===== 宏 / 预处理 =====
+// #define MAX(a,b) ((a) > (b) ? (a) : (b))
+// #define SQUARE(x) ((x) * (x))
 
 typedef unsigned long ulong;
 

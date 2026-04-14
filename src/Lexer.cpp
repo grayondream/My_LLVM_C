@@ -55,7 +55,7 @@ static const std::unordered_map<std::string, TokenType> keywordMap = {
     {"goto", TokenType::TOKEN_GOTO}
 };
 
-Lexer::Lexer(const std::string& source, const std::string& filename)
+Lexer::Lexer(const std::string& filename, const std::string& source)
     : m_source(source), m_filename(filename) {
 }
 
@@ -129,6 +129,7 @@ std::vector<Token> Lexer::tokenize() {
     while(!isEof()) {
         skipWhitespace();
         skipComment();
+        skipWhitespace();
         m_startPos = m_currentPos;  
         if(isEof()) {
             break;
@@ -151,7 +152,7 @@ void Lexer::skipWhitespace() {
             advance();
             break;
         default:
-            break;
+            return;
         }
     }
 
@@ -159,21 +160,27 @@ void Lexer::skipWhitespace() {
 }
         
 void Lexer::skipComment() {
-    while(true){
+    while (true) {
         const char ch = peek();
-        if(ch == '/' and peekNext() == '/') {
+        const char nextCh = peekNext();
+        if (ch == '/' && nextCh == '/') {
             advanceNextLine();
-        } else if(ch == '/' and peekNext() == '*') {
-            advance();advance();
-            while(!isEof() && peek() != '*' and peekNext() != '/') {
+        } else if (ch == '/' && nextCh == '*') {
+            advance(); 
+            advance(); 
+
+            while (!isEof() && !(peek() == '*' && peekNext() == '/')) {
                 advance();
             }
-            
-            if(!isEof()) {
-                advance();
-                advance();
+
+            if (isEof()) {
+                return;
             }
-        } else {
+
+            advance(); 
+            advance(); 
+        }
+        else {
             break;
         }
     }

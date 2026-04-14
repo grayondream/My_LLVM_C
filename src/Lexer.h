@@ -8,7 +8,7 @@
 
 class Lexer{
 public:
-    Lexer(const std::string& source, const std::string& filename);
+    Lexer(const std::string& filename, const std::string& source);
     ~Lexer();
     std::vector<Token> tokenize();
 
