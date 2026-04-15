@@ -39,5 +39,5 @@ private:
     size_t m_startPos{};
     size_t m_currentPos{};
     size_t m_lineNum{1};
-    size_t m_colNum{1};
+    size_t m_colNum{};
 };

@@ -5,7 +5,7 @@
 #include "ScopeGuard.h"
 #include "Lexer.h"
 
-inline static constexpr const char* INPUT_C_FILE = RESOURCE_DIR "/main.c";
+inline static constexpr const char* INPUT_C_FILE = RESOURCE_DIR "/main_min.c";
 
 int main(int argc, char* argv[]){
     LOGI("start llvm c compiler");
