@@ -105,4 +105,3 @@ public:
           filename(filename), line(line), column(column) {}
 };
 
-std::string to_string(const Token& token);

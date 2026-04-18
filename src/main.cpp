@@ -4,6 +4,8 @@
 #include "File.h"
 #include "ScopeGuard.h"
 #include "Lexer.h"
+#include "Parser.h"
+#include "Utils.h"
 
 inline static constexpr const char* INPUT_C_FILE = RESOURCE_DIR "/main_min.c";
 
@@ -29,6 +31,14 @@ int main(int argc, char* argv[]){
     auto tokens = lexer.tokenize();
     for(const auto& token : tokens) {
         LOGI("Token: {}", to_string(token));
+    }
+
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    if(ast) {
+        LOGI("ast: {}", to_string(*ast));
+    } else {
+        LOGE("parse ast failed");
     }
 
     LOGI("llvm c compile run success");
