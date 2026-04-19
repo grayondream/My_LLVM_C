@@ -107,6 +107,10 @@ std::unique_ptr<CompoundStmtAST> Parser::parseCompoundStmt() {
 std::unique_ptr<StmtAST> Parser::parseStmt() {
     if (match(TokenType::TOKEN_RETURN)) {
         auto value = parseExpr();
+        if (!value) {
+            return nullptr;
+        }
+
         match(TokenType::TOKEN_SEMICOLON);
         return std::make_unique<ReturnStmtAST>(std::move(value));
     }
@@ -140,7 +144,6 @@ std::unique_ptr<BinaryExprAST> Parser::parseBinaryExpr() {
 std::unique_ptr<NumberExprAST> Parser::parseNumberExpr() {
     if (auto token = match(TokenType::TOKEN_NUMBER); token.has_value()) {
         int value = std::get<int>(token.value().value);
-        advance();
         return std::make_unique<NumberExprAST>(value);
     }
 

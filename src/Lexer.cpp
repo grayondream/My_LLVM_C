@@ -362,6 +362,7 @@ Token Lexer::scanToken() {
         break;
     case ')':
         token = makeToken(TokenType::TOKEN_RPAREN, lexeme());
+        break;
     case '{':
         token = makeToken(TokenType::TOKEN_LBRACE, lexeme());
         break;
