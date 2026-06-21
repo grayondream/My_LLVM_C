@@ -150,8 +150,6 @@ std::unique_ptr<NumberExprAST> Parser::parseNumberExpr() {
     return nullptr;
 }
 
-
-
 std::unique_ptr<TranslationUnitAST> Parser::parse() {
     std::vector<std::unique_ptr<DeclAST>> decls{};
     decls.push_back(parseFunctionDecl());
