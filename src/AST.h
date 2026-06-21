@@ -5,6 +5,10 @@
 #include <vector>
 #include "Type.h"
 
+#include "llvm/IR/Value.h"
+
+class CodegenContext;
+
 enum class BinaryOp {
     Invalid,
     Add,
@@ -41,6 +45,7 @@ class ExprAST : public ASTNode {
 public:
     Type* type;
     bool isLValue;
+    virtual llvm::Value* codegen(CodegenContext& ctx) = 0;
 };
 
 class StmtAST : public ASTNode {
@@ -55,30 +60,35 @@ class NumberExprAST : public ExprAST {
 public:
     int value;
     explicit NumberExprAST(int val) : value(val) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
 class FloatExprAST : public ExprAST {
 public:
     double value;
     explicit FloatExprAST(double val) : value(val) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
 class CharExprAST : public ExprAST {
 public:
     char value;
     explicit CharExprAST(char val) : value(val) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
 class StringExprAST : public ExprAST {
 public:
     std::string value;
     explicit StringExprAST(const std::string& val) : value(val) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
 class VariableExprAST : public ExprAST {
 public:
     std::string name;
     explicit VariableExprAST(const std::string& n) : name(n) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
 class BinaryExprAST : public ExprAST {
@@ -89,6 +99,7 @@ public:
 
     BinaryExprAST(BinaryOp oper, std::unique_ptr<ExprAST> l, std::unique_ptr<ExprAST> r)
         : op(oper), left(std::move(l)), right(std::move(r)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
 class UnaryExprAST : public ExprAST {
@@ -98,6 +109,7 @@ public:
 
     UnaryExprAST(UnaryOp oper, std::unique_ptr<ExprAST> expr)
         : op(oper), operand(std::move(expr)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
 class CallExprAST : public ExprAST {
@@ -107,6 +119,7 @@ public:
 
     CallExprAST(const std::string& name, std::vector<std::unique_ptr<ExprAST>> arguments)
         : callee(name), args(std::move(arguments)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
 class ExprStmtAST : public StmtAST {

@@ -21,9 +21,12 @@ fi
 
 cd "${BUILD_DIR}"
 
+LLVM_DIR="${LLVM_DIR:-/opt/homebrew/Cellar/llvm@21/21.1.8/lib/cmake/llvm}"
+
 echo "Running CMake configuration..."
 cmake .. \
     -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+    -DLLVM_DIR="${LLVM_DIR}" \
     -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
 
 echo "Building project..."
