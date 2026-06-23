@@ -1,7 +1,7 @@
 #include "Parser.h"
 #include <memory>
-#include "AST.h"
-#include "Token.h"
+#include "ast/Decl.h"
+#include "frontend/Token.h"
 
 BinaryOp TokenType2BinaryOp(TokenType type) {
     switch (type) {

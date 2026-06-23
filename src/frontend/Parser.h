@@ -3,8 +3,8 @@
 #include <vector>
 #include <memory>
 #include <optional>
-#include "Token.h"
-#include "AST.h"
+#include "frontend/Token.h"
+#include "ast/Decl.h"
 
 class Parser{
 public:

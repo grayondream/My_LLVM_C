@@ -1,6 +1,6 @@
 #include "Utils.h"
-#include "AST.h"
-#include "Token.h"
+#include "ast/Decl.h"
+#include "frontend/Token.h"
 #include <sstream>
 
 static std::string TokenTypeToString(TokenType type) {

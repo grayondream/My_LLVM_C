@@ -3,7 +3,9 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
-#include "Symbol.h"
+#include "ast/Symbol.h"
+
+class Type;
 
 class CodegenContext {
 public:

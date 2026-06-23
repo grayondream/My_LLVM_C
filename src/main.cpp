@@ -1,12 +1,12 @@
 #include <string>
-#include "Token.h"
-#include "Log.h"
-#include "File.h"
-#include "ScopeGuard.h"
-#include "Lexer.h"
-#include "Parser.h"
-#include "Utils.h"
-#include "Codegen.h"
+#include "frontend/Token.h"
+#include "support/Log.h"
+#include "support/File.h"
+#include "support/ScopeGuard.h"
+#include "frontend/Lexer.h"
+#include "frontend/Parser.h"
+#include "support/Utils.h"
+#include "codegen/CodegenContext.h"
 #include "llvm/Support/raw_ostream.h"
 
 inline static constexpr const char* INPUT_C_FILE = RESOURCE_DIR "/main_min.c";

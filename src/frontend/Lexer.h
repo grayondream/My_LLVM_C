@@ -4,7 +4,7 @@
 #include <variant>
 #include <vector>
 #include <string>
-#include "Token.h"
+#include "frontend/Token.h"
 
 class Lexer{
 public:
