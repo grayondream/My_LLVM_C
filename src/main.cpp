@@ -6,6 +6,8 @@
 #include "Lexer.h"
 #include "Parser.h"
 #include "Utils.h"
+#include "Codegen.h"
+#include "llvm/Support/raw_ostream.h"
 
 inline static constexpr const char* INPUT_C_FILE = RESOURCE_DIR "/main_min.c";
 
@@ -39,6 +41,13 @@ int main(int argc, char* argv[]){
         LOGI("ast: {}", to_string(*ast));
     } else {
         LOGE("parse ast failed");
+    }
+
+    if(ast) {
+        CodegenContext codegenCtx;
+        ast->codegen(codegenCtx);
+        LOGI("generated llvm ir:");
+        codegenCtx.getModule().print(llvm::outs(), nullptr);
     }
 
     LOGI("llvm c compile run success");

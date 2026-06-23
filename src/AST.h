@@ -50,10 +50,12 @@ public:
 
 class StmtAST : public ASTNode {
 public:
+    virtual llvm::Value* codegen(CodegenContext& ctx) = 0;
 };
 
 class DeclAST : public ASTNode {
 public:
+    virtual llvm::Value* codegen(CodegenContext& ctx) = 0;
 };
 
 class NumberExprAST : public ExprAST {
@@ -127,6 +129,7 @@ public:
     std::unique_ptr<ExprAST> expr;
 
     explicit ExprStmtAST(std::unique_ptr<ExprAST> e) : expr(std::move(e)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
 class CompoundStmtAST : public StmtAST {
@@ -135,6 +138,7 @@ public:
 
     explicit CompoundStmtAST(std::vector<std::unique_ptr<StmtAST>> statements)
         : stmts(std::move(statements)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
 class ReturnStmtAST : public StmtAST {
@@ -142,6 +146,7 @@ public:
     std::unique_ptr<ExprAST> value;
 
     explicit ReturnStmtAST(std::unique_ptr<ExprAST> val) : value(std::move(val)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
 class DeclStmtAST : public StmtAST {
@@ -149,6 +154,7 @@ public:
     std::unique_ptr<DeclAST> decl;
 
     explicit DeclStmtAST(std::unique_ptr<DeclAST> d) : decl(std::move(d)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
 class VarDeclAST : public DeclAST {
@@ -159,6 +165,7 @@ public:
 
     VarDeclAST(const std::string& n, Type* t, std::unique_ptr<ExprAST> init = nullptr)
         : name(n), type(t), initExpr(std::move(init)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
 class ParamDeclAST : public ASTNode {
@@ -181,6 +188,7 @@ public:
                     std::vector<std::unique_ptr<ParamDeclAST>>& parameters,
                     std::unique_ptr<CompoundStmtAST>& b)
         : name(n), returnType(ret), params(std::move(parameters)), body(std::move(b)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
 class TranslationUnitAST : public ASTNode {
@@ -189,4 +197,5 @@ public:
 
     explicit TranslationUnitAST(std::vector<std::unique_ptr<DeclAST>> decls)
         : declarations(std::move(decls)) {}
+    llvm::Value* codegen(CodegenContext& ctx);
 };

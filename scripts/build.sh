@@ -30,12 +30,7 @@ cmake .. \
     -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
 
 echo "Building project..."
-cmake --build . --config "${BUILD_TYPE}" -j$(nproc)
-
-if [ -f "${BUILD_DIR}/compile_commands.json" ]; then
-    ln -sf "${BUILD_DIR}/compile_commands.json" "${PROJECT_ROOT}/compile_commands.json"
-    echo "compile_commands.json linked to project root"
-fi
+cmake --build . --config "${BUILD_TYPE}" -j$(sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
 
 echo "Build completed successfully!"
 echo "Executable: ${BUILD_DIR}/bin/my_llvm_c"
