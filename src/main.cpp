@@ -8,6 +8,7 @@
 #include "support/Utils.h"
 #include "codegen/CodegenContext.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Passes/PassBuilder.h"
 
 inline static constexpr const char* INPUT_C_FILE = RESOURCE_DIR "/main_min.c";
 
@@ -46,6 +47,22 @@ int main(int argc, char* argv[]){
     if(ast) {
         CodegenContext codegenCtx;
         ast->codegen(codegenCtx);
+
+        llvm::LoopAnalysisManager LAM;
+        llvm::FunctionAnalysisManager FAM;
+        llvm::CGSCCAnalysisManager CGAM;
+        llvm::ModuleAnalysisManager MAM;
+
+        llvm::PassBuilder PB;
+        PB.registerModuleAnalyses(MAM);
+        PB.registerCGSCCAnalyses(CGAM);
+        PB.registerFunctionAnalyses(FAM);
+        PB.registerLoopAnalyses(LAM);
+        PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+
+        llvm::ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
+        MPM.run(codegenCtx.getModule(), MAM);
+
         LOGI("generated llvm ir:");
         codegenCtx.getModule().print(llvm::outs(), nullptr);
     }

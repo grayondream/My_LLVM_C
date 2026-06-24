@@ -20,6 +20,7 @@ else()
         transformutils
         instcombine
         scalaropts
+        passes
         target
         x86asmparser
         x86codegen
