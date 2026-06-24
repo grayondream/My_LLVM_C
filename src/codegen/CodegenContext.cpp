@@ -3,7 +3,9 @@
 #include "support/Log.h"
 
 CodegenContext::CodegenContext()
-    : builder(context), module("my_llvm_c", context) {
+    : context(std::make_unique<llvm::LLVMContext>()),
+      builder(*context),
+      module(std::make_unique<llvm::Module>("my_llvm_c", *context)) {
     pushScope();
 }
 
@@ -33,16 +35,16 @@ void CodegenContext::declareVariable(const std::string& name, llvm::Value* alloc
 }
 
 llvm::Type* CodegenContext::getLLVMType(Type* type) {
-    if (!type) return llvm::Type::getVoidTy(context);
+    if (!type) return llvm::Type::getVoidTy(*context);
 
     switch (type->kind) {
-        case TypeKind::Int:    return llvm::Type::getInt32Ty(context);
-        case TypeKind::Float:  return llvm::Type::getFloatTy(context);
-        case TypeKind::Double: return llvm::Type::getDoubleTy(context);
-        case TypeKind::Char:   return llvm::Type::getInt8Ty(context);
-        case TypeKind::Void:   return llvm::Type::getVoidTy(context);
+        case TypeKind::Int:    return llvm::Type::getInt32Ty(*context);
+        case TypeKind::Float:  return llvm::Type::getFloatTy(*context);
+        case TypeKind::Double: return llvm::Type::getDoubleTy(*context);
+        case TypeKind::Char:   return llvm::Type::getInt8Ty(*context);
+        case TypeKind::Void:   return llvm::Type::getVoidTy(*context);
         case TypeKind::Pointer:
             return llvm::PointerType::get(getLLVMType(type->base), 0);
-        default:               return llvm::Type::getInt32Ty(context);
+        default:               return llvm::Type::getInt32Ty(*context);
     }
 }

@@ -11,9 +11,12 @@ class CodegenContext {
 public:
     CodegenContext();
 
-    llvm::LLVMContext& getContext() { return context; }
+    llvm::LLVMContext& getContext() { return *context; }
     llvm::IRBuilder<>& getBuilder() { return builder; }
-    llvm::Module& getModule() { return module; }
+    llvm::Module& getModule() { return *module; }
+
+    std::unique_ptr<llvm::Module> takeModule() { return std::move(module); }
+    std::unique_ptr<llvm::LLVMContext> takeContext() { return std::move(context); }
 
     void pushScope();
     void popScope();
@@ -25,8 +28,8 @@ public:
     llvm::Type* getLLVMType(Type* type);
 
 private:
-    llvm::LLVMContext context;
+    std::unique_ptr<llvm::LLVMContext> context;
     llvm::IRBuilder<> builder;
-    llvm::Module module;
+    std::unique_ptr<llvm::Module> module;
     std::vector<std::unique_ptr<Scope>> scopes;
 };

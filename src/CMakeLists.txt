@@ -21,11 +21,17 @@ else()
         instcombine
         scalaropts
         passes
+        orcjit
         target
         x86asmparser
         x86codegen
         x86desc
         x86info
+        aarch64codegen
+        aarch64desc
+        aarch64info
+        aarch64asmprinter
+        aarch64asmparser
     )
     target_link_libraries(my_llvm_c PRIVATE ${llvm_libs})
 endif()
