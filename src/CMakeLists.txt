@@ -38,6 +38,7 @@ else()
         aarch64asmprinter
         aarch64asmparser
         aarch64disassembler
+        aarch64asmprinter
     )
     target_link_libraries(my_llvm_c PRIVATE ${llvm_libs})
 endif()

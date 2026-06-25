@@ -67,18 +67,21 @@ std::unique_ptr<FunctionDeclAST> Parser::parseFunctionDecl() {
     if (!match(TokenType::TOKEN_RPAREN)) {
         return nullptr;
     }
-    
+
     auto body = parseCompoundStmt();
     if (!body) {
         return nullptr;
     }
 
     std::vector<std::unique_ptr<ParamDeclAST>> params{};
-    return std::make_unique<FunctionDeclAST>(id.lexeme, TypeContext::instance().getInt(), params, body);
+    auto func = std::make_unique<FunctionDeclAST>(id.lexeme, TypeContext::instance().getInt(), params, body);
+    func->setLocation(id.filename, id.line, id.column);
+    return func;
 }
 
 std::unique_ptr<ReturnStmtAST> Parser::parseReturnStmt() {
-    if (!match(TokenType::TOKEN_RETURN)) {
+    auto retToken = match(TokenType::TOKEN_RETURN);
+    if (!retToken) {
         return nullptr;
     }
 
@@ -88,7 +91,9 @@ std::unique_ptr<ReturnStmtAST> Parser::parseReturnStmt() {
     }
 
     match(TokenType::TOKEN_SEMICOLON);
-    return std::make_unique<ReturnStmtAST>(std::move(value));
+    auto stmt = std::make_unique<ReturnStmtAST>(std::move(value));
+    stmt->setLocation(retToken->filename, retToken->line, retToken->column);
+    return stmt;
 }
 
 std::unique_ptr<CompoundStmtAST> Parser::parseCompoundStmt() {
@@ -105,14 +110,16 @@ std::unique_ptr<CompoundStmtAST> Parser::parseCompoundStmt() {
 }
 
 std::unique_ptr<StmtAST> Parser::parseStmt() {
-    if (match(TokenType::TOKEN_RETURN)) {
+    if (auto retToken = match(TokenType::TOKEN_RETURN)) {
         auto value = parseExpr();
         if (!value) {
             return nullptr;
         }
 
         match(TokenType::TOKEN_SEMICOLON);
-        return std::make_unique<ReturnStmtAST>(std::move(value));
+        auto stmt = std::make_unique<ReturnStmtAST>(std::move(value));
+        stmt->setLocation(retToken->filename, retToken->line, retToken->column);
+        return stmt;
     }
 
     return nullptr;

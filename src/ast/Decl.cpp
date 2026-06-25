@@ -13,6 +13,11 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
         }
     }
     ctx.declareVariable(name, alloca, type);
+
+    if (!sourceFile.empty()) {
+        ctx.emitVariableDebug(alloca, name, type, sourceLine);
+    }
+
     return alloca;
 }
 
@@ -27,8 +32,16 @@ llvm::Value* FunctionDeclAST::codegen(CodegenContext& ctx) {
     llvm::Function* function = llvm::Function::Create(
         funcType, llvm::Function::ExternalLinkage, name, ctx.getModule());
 
+    if (!sourceFile.empty()) {
+        ctx.emitFunctionDebug(function, returnType, name, sourceLine);
+    }
+
     llvm::BasicBlock* bb = llvm::BasicBlock::Create(ctx.getContext(), "entry", function);
     ctx.getBuilder().SetInsertPoint(bb);
+
+    if (!sourceFile.empty()) {
+        ctx.setDebugLocation(sourceLine);
+    }
 
     ctx.pushScope();
     if (body) {

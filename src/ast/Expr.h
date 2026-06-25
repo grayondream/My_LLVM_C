@@ -37,7 +37,17 @@ enum class UnaryOp {
 
 class ASTNode {
 public:
+    std::string sourceFile;
+    int sourceLine{0};
+    int sourceColumn{0};
+
     virtual ~ASTNode() = default;
+
+    void setLocation(const std::string& file, int line, int col = 0) {
+        sourceFile = file;
+        sourceLine = line;
+        sourceColumn = col;
+    }
 };
 
 class ExprAST : public ASTNode {

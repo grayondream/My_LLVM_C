@@ -1,5 +1,9 @@
 #include <string>
 #include <cstdlib>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <signal.h>
 #include "frontend/Token.h"
 #include "support/Log.h"
 #include "support/File.h"
@@ -9,6 +13,7 @@
 #include "support/Utils.h"
 #include "codegen/CodegenContext.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/FileSystem.h"
@@ -18,14 +23,14 @@
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/TargetParser/Triple.h"
 #include "llvm/Passes/PassBuilder.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/Bitcode/BitcodeWriter.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/IRReader/IRReader.h"
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 #include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
-#include <array>
-#include <vector>
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringRef.h"
 
 static inline constexpr const char* INPUT_C_FILE = RESOURCE_DIR "/main_min.c";
 
@@ -41,12 +46,6 @@ static std::string getHostTargetTriple() {
 
 static std::unique_ptr<llvm::TargetMachine>
 createTargetMachine(llvm::Module& module) {
-    llvm::InitializeAllTargetInfos();
-    llvm::InitializeAllTargets();
-    llvm::InitializeAllTargetMCs();
-    llvm::InitializeAllAsmParsers();
-    llvm::InitializeAllAsmPrinters();
-
     std::string triple = getHostTargetTriple();
     llvm::Triple llvmTriple(triple);
     module.setTargetTriple(llvmTriple);
@@ -82,47 +81,35 @@ static bool emitObjectFile(llvm::Module& module, const std::string& outputPath) 
     }
 
     llvm::legacy::PassManager passManager;
+    llvm::MachineModuleInfoWrapperPass MMIWP(tm.get());
+    LOGI("adding object emission passes...");
     if (tm->addPassesToEmitFile(passManager, dest, nullptr,
-            llvm::CodeGenFileType::ObjectFile)) {
+            llvm::CodeGenFileType::ObjectFile, true, &MMIWP)) {
         LOGE("TargetMachine cannot emit object file");
         return false;
     }
 
-    passManager.run(module);
-    dest.close();
-    return true;
-}
+    struct sigaction sa[6];
+    struct { int signum; } sigs[] = {{SIGILL},{SIGTRAP},{SIGABRT},{SIGBUS},{SIGFPE},{SIGSEGV}};
+    for (int i = 0; i < 6; i++) sigaction(sigs[i].signum, nullptr, &sa[i]);
 
-static std::string runCommand(const std::string& cmd) {
-    std::string result;
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) return "";
-    char buf[256];
-    while (fgets(buf, sizeof(buf), pipe)) {
-        result += buf;
-    }
-    pclose(pipe);
-    // trim trailing newline
-    while (!result.empty() && (result.back() == '\n' || result.back() == '\r')) {
-        result.pop_back();
-    }
-    return result;
+    LOGI("running pass manager...");
+    passManager.run(module);
+
+    for (int i = 0; i < 6; i++) sigaction(sigs[i].signum, &sa[i], nullptr);
+    LOGI("pass manager done, flushing...");
+    dest.flush();
+    dest.close();
+    LOGI("object file written to {}", outputPath);
+    return true;
 }
 
 static std::string findSystemLinker() {
     auto ldPath = llvm::sys::findProgramByName("ld");
     if (ldPath) return *ldPath;
-
     auto ldLldPath = llvm::sys::findProgramByName("ld.lld");
     if (ldLldPath) return *ldLldPath;
-
     return "";
-}
-
-static std::string findSDKPath() {
-    std::string sdkPath = runCommand("xcrun --show-sdk-path");
-    if (!sdkPath.empty()) return sdkPath;
-    return "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk";
 }
 
 static int linkWithSystemLinker(const std::string& objectPath,
@@ -134,10 +121,7 @@ static int linkWithSystemLinker(const std::string& objectPath,
     }
     LOGI("using linker: {}", linker);
 
-    std::string sdkPath = findSDKPath();
-    LOGI("SDK path: {}", sdkPath);
-
-    std::string sysrootLib = sdkPath + "/usr/lib";
+    std::string sdkPath = "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk";
 
 #if defined(__aarch64__)
     std::string arch = "arm64";
@@ -145,44 +129,31 @@ static int linkWithSystemLinker(const std::string& objectPath,
     std::string arch = "x86_64";
 #endif
 
-    std::vector<std::string> args;
-    args.push_back(linker);
-    args.push_back("-o");
-    args.push_back(executablePath);
-    args.push_back("-arch");
-    args.push_back(arch);
-    args.push_back("-platform_version");
-    args.push_back("macos");
-    args.push_back("15.0");
-    args.push_back("15.0");
-    args.push_back("-syslibroot");
-    args.push_back(sdkPath);
-    args.push_back("-L");
-    args.push_back(sysrootLib);
-    args.push_back(objectPath);
-    args.push_back("-lSystem");
-    args.push_back("-no_fixup_chains");
-    args.push_back("-dead_strip");
+    std::string cmd = linker
+        + " -o " + executablePath
+        + " -arch " + arch
+        + " -platform_version macos 15.0 15.0"
+        + " -syslibroot " + sdkPath
+        + " -L " + sdkPath + "/usr/lib"
+        + " " + objectPath
+        + " -lSystem"
+        + " -no_fixup_chains";
 
-    std::vector<llvm::StringRef> sArgs;
-    for (const auto& a : args) {
-        sArgs.push_back(a);
+    LOGI("link command: {}", cmd);
+    int ret = system(cmd.c_str());
+    if (ret != 0) {
+        LOGE("linker failed with exit code {}", ret);
     }
-
-    auto result = llvm::sys::ExecuteAndWait(linker, sArgs);
-    if (result < 0) {
-        LOGE("linker execution failed");
-        return 1;
-    }
-    if (result != 0) {
-        LOGE("linker failed with exit code {}", result);
-        return result;
-    }
-
-    return 0;
+    return ret;
 }
 
 int main(int argc, char* argv[]) {
+    llvm::InitializeAllTargetInfos();
+    llvm::InitializeAllTargets();
+    llvm::InitializeAllTargetMCs();
+    llvm::InitializeAllAsmParsers();
+    llvm::InitializeAllAsmPrinters();
+
     bool emitMode = false;
     std::string outputPath = "output";
     std::string inputFile = INPUT_C_FILE;
@@ -223,7 +194,9 @@ int main(int argc, char* argv[]) {
     }
 
     CodegenContext codegenCtx;
+    codegenCtx.setSourceFile(inputFile);
     ast->codegen(codegenCtx);
+    codegenCtx.finalizeDebugInfo();
 
     llvm::LoopAnalysisManager LAM;
     llvm::FunctionAnalysisManager FAM;
@@ -245,18 +218,60 @@ int main(int argc, char* argv[]) {
 
     if (emitMode) {
         std::string objectPath = outputPath + ".o";
-        if (!emitObjectFile(codegenCtx.getModule(), objectPath)) {
+        std::string bitcodePath = objectPath + ".bc";
+
+        {
+            std::error_code ec;
+            llvm::raw_fd_ostream bitcodeFile(bitcodePath, ec, llvm::sys::fs::OF_None);
+            if (ec) {
+                LOGE("Failed to write bitcode: {}", ec.message());
+                return 1;
+            }
+            llvm::WriteBitcodeToFile(codegenCtx.getModule(), bitcodeFile);
+        }
+
+        pid_t pid = fork();
+        if (pid == 0) {
+            auto childCtx = std::make_unique<llvm::LLVMContext>();
+            auto bufferOrErr = llvm::MemoryBuffer::getFile(bitcodePath);
+            if (!bufferOrErr) {
+                LOGE("failed to read bitcode");
+                _exit(1);
+            }
+            auto modOrErr = llvm::parseBitcodeFile(**bufferOrErr, *childCtx);
+            if (!modOrErr) {
+                LOGE("failed to parse bitcode");
+                _exit(1);
+            }
+            auto& childMod = **modOrErr;
+
+            llvm::InitializeAllTargetInfos();
+            llvm::InitializeAllTargets();
+            llvm::InitializeAllTargetMCs();
+            llvm::InitializeAllAsmParsers();
+            llvm::InitializeAllAsmPrinters();
+
+            if (!emitObjectFile(childMod, objectPath)) {
+                _exit(1);
+            }
+
+            int ret = linkWithSystemLinker(objectPath, outputPath);
+            _exit(ret);
+        } else if (pid > 0) {
+            int status;
+            waitpid(pid, &status, 0);
+            if (WIFEXITED(status)) {
+                int ret = WEXITSTATUS(status);
+                if (ret != 0) return ret;
+            } else {
+                return 1;
+            }
+            LOGI("executable linked: {}", outputPath);
+        } else {
+            LOGE("fork failed");
             return 1;
         }
-        LOGI("object file emitted: {}", objectPath);
-
-        int ret = linkWithSystemLinker(objectPath, outputPath);
-        if (ret != 0) return ret;
-        LOGI("executable linked: {}", outputPath);
     } else {
-        llvm::InitializeNativeTarget();
-        llvm::InitializeNativeTargetAsmPrinter();
-
         auto jtmb = llvm::orc::JITTargetMachineBuilder::detectHost();
         if (!jtmb) {
             LOGE("failed to detect host target");
