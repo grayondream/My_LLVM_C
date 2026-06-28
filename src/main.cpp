@@ -21,6 +21,7 @@
 #include "llvm/Support/Program.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
+#include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/IR/DebugInfo.h"
@@ -35,13 +36,7 @@
 static inline constexpr const char* INPUT_C_FILE = RESOURCE_DIR "/main_min.c";
 
 static std::string getHostTargetTriple() {
-#if defined(__aarch64__)
-    return "arm64-apple-darwin";
-#elif defined(__x86_64__)
-    return "x86_64-apple-darwin";
-#else
     return llvm::sys::getDefaultTargetTriple();
-#endif
 }
 
 static std::unique_ptr<llvm::TargetMachine>
@@ -51,7 +46,7 @@ createTargetMachine(llvm::Module& module) {
     module.setTargetTriple(llvmTriple);
 
     std::string error;
-    const llvm::Target* target = llvm::TargetRegistry::lookupTarget(triple, error);
+    const llvm::Target* target = llvm::TargetRegistry::lookupTarget(llvmTriple, error);
     if (!target) {
         LOGE("Target lookup failed: {}", error);
         return nullptr;
@@ -59,7 +54,7 @@ createTargetMachine(llvm::Module& module) {
 
     llvm::TargetOptions options;
     auto tm = target->createTargetMachine(
-        triple, "generic", "", options, llvm::Reloc::Model());
+        llvmTriple, "generic", "", options, llvm::Reloc::Model());
     if (!tm) {
         LOGE("Failed to create TargetMachine");
         return nullptr;

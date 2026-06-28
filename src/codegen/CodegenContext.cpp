@@ -67,7 +67,7 @@ void CodegenContext::emitFunctionDebug(llvm::Function* func, Type* returnType,
         diFile, name, name, diFile,
         line, subroutineType,
         line, llvm::DINode::FlagZero,
-        llvm::DISubprogram::SPFlagZero);
+        llvm::DISubprogram::SPFlagDefinition);
 
     func->setSubprogram(sp);
     diCurrentScope = sp;
@@ -113,12 +113,12 @@ Scope* CodegenContext::currentScope() {
 
 llvm::Value* CodegenContext::lookupVariable(const std::string& name) {
     Symbol* sym = currentScope()->lookup(name);
-    if (!sym) return nullptr;
-    return builder.CreateLoad(getLLVMType(sym->type), sym->type->base ? nullptr : nullptr, name);
+    if (!sym || !sym->value) return nullptr;
+    return builder.CreateLoad(getLLVMType(sym->type), sym->value, name);
 }
 
 void CodegenContext::declareVariable(const std::string& name, llvm::Value* alloca, Type* type) {
-    currentScope()->symbols[name] = new Symbol(name, type);
+    currentScope()->symbols[name] = new Symbol(name, type, alloca);
 }
 
 llvm::Type* CodegenContext::getLLVMType(Type* type) {

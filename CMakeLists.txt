@@ -28,6 +28,10 @@ find_package(LLVM REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
+if(LLVM_PACKAGE_VERSION VERSION_LESS 22 OR LLVM_PACKAGE_VERSION VERSION_GREATER_EQUAL 23)
+    message(FATAL_ERROR "LLVM version must be >= 22 and < 23, found ${LLVM_PACKAGE_VERSION}")
+endif()
+
 add_definitions(${LLVM_DEFINITIONS})
 include_directories(${LLVM_INCLUDE_DIRS})
 
