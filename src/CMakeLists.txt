@@ -30,15 +30,7 @@ else()
         x86codegen
         x86desc
         x86info
-        x86asmparser
         x86disassembler
-        aarch64codegen
-        aarch64desc
-        aarch64info
-        aarch64asmprinter
-        aarch64asmparser
-        aarch64disassembler
-        aarch64asmprinter
     )
     target_link_libraries(my_llvm_c PRIVATE ${llvm_libs})
 endif()

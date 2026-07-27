@@ -43,10 +43,10 @@ static std::unique_ptr<llvm::TargetMachine>
 createTargetMachine(llvm::Module& module) {
     std::string triple = getHostTargetTriple();
     llvm::Triple llvmTriple(triple);
-    module.setTargetTriple(llvmTriple);
+    module.setTargetTriple(llvmTriple.str());
 
     std::string error;
-    const llvm::Target* target = llvm::TargetRegistry::lookupTarget(llvmTriple, error);
+    const llvm::Target* target = llvm::TargetRegistry::lookupTarget(llvmTriple.str(), error);
     if (!target) {
         LOGE("Target lookup failed: {}", error);
         return nullptr;
@@ -54,7 +54,7 @@ createTargetMachine(llvm::Module& module) {
 
     llvm::TargetOptions options;
     auto tm = target->createTargetMachine(
-        llvmTriple, "generic", "", options, llvm::Reloc::Model());
+        llvmTriple.str(), "generic", "", options, llvm::Reloc::Model());
     if (!tm) {
         LOGE("Failed to create TargetMachine");
         return nullptr;
@@ -76,7 +76,7 @@ static bool emitObjectFile(llvm::Module& module, const std::string& outputPath) 
     }
 
     llvm::legacy::PassManager passManager;
-    llvm::MachineModuleInfoWrapperPass MMIWP(tm.get());
+    llvm::MachineModuleInfoWrapperPass MMIWP(static_cast<llvm::LLVMTargetMachine*>(tm.get()));
     LOGI("adding object emission passes...");
     if (tm->addPassesToEmitFile(passManager, dest, nullptr,
             llvm::CodeGenFileType::ObjectFile, true, &MMIWP)) {
