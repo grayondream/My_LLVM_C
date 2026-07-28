@@ -100,3 +100,154 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
 
     return ctx.getBuilder().CreateCall(calleeFn, argsV, "calltmp");
 }
+
+llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
+    llvm::Value* lhsVal = lhs->codegen(ctx);
+    llvm::Value* rhsVal = rhs->codegen(ctx);
+    if (!lhsVal || !rhsVal) return nullptr;
+
+    auto& builder = ctx.getBuilder();
+    llvm::Value* result = rhsVal;
+
+    if (op != AssignOp::Assign) {
+        llvm::Value* loadedLhs = builder.CreateLoad(rhsVal->getType(), lhsVal, "loadtmp");
+        switch (op) {
+            case AssignOp::AddAssign:   result = builder.CreateAdd(loadedLhs, rhsVal, "addassign"); break;
+            case AssignOp::SubAssign:   result = builder.CreateSub(loadedLhs, rhsVal, "subassign"); break;
+            case AssignOp::MulAssign:   result = builder.CreateMul(loadedLhs, rhsVal, "mulassign"); break;
+            case AssignOp::DivAssign:   result = builder.CreateSDiv(loadedLhs, rhsVal, "divassign"); break;
+            case AssignOp::ModAssign:   result = builder.CreateSRem(loadedLhs, rhsVal, "modassign"); break;
+            case AssignOp::BitAndAssign: result = builder.CreateAnd(loadedLhs, rhsVal, "bandassign"); break;
+            case AssignOp::BitOrAssign:  result = builder.CreateOr(loadedLhs, rhsVal, "borassign"); break;
+            case AssignOp::BitXorAssign: result = builder.CreateXor(loadedLhs, rhsVal, "bxorassign"); break;
+            case AssignOp::LShiftAssign: result = builder.CreateShl(loadedLhs, rhsVal, "lshiftassign"); break;
+            case AssignOp::RShiftAssign: result = builder.CreateAShr(loadedLhs, rhsVal, "rshiftassign"); break;
+            default: break;
+        }
+    }
+
+    builder.CreateStore(result, lhsVal);
+    return result;
+}
+
+llvm::Value* TernaryExprAST::codegen(CodegenContext& ctx) {
+    llvm::Value* condVal = cond->codegen(ctx);
+    if (!condVal) return nullptr;
+
+    auto& builder = ctx.getBuilder();
+    llvm::Function* func = builder.GetInsertBlock()->getParent();
+
+    llvm::BasicBlock* thenBB = llvm::BasicBlock::Create(ctx.getContext(), "ternary.then", func);
+    llvm::BasicBlock* elseBB = llvm::BasicBlock::Create(ctx.getContext(), "ternary.else", func);
+    llvm::BasicBlock* mergeBB = llvm::BasicBlock::Create(ctx.getContext(), "ternary.merge", func);
+
+    builder.CreateCondBr(condVal, thenBB, elseBB);
+
+    builder.SetInsertPoint(thenBB);
+    llvm::Value* thenVal = then->codegen(ctx);
+    if (!thenVal) return nullptr;
+    builder.CreateBr(mergeBB);
+
+    builder.SetInsertPoint(elseBB);
+    llvm::Value* elseVal = elseExpr->codegen(ctx);
+    if (!elseVal) return nullptr;
+    builder.CreateBr(mergeBB);
+
+    builder.SetInsertPoint(mergeBB);
+    llvm::PHINode* phi = builder.CreatePHI(thenVal->getType(), 2, "ternarytmp");
+    phi->addIncoming(thenVal, thenBB);
+    phi->addIncoming(elseVal, elseBB);
+    return phi;
+}
+
+llvm::Value* CastExprAST::codegen(CodegenContext& ctx) {
+    llvm::Value* val = expr->codegen(ctx);
+    if (!val) return nullptr;
+
+    llvm::Type* targetLLVMType = ctx.getLLVMType(castType);
+    if (!targetLLVMType) return nullptr;
+
+    auto& builder = ctx.getBuilder();
+    llvm::Type* srcType = val->getType();
+
+    if (srcType == targetLLVMType) return val;
+
+    if (srcType->isIntegerTy() && targetLLVMType->isIntegerTy()) {
+        unsigned srcBits = srcType->getIntegerBitWidth();
+        unsigned dstBits = targetLLVMType->getIntegerBitWidth();
+        if (srcBits < dstBits) return builder.CreateSExt(val, targetLLVMType, "sexttmp");
+        if (srcBits > dstBits) return builder.CreateTrunc(val, targetLLVMType, "trunctmp");
+        return val;
+    }
+
+    if (srcType->isIntegerTy() && targetLLVMType->isFloatingPointTy()) {
+        return builder.CreateSIToFP(val, targetLLVMType, "sitofptmp");
+    }
+    if (srcType->isFloatingPointTy() && targetLLVMType->isIntegerTy()) {
+        return builder.CreateFPToSI(val, targetLLVMType, "fptositmp");
+    }
+    if (srcType->isFloatingPointTy() && targetLLVMType->isFloatingPointTy()) {
+        unsigned srcWidth = srcType->getFPMantissaWidth();
+        unsigned dstWidth = targetLLVMType->getFPMantissaWidth();
+        if (srcWidth < dstWidth) return builder.CreateFPExt(val, targetLLVMType, "fpexttmp");
+        if (srcWidth > dstWidth) return builder.CreateFPTrunc(val, targetLLVMType, "fptrunctmp");
+        return val;
+    }
+
+    return val;
+}
+
+llvm::Value* CommaExprAST::codegen(CodegenContext& ctx) {
+    left->codegen(ctx);
+    return right->codegen(ctx);
+}
+
+llvm::Value* PostfixIncDecExprAST::codegen(CodegenContext& ctx) {
+    llvm::Value* addr = operand->codegen(ctx);
+    if (!addr) return nullptr;
+
+    auto& builder = ctx.getBuilder();
+    llvm::Type* loadType = operand->type ? ctx.getLLVMType(operand->type) : llvm::Type::getInt32Ty(ctx.getContext());
+    llvm::Value* oldVal = builder.CreateLoad(loadType, addr, "postold");
+    llvm::Value* one = llvm::ConstantInt::get(loadType->isIntegerTy() ? loadType : llvm::Type::getInt32Ty(ctx.getContext()), 1);
+    llvm::Value* newVal = isIncrement ? builder.CreateAdd(oldVal, one, "postinc") : builder.CreateSub(oldVal, one, "postdec");
+    builder.CreateStore(newVal, addr);
+    return oldVal;
+}
+
+llvm::Value* ArrayAccessExprAST::codegen(CodegenContext& ctx) {
+    llvm::Value* arrVal = array->codegen(ctx);
+    llvm::Value* idxVal = index->codegen(ctx);
+    if (!arrVal || !idxVal) return nullptr;
+
+    auto& builder = ctx.getBuilder();
+    return builder.CreateGEP(llvm::Type::getInt32Ty(ctx.getContext()), arrVal, idxVal, "arrayidx");
+}
+
+llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
+    llvm::Value* objVal = object->codegen(ctx);
+    if (!objVal) return nullptr;
+
+    auto& builder = ctx.getBuilder();
+    llvm::Type* objType = objVal->getType();
+
+    if (accessKind == MemberAccessKind::Arrow) {
+        llvm::Type* pointeeType = ctx.getLLVMType(object->type ? object->type->base : nullptr);
+        if (pointeeType) objType = pointeeType;
+    }
+
+    return builder.CreateStructGEP(objType, objVal, 0, "member");
+}
+
+llvm::Value* SizeofExprAST::codegen(CodegenContext& ctx) {
+    llvm::Type* llvmType = ctx.getLLVMType(sizeofType);
+    if (!llvmType) return nullptr;
+
+    uint64_t size = ctx.getModule().getDataLayout().getTypeStoreSize(llvmType);
+    return llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.getContext()), size);
+}
+
+llvm::Value* InitializerListExprAST::codegen(CodegenContext& ctx) {
+    if (initializers.empty()) return nullptr;
+    return initializers.back()->codegen(ctx);
+}

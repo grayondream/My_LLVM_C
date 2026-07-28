@@ -59,3 +59,63 @@ public:
         : declarations(std::move(decls)) {}
     llvm::Value* codegen(CodegenContext& ctx);
 };
+
+class ArrayDeclAST : public DeclAST {
+public:
+    std::string name;
+    Type* elementType;
+    int size;
+    std::unique_ptr<ExprAST> initExpr;
+
+    ArrayDeclAST(const std::string& n, Type* elemType, int sz, std::unique_ptr<ExprAST> init = nullptr)
+        : name(n), elementType(elemType), size(sz), initExpr(std::move(init)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+class StructDeclAST : public DeclAST {
+public:
+    std::string name;
+    std::vector<std::pair<std::string, Type*>> fields;
+
+    StructDeclAST(const std::string& n, std::vector<std::pair<std::string, Type*>> flds)
+        : name(n), fields(std::move(flds)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+class UnionDeclAST : public DeclAST {
+public:
+    std::string name;
+    std::vector<std::pair<std::string, Type*>> members;
+
+    UnionDeclAST(const std::string& n, std::vector<std::pair<std::string, Type*>> mems)
+        : name(n), members(std::move(mems)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+class EnumDeclAST : public DeclAST {
+public:
+    std::string name;
+    std::vector<std::pair<std::string, int>> values;
+
+    EnumDeclAST(const std::string& n, std::vector<std::pair<std::string, int>> vals)
+        : name(n), values(std::move(vals)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+class TypedefDeclAST : public DeclAST {
+public:
+    std::string name;
+    Type* aliasedType;
+
+    TypedefDeclAST(const std::string& n, Type* aliased)
+        : name(n), aliasedType(aliased) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+class ForwardDeclAST : public DeclAST {
+public:
+    std::string name;
+
+    explicit ForwardDeclAST(const std::string& n) : name(n) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};

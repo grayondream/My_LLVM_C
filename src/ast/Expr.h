@@ -33,6 +33,28 @@ enum class UnaryOp {
     Not,
     Deref,
     AddressOf,
+    PreInc,
+    PreDec,
+    Sizeof,
+};
+
+enum class AssignOp {
+    Assign,
+    AddAssign,
+    SubAssign,
+    MulAssign,
+    DivAssign,
+    ModAssign,
+    BitAndAssign,
+    BitOrAssign,
+    BitXorAssign,
+    LShiftAssign,
+    RShiftAssign,
+};
+
+enum class MemberAccessKind {
+    Dot,
+    Arrow,
 };
 
 class ASTNode {
@@ -120,5 +142,99 @@ public:
 
     CallExprAST(const std::string& name, std::vector<std::unique_ptr<ExprAST>> arguments)
         : callee(name), args(std::move(arguments)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+class AssignmentExprAST : public ExprAST {
+public:
+    AssignOp op;
+    std::unique_ptr<ExprAST> lhs;
+    std::unique_ptr<ExprAST> rhs;
+
+    AssignmentExprAST(AssignOp oper, std::unique_ptr<ExprAST> left, std::unique_ptr<ExprAST> right)
+        : op(oper), lhs(std::move(left)), rhs(std::move(right)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+class TernaryExprAST : public ExprAST {
+public:
+    std::unique_ptr<ExprAST> cond;
+    std::unique_ptr<ExprAST> then;
+    std::unique_ptr<ExprAST> elseExpr;
+
+    TernaryExprAST(std::unique_ptr<ExprAST> condition,
+                   std::unique_ptr<ExprAST> thenExpr,
+                   std::unique_ptr<ExprAST> elseExpr)
+        : cond(std::move(condition)), then(std::move(thenExpr)), elseExpr(std::move(elseExpr)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+class CastExprAST : public ExprAST {
+public:
+    Type* castType;
+    std::unique_ptr<ExprAST> expr;
+
+    CastExprAST(Type* targetType, std::unique_ptr<ExprAST> e)
+        : castType(targetType), expr(std::move(e)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+class CommaExprAST : public ExprAST {
+public:
+    std::unique_ptr<ExprAST> left;
+    std::unique_ptr<ExprAST> right;
+
+    CommaExprAST(std::unique_ptr<ExprAST> l, std::unique_ptr<ExprAST> r)
+        : left(std::move(l)), right(std::move(r)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+class PostfixIncDecExprAST : public ExprAST {
+public:
+    std::unique_ptr<ExprAST> operand;
+    bool isIncrement;
+
+    PostfixIncDecExprAST(std::unique_ptr<ExprAST> expr, bool inc)
+        : operand(std::move(expr)), isIncrement(inc) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+class ArrayAccessExprAST : public ExprAST {
+public:
+    std::unique_ptr<ExprAST> array;
+    std::unique_ptr<ExprAST> index;
+
+    ArrayAccessExprAST(std::unique_ptr<ExprAST> arr, std::unique_ptr<ExprAST> idx)
+        : array(std::move(arr)), index(std::move(idx)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+class MemberAccessExprAST : public ExprAST {
+public:
+    MemberAccessKind accessKind;
+    std::unique_ptr<ExprAST> object;
+    std::string memberName;
+
+    MemberAccessExprAST(MemberAccessKind kind, std::unique_ptr<ExprAST> obj, const std::string& member)
+        : accessKind(kind), object(std::move(obj)), memberName(member) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+class SizeofExprAST : public ExprAST {
+public:
+    Type* sizeofType;
+    std::unique_ptr<ExprAST> expr;
+
+    SizeofExprAST(Type* type, std::unique_ptr<ExprAST> e = nullptr)
+        : sizeofType(type), expr(std::move(e)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+class InitializerListExprAST : public ExprAST {
+public:
+    std::vector<std::unique_ptr<ExprAST>> initializers;
+
+    InitializerListExprAST(std::vector<std::unique_ptr<ExprAST>> initList)
+        : initializers(std::move(initList)) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };

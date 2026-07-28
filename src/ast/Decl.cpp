@@ -66,3 +66,53 @@ llvm::Value* TranslationUnitAST::codegen(CodegenContext& ctx) {
     }
     return last;
 }
+
+llvm::Value* ArrayDeclAST::codegen(CodegenContext& ctx) {
+    llvm::Type* elemLLVMType = ctx.getLLVMType(elementType);
+    if (!elemLLVMType) return nullptr;
+
+    llvm::ArrayType* arrType = llvm::ArrayType::get(elemLLVMType, size);
+    llvm::AllocaInst* alloca = ctx.getBuilder().CreateAlloca(arrType, nullptr, name);
+
+    if (initExpr) {
+        llvm::Value* initVal = initExpr->codegen(ctx);
+        if (initVal) {
+            ctx.getBuilder().CreateStore(initVal, alloca);
+        }
+    }
+
+    ctx.declareVariable(name, alloca, elementType);
+    return alloca;
+}
+
+llvm::Value* StructDeclAST::codegen(CodegenContext& ctx) {
+    std::vector<llvm::Type*> fieldTypes;
+    for (auto& field : fields) {
+        fieldTypes.push_back(ctx.getLLVMType(field.second));
+    }
+
+    llvm::StructType* structType = llvm::StructType::create(ctx.getContext(), fieldTypes, name);
+    return nullptr;
+}
+
+llvm::Value* UnionDeclAST::codegen(CodegenContext& ctx) {
+    std::vector<llvm::Type*> memberTypes;
+    for (auto& member : members) {
+        memberTypes.push_back(ctx.getLLVMType(member.second));
+    }
+
+    llvm::StructType* unionType = llvm::StructType::create(ctx.getContext(), memberTypes, name);
+    return nullptr;
+}
+
+llvm::Value* EnumDeclAST::codegen(CodegenContext& ctx) {
+    return nullptr;
+}
+
+llvm::Value* TypedefDeclAST::codegen(CodegenContext& ctx) {
+    return nullptr;
+}
+
+llvm::Value* ForwardDeclAST::codegen(CodegenContext& ctx) {
+    return nullptr;
+}
