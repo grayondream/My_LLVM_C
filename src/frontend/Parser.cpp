@@ -597,6 +597,42 @@ std::unique_ptr<CompoundStmtAST> Parser::parseCompoundStmt() {
 }
 
 std::unique_ptr<StmtAST> Parser::parseStmt() {
+    // if statement
+    if (peek() && peek()->type == TokenType::TOKEN_IF) {
+        return parseIfStmt();
+    }
+
+    // while statement
+    if (peek() && peek()->type == TokenType::TOKEN_WHILE) {
+        return parseWhileStmt();
+    }
+
+    // do-while statement
+    if (peek() && peek()->type == TokenType::TOKEN_DO) {
+        return parseDoWhileStmt();
+    }
+
+    // for statement
+    if (peek() && peek()->type == TokenType::TOKEN_FOR) {
+        return parseForStmt();
+    }
+
+    // break statement
+    if (peek() && peek()->type == TokenType::TOKEN_BREAK) {
+        return parseBreakStmt();
+    }
+
+    // continue statement
+    if (peek() && peek()->type == TokenType::TOKEN_CONTINUE) {
+        return parseContinueStmt();
+    }
+
+    // goto statement
+    if (peek() && peek()->type == TokenType::TOKEN_GOTO) {
+        return parseGotoStmt();
+    }
+
+    // return statement
     if (auto retToken = match(TokenType::TOKEN_RETURN)) {
         auto value = parseExpr();
         if (!value) {
@@ -609,7 +645,173 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
         return stmt;
     }
 
-    return nullptr;
+    // compound statement (block)
+    if (peek() && peek()->type == TokenType::TOKEN_LBRACE) {
+        return parseCompoundStmt();
+    }
+
+    // label statement: identifier ':'
+    if (peek() && peek()->type == TokenType::TOKEN_IDENTIFIER) {
+        // Look ahead to see if this is a label
+        size_t savedPos = m_currentTokenPos;
+        auto id = advance();
+        if (peek() && peek()->type == TokenType::TOKEN_COLON) {
+            advance(); // consume ':'
+            auto stmt = parseStmt();
+            return std::make_unique<LabelStmtAST>(id->lexeme, std::move(stmt));
+        }
+        // Not a label, restore position
+        m_currentTokenPos = savedPos;
+    }
+
+    // expression statement
+    return parseExprStmt();
+}
+
+std::unique_ptr<StmtAST> Parser::parseIfStmt() {
+    auto ifToken = match(TokenType::TOKEN_IF);
+    if (!ifToken) {
+        return nullptr;
+    }
+
+    match(TokenType::TOKEN_LPAREN);
+    auto cond = parseExpr();
+    match(TokenType::TOKEN_RPAREN);
+
+    auto thenStmt = parseStmt();
+
+    std::unique_ptr<StmtAST> elseStmt;
+    if (match(TokenType::TOKEN_ELSE)) {
+        elseStmt = parseStmt();
+    }
+
+    auto stmt = std::make_unique<IfStmtAST>(std::move(cond), std::move(thenStmt), std::move(elseStmt));
+    stmt->setLocation(ifToken->filename, ifToken->line, ifToken->column);
+    return stmt;
+}
+
+std::unique_ptr<StmtAST> Parser::parseWhileStmt() {
+    auto whileToken = match(TokenType::TOKEN_WHILE);
+    if (!whileToken) {
+        return nullptr;
+    }
+
+    match(TokenType::TOKEN_LPAREN);
+    auto cond = parseExpr();
+    match(TokenType::TOKEN_RPAREN);
+
+    auto body = parseStmt();
+
+    auto stmt = std::make_unique<WhileStmtAST>(std::move(cond), std::move(body));
+    stmt->setLocation(whileToken->filename, whileToken->line, whileToken->column);
+    return stmt;
+}
+
+std::unique_ptr<StmtAST> Parser::parseDoWhileStmt() {
+    auto doToken = match(TokenType::TOKEN_DO);
+    if (!doToken) {
+        return nullptr;
+    }
+
+    auto body = parseStmt();
+
+    match(TokenType::TOKEN_WHILE);
+    match(TokenType::TOKEN_LPAREN);
+    auto cond = parseExpr();
+    match(TokenType::TOKEN_RPAREN);
+    match(TokenType::TOKEN_SEMICOLON);
+
+    auto stmt = std::make_unique<DoWhileStmtAST>(std::move(cond), std::move(body));
+    stmt->setLocation(doToken->filename, doToken->line, doToken->column);
+    return stmt;
+}
+
+std::unique_ptr<StmtAST> Parser::parseForStmt() {
+    auto forToken = match(TokenType::TOKEN_FOR);
+    if (!forToken) {
+        return nullptr;
+    }
+
+    match(TokenType::TOKEN_LPAREN);
+
+    // init
+    std::unique_ptr<StmtAST> init;
+    if (peek() && peek()->type == TokenType::TOKEN_SEMICOLON) {
+        advance(); // empty init
+    } else {
+        init = parseStmt(); // could be declaration or expression stmt
+    }
+
+    // condition
+    std::unique_ptr<ExprAST> cond;
+    if (peek() && peek()->type != TokenType::TOKEN_SEMICOLON) {
+        cond = parseExpr();
+    }
+    match(TokenType::TOKEN_SEMICOLON);
+
+    // increment
+    std::unique_ptr<ExprAST> inc;
+    if (peek() && peek()->type != TokenType::TOKEN_RPAREN) {
+        inc = parseExpr();
+    }
+    match(TokenType::TOKEN_RPAREN);
+
+    auto body = parseStmt();
+
+    auto stmt = std::make_unique<ForStmtAST>(std::move(init), std::move(cond), std::move(inc), std::move(body));
+    stmt->setLocation(forToken->filename, forToken->line, forToken->column);
+    return stmt;
+}
+
+std::unique_ptr<StmtAST> Parser::parseBreakStmt() {
+    auto breakToken = match(TokenType::TOKEN_BREAK);
+    if (!breakToken) {
+        return nullptr;
+    }
+
+    match(TokenType::TOKEN_SEMICOLON);
+
+    auto stmt = std::make_unique<BreakStmtAST>();
+    stmt->setLocation(breakToken->filename, breakToken->line, breakToken->column);
+    return stmt;
+}
+
+std::unique_ptr<StmtAST> Parser::parseContinueStmt() {
+    auto continueToken = match(TokenType::TOKEN_CONTINUE);
+    if (!continueToken) {
+        return nullptr;
+    }
+
+    match(TokenType::TOKEN_SEMICOLON);
+
+    auto stmt = std::make_unique<ContinueStmtAST>();
+    stmt->setLocation(continueToken->filename, continueToken->line, continueToken->column);
+    return stmt;
+}
+
+std::unique_ptr<StmtAST> Parser::parseGotoStmt() {
+    auto gotoToken = match(TokenType::TOKEN_GOTO);
+    if (!gotoToken) {
+        return nullptr;
+    }
+
+    auto label = match(TokenType::TOKEN_IDENTIFIER);
+    match(TokenType::TOKEN_SEMICOLON);
+
+    auto stmt = std::make_unique<GotoStmtAST>(label ? label->lexeme : "");
+    stmt->setLocation(gotoToken->filename, gotoToken->line, gotoToken->column);
+    return stmt;
+}
+
+std::unique_ptr<StmtAST> Parser::parseLabelStmt(const std::string& label) {
+    auto stmt = parseStmt();
+    return std::make_unique<LabelStmtAST>(label, std::move(stmt));
+}
+
+std::unique_ptr<StmtAST> Parser::parseExprStmt() {
+    auto expr = parseExpr();
+    match(TokenType::TOKEN_SEMICOLON);
+    return std::make_unique<ExprStmtAST>(std::move(expr));
 }
 
 std::unique_ptr<TranslationUnitAST> Parser::parse() {

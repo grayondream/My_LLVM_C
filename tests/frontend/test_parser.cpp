@@ -752,3 +752,172 @@ TEST_F(LexerTest, TokenizeShiftRightEqual) {
     ASSERT_EQ(tokens.size(), 1u);
     EXPECT_EQ(tokens[0].type, TokenType::TOKEN_RSHIFT_EQ);
 }
+
+// ========== Statement Parser Tests ==========
+
+class ParserStmtTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        spdlog::set_level(spdlog::level::off);
+    }
+
+    static std::vector<Token> lex(const std::string& source) {
+        Lexer lexer("test.c", source);
+        return lexer.tokenize();
+    }
+
+    static auto parse(const std::string& source) {
+        auto tokens = lex(source);
+        Parser parser(tokens);
+        return parser.parse();
+    }
+
+    static std::unique_ptr<TranslationUnitAST> s_lastTU;
+
+    static auto parseStmt(const std::string& source) {
+        s_lastTU = parse(source);
+        if (!s_lastTU || s_lastTU->declarations.empty()) return (StmtAST*)nullptr;
+        auto func = dynamic_cast<FunctionDeclAST*>(s_lastTU->declarations[0].get());
+        if (!func || !func->body || func->body->stmts.empty()) return (StmtAST*)nullptr;
+        return func->body->stmts[0].get();
+    }
+};
+
+std::unique_ptr<TranslationUnitAST> ParserStmtTest::s_lastTU;
+
+TEST_F(ParserStmtTest, ReturnStatement) {
+    auto stmt = parseStmt("int f() { return 42; }");
+    ASSERT_NE(stmt, nullptr);
+    auto ret = dynamic_cast<ReturnStmtAST*>(stmt);
+    ASSERT_NE(ret, nullptr);
+    EXPECT_NE(ret->value, nullptr);
+}
+
+TEST_F(ParserStmtTest, IfStatement) {
+    auto stmt = parseStmt("int f() { if (1) { } }");
+    ASSERT_NE(stmt, nullptr);
+    auto ifStmt = dynamic_cast<IfStmtAST*>(stmt);
+    ASSERT_NE(ifStmt, nullptr);
+    EXPECT_NE(ifStmt->cond, nullptr);
+    EXPECT_NE(ifStmt->thenStmt, nullptr);
+    EXPECT_EQ(ifStmt->elseStmt, nullptr);
+}
+
+TEST_F(ParserStmtTest, IfElseStatement) {
+    auto stmt = parseStmt("int f() { if (1) { } else { } }");
+    ASSERT_NE(stmt, nullptr);
+    auto ifStmt = dynamic_cast<IfStmtAST*>(stmt);
+    ASSERT_NE(ifStmt, nullptr);
+    EXPECT_NE(ifStmt->cond, nullptr);
+    EXPECT_NE(ifStmt->thenStmt, nullptr);
+    EXPECT_NE(ifStmt->elseStmt, nullptr);
+}
+
+TEST_F(ParserStmtTest, WhileStatement) {
+    auto stmt = parseStmt("int f() { while (1) { } }");
+    ASSERT_NE(stmt, nullptr);
+    auto whileStmt = dynamic_cast<WhileStmtAST*>(stmt);
+    ASSERT_NE(whileStmt, nullptr);
+    EXPECT_NE(whileStmt->cond, nullptr);
+    EXPECT_NE(whileStmt->body, nullptr);
+}
+
+TEST_F(ParserStmtTest, DoWhileStatement) {
+    auto stmt = parseStmt("int f() { do { } while (1); }");
+    ASSERT_NE(stmt, nullptr);
+    auto doWhile = dynamic_cast<DoWhileStmtAST*>(stmt);
+    ASSERT_NE(doWhile, nullptr);
+    EXPECT_NE(doWhile->body, nullptr);
+    EXPECT_NE(doWhile->cond, nullptr);
+}
+
+TEST_F(ParserStmtTest, ForStatement) {
+    auto stmt = parseStmt("int f() { for (i = 0; i < 10; i = i + 1) { } }");
+    ASSERT_NE(stmt, nullptr);
+    auto forStmt = dynamic_cast<ForStmtAST*>(stmt);
+    ASSERT_NE(forStmt, nullptr);
+    EXPECT_NE(forStmt->init, nullptr);
+    EXPECT_NE(forStmt->cond, nullptr);
+    EXPECT_NE(forStmt->inc, nullptr);
+    EXPECT_NE(forStmt->body, nullptr);
+}
+
+TEST_F(ParserStmtTest, ForEmptyInit) {
+    auto stmt = parseStmt("int f() { for (; 1; ) { } }");
+    ASSERT_NE(stmt, nullptr);
+    auto forStmt = dynamic_cast<ForStmtAST*>(stmt);
+    ASSERT_NE(forStmt, nullptr);
+    EXPECT_EQ(forStmt->init, nullptr);
+    EXPECT_NE(forStmt->cond, nullptr);
+    EXPECT_EQ(forStmt->inc, nullptr);
+}
+
+TEST_F(ParserStmtTest, BreakStatement) {
+    auto stmt = parseStmt("int f() { while(1) { break; } }");
+    ASSERT_NE(stmt, nullptr);
+    auto whileStmt = dynamic_cast<WhileStmtAST*>(stmt);
+    ASSERT_NE(whileStmt, nullptr);
+    auto body = dynamic_cast<CompoundStmtAST*>(whileStmt->body.get());
+    ASSERT_NE(body, nullptr);
+    ASSERT_FALSE(body->stmts.empty());
+    auto breakStmt = dynamic_cast<BreakStmtAST*>(body->stmts[0].get());
+    ASSERT_NE(breakStmt, nullptr);
+}
+
+TEST_F(ParserStmtTest, ContinueStatement) {
+    auto stmt = parseStmt("int f() { while(1) { continue; } }");
+    ASSERT_NE(stmt, nullptr);
+    auto whileStmt = dynamic_cast<WhileStmtAST*>(stmt);
+    ASSERT_NE(whileStmt, nullptr);
+    auto body = dynamic_cast<CompoundStmtAST*>(whileStmt->body.get());
+    ASSERT_NE(body, nullptr);
+    ASSERT_FALSE(body->stmts.empty());
+    auto continueStmt = dynamic_cast<ContinueStmtAST*>(body->stmts[0].get());
+    ASSERT_NE(continueStmt, nullptr);
+}
+
+TEST_F(ParserStmtTest, GotoStatement) {
+    auto stmt = parseStmt("int f() { goto label; }");
+    ASSERT_NE(stmt, nullptr);
+    auto gotoStmt = dynamic_cast<GotoStmtAST*>(stmt);
+    ASSERT_NE(gotoStmt, nullptr);
+    EXPECT_EQ(gotoStmt->label, "label");
+}
+
+TEST_F(ParserStmtTest, LabelStatement) {
+    auto stmt = parseStmt("int f() { label: return 0; }");
+    ASSERT_NE(stmt, nullptr);
+    auto labelStmt = dynamic_cast<LabelStmtAST*>(stmt);
+    ASSERT_NE(labelStmt, nullptr);
+    EXPECT_EQ(labelStmt->label, "label");
+    EXPECT_NE(labelStmt->stmt, nullptr);
+}
+
+TEST_F(ParserStmtTest, ExprStatement) {
+    auto stmt = parseStmt("int f() { x; }");
+    ASSERT_NE(stmt, nullptr);
+    auto exprStmt = dynamic_cast<ExprStmtAST*>(stmt);
+    ASSERT_NE(exprStmt, nullptr);
+    EXPECT_NE(exprStmt->expr, nullptr);
+}
+
+TEST_F(ParserStmtTest, CompoundStatement) {
+    auto stmt = parseStmt("int f() { { return 1; } }");
+    ASSERT_NE(stmt, nullptr);
+    auto compound = dynamic_cast<CompoundStmtAST*>(stmt);
+    ASSERT_NE(compound, nullptr);
+    EXPECT_FALSE(compound->stmts.empty());
+}
+
+TEST_F(ParserStmtTest, NestedIf) {
+    auto stmt = parseStmt("int f() { if (1) { if (2) { } } }");
+    ASSERT_NE(stmt, nullptr);
+    auto outer = dynamic_cast<IfStmtAST*>(stmt);
+    ASSERT_NE(outer, nullptr);
+    auto outerBody = dynamic_cast<CompoundStmtAST*>(outer->thenStmt.get());
+    ASSERT_NE(outerBody, nullptr);
+    ASSERT_FALSE(outerBody->stmts.empty());
+    auto inner = dynamic_cast<IfStmtAST*>(outerBody->stmts[0].get());
+    ASSERT_NE(inner, nullptr);
+    EXPECT_NE(inner->cond, nullptr);
+}

@@ -29,6 +29,24 @@ private:
 
     std::unique_ptr<StmtAST> parseStmt();
 
+    std::unique_ptr<StmtAST> parseIfStmt();
+
+    std::unique_ptr<StmtAST> parseWhileStmt();
+
+    std::unique_ptr<StmtAST> parseDoWhileStmt();
+
+    std::unique_ptr<StmtAST> parseForStmt();
+
+    std::unique_ptr<StmtAST> parseBreakStmt();
+
+    std::unique_ptr<StmtAST> parseContinueStmt();
+
+    std::unique_ptr<StmtAST> parseGotoStmt();
+
+    std::unique_ptr<StmtAST> parseLabelStmt(const std::string& label);
+
+    std::unique_ptr<StmtAST> parseExprStmt();
+
     std::unique_ptr<ExprAST> parseExpr(int minPrec = 0);
 
     std::unique_ptr<ExprAST> parsePrimary();
