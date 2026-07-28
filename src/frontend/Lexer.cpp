@@ -479,7 +479,13 @@ Token Lexer::scanToken() {
         token = makeToken(TokenType::TOKEN_COMMA, lexeme());
         break;
     case '.':
-        token = makeToken(TokenType::TOKEN_DOT, lexeme());
+        if (peekNext() == '.' && m_currentPos + 2 < m_source.size() && m_source[m_currentPos + 2] == '.') {
+            advance();
+            advance();
+            token = makeToken(TokenType::TOKEN_ELLIPSIS, lexeme());
+        } else {
+            token = makeToken(TokenType::TOKEN_DOT, lexeme());
+        }
         break;
     default:
         token = makeToken(TokenType::TOKEN_UNKNOWN, lexeme());

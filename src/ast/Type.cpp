@@ -44,4 +44,55 @@ TypeContext::~TypeContext() {
     for (auto& it : m_types) {
         delete it.second;
     }
+    for (auto& it : m_typedefs) {
+        delete it.second;
+    }
+}
+
+void TypeContext::addTypedef(const std::string& name, Type* type) {
+    m_typedefs[name] = new TypedefType(name, type);
+}
+
+Type* TypeContext::getTypedef(const std::string& name) const {
+    auto it = m_typedefs.find(name);
+    if (it != m_typedefs.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+void TypeContext::addStruct(const std::string& name, StructType* type) {
+    m_structs[name] = type;
+}
+
+StructType* TypeContext::getStruct(const std::string& name) const {
+    auto it = m_structs.find(name);
+    if (it != m_structs.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+void TypeContext::addUnion(const std::string& name, UnionType* type) {
+    m_unions[name] = type;
+}
+
+UnionType* TypeContext::getUnion(const std::string& name) const {
+    auto it = m_unions.find(name);
+    if (it != m_unions.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+void TypeContext::addEnum(const std::string& name, EnumType* type) {
+    m_enums[name] = type;
+}
+
+EnumType* TypeContext::getEnum(const std::string& name) const {
+    auto it = m_enums.find(name);
+    if (it != m_enums.end()) {
+        return it->second;
+    }
+    return nullptr;
 }

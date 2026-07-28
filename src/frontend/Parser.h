@@ -17,11 +17,33 @@ private:
 
     std::optional<Token> match(TokenType type);
 
-    std::optional<Token> peek();
+    std::optional<Token> peek() const;
 
     std::optional<Token> advance();
 
-    std::unique_ptr<FunctionDeclAST> parseFunctionDecl();
+    bool check(TokenType type) const;
+
+    bool isTypeStart() const;
+
+    Type* parseType();
+
+    Type* parseBaseType();
+
+    std::unique_ptr<DeclAST> parseDeclaration();
+
+    std::unique_ptr<FunctionDeclAST> parseFunctionDecl(Type* returnType, const std::string& name);
+
+    std::unique_ptr<DeclAST> parseVariableDecl(Type* type, const std::string& name);
+
+    std::unique_ptr<ParamDeclAST> parseParamDecl();
+
+    std::unique_ptr<StructDeclAST> parseStructDecl();
+
+    std::unique_ptr<UnionDeclAST> parseUnionDecl();
+
+    std::unique_ptr<EnumDeclAST> parseEnumDecl();
+
+    std::unique_ptr<TypedefDeclAST> parseTypedefDecl();
 
     std::unique_ptr<ReturnStmtAST> parseReturnStmt();
 

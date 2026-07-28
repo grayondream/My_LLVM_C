@@ -3,7 +3,7 @@
 #include "ast/Decl.h"
 #include "frontend/Token.h"
 
-std::optional<Token> Parser::peek() {
+std::optional<Token> Parser::peek() const {
     if (eof()) {
         return {};
     }
@@ -384,6 +384,25 @@ std::unique_ptr<ExprAST> Parser::parsePrimary() {
         return expr;
     }
 
+    // Initializer list: {expr, expr, ...}
+    if (token->type == TokenType::TOKEN_LBRACE) {
+        advance();
+        std::vector<std::unique_ptr<ExprAST>> initList;
+
+        if (!check(TokenType::TOKEN_RBRACE)) {
+            while (true) {
+                auto expr = parseExpr();
+                if (expr) {
+                    initList.push_back(std::move(expr));
+                }
+                if (!match(TokenType::TOKEN_COMMA)) break;
+            }
+        }
+
+        match(TokenType::TOKEN_RBRACE);
+        return std::make_unique<InitializerListExprAST>(std::move(initList));
+    }
+
     return nullptr;
 }
 
@@ -528,37 +547,6 @@ std::unique_ptr<ExprAST> Parser::parseExpr(int minPrec) {
 }
 
 // ========== Declaration Parsing ==========
-
-std::unique_ptr<FunctionDeclAST> Parser::parseFunctionDecl() {
-    if (!match(TokenType::TOKEN_INT)) {
-        return nullptr;
-    }
-
-    Token id;
-    if (auto token = match(TokenType::TOKEN_IDENTIFIER); token.has_value()) {
-        id = token.value();
-    } else {
-        return nullptr;
-    }
-
-    if (!match(TokenType::TOKEN_LPAREN)) {
-        return nullptr;
-    }
-
-    if (!match(TokenType::TOKEN_RPAREN)) {
-        return nullptr;
-    }
-
-    auto body = parseCompoundStmt();
-    if (!body) {
-        return nullptr;
-    }
-
-    std::vector<std::unique_ptr<ParamDeclAST>> params{};
-    auto func = std::make_unique<FunctionDeclAST>(id.lexeme, TypeContext::instance().getInt(), params, body);
-    func->setLocation(id.filename, id.line, id.column);
-    return func;
-}
 
 std::unique_ptr<ReturnStmtAST> Parser::parseReturnStmt() {
     auto retToken = match(TokenType::TOKEN_RETURN);
@@ -816,6 +804,536 @@ std::unique_ptr<StmtAST> Parser::parseExprStmt() {
 
 std::unique_ptr<TranslationUnitAST> Parser::parse() {
     std::vector<std::unique_ptr<DeclAST>> decls{};
-    decls.push_back(parseFunctionDecl());
+    while (!eof()) {
+        auto decl = parseDeclaration();
+        if (decl) {
+            decls.push_back(std::move(decl));
+        } else {
+            advance();
+        }
+    }
     return std::make_unique<TranslationUnitAST>(std::move(decls));
+}
+
+bool Parser::check(TokenType type) const {
+    if (eof()) return false;
+    return m_tokens[m_currentTokenPos].type == type;
+}
+
+bool Parser::isTypeStart() const {
+    if (eof()) return false;
+    switch (peek()->type) {
+        case TokenType::TOKEN_INT:
+        case TokenType::TOKEN_FLOAT:
+        case TokenType::TOKEN_DOUBLE:
+        case TokenType::TOKEN_CHAR_KW:
+        case TokenType::TOKEN_VOID:
+        case TokenType::TOKEN_STRUCT:
+        case TokenType::TOKEN_UNION:
+        case TokenType::TOKEN_ENUM:
+        case TokenType::TOKEN_TYPEDEF:
+            return true;
+        case TokenType::TOKEN_IDENTIFIER: {
+            // Check if identifier is a typedef name
+            Type* t = TypeContext::instance().getTypedef(peek()->lexeme);
+            return t != nullptr;
+        }
+        default:
+            return false;
+    }
+}
+
+Type* Parser::parseBaseType() {
+    auto tok = peek();
+    if (!tok) return nullptr;
+
+    switch (tok->type) {
+        case TokenType::TOKEN_INT: {
+            advance();
+            return TypeContext::instance().getInt();
+        }
+        case TokenType::TOKEN_FLOAT: {
+            advance();
+            return TypeContext::instance().getFloat();
+        }
+        case TokenType::TOKEN_DOUBLE: {
+            advance();
+            return TypeContext::instance().getDouble();
+        }
+        case TokenType::TOKEN_CHAR_KW: {
+            advance();
+            return TypeContext::instance().getChar();
+        }
+        case TokenType::TOKEN_VOID: {
+            advance();
+            return TypeContext::instance().getVoid();
+        }
+        case TokenType::TOKEN_STRUCT: {
+            advance(); // consume 'struct'
+            std::string name;
+            if (check(TokenType::TOKEN_IDENTIFIER)) {
+                name = advance()->lexeme;
+            }
+
+            // Check if this is a definition or just a reference
+            if (check(TokenType::TOKEN_LBRACE)) {
+                advance(); // consume '{'
+                auto* structType = new StructType(name);
+                while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
+                    Type* fieldType = parseType();
+                    if (!fieldType) break;
+                    if (!check(TokenType::TOKEN_IDENTIFIER)) break;
+                    std::string fieldName = advance()->lexeme;
+                    structType->addField(fieldName, fieldType);
+                    match(TokenType::TOKEN_SEMICOLON);
+                }
+                match(TokenType::TOKEN_RBRACE);
+                match(TokenType::TOKEN_SEMICOLON);
+                TypeContext::instance().addStruct(name, structType);
+                return structType;
+            }
+
+            // Just a reference to existing struct type
+            auto existing = TypeContext::instance().getStruct(name);
+            if (existing) return existing;
+
+            // Forward reference - create placeholder
+            auto* structType = new StructType(name);
+            TypeContext::instance().addStruct(name, structType);
+            return structType;
+        }
+        case TokenType::TOKEN_UNION: {
+            advance(); // consume 'union'
+            std::string name;
+            if (check(TokenType::TOKEN_IDENTIFIER)) {
+                name = advance()->lexeme;
+            }
+
+            if (check(TokenType::TOKEN_LBRACE)) {
+                advance(); // consume '{'
+                auto* unionType = new UnionType(name);
+                while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
+                    Type* memberType = parseType();
+                    if (!memberType) break;
+                    if (!check(TokenType::TOKEN_IDENTIFIER)) break;
+                    std::string memberName = advance()->lexeme;
+                    unionType->addMember(memberName, memberType);
+                    match(TokenType::TOKEN_SEMICOLON);
+                }
+                match(TokenType::TOKEN_RBRACE);
+                match(TokenType::TOKEN_SEMICOLON);
+                TypeContext::instance().addUnion(name, unionType);
+                return unionType;
+            }
+
+            auto existing = TypeContext::instance().getUnion(name);
+            if (existing) return existing;
+
+            auto* unionType = new UnionType(name);
+            TypeContext::instance().addUnion(name, unionType);
+            return unionType;
+        }
+        case TokenType::TOKEN_ENUM: {
+            advance(); // consume 'enum'
+            std::string name;
+            if (check(TokenType::TOKEN_IDENTIFIER)) {
+                name = advance()->lexeme;
+            }
+
+            if (check(TokenType::TOKEN_LBRACE)) {
+                advance(); // consume '{'
+                auto* enumType = new EnumType(name);
+                int currentVal = 0;
+                while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
+                    if (!check(TokenType::TOKEN_IDENTIFIER)) break;
+                    std::string valueName = advance()->lexeme;
+                    int val = currentVal;
+                    if (check(TokenType::TOKEN_ASSIGN)) {
+                        advance();
+                        auto expr = parseExpr();
+                        if (auto num = dynamic_cast<NumberExprAST*>(expr.get())) {
+                            val = num->value;
+                        }
+                    }
+                    enumType->addValue(valueName, val);
+                    currentVal = val + 1;
+                    if (!check(TokenType::TOKEN_COMMA)) break;
+                    advance(); // consume ','
+                }
+                match(TokenType::TOKEN_RBRACE);
+                TypeContext::instance().addEnum(name, enumType);
+                return enumType;
+            }
+
+            auto existing = TypeContext::instance().getEnum(name);
+            if (existing) return existing;
+
+            auto* enumType = new EnumType(name);
+            TypeContext::instance().addEnum(name, enumType);
+            return enumType;
+        }
+        case TokenType::TOKEN_IDENTIFIER: {
+            // Check if it's a typedef name
+            Type* typedefType = TypeContext::instance().getTypedef(tok->lexeme);
+            if (typedefType) {
+                advance();
+                return typedefType;
+            }
+            return nullptr;
+        }
+        default:
+            return nullptr;
+    }
+}
+
+Type* Parser::parseType() {
+    bool isConst = false;
+    bool isVolatile = false;
+
+    // Handle qualifiers before base type
+    while (!eof()) {
+        if (check(TokenType::TOKEN_CONST)) {
+            advance();
+            isConst = true;
+        } else if (check(TokenType::TOKEN_VOLATILE)) {
+            advance();
+            isVolatile = true;
+        } else {
+            break;
+        }
+    }
+
+    Type* baseType = parseBaseType();
+    if (!baseType) return nullptr;
+
+    baseType->isConst = isConst;
+    baseType->isVolatile = isVolatile;
+
+    // Check for pointer types with qualifiers
+    while (check(TokenType::TOKEN_STAR)) {
+        advance();
+        auto* ptrType = new Type(TypeKind::Pointer, baseType);
+
+        // Check for qualifiers after pointer star (but before next star or identifier)
+        while (!eof()) {
+            if (check(TokenType::TOKEN_CONST)) {
+                advance();
+                ptrType->isConst = true;
+            } else if (check(TokenType::TOKEN_VOLATILE)) {
+                advance();
+                ptrType->isVolatile = true;
+            } else {
+                break;
+            }
+        }
+
+        baseType = ptrType;
+    }
+
+    return baseType;
+}
+
+std::unique_ptr<DeclAST> Parser::parseDeclaration() {
+    if (check(TokenType::TOKEN_TYPEDEF)) {
+        return parseTypedefDecl();
+    }
+
+    if (check(TokenType::TOKEN_STRUCT)) {
+        auto structDecl = parseStructDecl();
+        if (!structDecl) return nullptr;
+
+        // Register struct type in TypeContext if it has fields
+        if (!structDecl->fields.empty()) {
+            auto structType = new StructType(structDecl->name);
+            for (auto& field : structDecl->fields) {
+                structType->addField(field.first, field.second);
+            }
+            TypeContext::instance().addStruct(structDecl->name, structType);
+        }
+
+        // Check if there's a variable name after struct declaration
+        if (check(TokenType::TOKEN_IDENTIFIER)) {
+            auto nameTok = advance();
+            auto type = TypeContext::instance().getStruct(structDecl->name);
+            if (!type) {
+                // Create a placeholder struct type for forward-declared structs
+                type = new StructType(structDecl->name);
+                TypeContext::instance().addStruct(structDecl->name, static_cast<StructType*>(type));
+            }
+            return parseVariableDecl(type, nameTok->lexeme);
+        }
+        return structDecl;
+    }
+
+    if (check(TokenType::TOKEN_UNION)) {
+        auto unionDecl = parseUnionDecl();
+        if (!unionDecl) return nullptr;
+
+        // Register union type in TypeContext if it has members
+        if (!unionDecl->members.empty()) {
+            auto unionType = new UnionType(unionDecl->name);
+            for (auto& member : unionDecl->members) {
+                unionType->addMember(member.first, member.second);
+            }
+            TypeContext::instance().addUnion(unionDecl->name, unionType);
+        }
+
+        if (check(TokenType::TOKEN_IDENTIFIER)) {
+            auto nameTok = advance();
+            auto type = TypeContext::instance().getUnion(unionDecl->name);
+            if (!type) {
+                type = new UnionType(unionDecl->name);
+                TypeContext::instance().addUnion(unionDecl->name, static_cast<UnionType*>(type));
+            }
+            return parseVariableDecl(type, nameTok->lexeme);
+        }
+        return unionDecl;
+    }
+
+    if (check(TokenType::TOKEN_ENUM)) {
+        auto enumDecl = parseEnumDecl();
+        if (!enumDecl) return nullptr;
+
+        // Register enum type in TypeContext if it has values
+        if (!enumDecl->values.empty()) {
+            auto enumType = new EnumType(enumDecl->name);
+            for (auto& val : enumDecl->values) {
+                enumType->addValue(val.first, val.second);
+            }
+            TypeContext::instance().addEnum(enumDecl->name, enumType);
+        }
+
+        if (check(TokenType::TOKEN_IDENTIFIER)) {
+            auto nameTok = advance();
+            auto type = TypeContext::instance().getEnum(enumDecl->name);
+            if (!type) {
+                type = new EnumType(enumDecl->name);
+                TypeContext::instance().addEnum(enumDecl->name, static_cast<EnumType*>(type));
+            }
+            return parseVariableDecl(type, nameTok->lexeme);
+        }
+        return enumDecl;
+    }
+
+    Type* type = parseType();
+    if (!type) return nullptr;
+
+    if (!check(TokenType::TOKEN_IDENTIFIER)) return nullptr;
+    auto nameTok = advance();
+
+    // Function declaration/definition: type name '('
+    if (check(TokenType::TOKEN_LPAREN)) {
+        return parseFunctionDecl(type, nameTok->lexeme);
+    }
+
+    // Variable declaration
+    return parseVariableDecl(type, nameTok->lexeme);
+}
+
+std::unique_ptr<FunctionDeclAST> Parser::parseFunctionDecl(Type* returnType, const std::string& name) {
+    if (!match(TokenType::TOKEN_LPAREN)) return nullptr;
+
+    std::vector<std::unique_ptr<ParamDeclAST>> params;
+    bool isVarArg = false;
+
+    if (!check(TokenType::TOKEN_RPAREN)) {
+        while (true) {
+            if (check(TokenType::TOKEN_VOID)) {
+                advance();
+                break;
+            }
+
+            auto param = parseParamDecl();
+            if (!param) return nullptr;
+            params.push_back(std::move(param));
+
+            if (!match(TokenType::TOKEN_COMMA)) break;
+
+            if (check(TokenType::TOKEN_ELLIPSIS)) {
+                isVarArg = true;
+                advance();
+                break;
+            }
+        }
+    }
+
+    if (!match(TokenType::TOKEN_RPAREN)) return nullptr;
+
+    // Check for function body
+    std::unique_ptr<CompoundStmtAST> body;
+    if (check(TokenType::TOKEN_LBRACE)) {
+        body = parseCompoundStmt();
+    }
+
+    return std::make_unique<FunctionDeclAST>(name, returnType, params, body);
+}
+
+std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string& name) {
+    std::unique_ptr<ExprAST> init;
+
+    // Check for array declaration: name[size]
+    if (check(TokenType::TOKEN_LBRACKET)) {
+        advance();
+        int size = 0;
+        if (auto numTok = match(TokenType::TOKEN_NUMBER)) {
+            size = std::get<int>(numTok->value);
+        }
+        match(TokenType::TOKEN_RBRACKET);
+
+        // Check for initializer
+        if (check(TokenType::TOKEN_ASSIGN)) {
+            advance();
+            init = parseExpr();
+        }
+
+        match(TokenType::TOKEN_SEMICOLON);
+        return std::make_unique<ArrayDeclAST>(name, type, size, std::move(init));
+    }
+
+    // Check for initializer: = expr
+    if (check(TokenType::TOKEN_ASSIGN)) {
+        advance();
+        init = parseExpr();
+    }
+
+    match(TokenType::TOKEN_SEMICOLON);
+    return std::make_unique<VarDeclAST>(name, type, std::move(init));
+}
+
+std::unique_ptr<ParamDeclAST> Parser::parseParamDecl() {
+    Type* type = parseType();
+    if (!type) return nullptr;
+
+    std::string name;
+    if (check(TokenType::TOKEN_IDENTIFIER)) {
+        name = advance()->lexeme;
+    }
+
+    return std::make_unique<ParamDeclAST>(name, type);
+}
+
+std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
+    if (!match(TokenType::TOKEN_STRUCT)) return nullptr;
+
+    std::string name;
+    if (check(TokenType::TOKEN_IDENTIFIER)) {
+        name = advance()->lexeme;
+    }
+
+    if (!check(TokenType::TOKEN_LBRACE)) {
+        // Forward declaration
+        return std::make_unique<StructDeclAST>(name, std::vector<std::pair<std::string, Type*>>{});
+    }
+
+    advance(); // consume '{'
+
+    std::vector<std::pair<std::string, Type*>> fields;
+    while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
+        Type* fieldType = parseType();
+        if (!fieldType) break;
+
+        if (!check(TokenType::TOKEN_IDENTIFIER)) break;
+        std::string fieldName = advance()->lexeme;
+
+        fields.push_back({fieldName, fieldType});
+
+        match(TokenType::TOKEN_SEMICOLON);
+    }
+
+    match(TokenType::TOKEN_RBRACE);
+    match(TokenType::TOKEN_SEMICOLON);
+
+    return std::make_unique<StructDeclAST>(name, std::move(fields));
+}
+
+std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
+    if (!match(TokenType::TOKEN_UNION)) return nullptr;
+
+    std::string name;
+    if (check(TokenType::TOKEN_IDENTIFIER)) {
+        name = advance()->lexeme;
+    }
+
+    if (!check(TokenType::TOKEN_LBRACE)) {
+        // Forward declaration
+        return std::make_unique<UnionDeclAST>(name, std::vector<std::pair<std::string, Type*>>{});
+    }
+
+    advance(); // consume '{'
+
+    std::vector<std::pair<std::string, Type*>> members;
+    while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
+        Type* memberType = parseType();
+        if (!memberType) break;
+
+        if (!check(TokenType::TOKEN_IDENTIFIER)) break;
+        std::string memberName = advance()->lexeme;
+
+        members.push_back({memberName, memberType});
+
+        match(TokenType::TOKEN_SEMICOLON);
+    }
+
+    match(TokenType::TOKEN_RBRACE);
+    match(TokenType::TOKEN_SEMICOLON);
+
+    return std::make_unique<UnionDeclAST>(name, std::move(members));
+}
+
+std::unique_ptr<EnumDeclAST> Parser::parseEnumDecl() {
+    if (!match(TokenType::TOKEN_ENUM)) return nullptr;
+
+    std::string name;
+    if (check(TokenType::TOKEN_IDENTIFIER)) {
+        name = advance()->lexeme;
+    }
+
+    if (!check(TokenType::TOKEN_LBRACE)) {
+        // Forward declaration
+        return std::make_unique<EnumDeclAST>(name, std::vector<std::pair<std::string, int>>{});
+    }
+
+    advance(); // consume '{'
+
+    std::vector<std::pair<std::string, int>> values;
+    int currentVal = 0;
+
+    while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
+        if (!check(TokenType::TOKEN_IDENTIFIER)) break;
+        std::string valueName = advance()->lexeme;
+
+        int val = currentVal;
+        if (check(TokenType::TOKEN_ASSIGN)) {
+            advance();
+            auto expr = parseExpr();
+            if (auto num = dynamic_cast<NumberExprAST*>(expr.get())) {
+                val = num->value;
+            }
+        }
+
+        values.push_back({valueName, val});
+        currentVal = val + 1;
+
+        if (!check(TokenType::TOKEN_COMMA)) break;
+        advance(); // consume ','
+    }
+
+    match(TokenType::TOKEN_RBRACE);
+
+    return std::make_unique<EnumDeclAST>(name, std::move(values));
+}
+
+std::unique_ptr<TypedefDeclAST> Parser::parseTypedefDecl() {
+    if (!match(TokenType::TOKEN_TYPEDEF)) return nullptr;
+
+    Type* type = parseType();
+    if (!type) return nullptr;
+
+    if (!check(TokenType::TOKEN_IDENTIFIER)) return nullptr;
+    std::string name = advance()->lexeme;
+
+    match(TokenType::TOKEN_SEMICOLON);
+
+    TypeContext::instance().addTypedef(name, type);
+    return std::make_unique<TypedefDeclAST>(name, type);
 }

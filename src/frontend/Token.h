@@ -93,6 +93,7 @@ enum class TokenType : int32_t {
     TOKEN_RBRACE,       // }
     TOKEN_LBRACKET,     // [
     TOKEN_RBRACKET,     // ]
+    TOKEN_ELLIPSIS,     // ...
 
     // 文件结尾
     TOKEN_EOS

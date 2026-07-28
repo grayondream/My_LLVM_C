@@ -921,3 +921,557 @@ TEST_F(ParserStmtTest, NestedIf) {
     ASSERT_NE(inner, nullptr);
     EXPECT_NE(inner->cond, nullptr);
 }
+
+// ========== Declaration Parser Tests ==========
+
+class ParserDeclTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        spdlog::set_level(spdlog::level::off);
+    }
+
+    static std::vector<Token> lex(const std::string& source) {
+        Lexer lexer("test.c", source);
+        return lexer.tokenize();
+    }
+
+    static auto parse(const std::string& source) {
+        auto tokens = lex(source);
+        Parser parser(tokens);
+        return parser.parse();
+    }
+};
+
+// ========== Variable Declarations ==========
+
+TEST_F(ParserDeclTest, SimpleVarDecl) {
+    auto tu = parse("int x;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->name, "x");
+    EXPECT_EQ(var->type->kind, TypeKind::Int);
+    EXPECT_EQ(var->initExpr, nullptr);
+}
+
+TEST_F(ParserDeclTest, VarDeclWithInit) {
+    auto tu = parse("int x = 42;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->name, "x");
+    EXPECT_EQ(var->type->kind, TypeKind::Int);
+    ASSERT_NE(var->initExpr, nullptr);
+    auto num = dynamic_cast<NumberExprAST*>(var->initExpr.get());
+    ASSERT_NE(num, nullptr);
+    EXPECT_EQ(num->value, 42);
+}
+
+TEST_F(ParserDeclTest, FloatVarDecl) {
+    auto tu = parse("float f;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->name, "f");
+    EXPECT_EQ(var->type->kind, TypeKind::Float);
+}
+
+TEST_F(ParserDeclTest, DoubleVarDecl) {
+    auto tu = parse("double d = 3.14;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->name, "d");
+    EXPECT_EQ(var->type->kind, TypeKind::Double);
+}
+
+TEST_F(ParserDeclTest, CharVarDecl) {
+    auto tu = parse("char c;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->name, "c");
+    EXPECT_EQ(var->type->kind, TypeKind::Char);
+}
+
+TEST_F(ParserDeclTest, VoidPointerDecl) {
+    auto tu = parse("void* p;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->name, "p");
+    EXPECT_EQ(var->type->kind, TypeKind::Pointer);
+    EXPECT_EQ(var->type->base->kind, TypeKind::Void);
+}
+
+TEST_F(ParserDeclTest, IntPointerDecl) {
+    auto tu = parse("int* ptr;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->name, "ptr");
+    EXPECT_EQ(var->type->kind, TypeKind::Pointer);
+    EXPECT_EQ(var->type->base->kind, TypeKind::Int);
+}
+
+TEST_F(ParserDeclTest, DoublePointerDecl) {
+    auto tu = parse("int** pp;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->name, "pp");
+    EXPECT_EQ(var->type->kind, TypeKind::Pointer);
+    EXPECT_EQ(var->type->base->kind, TypeKind::Pointer);
+    EXPECT_EQ(var->type->base->base->kind, TypeKind::Int);
+}
+
+// ========== Array Declarations ==========
+
+TEST_F(ParserDeclTest, ArrayDecl) {
+    auto tu = parse("int arr[10];");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto arr = dynamic_cast<ArrayDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(arr, nullptr);
+    EXPECT_EQ(arr->name, "arr");
+    EXPECT_EQ(arr->elementType->kind, TypeKind::Int);
+    EXPECT_EQ(arr->size, 10);
+}
+
+TEST_F(ParserDeclTest, ArrayDeclWithInit) {
+    auto tu = parse("int arr[5] = {1, 2, 3};");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto arr = dynamic_cast<ArrayDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(arr, nullptr);
+    EXPECT_EQ(arr->name, "arr");
+    EXPECT_EQ(arr->size, 5);
+    EXPECT_NE(arr->initExpr, nullptr);
+}
+
+// ========== Function Declarations ==========
+
+TEST_F(ParserDeclTest, FunctionDeclNoParams) {
+    auto tu = parse("int main() { return 0; }");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto func = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(func, nullptr);
+    EXPECT_EQ(func->name, "main");
+    EXPECT_EQ(func->returnType->kind, TypeKind::Int);
+    EXPECT_TRUE(func->params.empty());
+    EXPECT_NE(func->body, nullptr);
+}
+
+TEST_F(ParserDeclTest, FunctionDeclWithParams) {
+    auto tu = parse("int add(int a, int b) { return a + b; }");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto func = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(func, nullptr);
+    EXPECT_EQ(func->name, "add");
+    EXPECT_EQ(func->returnType->kind, TypeKind::Int);
+    EXPECT_EQ(func->params.size(), 2u);
+    EXPECT_EQ(func->params[0]->name, "a");
+    EXPECT_EQ(func->params[0]->type->kind, TypeKind::Int);
+    EXPECT_EQ(func->params[1]->name, "b");
+    EXPECT_EQ(func->params[1]->type->kind, TypeKind::Int);
+}
+
+TEST_F(ParserDeclTest, FunctionDeclVoidReturn) {
+    auto tu = parse("void print(void) { }");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto func = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(func, nullptr);
+    EXPECT_EQ(func->name, "print");
+    EXPECT_EQ(func->returnType->kind, TypeKind::Void);
+}
+
+TEST_F(ParserDeclTest, FunctionDeclForwardDecl) {
+    auto tu = parse("int foo(int x);");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto func = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(func, nullptr);
+    EXPECT_EQ(func->name, "foo");
+    EXPECT_EQ(func->returnType->kind, TypeKind::Int);
+    EXPECT_EQ(func->params.size(), 1u);
+    EXPECT_EQ(func->body, nullptr);
+}
+
+TEST_F(ParserDeclTest, FunctionDeclPointerParam) {
+    auto tu = parse("void swap(int* a, int* b) { }");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto func = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(func, nullptr);
+    EXPECT_EQ(func->params.size(), 2u);
+    EXPECT_EQ(func->params[0]->type->kind, TypeKind::Pointer);
+    EXPECT_EQ(func->params[0]->type->base->kind, TypeKind::Int);
+    EXPECT_EQ(func->params[1]->type->kind, TypeKind::Pointer);
+    EXPECT_EQ(func->params[1]->type->base->kind, TypeKind::Int);
+}
+
+// ========== Struct Declarations ==========
+
+TEST_F(ParserDeclTest, StructDecl) {
+    auto tu = parse("struct Point { int x; int y; };");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto strct = dynamic_cast<StructDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(strct, nullptr);
+    EXPECT_EQ(strct->name, "Point");
+    EXPECT_EQ(strct->fields.size(), 2u);
+    EXPECT_EQ(strct->fields[0].first, "x");
+    EXPECT_EQ(strct->fields[0].second->kind, TypeKind::Int);
+    EXPECT_EQ(strct->fields[1].first, "y");
+    EXPECT_EQ(strct->fields[1].second->kind, TypeKind::Int);
+}
+
+TEST_F(ParserDeclTest, StructVarDecl) {
+    auto tu = parse("struct Point p;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->name, "p");
+    EXPECT_EQ(var->type->kind, TypeKind::Struct);
+}
+
+TEST_F(ParserDeclTest, StructForwardDecl) {
+    auto tu = parse("struct Node;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto strct = dynamic_cast<StructDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(strct, nullptr);
+    EXPECT_EQ(strct->name, "Node");
+    EXPECT_TRUE(strct->fields.empty());
+}
+
+TEST_F(ParserDeclTest, StructWithPointerField) {
+    auto tu = parse("struct Node { int data; struct Node* next; };");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto strct = dynamic_cast<StructDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(strct, nullptr);
+    EXPECT_EQ(strct->fields.size(), 2u);
+    EXPECT_EQ(strct->fields[1].second->kind, TypeKind::Pointer);
+    EXPECT_EQ(strct->fields[1].second->base->kind, TypeKind::Struct);
+}
+
+// ========== Union Declarations ==========
+
+TEST_F(ParserDeclTest, UnionDecl) {
+    auto tu = parse("union Data { int i; float f; };");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto un = dynamic_cast<UnionDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(un, nullptr);
+    EXPECT_EQ(un->name, "Data");
+    EXPECT_EQ(un->members.size(), 2u);
+    EXPECT_EQ(un->members[0].first, "i");
+    EXPECT_EQ(un->members[0].second->kind, TypeKind::Int);
+    EXPECT_EQ(un->members[1].first, "f");
+    EXPECT_EQ(un->members[1].second->kind, TypeKind::Float);
+}
+
+TEST_F(ParserDeclTest, UnionVarDecl) {
+    auto tu = parse("union Data d;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->name, "d");
+    EXPECT_EQ(var->type->kind, TypeKind::Union);
+}
+
+// ========== Enum Declarations ==========
+
+TEST_F(ParserDeclTest, EnumDecl) {
+    auto tu = parse("enum Color { RED, GREEN, BLUE };");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto en = dynamic_cast<EnumDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(en, nullptr);
+    EXPECT_EQ(en->name, "Color");
+    EXPECT_EQ(en->values.size(), 3u);
+    EXPECT_EQ(en->values[0].first, "RED");
+    EXPECT_EQ(en->values[0].second, 0);
+    EXPECT_EQ(en->values[1].first, "GREEN");
+    EXPECT_EQ(en->values[1].second, 1);
+    EXPECT_EQ(en->values[2].first, "BLUE");
+    EXPECT_EQ(en->values[2].second, 2);
+}
+
+TEST_F(ParserDeclTest, EnumDeclWithValues) {
+    auto tu = parse("enum Status { OK = 200, NOT_FOUND = 404 };");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto en = dynamic_cast<EnumDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(en, nullptr);
+    EXPECT_EQ(en->name, "Status");
+    EXPECT_EQ(en->values.size(), 2u);
+    EXPECT_EQ(en->values[0].first, "OK");
+    EXPECT_EQ(en->values[0].second, 200);
+    EXPECT_EQ(en->values[1].first, "NOT_FOUND");
+    EXPECT_EQ(en->values[1].second, 404);
+}
+
+TEST_F(ParserDeclTest, EnumVarDecl) {
+    auto tu = parse("enum Color c;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->name, "c");
+    EXPECT_EQ(var->type->kind, TypeKind::Enum);
+}
+
+// ========== Typedef Declarations ==========
+
+TEST_F(ParserDeclTest, TypedefDecl) {
+    auto tu = parse("typedef int Integer;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto td = dynamic_cast<TypedefDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(td, nullptr);
+    EXPECT_EQ(td->name, "Integer");
+    EXPECT_EQ(td->aliasedType->kind, TypeKind::Int);
+}
+
+TEST_F(ParserDeclTest, TypedefStruct) {
+    auto tu = parse("typedef struct { int x; int y; } Point;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto td = dynamic_cast<TypedefDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(td, nullptr);
+    EXPECT_EQ(td->name, "Point");
+    EXPECT_EQ(td->aliasedType->kind, TypeKind::Struct);
+}
+
+TEST_F(ParserDeclTest, TypedefUsage) {
+    auto tu = parse("typedef int Integer; Integer x = 5;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 2u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[1].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->name, "x");
+    EXPECT_EQ(var->type->kind, TypeKind::Typedef);
+}
+
+// ========== Multiple Declarations ==========
+
+TEST_F(ParserDeclTest, MultipleVarDecls) {
+    auto tu = parse("int x; float y; char z;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 3u);
+    EXPECT_NE(dynamic_cast<VarDeclAST*>(tu->declarations[0].get()), nullptr);
+    EXPECT_NE(dynamic_cast<VarDeclAST*>(tu->declarations[1].get()), nullptr);
+    EXPECT_NE(dynamic_cast<VarDeclAST*>(tu->declarations[2].get()), nullptr);
+}
+
+TEST_F(ParserDeclTest, MixedDeclarations) {
+    auto tu = parse("int x; int add(int a, int b) { return a + b; } float y;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 3u);
+    EXPECT_NE(dynamic_cast<VarDeclAST*>(tu->declarations[0].get()), nullptr);
+    EXPECT_NE(dynamic_cast<FunctionDeclAST*>(tu->declarations[1].get()), nullptr);
+    EXPECT_NE(dynamic_cast<VarDeclAST*>(tu->declarations[2].get()), nullptr);
+}
+
+// ========== Const and Volatile Qualifiers ==========
+
+TEST_F(ParserDeclTest, ConstVarDecl) {
+    auto tu = parse("const int x = 10;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_TRUE(var->type->isConst);
+}
+
+TEST_F(ParserDeclTest, VolatileVarDecl) {
+    auto tu = parse("volatile int x;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_TRUE(var->type->isVolatile);
+}
+
+TEST_F(ParserDeclTest, ConstPointerDecl) {
+    auto tu = parse("const int* p;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->type->kind, TypeKind::Pointer);
+    EXPECT_TRUE(var->type->base->isConst);
+    EXPECT_FALSE(var->type->isConst);
+}
+
+// ========== Additional Edge Case Tests ==========
+
+TEST_F(ParserDeclTest, FunctionDeclVarArgs) {
+    auto tu = parse("int printf(const char* fmt, ...);");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto func = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(func, nullptr);
+    EXPECT_EQ(func->name, "printf");
+    EXPECT_EQ(func->params.size(), 1u);
+    EXPECT_EQ(func->params[0]->name, "fmt");
+    EXPECT_EQ(func->params[0]->type->kind, TypeKind::Pointer);
+    EXPECT_EQ(func->body, nullptr);
+}
+
+TEST_F(ParserDeclTest, FunctionDeclVoidParams) {
+    auto tu = parse("void foo(void) { }");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto func = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(func, nullptr);
+    EXPECT_EQ(func->name, "foo");
+    EXPECT_EQ(func->returnType->kind, TypeKind::Void);
+    EXPECT_TRUE(func->params.empty());
+    EXPECT_NE(func->body, nullptr);
+}
+
+TEST_F(ParserDeclTest, NestedStructDecl) {
+    auto tu = parse("struct Outer { struct Inner { int x; } inner; int y; };");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_GE(tu->declarations.size(), 1u);
+    auto strct = dynamic_cast<StructDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(strct, nullptr);
+    EXPECT_EQ(strct->name, "Outer");
+    EXPECT_EQ(strct->fields.size(), 2u);
+    EXPECT_EQ(strct->fields[0].first, "inner");
+    EXPECT_EQ(strct->fields[0].second->kind, TypeKind::Struct);
+    EXPECT_EQ(strct->fields[1].first, "y");
+    EXPECT_EQ(strct->fields[1].second->kind, TypeKind::Int);
+}
+
+TEST_F(ParserDeclTest, EnumForwardDecl) {
+    auto tu = parse("enum Color;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto en = dynamic_cast<EnumDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(en, nullptr);
+    EXPECT_EQ(en->name, "Color");
+    EXPECT_TRUE(en->values.empty());
+}
+
+TEST_F(ParserDeclTest, EnumDeclWithMixedValues) {
+    auto tu = parse("enum Flags { NONE = 0, READ = 1, WRITE = 2, EXEC = 4 };");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto en = dynamic_cast<EnumDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(en, nullptr);
+    EXPECT_EQ(en->values.size(), 4u);
+    EXPECT_EQ(en->values[0].first, "NONE");
+    EXPECT_EQ(en->values[0].second, 0);
+    EXPECT_EQ(en->values[1].first, "READ");
+    EXPECT_EQ(en->values[1].second, 1);
+    EXPECT_EQ(en->values[2].first, "WRITE");
+    EXPECT_EQ(en->values[2].second, 2);
+    EXPECT_EQ(en->values[3].first, "EXEC");
+    EXPECT_EQ(en->values[3].second, 4);
+}
+
+TEST_F(ParserDeclTest, TypedefStructForward) {
+    auto tu = parse("typedef struct Node Node; struct Node { int data; Node* next; };");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 2u);
+    auto td = dynamic_cast<TypedefDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(td, nullptr);
+    EXPECT_EQ(td->name, "Node");
+    EXPECT_EQ(td->aliasedType->kind, TypeKind::Struct);
+}
+
+TEST_F(ParserDeclTest, ConstVolatileDecl) {
+    auto tu = parse("const volatile int x;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_TRUE(var->type->isConst);
+    EXPECT_TRUE(var->type->isVolatile);
+}
+
+TEST_F(ParserDeclTest, MultiplePointersDecl) {
+    auto tu = parse("int** const p;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->type->kind, TypeKind::Pointer);
+    EXPECT_TRUE(var->type->isConst);
+    EXPECT_EQ(var->type->base->kind, TypeKind::Pointer);
+    EXPECT_FALSE(var->type->base->isConst);
+    EXPECT_EQ(var->type->base->base->kind, TypeKind::Int);
+}
+
+TEST_F(ParserDeclTest, ArrayOfPointersDecl) {
+    auto tu = parse("int* arr[10];");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto arr = dynamic_cast<ArrayDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(arr, nullptr);
+    EXPECT_EQ(arr->name, "arr");
+    EXPECT_EQ(arr->size, 10);
+    EXPECT_EQ(arr->elementType->kind, TypeKind::Pointer);
+    EXPECT_EQ(arr->elementType->base->kind, TypeKind::Int);
+}
+
+TEST_F(ParserDeclTest, StructWithArrayField) {
+    auto tu = parse("struct Buffer { int size; int* data; };");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto strct = dynamic_cast<StructDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(strct, nullptr);
+    EXPECT_EQ(strct->fields.size(), 2u);
+    EXPECT_EQ(strct->fields[0].first, "size");
+    EXPECT_EQ(strct->fields[0].second->kind, TypeKind::Int);
+    EXPECT_EQ(strct->fields[1].first, "data");
+    EXPECT_EQ(strct->fields[1].second->kind, TypeKind::Pointer);
+}
+
+TEST_F(ParserDeclTest, FunctionDeclPointerReturn) {
+    auto tu = parse("int* getPointer(void) { return 0; }");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto func = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(func, nullptr);
+    EXPECT_EQ(func->returnType->kind, TypeKind::Pointer);
+    EXPECT_EQ(func->returnType->base->kind, TypeKind::Int);
+    EXPECT_NE(func->body, nullptr);
+}
+
+TEST_F(ParserDeclTest, TypedefPointer) {
+    auto tu = parse("typedef int* IntPtr; IntPtr p;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 2u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[1].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->name, "p");
+    EXPECT_EQ(var->type->kind, TypeKind::Typedef);
+}
+
+TEST_F(ParserDeclTest, TypedefArray) {
+    auto tu = parse("typedef int IntArr[10]; IntArr a;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 2u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[1].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->name, "a");
+    EXPECT_EQ(var->type->kind, TypeKind::Typedef);
+}

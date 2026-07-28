@@ -108,6 +108,22 @@ public:
     Type* getChar();
     Type* getVoid();
 
+    void addTypedef(const std::string& name, Type* type);
+    Type* getTypedef(const std::string& name) const;
+
+    void addStruct(const std::string& name, StructType* type);
+    StructType* getStruct(const std::string& name) const;
+
+    void addUnion(const std::string& name, UnionType* type);
+    UnionType* getUnion(const std::string& name) const;
+
+    void addEnum(const std::string& name, EnumType* type);
+    EnumType* getEnum(const std::string& name) const;
+
 private:
     std::unordered_map<TypeKind, Type*> m_types;
+    std::unordered_map<std::string, Type*> m_typedefs;
+    std::unordered_map<std::string, StructType*> m_structs;
+    std::unordered_map<std::string, UnionType*> m_unions;
+    std::unordered_map<std::string, EnumType*> m_enums;
 };

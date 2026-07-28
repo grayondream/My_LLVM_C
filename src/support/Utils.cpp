@@ -85,6 +85,7 @@ static std::string TokenTypeToString(TokenType type) {
         case TokenType::TOKEN_RBRACE:     return "}";
         case TokenType::TOKEN_LBRACKET:   return "[";
         case TokenType::TOKEN_RBRACKET:   return "]";
+        case TokenType::TOKEN_ELLIPSIS:   return "...";
         case TokenType::TOKEN_EOS:        return "EOS";
         default:                          return "UNKNOWN(" + std::to_string(static_cast<int>(type)) + ")";
     }
