@@ -1,14 +1,15 @@
 file(GLOB_RECURSE SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
+list(FILTER SOURCES EXCLUDE REGEX ".*main\\.cpp$")
 
-add_executable(my_llvm_c ${SOURCES})
+add_library(my_llvm_c_lib ${SOURCES})
 
-target_include_directories(my_llvm_c PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(my_llvm_c_lib PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 find_package(spdlog CONFIG REQUIRED)
-target_link_libraries(my_llvm_c PRIVATE spdlog::spdlog)
+target_link_libraries(my_llvm_c_lib PUBLIC spdlog::spdlog)
 
 if(LLVM_LINK_LLVM_DYLIB)
-    target_link_libraries(my_llvm_c PRIVATE LLVM)
+    target_link_libraries(my_llvm_c_lib PUBLIC LLVM)
 else()
     llvm_map_components_to_libnames(llvm_libs
         core
@@ -32,9 +33,20 @@ else()
         x86info
         x86disassembler
     )
-    target_link_libraries(my_llvm_c PRIVATE ${llvm_libs})
+    target_link_libraries(my_llvm_c_lib PUBLIC ${llvm_libs})
 endif()
 
+target_compile_definitions(my_llvm_c_lib PRIVATE RESOURCE_DIR="${CMAKE_SOURCE_DIR}/resources")
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_definitions(my_llvm_c_lib PRIVATE SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG)
+else()
+    target_compile_definitions(my_llvm_c_lib PRIVATE SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO)
+endif()
+
+add_executable(my_llvm_c main.cpp)
+target_include_directories(my_llvm_c PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(my_llvm_c PRIVATE my_llvm_c_lib)
 target_compile_definitions(my_llvm_c PRIVATE RESOURCE_DIR="${CMAKE_SOURCE_DIR}/resources")
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
