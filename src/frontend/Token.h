@@ -67,6 +67,20 @@ enum class TokenType : int32_t {
     TOKEN_NOT,          // !
     TOKEN_BIT_AND,      // &
     TOKEN_BIT_OR,       // |
+    TOKEN_CARET,        // ^
+    TOKEN_TILDE,        // ~
+    TOKEN_LSHIFT,       // <<
+    TOKEN_RSHIFT,       // >>
+    TOKEN_PLUS_PLUS,    // ++
+    TOKEN_MINUS_MINUS,  // --
+    TOKEN_QUESTION,     // ?
+    TOKEN_COLON,        // :
+    TOKEN_AMP_EQ,       // &=
+    TOKEN_PIPE_EQ,      // |=
+    TOKEN_CARET_EQ,     // ^=
+    TOKEN_LSHIFT_EQ,    // <<=
+    TOKEN_RSHIFT_EQ,    // >>=
+    TOKEN_PERCENT_EQ,   // %=
 
     // 分隔符
     TOKEN_SEMICOLON,    // ;

@@ -61,6 +61,20 @@ static std::string TokenTypeToString(TokenType type) {
         case TokenType::TOKEN_NOT:        return "!";
         case TokenType::TOKEN_BIT_AND:    return "&";
         case TokenType::TOKEN_BIT_OR:     return "|";
+        case TokenType::TOKEN_CARET:      return "^";
+        case TokenType::TOKEN_TILDE:      return "~";
+        case TokenType::TOKEN_LSHIFT:     return "<<";
+        case TokenType::TOKEN_RSHIFT:     return ">>";
+        case TokenType::TOKEN_PLUS_PLUS:  return "++";
+        case TokenType::TOKEN_MINUS_MINUS: return "--";
+        case TokenType::TOKEN_QUESTION:   return "?";
+        case TokenType::TOKEN_COLON:      return ":";
+        case TokenType::TOKEN_AMP_EQ:     return "&=";
+        case TokenType::TOKEN_PIPE_EQ:    return "|=";
+        case TokenType::TOKEN_CARET_EQ:   return "^=";
+        case TokenType::TOKEN_LSHIFT_EQ:  return "<<=";
+        case TokenType::TOKEN_RSHIFT_EQ:  return ">>=";
+        case TokenType::TOKEN_PERCENT_EQ: return "%=";
         case TokenType::TOKEN_SEMICOLON:  return ";";
         case TokenType::TOKEN_COMMA:      return ",";
         case TokenType::TOKEN_DOT:        return ".";
@@ -116,6 +130,9 @@ static std::string BinaryOpToString(BinaryOp op) {
         case BinaryOp::Or:     return "||";
         case BinaryOp::BitAnd: return "&";
         case BinaryOp::BitOr:  return "|";
+        case BinaryOp::BitXor: return "^";
+        case BinaryOp::LShift: return "<<";
+        case BinaryOp::RShift: return ">>";
         default:               return "?";
     }
 }

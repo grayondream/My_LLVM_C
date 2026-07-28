@@ -51,6 +51,9 @@ llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
         case BinaryOp::Or:     return builder.CreateOr(lhs, rhs, "ortmp");
         case BinaryOp::BitAnd: return builder.CreateAnd(lhs, rhs, "bitandtmp");
         case BinaryOp::BitOr:  return builder.CreateOr(lhs, rhs, "bitortmp");
+        case BinaryOp::BitXor: return builder.CreateXor(lhs, rhs, "bitxortmp");
+        case BinaryOp::LShift: return builder.CreateShl(lhs, rhs, "lshifttmp");
+        case BinaryOp::RShift: return builder.CreateAShr(lhs, rhs, "rshifttmp");
         default:
             LOGE("invalid binary operator");
             return nullptr;

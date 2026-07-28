@@ -307,74 +307,153 @@ Token Lexer::scanToken() {
         token = scanChar();
         break;
     case '+':
-        token = makeToken(TokenType::TOKEN_PLUS, lexeme());
-        break;
+        {
+            if(peekNext() == '+') {
+                advance();
+                token = makeToken(TokenType::TOKEN_PLUS_PLUS, lexeme());
+            } else if(peekNext() == '=') {
+                advance();
+                token = makeToken(TokenType::TOKEN_PLUS_EQ, lexeme());
+            } else {
+                token = makeToken(TokenType::TOKEN_PLUS, lexeme());
+            }
+        } break;
     case '-':
-        token = makeToken(TokenType::TOKEN_MINUS, lexeme());
-        break;
+        {
+            if(peekNext() == '-') {
+                advance();
+                token = makeToken(TokenType::TOKEN_MINUS_MINUS, lexeme());
+            } else if(peekNext() == '=') {
+                advance();
+                token = makeToken(TokenType::TOKEN_MINUS_EQ, lexeme());
+            } else if(peekNext() == '>') {
+                advance();
+                token = makeToken(TokenType::TOKEN_ARROW, lexeme());
+            } else {
+                token = makeToken(TokenType::TOKEN_MINUS, lexeme());
+            }
+        } break;
     case '*':
-        token = makeToken(TokenType::TOKEN_STAR, lexeme());
-        break;
+        {
+            if(peekNext() == '=') {
+                advance();
+                token = makeToken(TokenType::TOKEN_STAR_EQ, lexeme());
+            } else {
+                token = makeToken(TokenType::TOKEN_STAR, lexeme());
+            }
+        } break;
     case '/':
-        token = makeToken(TokenType::TOKEN_SLASH, lexeme());
-        break;
+        {
+            if(peekNext() == '=') {
+                advance();
+                token = makeToken(TokenType::TOKEN_SLASH_EQ, lexeme());
+            } else {
+                token = makeToken(TokenType::TOKEN_SLASH, lexeme());
+            }
+        } break;
     case '%':
-        token = makeToken(TokenType::TOKEN_PERCENT, lexeme());
-        break;
+        {
+            if(peekNext() == '=') {
+                advance();
+                token = makeToken(TokenType::TOKEN_PERCENT_EQ, lexeme());
+            } else {
+                token = makeToken(TokenType::TOKEN_PERCENT, lexeme());
+            }
+        } break;
     case '=':
         {
-            auto isMatch = match('=');
-            if(isMatch) {
-                token = makeToken(TokenType::TOKEN_ASSIGN, lexeme());
-            }else{
+            if(peekNext() == '=') {
+                advance();
                 token = makeToken(TokenType::TOKEN_EQ, lexeme());
+            } else {
+                token = makeToken(TokenType::TOKEN_ASSIGN, lexeme());
             }
         } break;
     case '!':
         {
-            auto isMatch = match('=');
-            if(isMatch) {
+            if(peekNext() == '=') {
+                advance();
                 token = makeToken(TokenType::TOKEN_NOT_EQ, lexeme());
-            }else{
+            } else {
                 token = makeToken(TokenType::TOKEN_NOT, lexeme());
             }
         } break;
     case '<':
         {
-            auto isMatch = match('=');
-            if(isMatch) {
+            if(peekNext() == '=') {
+                advance();
                 token = makeToken(TokenType::TOKEN_LE, lexeme());
-            }else{
+            } else if(peekNext() == '<') {
+                advance();
+                if(peekNext() == '=') {
+                    advance();
+                    token = makeToken(TokenType::TOKEN_LSHIFT_EQ, lexeme());
+                } else {
+                    token = makeToken(TokenType::TOKEN_LSHIFT, lexeme());
+                }
+            } else {
                 token = makeToken(TokenType::TOKEN_LT, lexeme());
             }
         } break;
     case '>':
         {
-            auto isMatch = match('=');
-            if(isMatch) {
+            if(peekNext() == '=') {
+                advance();
                 token = makeToken(TokenType::TOKEN_GE, lexeme());
-            }else{
+            } else if(peekNext() == '>') {
+                advance();
+                if(peekNext() == '=') {
+                    advance();
+                    token = makeToken(TokenType::TOKEN_RSHIFT_EQ, lexeme());
+                } else {
+                    token = makeToken(TokenType::TOKEN_RSHIFT, lexeme());
+                }
+            } else {
                 token = makeToken(TokenType::TOKEN_GT, lexeme());
             }
         } break;
     case '&':
         {
-            auto isMatch = match('&');
-            if(isMatch) {
+            if(peekNext() == '&') {
+                advance();
                 token = makeToken(TokenType::TOKEN_AND, lexeme());
-            }else{
+            } else if(peekNext() == '=') {
+                advance();
+                token = makeToken(TokenType::TOKEN_AMP_EQ, lexeme());
+            } else {
                 token = makeToken(TokenType::TOKEN_BIT_AND, lexeme());
             }
         } break;
     case '|':
         {
-            auto isMatch = match('|');
-            if(isMatch) {
+            if(peekNext() == '|') {
+                advance();
                 token = makeToken(TokenType::TOKEN_OR, lexeme());
-            }else{
+            } else if(peekNext() == '=') {
+                advance();
+                token = makeToken(TokenType::TOKEN_PIPE_EQ, lexeme());
+            } else {
                 token = makeToken(TokenType::TOKEN_BIT_OR, lexeme());
             }
         } break;
+    case '^':
+        {
+            if(peekNext() == '=') {
+                advance();
+                token = makeToken(TokenType::TOKEN_CARET_EQ, lexeme());
+            } else {
+                token = makeToken(TokenType::TOKEN_CARET, lexeme());
+            }
+        } break;
+    case '~':
+        token = makeToken(TokenType::TOKEN_TILDE, lexeme());
+        break;
+    case '?':
+        token = makeToken(TokenType::TOKEN_QUESTION, lexeme());
+        break;
+    case ':':
+        token = makeToken(TokenType::TOKEN_COLON, lexeme());
+        break;
     case '(':
         token = makeToken(TokenType::TOKEN_LPAREN, lexeme());
         break;

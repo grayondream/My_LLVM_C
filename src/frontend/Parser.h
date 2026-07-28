@@ -29,11 +29,21 @@ private:
 
     std::unique_ptr<StmtAST> parseStmt();
 
-    std::unique_ptr<ExprAST> parseExpr();
+    std::unique_ptr<ExprAST> parseExpr(int minPrec = 0);
 
-    std::unique_ptr<NumberExprAST> parseNumberExpr();
+    std::unique_ptr<ExprAST> parsePrimary();
 
-    std::unique_ptr<BinaryExprAST> parseBinaryExpr();
+    std::unique_ptr<ExprAST> parseUnary();
+
+    std::unique_ptr<ExprAST> parsePostfix(std::unique_ptr<ExprAST> lhs);
+
+    int getPrecedence(TokenType op) const;
+
+    bool isRightAssociative(TokenType op) const;
+
+    BinaryOp tokenTypeToBinaryOp(TokenType type) const;
+
+    AssignOp tokenTypeToAssignOp(TokenType type) const;
 
 private:
     std::vector<Token> m_tokens;

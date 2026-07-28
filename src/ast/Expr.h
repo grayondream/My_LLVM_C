@@ -25,6 +25,9 @@ enum class BinaryOp {
     Or,
     BitAnd,
     BitOr,
+    BitXor,
+    LShift,
+    RShift,
 };
 
 enum class UnaryOp {
