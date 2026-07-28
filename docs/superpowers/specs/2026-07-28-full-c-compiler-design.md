@@ -98,6 +98,45 @@ src/
 │   ├── ScopeGuard.h                 （已有）
 │   └── Utils.h / Utils.cpp          （已有）
 └── main.cpp                         （已有，扩展）
+
+tests/
+├── CMakeLists.txt                   （测试构建配置）
+├── frontend/
+│   ├── test_lexer.cpp               （词法分析器单元测试）
+│   ├── test_token_stream.cpp        （Token 流单元测试）
+│   └── test_parser.cpp              （语法分析器单元测试）
+├── preprocessor/
+│   ├── test_preprocessor.cpp        （预处理器单元测试）
+│   └── test_macro_table.cpp         （宏表单元测试）
+├── ast/
+│   ├── test_expr.cpp                （表达式 AST 单元测试）
+│   ├── test_stmt.cpp                （语句 AST 单元测试）
+│   ├── test_decl.cpp                （声明 AST 单元测试）
+│   └── test_type.cpp                （类型系统单元测试）
+├── sema/
+│   ├── test_semantic_analyzer.cpp   （语义分析器单元测试）
+│   └── test_diagnostic.cpp          （诊断系统单元测试）
+├── codegen/
+│   └── test_codegen_context.cpp     （代码生成单元测试）
+├── libc/
+│   ├── test_printf.cpp              （printf 内置函数测试）
+│   ├── test_malloc.cpp              （malloc 内置函数测试）
+│   └── test_string.cpp              （字符串函数测试）
+├── driver/
+│   ├── test_compiler_driver.cpp     （编译器驱动单元测试）
+│   └── test_linker.cpp              （链接器单元测试）
+├── integration/
+│   ├── test_expressions.cpp         （表达式集成测试）
+│   ├── test_statements.cpp          （语句集成测试）
+│   ├── test_declarations.cpp        （声明集成测试）
+│   └── test_end_to_end.cpp          （端到端编译测试）
+└── resources/
+    ├── test_input/                  （测试输入文件）
+    └── expected/                    （预期输出文件）
+
+resources/
+├── main.c                           （综合测试文件）
+└── main_min.c                       （最小测试文件）
 ```
 
 ---
@@ -489,9 +528,16 @@ error: array subscript must be an integer
 3. 添加 Pratt 表达式解析
 4. 添加所有新 AST 节点（表达式、语句、声明、类型）
 5. 扩展代码生成支持所有新 AST 节点
-6. 用 `resources/main.c` 测试
+6. **编写单元测试**:
+   - `test_token_stream.cpp` —— Token 流单元测试
+   - `test_parser.cpp` —— 语法分析器单元测试（表达式、语句、声明）
+   - `test_expr.cpp` —— 表达式 AST 单元测试
+   - `test_stmt.cpp` —— 语句 AST 单元测试
+   - `test_decl.cpp` —— 声明 AST 单元测试
+   - `test_type.cpp` —— 类型系统单元测试
+7. 用 `resources/main.c` 集成测试
 
-**预估规模**: 约 2000-3000 行新增/修改代码
+**预估规模**: 约 2000-3000 行新增/修改代码 + 1500-2000 行测试代码
 
 ### 阶段 2：语义分析
 
@@ -503,8 +549,11 @@ error: array subscript must be an integer
 3. 添加所有运算符的类型检查规则
 4. 添加名称解析和作用域管理
 5. 添加带文件/行/列的错误报告
+6. **编写单元测试**:
+   - `test_semantic_analyzer.cpp` —— 语义分析器单元测试（类型检查、名称解析、作用域）
+   - `test_diagnostic.cpp` —— 诊断系统单元测试（错误格式、位置信息）
 
-**预估规模**: 约 1500-2000 行
+**预估规模**: 约 1500-2000 行 + 1000-1500 行测试代码
 
 ### 阶段 3：预处理器
 
@@ -518,8 +567,11 @@ error: array subscript must be an integer
 5. 添加 `#ifdef`/`#ifndef`/`#elif`/`#else`/`#endif`
 6. 添加 token 拼接（`##`）和字符串化（`#`）
 7. 添加 `#pragma once`
+8. **编写单元测试**:
+   - `test_preprocessor.cpp` —— 预处理器单元测试（宏展开、条件编译、包含指令）
+   - `test_macro_table.cpp` —— 宏表单元测试（定义、查找、取消定义）
 
-**预估规模**: 约 1500-2000 行
+**预估规模**: 约 1500-2000 行 + 1200-1500 行测试代码
 
 ### 阶段 4：内置 libc
 
@@ -533,8 +585,12 @@ error: array subscript must be an integer
 5. 实现工具函数
 6. 实现可变参数支持
 7. 将内置 libc 链接到编译器输出
+8. **编写单元测试**:
+   - `test_printf.cpp` —— printf 内置函数测试（格式化、参数）
+   - `test_malloc.cpp` —— malloc 内置函数测试（分配、释放、边界）
+   - `test_string.cpp` —— 字符串函数测试（所有字符串操作函数）
 
-**预估规模**: 约 2000-3000 行
+**预估规模**: 约 2000-3000 行 + 1500-2000 行测试代码
 
 ### 阶段 5：多文件编译
 
@@ -546,26 +602,404 @@ error: array subscript must be an integer
 3. 添加 `-c`、`-o`、`-I`、`-D` 选项
 4. 实现 `Linker` 类
 5. 添加目标文件链接
-6. 用多文件程序测试
+6. **编写单元测试**:
+   - `test_compiler_driver.cpp` —— 编译器驱动单元测试（参数解析、文件处理）
+   - `test_linker.cpp` —— 链接器单元测试（链接命令、符号解析）
+7. 用多文件程序集成测试
 
-**预估规模**: 约 1000-1500 行
+**预估规模**: 约 1000-1500 行 + 800-1200 行测试代码
 
 ---
 
 ## 11. 测试策略
 
-### 测试输入
+### 测试框架：Google Test
 
-- `resources/main_min.c` —— 最小回归测试
-- `resources/main.c` —— 综合功能测试（目标）
-- 每个功能区域新增测试文件
+引入 Google Test（gtest）作为单元测试框架，通过 vcpkg 安装：
 
-### 测试方法
+```bash
+vcpkg install gtest:x64-linux
+```
 
-- 每个阶段产生可测试的输出
-- LLVM IR 可用 `llvm-dis` 验证
-- JIT 执行可验证运行时行为
-- 目标文件输出可验证链接正确性
+**CMake 集成**：
+```cmake
+find_package(GTest REQUIRED)
+target_link_libraries(test_target PRIVATE GTest::gtest_main GTest::gmock)
+```
+
+### 构建配置变更
+
+**根 CMakeLists.txt 新增**：
+```cmake
+# 测试选项
+option(BUILD_TESTS "Build unit tests" ON)
+
+# 添加测试子目录
+if(BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+```
+
+**vcpkg.json 新增依赖**：
+```json
+{
+    "dependencies": [
+        "llvm",
+        "spdlog",
+        "gtest"
+    ]
+}
+```
+
+**构建命令**：
+```bash
+# 仅构建编译器
+cmake -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build
+
+# 构建编译器 + 测试
+cmake -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTS=ON
+cmake --build build
+
+# 运行测试
+ctest --test-dir build --output-on-failure
+
+# 生成覆盖率报告
+cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="--coverage"
+cmake --build build
+ctest --test-dir build
+gcovr --root .. --filter ../src/ --html-details coverage.html
+```
+
+### 测试目录结构
+
+```
+tests/
+├── CMakeLists.txt                    # 测试构建配置
+├── frontend/
+│   ├── test_lexer.cpp                # 词法分析器单元测试
+│   ├── test_token_stream.cpp         # Token 流单元测试
+│   └── test_parser.cpp               # 语法分析器单元测试
+├── preprocessor/
+│   ├── test_preprocessor.cpp         # 预处理器单元测试
+│   └── test_macro_table.cpp          # 宏表单元测试
+├── ast/
+│   ├── test_expr.cpp                 # 表达式 AST 单元测试
+│   ├── test_stmt.cpp                 # 语句 AST 单元测试
+│   ├── test_decl.cpp                 # 声明 AST 单元测试
+│   └── test_type.cpp                 # 类型系统单元测试
+├── sema/
+│   ├── test_semantic_analyzer.cpp    # 语义分析器单元测试
+│   └── test_diagnostic.cpp           # 诊断系统单元测试
+├── codegen/
+│   └── test_codegen_context.cpp      # 代码生成单元测试
+├── libc/
+│   ├── test_printf.cpp               # printf 内置函数测试
+│   ├── test_malloc.cpp               # malloc 内置函数测试
+│   └── test_string.cpp               # 字符串函数测试
+├── driver/
+│   ├── test_compiler_driver.cpp      # 编译器驱动单元测试
+│   └── test_linker.cpp               # 链接器单元测试
+├── integration/
+│   ├── test_expressions.cpp          # 表达式集成测试
+│   ├── test_statements.cpp           # 语句集成测试
+│   ├── test_declarations.cpp         # 声明集成测试
+│   └── test_end_to_end.cpp           # 端到端编译测试
+└── resources/
+    ├── test_input/                   # 测试输入文件
+    └── expected/                     # 预期输出文件
+```
+
+### 单元测试编写规范
+
+**每个模块必须包含**：
+1. **正常路径测试** —— 验证正确输入产生正确输出
+2. **边界条件测试** —— 空输入、极大值、极小值
+3. **错误路径测试** —— 验证错误检测和报告
+4. **回归测试** —— 防止已修复的 bug 再次出现
+
+**测试命名规范**：
+```cpp
+TEST(LexerTest, SingleLineComment) { ... }
+TEST(LexerTest, MultiLineComment) { ... }
+TEST(ParserTest, BinaryExpressionPrecedence) { ... }
+TEST(PreprocessorTest, ObjectLikeMacro) { ... }
+TEST(SemanticAnalyzerTest, TypeMismatchError) { ... }
+```
+
+**测试辅助工具**：
+```cpp
+// 测试用 Token 流构造器
+TokenStream createTokenStream(const std::string& source);
+
+// 测试用 AST 构造器
+std::unique_ptr<ExprAST> createTestExpr(const std::string& source);
+
+// LLVM IR 验证辅助
+bool verifyModule(llvm::Module& module);
+
+// 输出比较辅助
+std::string captureStdout(const std::string& source);
+```
+
+### 各模块测试要求
+
+#### 词法分析器测试（test_lexer.cpp）
+
+```cpp
+// 基本 token 类型
+TEST(LexerTest, IntegerLiteral) { ... }
+TEST(LexerTest, FloatLiteral) { ... }
+TEST(LexerTest, StringLiteral) { ... }
+TEST(LexerTest, CharLiteral) { ... }
+TEST(LexerTest, Identifier) { ... }
+
+// 关键字
+TEST(LexerTest, Keywords) { ... }  // 所有 27 个关键字
+
+// 运算符
+TEST(LexerTest, ArithmeticOperators) { ... }
+TEST(LexerTest, ComparisonOperators) { ... }
+TEST(LexerTest, LogicalOperators) { ... }
+TEST(LexerTest, BitwiseOperators) { ... }
+TEST(LexerTest, AssignmentOperators) { ... }
+
+// 注释
+TEST(LexerTest, SingleLineComment) { ... }
+TEST(LexerTest, MultiLineComment) { ... }
+TEST(LexerTest, NestedComment) { ... }
+
+// 边界条件
+TEST(LexerTest, EmptyInput) { ... }
+TEST(LexerTest, UnterminatedString) { ... }
+TEST(LexerTest, UnterminatedComment) { ... }
+```
+
+#### Token 流测试（test_token_stream.cpp）
+
+```cpp
+TEST(TokenStreamTest, PeekDoesNotConsume) { ... }
+TEST(TokenStreamTest, ConsumeAdvancesPosition) { ... }
+TEST(TokenStreamTest, ExpectValidToken) { ... }
+TEST(TokenStreamTest, ExpectInvalidToken) { ... }
+TEST(TokenStreamTest, MatchAndConsume) { ... }
+TEST(TokenStreamTest, AtEndDetection) { ... }
+```
+
+#### 语法分析器测试（test_parser.cpp）
+
+```cpp
+// 表达式解析
+TEST(ParserTest, PrimaryExpression) { ... }
+TEST(ParserTest, BinaryExpressionAddition) { ... }
+TEST(ParserTest, BinaryExpressionPrecedence) { ... }
+TEST(ParserTest, UnaryExpression) { ... }
+TEST(ParserTest, AssignmentExpression) { ... }
+TEST(ParserTest, TernaryExpression) { ... }
+TEST(ParserTest, CastExpression) { ... }
+TEST(ParserTest, ArrayAccess) { ... }
+TEST(ParserTest, MemberAccess) { ... }
+
+// 语句解析
+TEST(ParserTest, IfStatement) { ... }
+TEST(ParserTest, WhileStatement) { ... }
+TEST(ParserTest, ForStatement) { ... }
+TEST(ParserTest, SwitchStatement) { ... }
+TEST(ParserTest, ReturnStatement) { ... }
+
+// 声明解析
+TEST(ParserTest, VariableDeclaration) { ... }
+TEST(ParserTest, FunctionDeclaration) { ... }
+TEST(ParserTest, StructDeclaration) { ... }
+TEST(ParserTest, EnumDeclaration) { ... }
+TEST(ParserTest, TypedefDeclaration) { ... }
+
+// 错误处理
+TEST(ParserTest, SyntaxErrorReporting) { ... }
+TEST(ParserTest, UnexpectedToken) { ... }
+```
+
+#### 预处理器测试（test_preprocessor.cpp）
+
+```cpp
+// 宏定义
+TEST(PreprocessorTest, ObjectLikeMacro) { ... }
+TEST(PreprocessorTest, FunctionLikeMacro) { ... }
+TEST(PreprocessorTest, VariadicMacro) { ... }
+TEST(PreprocessorTest, MacroExpansion) { ... }
+TEST(PreprocessorTest, RecursiveMacro) { ... }
+TEST(PreprocessorTest, TokenPasting) { ... }
+TEST(PreprocessorTest, Stringification) { ... }
+
+// 条件编译
+TEST(PreprocessorTest, IfDef) { ... }
+TEST(PreprocessorTest, IfNDef) { ... }
+TEST(PreprocessorTest, Elif) { ... }
+TEST(PreprocessorTest, Else) { ... }
+
+// 包含指令
+TEST(PreprocessorTest, IncludeLocal) { ... }
+TEST(PreprocessorTest, IncludeSystem) { ... }
+TEST(PreprocessorTest, IncludeGuard) { ... }
+TEST(PreprocessorTest, PragmaOnce) { ... }
+```
+
+#### 语义分析器测试（test_semantic_analyzer.cpp）
+
+```cpp
+// 类型检查
+TEST(SemanticAnalyzerTest, ArithmeticTypeCheck) { ... }
+TEST(SemanticAnalyzerTest, ComparisonTypeCheck) { ... }
+TEST(SemanticAnalyzerTest, LogicalTypeCheck) { ... }
+TEST(SemanticAnalyzerTest, AssignmentTypeCheck) { ... }
+
+// 名称解析
+TEST(SemanticAnalyzerTest, VariableDeclaration) { ... }
+TEST(SemanticAnalyzerTest, FunctionDeclaration) { ... }
+TEST(SemanticAnalyzerTest, UndeclaredVariable) { ... }
+TEST(SemanticAnalyzerTest, RedeclarationError) { ... }
+
+// 作用域
+TEST(SemanticAnalyzerTest, NestedScope) { ... }
+TEST(SemanticAnalyzerTest, FunctionScope) { ... }
+TEST(SemanticAnalyzerTest, BlockScope) { ... }
+
+// 错误报告
+TEST(SemanticAnalyzerTest, ErrorLocation) { ... }
+TEST(SemanticAnalyzerTest, MultipleErrors) { ... }
+```
+
+#### 代码生成测试（test_codegen_context.cpp）
+
+```cpp
+// 类型映射
+TEST(CodegenTest, IntTypeMapping) { ... }
+TEST(CodegenTest, FloatTypeMapping) { ... }
+TEST(CodegenTest, PointerTypeMapping) { ... }
+
+// 表达式生成
+TEST(CodegenTest, BinaryExpression) { ... }
+TEST(CodegenTest, UnaryExpression) { ... }
+TEST(CodegenTest, FunctionCall) { ... }
+
+// 语句生成
+TEST(CodegenTest, ReturnStatement) { ... }
+TEST(CodegenTest, IfStatement) { ... }
+TEST(CodegenTest, LoopStatement) { ... }
+
+// LLVM IR 验证
+TEST(CodegenTest, ModuleVerification) { ... }
+TEST(CodegenTest, Optimization) { ... }
+```
+
+#### 内置 libc 测试（test_libc.cpp）
+
+```cpp
+// printf 测试
+TEST(LibcTest, PrintfInt) { ... }
+TEST(LibcTest, PrintfFloat) { ... }
+TEST(LibcTest, PrintfString) { ... }
+TEST(LibcTest, PrintfFormat) { ... }
+
+// malloc 测试
+TEST(LibcTest, MallocFree) { ... }
+TEST(LibcTest, Calloc) { ... }
+TEST(LibcTest, Realloc) { ... }
+
+// 字符串函数测试
+TEST(LibcTest, Strlen) { ... }
+TEST(LibcTest, Strcmp) { ... }
+TEST(LibcTest, Strcpy) { ... }
+TEST(LibcTest, Memcpy) { ... }
+```
+
+#### 集成测试（test_end_to_end.cpp）
+
+```cpp
+// 完整编译流程
+TEST(EndToEndTest, SimpleProgram) { ... }
+TEST(EndToEndTest, FunctionDefinition) { ... }
+TEST(EndToEndTest, ControlFlow) { ... }
+TEST(EndToEndTest, ArrayAccess) { ... }
+TEST(EndToEndTest, StructUsage) { ... }
+
+// 预处理器集成
+TEST(EndToEndTest, MacroExpansion) { ... }
+TEST(EndToEndTest, IncludeFile) { ... }
+
+// 多文件编译
+TEST(EndToEndTest, SeparateCompilation) { ... }
+TEST(EndToEndTest, ExternalLinkage) { ... }
+```
+
+### 测试辅助工具
+
+**测试数据生成器**：
+```cpp
+// 生成各种 C 代码片段用于测试
+class TestCodeGenerator {
+public:
+    static std::string generateSimpleFunction();
+    static std::string generateControlFlow();
+    static std::string generateExpressions();
+    static std::string generateDeclarations();
+};
+```
+
+**LLVM IR 验证器**：
+```cpp
+// 验证生成的 LLVM IR 是否有效
+bool validateLLVMIR(const std::string& ir);
+bool validateModule(llvm::Module& module);
+std::string optimizeModule(llvm::Module& module, int optLevel);
+```
+
+**输出捕获器**：
+```cpp
+// 捕获编译器输出用于测试
+class OutputCapture {
+public:
+    std::string captureStdout(const std::string& source);
+    std::string captureStderr(const std::string& source);
+    int captureExitCode(const std::string& source);
+};
+```
+
+### 测试运行配置
+
+**CMakeLists.txt（tests 目录）**：
+```cmake
+find_package(GTest REQUIRED)
+include(GoogleTest)
+
+# 收集所有测试源文件
+file(GLOB_RECURSE TEST_SOURCES "*.cpp")
+
+# 创建测试可执行文件
+add_executable(compiler_tests ${TEST_SOURCES})
+target_link_libraries(compiler_tests
+    PRIVATE
+        my_llvm_c_lib  # 编译器库
+        GTest::gtest_main
+        GTest::gmock
+        LLVM
+)
+
+# 注册测试
+gtest_discover_tests(compiler_tests)
+```
+
+**测试覆盖率**：
+```bash
+# 启用覆盖率构建
+cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="--coverage"
+cmake --build build
+ctest --test-dir build
+
+# 生成覆盖率报告
+gcovr --root .. --filter ../src/ --html-details coverage.html
+```
 
 ### 待创建的测试文件
 
@@ -588,6 +1022,10 @@ error: array subscript must be an integer
 | 内置 libc 实现工作量 | 高 | 从 printf/malloc 开始，逐步添加函数 |
 | 多文件链接正确性 | 中 | 使用系统链接器，先用简单案例测试 |
 | LLVM API 版本间变更 | 低 | 固定使用 LLVM 18，尽早测试 |
+| 单元测试覆盖不足 | 中 | 每个模块必须达到 80% 代码覆盖率 |
+| 测试用例维护成本 | 中 | 使用参数化测试减少重复 |
+| 集成测试复杂度 | 中 | 从简单端到端测试开始，逐步增加复杂度 |
+| 测试环境依赖 | 低 | 使用 vcpkg 管理 gtest 依赖 |
 
 ---
 
@@ -601,3 +1039,7 @@ error: array subscript must be an integer
 4. 能通过预处理器处理标准 C 头文件
 5. 能编译多文件程序并正确链接
 6. 能为无效代码产生有意义的错误消息
+7. **所有单元测试通过**（`ctest` 命令执行成功）
+8. **代码覆盖率 ≥ 80%**（使用 gcovr 生成覆盖率报告）
+9. **无内存泄漏**（使用 Valgrind 或 AddressSanitizer 验证）
+10. **编译性能**：编译 1000 行 C 代码 < 1 秒
