@@ -11,6 +11,7 @@ public:
     Lexer(const std::string& filename, const std::string& source);
     ~Lexer();
     std::vector<Token> tokenize();
+    Token nextToken();
 
 private:
     bool isEof() const;

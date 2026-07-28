@@ -143,6 +143,24 @@ std::vector<Token> Lexer::tokenize() {
     return tokens;
 }
 
+Token Lexer::nextToken() {
+    while(!isEof()) {
+        skipWhitespace();
+        skipComment();
+        m_startPos = m_currentPos;
+        if(isEof()) {
+            break;
+        }
+
+        auto token = scanToken();
+        if(token.type != TokenType::TOKEN_UNKNOWN) {
+            return token;
+        }
+    }
+
+    return makeToken(TokenType::TOKEN_EOS, "");
+}
+
 void Lexer::skipWhitespace() {
     while(true){
         const char ch = peek();
