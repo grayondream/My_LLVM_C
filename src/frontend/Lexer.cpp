@@ -487,6 +487,9 @@ Token Lexer::scanToken() {
             token = makeToken(TokenType::TOKEN_DOT, lexeme());
         }
         break;
+    case '#':
+        token = makeToken(TokenType::TOKEN_HASH, lexeme());
+        break;
     default:
         token = makeToken(TokenType::TOKEN_UNKNOWN, lexeme());
         break;
