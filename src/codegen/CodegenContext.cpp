@@ -117,8 +117,71 @@ llvm::Value* CodegenContext::lookupVariable(const std::string& name) {
     return builder.CreateLoad(getLLVMType(sym->type), sym->value, name);
 }
 
+llvm::Value* CodegenContext::lookupVariableAddr(const std::string& name) {
+    Symbol* sym = currentScope()->lookup(name);
+    if (!sym || !sym->value) return nullptr;
+    return sym->value;
+}
+
 void CodegenContext::declareVariable(const std::string& name, llvm::Value* alloca, Type* type) {
     currentScope()->symbols[name] = new Symbol(name, type, alloca);
+}
+
+void CodegenContext::pushBreakBlock(llvm::BasicBlock* bb) {
+    breakBlocks.push_back(bb);
+}
+
+void CodegenContext::popBreakBlock() {
+    if (!breakBlocks.empty()) {
+        breakBlocks.pop_back();
+    }
+}
+
+llvm::BasicBlock* CodegenContext::getBreakBlock() const {
+    if (breakBlocks.empty()) return nullptr;
+    return breakBlocks.back();
+}
+
+void CodegenContext::pushContinueBlock(llvm::BasicBlock* bb) {
+    continueBlocks.push_back(bb);
+}
+
+void CodegenContext::popContinueBlock() {
+    if (!continueBlocks.empty()) {
+        continueBlocks.pop_back();
+    }
+}
+
+llvm::BasicBlock* CodegenContext::getContinueBlock() const {
+    if (continueBlocks.empty()) return nullptr;
+    return continueBlocks.back();
+}
+
+void CodegenContext::addLabel(const std::string& label, llvm::BasicBlock* bb) {
+    labels[label] = bb;
+}
+
+llvm::BasicBlock* CodegenContext::getLabel(const std::string& label) const {
+    auto it = labels.find(label);
+    if (it != labels.end()) return it->second;
+    return nullptr;
+}
+
+llvm::Value* CodegenContext::coerceToBool(llvm::Value* val) {
+    if (!val) return nullptr;
+    if (val->getType()->isIntegerTy(1)) return val;
+    if (val->getType()->isIntegerTy()) {
+        return builder.CreateICmpNE(val,
+            llvm::ConstantInt::get(val->getType(), 0), "tobool");
+    }
+    if (val->getType()->isFloatingPointTy()) {
+        return builder.CreateFCmpUNE(val,
+            llvm::ConstantFP::get(val->getType(), 0.0), "tobool");
+    }
+    if (val->getType()->isPointerTy()) {
+        return builder.CreatePtrToInt(val, llvm::Type::getInt1Ty(*context), "ptrtobool");
+    }
+    return val;
 }
 
 llvm::Type* CodegenContext::getLLVMType(Type* type) {
@@ -133,6 +196,23 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
         case TypeKind::Pointer: {
             auto* pointee = getLLVMType(type->base);
             return llvm::PointerType::get(*context, 0);
+        }
+        case TypeKind::Struct: {
+            auto* st = static_cast<StructType*>(type);
+            std::vector<llvm::Type*> fieldTypes;
+            for (auto& f : st->fields) {
+                fieldTypes.push_back(getLLVMType(f.second));
+            }
+            return llvm::StructType::create(*context, fieldTypes, st->name);
+        }
+        case TypeKind::Array: {
+            auto* at = static_cast<ArrayType*>(type);
+            return llvm::ArrayType::get(getLLVMType(at->elementType), at->size);
+        }
+        case TypeKind::Enum:   return llvm::Type::getInt32Ty(*context);
+        case TypeKind::Typedef: {
+            auto* td = static_cast<TypedefType*>(type);
+            return getLLVMType(td->aliasedType);
         }
         default:               return llvm::Type::getInt32Ty(*context);
     }

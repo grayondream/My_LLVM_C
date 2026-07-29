@@ -6,6 +6,7 @@
 #include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "ast/Symbol.h"
+#include <map>
 
 class Type;
 
@@ -27,6 +28,7 @@ public:
     Scope* currentScope();
 
     llvm::Value* lookupVariable(const std::string& name);
+    llvm::Value* lookupVariableAddr(const std::string& name);
     void declareVariable(const std::string& name, llvm::Value* alloca, Type* type);
 
     llvm::Type* getLLVMType(Type* type);
@@ -39,6 +41,19 @@ public:
     void setDebugLocation(unsigned line, unsigned col = 0);
     void finalizeDebugInfo();
 
+    void pushBreakBlock(llvm::BasicBlock* bb);
+    void popBreakBlock();
+    llvm::BasicBlock* getBreakBlock() const;
+
+    void pushContinueBlock(llvm::BasicBlock* bb);
+    void popContinueBlock();
+    llvm::BasicBlock* getContinueBlock() const;
+
+    void addLabel(const std::string& label, llvm::BasicBlock* bb);
+    llvm::BasicBlock* getLabel(const std::string& label) const;
+
+    llvm::Value* coerceToBool(llvm::Value* val);
+
 private:
     std::unique_ptr<llvm::LLVMContext> context;
     llvm::IRBuilder<> builder;
@@ -50,4 +65,8 @@ private:
     llvm::DICompileUnit* diCompileUnit{nullptr};
     llvm::DIScope* diCurrentScope{nullptr};
     std::string sourceFileName;
+
+    std::vector<llvm::BasicBlock*> breakBlocks;
+    std::vector<llvm::BasicBlock*> continueBlocks;
+    std::map<std::string, llvm::BasicBlock*> labels;
 };

@@ -2,6 +2,13 @@
 #include "codegen/CodegenContext.h"
 #include "support/Log.h"
 
+static llvm::Value* emitLoad(CodegenContext& ctx, llvm::Value* ptr, Type* astType = nullptr) {
+    if (!ptr) return nullptr;
+    if (!ptr->getType()->isPointerTy()) return ptr;
+    llvm::Type* loadType = astType ? ctx.getLLVMType(astType) : llvm::Type::getInt32Ty(ctx.getContext());
+    return ctx.getBuilder().CreateLoad(loadType, ptr, "loadtmp");
+}
+
 llvm::Value* NumberExprAST::codegen(CodegenContext& ctx) {
     return llvm::ConstantInt::get(ctx.getContext(), llvm::APInt(32, value, true));
 }
@@ -24,14 +31,16 @@ llvm::Value* VariableExprAST::codegen(CodegenContext& ctx) {
         LOGE("unknown variable: {}", name);
         return nullptr;
     }
-    llvm::Value* alloca = ctx.lookupVariable(name);
-    return alloca;
+    return ctx.lookupVariableAddr(name);
 }
 
 llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
     llvm::Value* lhs = left->codegen(ctx);
     llvm::Value* rhs = right->codegen(ctx);
     if (!lhs || !rhs) return nullptr;
+
+    lhs = emitLoad(ctx, lhs, left->type);
+    rhs = emitLoad(ctx, rhs, right->type);
 
     auto& builder = ctx.getBuilder();
 
@@ -67,9 +76,9 @@ llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
     auto& builder = ctx.getBuilder();
 
     switch (op) {
-        case UnaryOp::Plus:      return v;
-        case UnaryOp::Minus:     return builder.CreateNeg(v, "negtmp");
-        case UnaryOp::Not:       return builder.CreateNot(v, "nottmp");
+        case UnaryOp::Plus:      return emitLoad(ctx, v, operand->type);
+        case UnaryOp::Minus:     return builder.CreateNeg(emitLoad(ctx, v, operand->type), "negtmp");
+        case UnaryOp::Not:       return builder.CreateNot(emitLoad(ctx, v, operand->type), "nottmp");
         case UnaryOp::Deref: {
             llvm::Type* pointeeType = ctx.getLLVMType(operand->type ? operand->type->base : nullptr);
             if (!pointeeType) pointeeType = llvm::Type::getInt8Ty(ctx.getContext());
@@ -110,21 +119,21 @@ llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
     if (!lhsVal || !rhsVal) return nullptr;
 
     auto& builder = ctx.getBuilder();
-    llvm::Value* result = rhsVal;
+    llvm::Value* result = emitLoad(ctx, rhsVal, rhs->type);
 
     if (op != AssignOp::Assign) {
-        llvm::Value* loadedLhs = builder.CreateLoad(rhsVal->getType(), lhsVal, "loadtmp");
+        llvm::Value* loadedLhs = emitLoad(ctx, lhsVal, lhs->type);
         switch (op) {
-            case AssignOp::AddAssign:   result = builder.CreateAdd(loadedLhs, rhsVal, "addassign"); break;
-            case AssignOp::SubAssign:   result = builder.CreateSub(loadedLhs, rhsVal, "subassign"); break;
-            case AssignOp::MulAssign:   result = builder.CreateMul(loadedLhs, rhsVal, "mulassign"); break;
-            case AssignOp::DivAssign:   result = builder.CreateSDiv(loadedLhs, rhsVal, "divassign"); break;
-            case AssignOp::ModAssign:   result = builder.CreateSRem(loadedLhs, rhsVal, "modassign"); break;
-            case AssignOp::BitAndAssign: result = builder.CreateAnd(loadedLhs, rhsVal, "bandassign"); break;
-            case AssignOp::BitOrAssign:  result = builder.CreateOr(loadedLhs, rhsVal, "borassign"); break;
-            case AssignOp::BitXorAssign: result = builder.CreateXor(loadedLhs, rhsVal, "bxorassign"); break;
-            case AssignOp::LShiftAssign: result = builder.CreateShl(loadedLhs, rhsVal, "lshiftassign"); break;
-            case AssignOp::RShiftAssign: result = builder.CreateAShr(loadedLhs, rhsVal, "rshiftassign"); break;
+            case AssignOp::AddAssign:   result = builder.CreateAdd(loadedLhs, result, "addassign"); break;
+            case AssignOp::SubAssign:   result = builder.CreateSub(loadedLhs, result, "subassign"); break;
+            case AssignOp::MulAssign:   result = builder.CreateMul(loadedLhs, result, "mulassign"); break;
+            case AssignOp::DivAssign:   result = builder.CreateSDiv(loadedLhs, result, "divassign"); break;
+            case AssignOp::ModAssign:   result = builder.CreateSRem(loadedLhs, result, "modassign"); break;
+            case AssignOp::BitAndAssign: result = builder.CreateAnd(loadedLhs, result, "bandassign"); break;
+            case AssignOp::BitOrAssign:  result = builder.CreateOr(loadedLhs, result, "borassign"); break;
+            case AssignOp::BitXorAssign: result = builder.CreateXor(loadedLhs, result, "bxorassign"); break;
+            case AssignOp::LShiftAssign: result = builder.CreateShl(loadedLhs, result, "lshiftassign"); break;
+            case AssignOp::RShiftAssign: result = builder.CreateAShr(loadedLhs, result, "rshiftassign"); break;
             default: break;
         }
     }
@@ -136,6 +145,7 @@ llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
 llvm::Value* TernaryExprAST::codegen(CodegenContext& ctx) {
     llvm::Value* condVal = cond->codegen(ctx);
     if (!condVal) return nullptr;
+    condVal = ctx.coerceToBool(condVal);
 
     auto& builder = ctx.getBuilder();
     llvm::Function* func = builder.GetInsertBlock()->getParent();
@@ -232,14 +242,37 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
     if (!objVal) return nullptr;
 
     auto& builder = ctx.getBuilder();
-    llvm::Type* objType = objVal->getType();
+    llvm::Type* objType = nullptr;
+    unsigned fieldIndex = 0;
 
-    if (accessKind == MemberAccessKind::Arrow) {
-        llvm::Type* pointeeType = ctx.getLLVMType(object->type ? object->type->base : nullptr);
-        if (pointeeType) objType = pointeeType;
+    if (object->type && object->type->kind == TypeKind::Struct) {
+        auto* structType = static_cast<StructType*>(object->type);
+        for (size_t i = 0; i < structType->fields.size(); ++i) {
+            if (structType->fields[i].first == memberName) {
+                fieldIndex = i;
+                break;
+            }
+        }
+        objType = ctx.getLLVMType(object->type);
+    } else if (object->type && object->type->kind == TypeKind::Pointer &&
+               object->type->base && object->type->base->kind == TypeKind::Struct) {
+        auto* structType = static_cast<StructType*>(object->type->base);
+        for (size_t i = 0; i < structType->fields.size(); ++i) {
+            if (structType->fields[i].first == memberName) {
+                fieldIndex = i;
+                break;
+            }
+        }
+        objType = ctx.getLLVMType(object->type->base);
+    } else if (object->type && object->type->kind == TypeKind::Pointer) {
+        objType = ctx.getLLVMType(object->type->base);
     }
 
-    return builder.CreateStructGEP(objType, objVal, 0, "member");
+    if (!objType) {
+        objType = objVal->getType();
+    }
+
+    return builder.CreateStructGEP(objType, objVal, fieldIndex, "member");
 }
 
 llvm::Value* SizeofExprAST::codegen(CodegenContext& ctx) {

@@ -44,6 +44,18 @@ llvm::Value* FunctionDeclAST::codegen(CodegenContext& ctx) {
     }
 
     ctx.pushScope();
+
+    unsigned idx = 0;
+    for (auto& param : params) {
+        llvm::Argument* arg = function->getArg(idx);
+        arg->setName(param->name);
+        llvm::AllocaInst* alloca = ctx.getBuilder().CreateAlloca(
+            ctx.getLLVMType(param->type), nullptr, param->name);
+        ctx.getBuilder().CreateStore(arg, alloca);
+        ctx.declareVariable(param->name, alloca, param->type);
+        idx++;
+    }
+
     if (body) {
         body->codegen(ctx);
     }
