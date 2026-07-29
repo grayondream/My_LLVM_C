@@ -17,6 +17,10 @@ target_include_directories(compiler_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src
 )
 
+target_compile_definitions(compiler_tests PRIVATE
+    TEST_INPUT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/resources/test_input"
+)
+
 target_link_libraries(compiler_tests
     PRIVATE
         my_llvm_c_lib

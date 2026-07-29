@@ -638,6 +638,29 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
         return parseCompoundStmt();
     }
 
+    // local declaration (type keyword or typedef name)
+    if (isTypeStart() || check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE)) {
+        size_t savedPos = m_currentTokenPos;
+        Type* type = parseType();
+        if (type && check(TokenType::TOKEN_IDENTIFIER)) {
+            auto nameTok = advance();
+            if (check(TokenType::TOKEN_LPAREN)) {
+                // This is a function declaration inside a block - restore and parse as declaration
+                m_currentTokenPos = savedPos;
+                auto decl = parseDeclaration();
+                if (decl) {
+                    return std::make_unique<DeclStmtAST>(std::move(decl));
+                }
+            }
+            auto varDecl = parseVariableDecl(type, nameTok->lexeme);
+            if (varDecl) {
+                return std::make_unique<DeclStmtAST>(std::move(varDecl));
+            }
+        }
+        // Not a declaration, restore position
+        m_currentTokenPos = savedPos;
+    }
+
     // label statement: identifier ':'
     if (peek() && peek()->type == TokenType::TOKEN_IDENTIFIER) {
         // Look ahead to see if this is a label

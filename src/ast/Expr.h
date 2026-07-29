@@ -77,8 +77,8 @@ public:
 
 class ExprAST : public ASTNode {
 public:
-    Type* type;
-    bool isLValue;
+    Type* type{nullptr};
+    bool isLValue{false};
     virtual llvm::Value* codegen(CodegenContext& ctx) = 0;
 };
 
