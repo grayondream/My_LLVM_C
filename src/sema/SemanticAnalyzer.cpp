@@ -1,0 +1,661 @@
+#include "sema/SemanticAnalyzer.h"
+#include "ast/Expr.h"
+#include "ast/Stmt.h"
+#include "ast/Decl.h"
+#include "ast/Type.h"
+
+SemanticAnalyzer::SemanticAnalyzer()
+    : globalScope(std::make_unique<Scope>(nullptr)),
+      currentScope(globalScope.get()),
+      currentFunction(nullptr),
+      typeCtx(&TypeContext::instance()) {}
+
+const std::vector<Diagnostic>& SemanticAnalyzer::getErrors() const {
+    return errors;
+}
+
+void SemanticAnalyzer::emitError(const std::string& msg, const ASTNode& node) {
+    errors.emplace_back(Diagnostic::Level::Error, msg, node.sourceFile, node.sourceLine, node.sourceColumn);
+}
+
+void SemanticAnalyzer::emitWarning(const std::string& msg, const ASTNode& node) {
+    errors.emplace_back(Diagnostic::Level::Warning, msg, node.sourceFile, node.sourceLine, node.sourceColumn);
+}
+
+void SemanticAnalyzer::enterScope() {
+    currentScope = new Scope(currentScope);
+}
+
+void SemanticAnalyzer::exitScope() {
+    Scope* parent = currentScope->parent;
+    if (currentScope != globalScope.get()) {
+        delete currentScope;
+    }
+    currentScope = parent;
+}
+
+bool SemanticAnalyzer::declare(const std::string& name, Type* type) {
+    if (currentScope->symbols.count(name)) {
+        return false;
+    }
+    currentScope->symbols[name] = new Symbol(name, type);
+    return true;
+}
+
+Symbol* SemanticAnalyzer::lookup(const std::string& name) {
+    return currentScope->lookup(name);
+}
+
+bool SemanticAnalyzer::isIntegerType(Type* type) const {
+    if (!type) return false;
+    return type->kind == TypeKind::Int || type->kind == TypeKind::Char || type->kind == TypeKind::Enum;
+}
+
+bool SemanticAnalyzer::isFloatType(Type* type) const {
+    if (!type) return false;
+    return type->kind == TypeKind::Float || type->kind == TypeKind::Double;
+}
+
+bool SemanticAnalyzer::isArithmeticType(Type* type) const {
+    return isIntegerType(type) || isFloatType(type);
+}
+
+bool SemanticAnalyzer::isPointerOrArray(Type* type) const {
+    if (!type) return false;
+    return type->kind == TypeKind::Pointer || type->kind == TypeKind::Array;
+}
+
+bool SemanticAnalyzer::typesCompatible(Type* left, Type* right) const {
+    if (!left || !right) return false;
+    if (left->kind == right->kind) return true;
+    if (isArithmeticType(left) && isArithmeticType(right)) return true;
+    if (left->kind == TypeKind::Pointer && right->kind == TypeKind::Pointer) return true;
+    if (left->kind == TypeKind::Pointer && right->kind == TypeKind::Int) return true;
+    if (left->kind == TypeKind::Int && right->kind == TypeKind::Pointer) return true;
+    return false;
+}
+
+Type* SemanticAnalyzer::getCommonType(Type* left, Type* right) const {
+    if (!left) return right;
+    if (!right) return left;
+    if (left->kind == right->kind) return left;
+    if (left->kind == TypeKind::Double || right->kind == TypeKind::Double) return typeCtx->getDouble();
+    if (left->kind == TypeKind::Float || right->kind == TypeKind::Float) return typeCtx->getFloat();
+    if (left->kind == TypeKind::Int) return left;
+    if (right->kind == TypeKind::Int) return right;
+    return left;
+}
+
+Type* SemanticAnalyzer::checkBinaryTypes(BinaryOp op, Type* left, Type* right, ExprAST& node) {
+    if (!left || !right) return nullptr;
+
+    switch (op) {
+        case BinaryOp::Add:
+        case BinaryOp::Sub:
+        case BinaryOp::Mul:
+        case BinaryOp::Div:
+        case BinaryOp::Mod:
+            if (isArithmeticType(left) && isArithmeticType(right)) {
+                return getCommonType(left, right);
+            }
+            if (isPointerOrArray(left) && isIntegerType(right)) return left;
+            if (isIntegerType(left) && isPointerOrArray(right)) return right;
+            emitError("invalid operands to binary operator", node);
+            return nullptr;
+
+        case BinaryOp::Eq:
+        case BinaryOp::NotEq:
+        case BinaryOp::Lt:
+        case BinaryOp::Gt:
+        case BinaryOp::Le:
+        case BinaryOp::Ge:
+            if (!typesCompatible(left, right)) {
+                emitError("comparison of incompatible types", node);
+                return nullptr;
+            }
+            return typeCtx->getInt();
+
+        case BinaryOp::And:
+        case BinaryOp::Or:
+            return typeCtx->getInt();
+
+        case BinaryOp::BitAnd:
+        case BinaryOp::BitOr:
+        case BinaryOp::BitXor:
+        case BinaryOp::LShift:
+        case BinaryOp::RShift:
+            if (isIntegerType(left) && isIntegerType(right)) {
+                return getCommonType(left, right);
+            }
+            emitError("bitwise operation on non-integer types", node);
+            return nullptr;
+
+        default:
+            return nullptr;
+    }
+}
+
+Type* SemanticAnalyzer::checkAssignmentTypes(Type* lhs, Type* rhs, ExprAST& node) {
+    if (!lhs || !rhs) return nullptr;
+
+    if (lhs->kind == TypeKind::Void || rhs->kind == TypeKind::Void) {
+        emitError("assignment to or from void type", node);
+        return nullptr;
+    }
+
+    if (isArithmeticType(lhs) && isArithmeticType(rhs)) return lhs;
+    if (lhs->kind == rhs->kind) return lhs;
+    if (isPointerOrArray(lhs) && isPointerOrArray(rhs)) return lhs;
+    if (isPointerOrArray(lhs) && isIntegerType(rhs)) return lhs;
+
+    emitError("incompatible types in assignment", node);
+    return nullptr;
+}
+
+Type* SemanticAnalyzer::checkFunctionCall(const std::string& name, const std::vector<std::unique_ptr<ExprAST>>& args, ExprAST& node) {
+    Symbol* sym = lookup(name);
+    if (!sym) {
+        emitError("undeclared function '" + name + "'", node);
+        return nullptr;
+    }
+
+    if (sym->type->kind != TypeKind::Function) {
+        emitError("'" + name + "' is not a function", node);
+        return nullptr;
+    }
+
+    FunctionType* funcType = static_cast<FunctionType*>(sym->type);
+    if (!funcType->isVarArg && args.size() != funcType->paramTypes.size()) {
+        emitError("wrong number of arguments to function '" + name + "'", node);
+        return nullptr;
+    }
+
+    for (size_t i = 0; i < args.size() && i < funcType->paramTypes.size(); ++i) {
+        Type* argType = getExprType(*args[i]);
+        if (argType && !typesCompatible(funcType->paramTypes[i], argType)) {
+            emitError("type mismatch in argument " + std::to_string(i + 1) + " of call to '" + name + "'", node);
+        }
+    }
+
+    return funcType->returnType;
+}
+
+Type* SemanticAnalyzer::getExprType(ExprAST& expr) {
+    visit(expr);
+    return expr.type;
+}
+
+void SemanticAnalyzer::visit(NumberExprAST& node) {
+    node.type = typeCtx->getInt();
+    node.isLValue = false;
+}
+
+void SemanticAnalyzer::visit(FloatExprAST& node) {
+    node.type = typeCtx->getFloat();
+    node.isLValue = false;
+}
+
+void SemanticAnalyzer::visit(CharExprAST& node) {
+    node.type = typeCtx->getChar();
+    node.isLValue = false;
+}
+
+void SemanticAnalyzer::visit(StringExprAST& node) {
+    node.type = new Type(TypeKind::Pointer, typeCtx->getChar());
+    node.isLValue = false;
+}
+
+void SemanticAnalyzer::visit(VariableExprAST& node) {
+    Symbol* sym = lookup(node.name);
+    if (!sym) {
+        emitError("undeclared variable '" + node.name + "'", node);
+        node.type = nullptr;
+    } else {
+        node.type = sym->type;
+    }
+    node.isLValue = true;
+}
+
+void SemanticAnalyzer::visit(BinaryExprAST& node) {
+    Type* leftType = getExprType(*node.left);
+    Type* rightType = getExprType(*node.right);
+    node.type = checkBinaryTypes(node.op, leftType, rightType, node);
+    node.isLValue = false;
+}
+
+void SemanticAnalyzer::visit(UnaryExprAST& node) {
+    Type* operandType = getExprType(*node.operand);
+
+    switch (node.op) {
+        case UnaryOp::Plus:
+        case UnaryOp::Minus:
+            if (!isArithmeticType(operandType)) {
+                emitError("invalid operand to unary operator", node);
+                node.type = nullptr;
+            } else {
+                node.type = operandType;
+            }
+            break;
+        case UnaryOp::Not:
+            node.type = typeCtx->getInt();
+            break;
+        case UnaryOp::Deref:
+            if (operandType && operandType->kind == TypeKind::Pointer) {
+                node.type = operandType->base;
+            } else {
+                emitError("dereference of non-pointer type", node);
+                node.type = nullptr;
+            }
+            break;
+        case UnaryOp::AddressOf:
+            if (node.operand->isLValue) {
+                node.type = new Type(TypeKind::Pointer, operandType);
+            } else {
+                emitError("address of non-lvalue", node);
+                node.type = nullptr;
+            }
+            break;
+        case UnaryOp::PreInc:
+        case UnaryOp::PreDec:
+            if (!isArithmeticType(operandType) && !isPointerOrArray(operandType)) {
+                emitError("invalid operand to increment/decrement", node);
+                node.type = nullptr;
+            } else {
+                node.type = operandType;
+            }
+            break;
+        case UnaryOp::Sizeof:
+            node.type = typeCtx->getInt();
+            break;
+    }
+    node.isLValue = false;
+}
+
+void SemanticAnalyzer::visit(CallExprAST& node) {
+    node.type = checkFunctionCall(node.callee, node.args, node);
+    node.isLValue = false;
+}
+
+void SemanticAnalyzer::visit(AssignmentExprAST& node) {
+    Type* lhsType = getExprType(*node.lhs);
+    Type* rhsType = getExprType(*node.rhs);
+    node.type = checkAssignmentTypes(lhsType, rhsType, node);
+    node.isLValue = true;
+}
+
+void SemanticAnalyzer::visit(TernaryExprAST& node) {
+    Type* condType = getExprType(*node.cond);
+    Type* thenType = getExprType(*node.then);
+    Type* elseType = getExprType(*node.elseExpr);
+
+    if (condType && !isArithmeticType(condType)) {
+        emitError("ternary condition must be arithmetic type", node);
+    }
+
+    node.type = getCommonType(thenType, elseType);
+    node.isLValue = false;
+}
+
+void SemanticAnalyzer::visit(CastExprAST& node) {
+    Type* exprType = getExprType(*node.expr);
+    if (exprType && node.castType && !typesCompatible(exprType, node.castType)) {
+        emitWarning("incompatible cast", node);
+    }
+    node.type = node.castType;
+    node.isLValue = false;
+}
+
+void SemanticAnalyzer::visit(CommaExprAST& node) {
+    getExprType(*node.left);
+    node.type = getExprType(*node.right);
+    node.isLValue = node.right->isLValue;
+}
+
+void SemanticAnalyzer::visit(PostfixIncDecExprAST& node) {
+    Type* operandType = getExprType(*node.operand);
+    if (!isArithmeticType(operandType) && !isPointerOrArray(operandType)) {
+        emitError("invalid operand to postfix increment/decrement", node);
+        node.type = nullptr;
+    } else {
+        node.type = operandType;
+    }
+    node.isLValue = false;
+}
+
+void SemanticAnalyzer::visit(ArrayAccessExprAST& node) {
+    Type* arrayType = getExprType(*node.array);
+    Type* indexType = getExprType(*node.index);
+
+    if (!isIntegerType(indexType)) {
+        emitError("array index must be integer type", node);
+    }
+
+    if (arrayType && arrayType->kind == TypeKind::Array) {
+        node.type = static_cast<ArrayType*>(arrayType)->elementType;
+    } else if (arrayType && arrayType->kind == TypeKind::Pointer) {
+        node.type = arrayType->base;
+    } else {
+        emitError("subscripted value is neither array nor pointer", node);
+        node.type = nullptr;
+    }
+    node.isLValue = true;
+}
+
+void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
+    Type* objType = getExprType(*node.object);
+
+    if (!objType) {
+        node.type = nullptr;
+        node.isLValue = false;
+        return;
+    }
+
+    StructType* structType = nullptr;
+    if (node.accessKind == MemberAccessKind::Arrow) {
+        if (objType->kind != TypeKind::Pointer) {
+            emitError("member access on non-pointer with '->'", node);
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
+        }
+        if (objType->base->kind != TypeKind::Struct) {
+            emitError("member access on non-struct pointer", node);
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
+        }
+        structType = static_cast<StructType*>(objType->base);
+    } else {
+        if (objType->kind != TypeKind::Struct) {
+            emitError("member access on non-struct type", node);
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
+        }
+        structType = static_cast<StructType*>(objType);
+    }
+
+    for (auto& field : structType->fields) {
+        if (field.first == node.memberName) {
+            node.type = field.second;
+            node.isLValue = true;
+            return;
+        }
+    }
+    emitError("no member named '" + node.memberName + "' in struct", node);
+    node.type = nullptr;
+    node.isLValue = false;
+}
+
+void SemanticAnalyzer::visit(SizeofExprAST& node) {
+    node.type = typeCtx->getInt();
+    node.isLValue = false;
+}
+
+void SemanticAnalyzer::visit(InitializerListExprAST& node) {
+    if (!node.initializers.empty()) {
+        node.type = getExprType(*node.initializers[0]);
+    } else {
+        node.type = typeCtx->getInt();
+    }
+    node.isLValue = false;
+}
+
+void SemanticAnalyzer::visit(CompoundStmtAST& node) {
+    enterScope();
+    for (auto& stmt : node.stmts) {
+        if (stmt) {
+            visit(*stmt);
+        }
+    }
+    exitScope();
+}
+
+void SemanticAnalyzer::visit(ExprStmtAST& node) {
+    if (node.expr) {
+        getExprType(*node.expr);
+    }
+}
+
+void SemanticAnalyzer::visit(ReturnStmtAST& node) {
+    if (node.value) {
+        Type* retValType = getExprType(*node.value);
+        if (currentFunction && retValType) {
+            if (!typesCompatible(currentFunction->returnType, retValType)) {
+                emitError("return type mismatch", node);
+            }
+        }
+    } else if (currentFunction && currentFunction->returnType->kind != TypeKind::Void) {
+        emitError("non-void function should return a value", node);
+    }
+}
+
+void SemanticAnalyzer::visit(IfStmtAST& node) {
+    Type* condType = getExprType(*node.cond);
+    if (condType && !isArithmeticType(condType)) {
+        emitError("if condition must be arithmetic type", node);
+    }
+    if (node.thenStmt) visit(*node.thenStmt);
+    if (node.elseStmt) visit(*node.elseStmt);
+}
+
+void SemanticAnalyzer::visit(WhileStmtAST& node) {
+    Type* condType = getExprType(*node.cond);
+    if (condType && !isArithmeticType(condType)) {
+        emitError("while condition must be arithmetic type", node);
+    }
+    if (node.body) visit(*node.body);
+}
+
+void SemanticAnalyzer::visit(DoWhileStmtAST& node) {
+    Type* condType = getExprType(*node.cond);
+    if (condType && !isArithmeticType(condType)) {
+        emitError("do-while condition must be arithmetic type", node);
+    }
+    if (node.body) visit(*node.body);
+}
+
+void SemanticAnalyzer::visit(ForStmtAST& node) {
+    enterScope();
+    if (node.init) visit(*node.init);
+    if (node.cond) {
+        Type* condType = getExprType(*node.cond);
+        if (condType && !isArithmeticType(condType)) {
+            emitError("for condition must be arithmetic type", node);
+        }
+    }
+    if (node.inc) getExprType(*node.inc);
+    if (node.body) visit(*node.body);
+    exitScope();
+}
+
+void SemanticAnalyzer::visit(SwitchStmtAST& node) {
+    Type* condType = getExprType(*node.cond);
+    if (condType && !isIntegerType(condType)) {
+        emitError("switch expression must be integer type", node);
+    }
+    for (auto& c : node.cases) {
+        if (c) visit(*c);
+    }
+}
+
+void SemanticAnalyzer::visit(BreakStmtAST& node) {}
+
+void SemanticAnalyzer::visit(ContinueStmtAST& node) {}
+
+void SemanticAnalyzer::visit(GotoStmtAST& node) {}
+
+void SemanticAnalyzer::visit(LabelStmtAST& node) {
+    if (node.stmt) visit(*node.stmt);
+}
+
+void SemanticAnalyzer::visit(NullStmtAST& node) {}
+
+void SemanticAnalyzer::visit(VarDeclAST& node) {
+    if (node.initExpr) {
+        Type* initType = getExprType(*node.initExpr);
+        if (initType && !typesCompatible(node.type, initType)) {
+            emitError("type mismatch in variable initialization", node);
+        }
+    }
+    if (!declare(node.name, node.type)) {
+        emitError("redeclaration of variable '" + node.name + "'", node);
+    }
+}
+
+void SemanticAnalyzer::visit(ArrayDeclAST& node) {
+    Type* arrayType = new ArrayType(node.elementType, node.size);
+    if (node.initExpr) {
+        Type* initType = getExprType(*node.initExpr);
+        if (initType && !typesCompatible(node.elementType, initType)) {
+            emitError("type mismatch in array initialization", node);
+        }
+    }
+    if (!declare(node.name, arrayType)) {
+        emitError("redeclaration of array '" + node.name + "'", node);
+    }
+}
+
+void SemanticAnalyzer::visit(StructDeclAST& node) {
+    auto* structType = new StructType(node.name);
+    for (auto& field : node.fields) {
+        structType->addField(field.first, field.second);
+    }
+    typeCtx->addStruct(node.name, structType);
+}
+
+void SemanticAnalyzer::visit(UnionDeclAST& node) {
+    auto* unionType = new UnionType(node.name);
+    for (auto& member : node.members) {
+        unionType->addMember(member.first, member.second);
+    }
+    typeCtx->addUnion(node.name, unionType);
+}
+
+void SemanticAnalyzer::visit(EnumDeclAST& node) {
+    auto* enumType = new EnumType(node.name);
+    for (auto& val : node.values) {
+        enumType->addValue(val.first, val.second);
+    }
+    typeCtx->addEnum(node.name, enumType);
+}
+
+void SemanticAnalyzer::visit(TypedefDeclAST& node) {
+    typeCtx->addTypedef(node.name, node.aliasedType);
+}
+
+void SemanticAnalyzer::visit(ForwardDeclAST& node) {}
+
+void SemanticAnalyzer::visit(DeclStmtAST& node) {
+    if (node.decl) {
+        if (auto* varDecl = dynamic_cast<VarDeclAST*>(node.decl.get())) {
+            visit(*varDecl);
+        } else if (auto* arrDecl = dynamic_cast<ArrayDeclAST*>(node.decl.get())) {
+            visit(*arrDecl);
+        } else if (auto* structDecl = dynamic_cast<StructDeclAST*>(node.decl.get())) {
+            visit(*structDecl);
+        } else if (auto* unionDecl = dynamic_cast<UnionDeclAST*>(node.decl.get())) {
+            visit(*unionDecl);
+        } else if (auto* enumDecl = dynamic_cast<EnumDeclAST*>(node.decl.get())) {
+            visit(*enumDecl);
+        } else if (auto* typedefDecl = dynamic_cast<TypedefDeclAST*>(node.decl.get())) {
+            visit(*typedefDecl);
+        } else if (auto* fwdDecl = dynamic_cast<ForwardDeclAST*>(node.decl.get())) {
+            visit(*fwdDecl);
+        }
+    }
+}
+
+void SemanticAnalyzer::visit(FunctionDeclAST& node) {
+    std::vector<Type*> paramTypes;
+    for (auto& param : node.params) {
+        paramTypes.push_back(param->type);
+    }
+    auto* funcType = new FunctionType(node.returnType, std::move(paramTypes));
+    if (!declare(node.name, funcType)) {
+        emitError("redeclaration of function '" + node.name + "'", node);
+    }
+
+    FunctionDeclAST* prevFunc = currentFunction;
+    currentFunction = &node;
+    enterScope();
+
+    for (auto& param : node.params) {
+        if (!declare(param->name, param->type)) {
+            emitError("redeclaration of parameter '" + param->name + "'", *param);
+        }
+    }
+
+    if (node.body) {
+        visit(*node.body);
+    }
+
+    exitScope();
+    currentFunction = prevFunc;
+}
+
+void SemanticAnalyzer::visit(TranslationUnitAST& node) {
+    for (auto& decl : node.declarations) {
+        if (decl) {
+            if (auto* funcDecl = dynamic_cast<FunctionDeclAST*>(decl.get())) {
+                visit(*funcDecl);
+            } else if (auto* varDecl = dynamic_cast<VarDeclAST*>(decl.get())) {
+                visit(*varDecl);
+            } else if (auto* arrDecl = dynamic_cast<ArrayDeclAST*>(decl.get())) {
+                visit(*arrDecl);
+            } else if (auto* structDecl = dynamic_cast<StructDeclAST*>(decl.get())) {
+                visit(*structDecl);
+            } else if (auto* unionDecl = dynamic_cast<UnionDeclAST*>(decl.get())) {
+                visit(*unionDecl);
+            } else if (auto* enumDecl = dynamic_cast<EnumDeclAST*>(decl.get())) {
+                visit(*enumDecl);
+            } else if (auto* typedefDecl = dynamic_cast<TypedefDeclAST*>(decl.get())) {
+                visit(*typedefDecl);
+            } else if (auto* fwdDecl = dynamic_cast<ForwardDeclAST*>(decl.get())) {
+                visit(*fwdDecl);
+            }
+        }
+    }
+}
+
+void SemanticAnalyzer::analyze(TranslationUnitAST& ast) {
+    errors.clear();
+    visit(ast);
+}
+
+void SemanticAnalyzer::visit(ExprAST& expr) {
+    if (auto* e = dynamic_cast<NumberExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<FloatExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<CharExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<StringExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<VariableExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<BinaryExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<UnaryExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<CallExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<AssignmentExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<TernaryExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<CastExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<CommaExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<PostfixIncDecExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<ArrayAccessExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<MemberAccessExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<SizeofExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<InitializerListExprAST*>(&expr)) { visit(*e); return; }
+}
+
+void SemanticAnalyzer::visit(StmtAST& stmt) {
+    if (auto* s = dynamic_cast<CompoundStmtAST*>(&stmt)) { visit(*s); return; }
+    if (auto* s = dynamic_cast<ExprStmtAST*>(&stmt)) { visit(*s); return; }
+    if (auto* s = dynamic_cast<ReturnStmtAST*>(&stmt)) { visit(*s); return; }
+    if (auto* s = dynamic_cast<IfStmtAST*>(&stmt)) { visit(*s); return; }
+    if (auto* s = dynamic_cast<WhileStmtAST*>(&stmt)) { visit(*s); return; }
+    if (auto* s = dynamic_cast<DoWhileStmtAST*>(&stmt)) { visit(*s); return; }
+    if (auto* s = dynamic_cast<ForStmtAST*>(&stmt)) { visit(*s); return; }
+    if (auto* s = dynamic_cast<SwitchStmtAST*>(&stmt)) { visit(*s); return; }
+    if (auto* s = dynamic_cast<BreakStmtAST*>(&stmt)) { visit(*s); return; }
+    if (auto* s = dynamic_cast<ContinueStmtAST*>(&stmt)) { visit(*s); return; }
+    if (auto* s = dynamic_cast<GotoStmtAST*>(&stmt)) { visit(*s); return; }
+    if (auto* s = dynamic_cast<LabelStmtAST*>(&stmt)) { visit(*s); return; }
+    if (auto* s = dynamic_cast<NullStmtAST*>(&stmt)) { visit(*s); return; }
+    if (auto* s = dynamic_cast<DeclStmtAST*>(&stmt)) { visit(*s); return; }
+}
