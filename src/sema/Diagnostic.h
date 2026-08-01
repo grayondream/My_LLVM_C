@@ -16,9 +16,19 @@ struct Diagnostic {
 
     std::string format() const {
         std::ostringstream oss;
-        oss << (level == Level::Error ? "error: " : "warning: ")
-            << message << "\n"
-            << "  --> " << file << ":" << line << ":" << column;
+        oss << (level == Level::Error ? "error" : "warning") << ": " << message;
+        if (!file.empty()) {
+            oss << "\n  --> " << file << ":" << line << ":" << column;
+        }
+        return oss.str();
+    }
+
+    std::string formatWithSeverity() const {
+        std::ostringstream oss;
+        oss << (level == Level::Error ? "error" : "warning") << "[S" << (level == Level::Error ? "E" : "W") << "001]: " << message;
+        if (!file.empty()) {
+            oss << "\n  --> " << file << ":" << line << ":" << column;
+        }
         return oss.str();
     }
 };

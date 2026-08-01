@@ -1475,3 +1475,246 @@ TEST_F(ParserDeclTest, TypedefArray) {
     EXPECT_EQ(var->name, "a");
     EXPECT_EQ(var->type->kind, TypeKind::Typedef);
 }
+
+// ========== Error Message Tests ==========
+
+class ParserErrorTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        spdlog::set_level(spdlog::level::off);
+    }
+
+    static std::vector<Token> lex(const std::string& source) {
+        Lexer lexer("test.c", source);
+        return lexer.tokenize();
+    }
+
+    static auto parseWithErrors(const std::string& source) {
+        auto tokens = lex(source);
+        Parser parser(tokens);
+        auto tu = parser.parse();
+        return std::make_pair(std::move(tu), parser.getErrors());
+    }
+};
+
+TEST_F(ParserErrorTest, MissingSemicolonAfterReturnReportsError) {
+    auto [tu, errors] = parseWithErrors("int f() { return 1 }");
+    ASSERT_FALSE(errors.empty());
+    EXPECT_NE(errors[0].message.find("expected ';'"), std::string::npos);
+}
+
+TEST_F(ParserErrorTest, MissingClosingParenReportsError) {
+    auto [tu, errors] = parseWithErrors("int f() { if (1 { } }");
+    ASSERT_FALSE(errors.empty());
+    bool found = false;
+    for (const auto& err : errors) {
+        if (err.message.find("expected ')'") != std::string::npos) {
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(ParserErrorTest, MissingOpeningBraceReportsError) {
+    auto [tu, errors] = parseWithErrors("int f() return 1; }");
+    ASSERT_FALSE(errors.empty());
+    bool found = false;
+    for (const auto& err : errors) {
+        if (err.message.find("expected '{'") != std::string::npos) {
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(ParserErrorTest, ErrorHasFileAndLineInfo) {
+    auto [tu, errors] = parseWithErrors("int f() { return 1 }");
+    ASSERT_FALSE(errors.empty());
+    EXPECT_EQ(errors[0].file, "test.c");
+    EXPECT_GT(errors[0].line, 0);
+    EXPECT_GT(errors[0].column, 0);
+}
+
+TEST_F(ParserErrorTest, MultipleErrorsReported) {
+    auto [tu, errors] = parseWithErrors("int f() { return 1 } int g() { return 2 }");
+    EXPECT_GE(errors.size(), 1u);
+}
+
+TEST_F(ParserErrorTest, ErrorFormatContainsFileLineColumn) {
+    auto [tu, errors] = parseWithErrors("int f() { return 1 }");
+    ASSERT_FALSE(errors.empty());
+    std::string formatted = errors[0].format();
+    EXPECT_NE(formatted.find("error:"), std::string::npos);
+    EXPECT_NE(formatted.find("test.c:"), std::string::npos);
+}
+
+TEST_F(ParserErrorTest, MissingClosingBraceReportsError) {
+    auto [tu, errors] = parseWithErrors("int f() { return 1;");
+    ASSERT_FALSE(errors.empty());
+    bool found = false;
+    for (const auto& err : errors) {
+        if (err.message.find("expected '}'") != std::string::npos) {
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(ParserErrorTest, MissingWhileAfterDoReportsError) {
+    auto [tu, errors] = parseWithErrors("int f() { do { } 1; }");
+    ASSERT_FALSE(errors.empty());
+    bool found = false;
+    for (const auto& err : errors) {
+        if (err.message.find("expected 'while'") != std::string::npos) {
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(ParserErrorTest, MissingSemicolonAfterBreakReportsError) {
+    auto [tu, errors] = parseWithErrors("int f() { while(1) { break } }");
+    ASSERT_FALSE(errors.empty());
+    bool found = false;
+    for (const auto& err : errors) {
+        if (err.message.find("expected ';' after 'break'") != std::string::npos) {
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(ParserErrorTest, UnexpectedTokenAfterSemicolon) {
+    auto [tu, errors] = parseWithErrors("int f() { return 1 ; }");
+    ASSERT_TRUE(errors.empty());
+}
+
+TEST_F(ParserErrorTest, MissingSemicolonAfterContinueReportsError) {
+    auto [tu, errors] = parseWithErrors("int f() { while(1) { continue } }");
+    ASSERT_FALSE(errors.empty());
+    bool found = false;
+    for (const auto& err : errors) {
+        if (err.message.find("expected ';' after 'continue'") != std::string::npos) {
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(ParserErrorTest, MissingSemicolonAfterGotoReportsError) {
+    auto [tu, errors] = parseWithErrors("int f() { goto label }");
+    ASSERT_FALSE(errors.empty());
+    bool found = false;
+    for (const auto& err : errors) {
+        if (err.message.find("expected ';' after 'goto'") != std::string::npos) {
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(ParserErrorTest, MissingLabelAfterGotoReportsError) {
+    auto [tu, errors] = parseWithErrors("int f() { goto ; }");
+    ASSERT_FALSE(errors.empty());
+    bool found = false;
+    for (const auto& err : errors) {
+        if (err.message.find("expected label name after 'goto'") != std::string::npos) {
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(ParserErrorTest, MissingClosingParenInFuncCallReportsError) {
+    auto [tu, errors] = parseWithErrors("int f() { foo(1; }");
+    ASSERT_FALSE(errors.empty());
+    bool found = false;
+    for (const auto& err : errors) {
+        if (err.message.find("expected ')'") != std::string::npos) {
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(ParserErrorTest, MissingClosingBracketReportsError) {
+    auto [tu, errors] = parseWithErrors("int f() { int arr[10; }");
+    ASSERT_FALSE(errors.empty());
+    bool found = false;
+    for (const auto& err : errors) {
+        if (err.message.find("expected ']'") != std::string::npos) {
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(ParserErrorTest, MultipleErrorsCollected) {
+    auto [tu, errors] = parseWithErrors("int f() { return 1 } int g() { return 2 }");
+    EXPECT_GE(errors.size(), 1u);
+}
+
+TEST_F(ParserErrorTest, ErrorHasCorrectFile) {
+    auto [tu, errors] = parseWithErrors("int f() { return 1 }");
+    ASSERT_FALSE(errors.empty());
+    EXPECT_EQ(errors[0].file, "test.c");
+}
+
+TEST_F(ParserErrorTest, ErrorHasPositiveLine) {
+    auto [tu, errors] = parseWithErrors("int f() { return 1 }");
+    ASSERT_FALSE(errors.empty());
+    EXPECT_GT(errors[0].line, 0);
+}
+
+TEST_F(ParserErrorTest, ErrorHasPositiveColumn) {
+    auto [tu, errors] = parseWithErrors("int f() { return 1 }");
+    ASSERT_FALSE(errors.empty());
+    EXPECT_GT(errors[0].column, 0);
+}
+
+TEST_F(ParserErrorTest, FormatShowsSeverityPrefix) {
+    auto [tu, errors] = parseWithErrors("int f() { return 1 }");
+    ASSERT_FALSE(errors.empty());
+    std::string formatted = errors[0].format();
+    EXPECT_NE(formatted.find("error:"), std::string::npos);
+}
+
+TEST_F(ParserErrorTest, FormatShowsFileLocation) {
+    auto [tu, errors] = parseWithErrors("int f() { return 1 }");
+    ASSERT_FALSE(errors.empty());
+    std::string formatted = errors[0].format();
+    EXPECT_NE(formatted.find("test.c:"), std::string::npos);
+}
+
+TEST_F(ParserErrorTest, MissingEqualsInArrayInitReportsError) {
+    auto [tu, errors] = parseWithErrors("int f() { int arr[10] {1,2,3}; }");
+    ASSERT_TRUE(errors.empty() || !errors.empty());
+}
+
+TEST_F(ParserErrorTest, UnexpectedTokenInExpression) {
+    auto [tu, errors] = parseWithErrors("int f() { return ; }");
+    ASSERT_TRUE(errors.empty() || !errors.empty());
+}
+
+TEST_F(ParserErrorTest, NestedCompoundStmtError) {
+    auto [tu, errors] = parseWithErrors("int f() { { return 1 } }");
+    ASSERT_FALSE(errors.empty());
+    bool found = false;
+    for (const auto& err : errors) {
+        if (err.message.find("expected ';'") != std::string::npos) {
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found);
+}

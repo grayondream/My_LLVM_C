@@ -3,6 +3,84 @@
 #include "ast/Decl.h"
 #include "frontend/Token.h"
 
+const std::vector<Diagnostic>& Parser::getErrors() const {
+    return m_errors;
+}
+
+void Parser::error(const std::string& msg, const Token& token) {
+    m_errors.emplace_back(Diagnostic::Level::Error, msg, token.filename, token.line, token.column);
+}
+
+void Parser::errorUnexpected(const std::string& expected) {
+    auto token = peek();
+    if (token) {
+        std::string msg = "unexpected token '" + token->lexeme + "', " + expected;
+        error(msg, *token);
+    } else {
+        errorUnexpectedEOF(expected);
+    }
+}
+
+void Parser::errorUnexpectedEOF(const std::string& expected) {
+    Token dummy;
+    dummy.filename = m_tokens.empty() ? "" : m_tokens.back().filename;
+    dummy.line = m_tokens.empty() ? 0 : m_tokens.back().line;
+    dummy.column = m_tokens.empty() ? 0 : m_tokens.back().column;
+    error("unexpected end of file, " + expected, dummy);
+}
+
+bool Parser::expect(TokenType type, const std::string& msg) {
+    if (match(type)) {
+        return true;
+    }
+    auto token = peek();
+    if (token) {
+        error(msg, *token);
+    } else {
+        errorUnexpectedEOF(msg);
+    }
+    return false;
+}
+
+std::string Parser::tokenTypeName(TokenType type) const {
+    switch (type) {
+        case TokenType::TOKEN_IDENTIFIER:    return "identifier";
+        case TokenType::TOKEN_NUMBER:        return "number";
+        case TokenType::TOKEN_STRING:        return "string literal";
+        case TokenType::TOKEN_CHAR:          return "character literal";
+        case TokenType::TOKEN_INT:           return "'int'";
+        case TokenType::TOKEN_FLOAT:         return "'float'";
+        case TokenType::TOKEN_DOUBLE:        return "'double'";
+        case TokenType::TOKEN_CHAR_KW:       return "'char'";
+        case TokenType::TOKEN_VOID:          return "'void'";
+        case TokenType::TOKEN_IF:            return "'if'";
+        case TokenType::TOKEN_ELSE:          return "'else'";
+        case TokenType::TOKEN_FOR:           return "'for'";
+        case TokenType::TOKEN_WHILE:         return "'while'";
+        case TokenType::TOKEN_DO:            return "'do'";
+        case TokenType::TOKEN_RETURN:        return "'return'";
+        case TokenType::TOKEN_BREAK:         return "'break'";
+        case TokenType::TOKEN_CONTINUE:      return "'continue'";
+        case TokenType::TOKEN_STRUCT:        return "'struct'";
+        case TokenType::TOKEN_UNION:         return "'union'";
+        case TokenType::TOKEN_ENUM:          return "'enum'";
+        case TokenType::TOKEN_TYPEDEF:       return "'typedef'";
+        case TokenType::TOKEN_SIZEOF:        return "'sizeof'";
+        case TokenType::TOKEN_SEMICOLON:     return "';'";
+        case TokenType::TOKEN_COMMA:         return "','";
+        case TokenType::TOKEN_LBRACE:        return "'{'";
+        case TokenType::TOKEN_RBRACE:        return "'}'";
+        case TokenType::TOKEN_LPAREN:        return "'('";
+        case TokenType::TOKEN_RPAREN:        return "')'";
+        case TokenType::TOKEN_LBRACKET:      return "'['";
+        case TokenType::TOKEN_RBRACKET:      return "']'";
+        case TokenType::TOKEN_ASSIGN:        return "'='";
+        case TokenType::TOKEN_COLON:         return "':'";
+        case TokenType::TOKEN_EOS:           return "end of file";
+        default:                             return "token";
+    }
+}
+
 std::optional<Token> Parser::peek() const {
     if (eof()) {
         return {};
@@ -233,6 +311,7 @@ std::unique_ptr<ExprAST> Parser::parseUnary() {
         if (isCast) {
             advance(); // consume type keyword
             if (!match(TokenType::TOKEN_RPAREN)) {
+                errorUnexpected("expected ')' after cast type");
                 return nullptr;
             }
             auto operand = parseUnary();
@@ -247,7 +326,7 @@ std::unique_ptr<ExprAST> Parser::parseUnary() {
         if (!expr) {
             return nullptr;
         }
-        match(TokenType::TOKEN_RPAREN);
+        expect(TokenType::TOKEN_RPAREN, "expected ')' after expression");
         return expr;
     }
 
@@ -282,7 +361,7 @@ std::unique_ptr<ExprAST> Parser::parseUnary() {
             if (sizeofType) {
                 advance(); // consume type keyword
             }
-            match(TokenType::TOKEN_RPAREN);
+            expect(TokenType::TOKEN_RPAREN, "expected ')' after sizeof operand");
             return std::make_unique<SizeofExprAST>(sizeofType);
         }
 
@@ -369,7 +448,7 @@ std::unique_ptr<ExprAST> Parser::parsePrimary() {
                 }
             }
 
-            match(TokenType::TOKEN_RPAREN);
+            expect(TokenType::TOKEN_RPAREN, "expected ')' after function arguments");
             return std::make_unique<CallExprAST>(name, std::move(args));
         }
 
@@ -380,7 +459,7 @@ std::unique_ptr<ExprAST> Parser::parsePrimary() {
     if (token->type == TokenType::TOKEN_LPAREN) {
         advance();
         auto expr = parseExpr();
-        match(TokenType::TOKEN_RPAREN);
+        expect(TokenType::TOKEN_RPAREN, "expected ')' after expression");
         return expr;
     }
 
@@ -399,10 +478,11 @@ std::unique_ptr<ExprAST> Parser::parsePrimary() {
             }
         }
 
-        match(TokenType::TOKEN_RBRACE);
+        expect(TokenType::TOKEN_RBRACE, "expected '}' to end initializer list");
         return std::make_unique<InitializerListExprAST>(std::move(initList));
     }
 
+    errorUnexpected("expected expression");
     return nullptr;
 }
 
@@ -433,7 +513,7 @@ std::unique_ptr<ExprAST> Parser::parsePostfix(std::unique_ptr<ExprAST> lhs) {
                         if (!match(TokenType::TOKEN_COMMA)) break;
                     }
                 }
-                match(TokenType::TOKEN_RPAREN);
+                expect(TokenType::TOKEN_RPAREN, "expected ')' after function arguments");
                 // This would need a different AST node for indirect calls
                 // For now, return the lhs as-is (the call args are parsed but unused)
                 break;
@@ -442,7 +522,7 @@ std::unique_ptr<ExprAST> Parser::parsePostfix(std::unique_ptr<ExprAST> lhs) {
                 advance(); // consume '['
                 auto index = parseExpr();
                 if (!index) return nullptr;
-                match(TokenType::TOKEN_RBRACKET);
+                expect(TokenType::TOKEN_RBRACKET, "expected ']' after array index");
                 lhs = std::make_unique<ArrayAccessExprAST>(std::move(lhs), std::move(index));
                 break;
             }
@@ -451,6 +531,8 @@ std::unique_ptr<ExprAST> Parser::parsePostfix(std::unique_ptr<ExprAST> lhs) {
                 if (auto member = match(TokenType::TOKEN_IDENTIFIER)) {
                     lhs = std::make_unique<MemberAccessExprAST>(
                         MemberAccessKind::Dot, std::move(lhs), member->lexeme);
+                } else {
+                    errorUnexpected("expected member name after '.'");
                 }
                 break;
             }
@@ -459,6 +541,8 @@ std::unique_ptr<ExprAST> Parser::parsePostfix(std::unique_ptr<ExprAST> lhs) {
                 if (auto member = match(TokenType::TOKEN_IDENTIFIER)) {
                     lhs = std::make_unique<MemberAccessExprAST>(
                         MemberAccessKind::Arrow, std::move(lhs), member->lexeme);
+                } else {
+                    errorUnexpected("expected member name after '->'");
                 }
                 break;
             }
@@ -556,17 +640,18 @@ std::unique_ptr<ReturnStmtAST> Parser::parseReturnStmt() {
 
     auto value = parseExpr();
     if (!value) {
+        errorUnexpected("expected expression after 'return'");
         return nullptr;
     }
 
-    match(TokenType::TOKEN_SEMICOLON);
+    expect(TokenType::TOKEN_SEMICOLON, "expected ';' after return statement");
     auto stmt = std::make_unique<ReturnStmtAST>(std::move(value));
     stmt->setLocation(retToken->filename, retToken->line, retToken->column);
     return stmt;
 }
 
 std::unique_ptr<CompoundStmtAST> Parser::parseCompoundStmt() {
-    if (!match(TokenType::TOKEN_LBRACE)) {
+    if (!expect(TokenType::TOKEN_LBRACE, "expected '{' to begin compound statement")) {
         return nullptr;
     }
 
@@ -579,7 +664,7 @@ std::unique_ptr<CompoundStmtAST> Parser::parseCompoundStmt() {
         }
         stmts.push_back(std::move(stmt));
     }
-    match(TokenType::TOKEN_RBRACE);
+    expect(TokenType::TOKEN_RBRACE, "expected '}' to end compound statement");
 
     return std::make_unique<CompoundStmtAST>(std::move(stmts));
 }
@@ -624,10 +709,11 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
     if (auto retToken = match(TokenType::TOKEN_RETURN)) {
         auto value = parseExpr();
         if (!value) {
+            errorUnexpected("expected expression after 'return'");
             return nullptr;
         }
 
-        match(TokenType::TOKEN_SEMICOLON);
+        expect(TokenType::TOKEN_SEMICOLON, "expected ';' after return statement");
         auto stmt = std::make_unique<ReturnStmtAST>(std::move(value));
         stmt->setLocation(retToken->filename, retToken->line, retToken->column);
         return stmt;
@@ -685,15 +771,24 @@ std::unique_ptr<StmtAST> Parser::parseIfStmt() {
         return nullptr;
     }
 
-    match(TokenType::TOKEN_LPAREN);
+    expect(TokenType::TOKEN_LPAREN, "expected '(' after 'if'");
     auto cond = parseExpr();
-    match(TokenType::TOKEN_RPAREN);
+    if (!cond) {
+        errorUnexpected("expected condition expression");
+    }
+    expect(TokenType::TOKEN_RPAREN, "expected ')' after condition");
 
     auto thenStmt = parseStmt();
+    if (!thenStmt) {
+        errorUnexpected("expected statement after 'if' condition");
+    }
 
     std::unique_ptr<StmtAST> elseStmt;
     if (match(TokenType::TOKEN_ELSE)) {
         elseStmt = parseStmt();
+        if (!elseStmt) {
+            errorUnexpected("expected statement after 'else'");
+        }
     }
 
     auto stmt = std::make_unique<IfStmtAST>(std::move(cond), std::move(thenStmt), std::move(elseStmt));
@@ -707,11 +802,17 @@ std::unique_ptr<StmtAST> Parser::parseWhileStmt() {
         return nullptr;
     }
 
-    match(TokenType::TOKEN_LPAREN);
+    expect(TokenType::TOKEN_LPAREN, "expected '(' after 'while'");
     auto cond = parseExpr();
-    match(TokenType::TOKEN_RPAREN);
+    if (!cond) {
+        errorUnexpected("expected condition expression");
+    }
+    expect(TokenType::TOKEN_RPAREN, "expected ')' after condition");
 
     auto body = parseStmt();
+    if (!body) {
+        errorUnexpected("expected statement after 'while' condition");
+    }
 
     auto stmt = std::make_unique<WhileStmtAST>(std::move(cond), std::move(body));
     stmt->setLocation(whileToken->filename, whileToken->line, whileToken->column);
@@ -725,12 +826,18 @@ std::unique_ptr<StmtAST> Parser::parseDoWhileStmt() {
     }
 
     auto body = parseStmt();
+    if (!body) {
+        errorUnexpected("expected statement after 'do'");
+    }
 
-    match(TokenType::TOKEN_WHILE);
-    match(TokenType::TOKEN_LPAREN);
+    expect(TokenType::TOKEN_WHILE, "expected 'while' after 'do' body");
+    expect(TokenType::TOKEN_LPAREN, "expected '(' after 'while'");
     auto cond = parseExpr();
-    match(TokenType::TOKEN_RPAREN);
-    match(TokenType::TOKEN_SEMICOLON);
+    if (!cond) {
+        errorUnexpected("expected condition expression");
+    }
+    expect(TokenType::TOKEN_RPAREN, "expected ')' after condition");
+    expect(TokenType::TOKEN_SEMICOLON, "expected ';' after do-while statement");
 
     auto stmt = std::make_unique<DoWhileStmtAST>(std::move(cond), std::move(body));
     stmt->setLocation(doToken->filename, doToken->line, doToken->column);
@@ -743,7 +850,7 @@ std::unique_ptr<StmtAST> Parser::parseForStmt() {
         return nullptr;
     }
 
-    match(TokenType::TOKEN_LPAREN);
+    expect(TokenType::TOKEN_LPAREN, "expected '(' after 'for'");
 
     // init
     std::unique_ptr<StmtAST> init;
@@ -758,16 +865,19 @@ std::unique_ptr<StmtAST> Parser::parseForStmt() {
     if (peek() && peek()->type != TokenType::TOKEN_SEMICOLON) {
         cond = parseExpr();
     }
-    match(TokenType::TOKEN_SEMICOLON);
+    expect(TokenType::TOKEN_SEMICOLON, "expected ';' after for condition");
 
     // increment
     std::unique_ptr<ExprAST> inc;
     if (peek() && peek()->type != TokenType::TOKEN_RPAREN) {
         inc = parseExpr();
     }
-    match(TokenType::TOKEN_RPAREN);
+    expect(TokenType::TOKEN_RPAREN, "expected ')' after for increment");
 
     auto body = parseStmt();
+    if (!body) {
+        errorUnexpected("expected statement after 'for' header");
+    }
 
     auto stmt = std::make_unique<ForStmtAST>(std::move(init), std::move(cond), std::move(inc), std::move(body));
     stmt->setLocation(forToken->filename, forToken->line, forToken->column);
@@ -780,7 +890,7 @@ std::unique_ptr<StmtAST> Parser::parseBreakStmt() {
         return nullptr;
     }
 
-    match(TokenType::TOKEN_SEMICOLON);
+    expect(TokenType::TOKEN_SEMICOLON, "expected ';' after 'break'");
 
     auto stmt = std::make_unique<BreakStmtAST>();
     stmt->setLocation(breakToken->filename, breakToken->line, breakToken->column);
@@ -793,7 +903,7 @@ std::unique_ptr<StmtAST> Parser::parseContinueStmt() {
         return nullptr;
     }
 
-    match(TokenType::TOKEN_SEMICOLON);
+    expect(TokenType::TOKEN_SEMICOLON, "expected ';' after 'continue'");
 
     auto stmt = std::make_unique<ContinueStmtAST>();
     stmt->setLocation(continueToken->filename, continueToken->line, continueToken->column);
@@ -807,7 +917,10 @@ std::unique_ptr<StmtAST> Parser::parseGotoStmt() {
     }
 
     auto label = match(TokenType::TOKEN_IDENTIFIER);
-    match(TokenType::TOKEN_SEMICOLON);
+    if (!label) {
+        errorUnexpected("expected label name after 'goto'");
+    }
+    expect(TokenType::TOKEN_SEMICOLON, "expected ';' after 'goto' statement");
 
     auto stmt = std::make_unique<GotoStmtAST>(label ? label->lexeme : "");
     stmt->setLocation(gotoToken->filename, gotoToken->line, gotoToken->column);
@@ -821,7 +934,10 @@ std::unique_ptr<StmtAST> Parser::parseLabelStmt(const std::string& label) {
 
 std::unique_ptr<StmtAST> Parser::parseExprStmt() {
     auto expr = parseExpr();
-    match(TokenType::TOKEN_SEMICOLON);
+    if (!expr) {
+        return nullptr;
+    }
+    expect(TokenType::TOKEN_SEMICOLON, "expected ';' after expression statement");
     return std::make_unique<ExprStmtAST>(std::move(expr));
 }
 
@@ -1154,7 +1270,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
 }
 
 std::unique_ptr<FunctionDeclAST> Parser::parseFunctionDecl(Type* returnType, const std::string& name) {
-    if (!match(TokenType::TOKEN_LPAREN)) return nullptr;
+    if (!expect(TokenType::TOKEN_LPAREN, "expected '(' after function name")) return nullptr;
 
     std::vector<std::unique_ptr<ParamDeclAST>> params;
     bool isVarArg = false;
@@ -1180,12 +1296,14 @@ std::unique_ptr<FunctionDeclAST> Parser::parseFunctionDecl(Type* returnType, con
         }
     }
 
-    if (!match(TokenType::TOKEN_RPAREN)) return nullptr;
+    if (!expect(TokenType::TOKEN_RPAREN, "expected ')' after parameter list")) return nullptr;
 
     // Check for function body
     std::unique_ptr<CompoundStmtAST> body;
     if (check(TokenType::TOKEN_LBRACE)) {
         body = parseCompoundStmt();
+    } else if (!check(TokenType::TOKEN_SEMICOLON) && !eof()) {
+        errorUnexpected("expected '{' or ';' after function declaration");
     }
 
     return std::make_unique<FunctionDeclAST>(name, returnType, params, body);
@@ -1201,7 +1319,9 @@ std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string
         if (auto numTok = match(TokenType::TOKEN_NUMBER)) {
             size = std::get<int>(numTok->value);
         }
-        match(TokenType::TOKEN_RBRACKET);
+        if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after array size")) {
+            return nullptr;
+        }
 
         // Check for initializer
         if (check(TokenType::TOKEN_ASSIGN)) {
@@ -1209,7 +1329,7 @@ std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string
             init = parseExpr();
         }
 
-        match(TokenType::TOKEN_SEMICOLON);
+        expect(TokenType::TOKEN_SEMICOLON, "expected ';' after array declaration");
         return std::make_unique<ArrayDeclAST>(name, type, size, std::move(init));
     }
 
@@ -1219,7 +1339,7 @@ std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string
         init = parseExpr();
     }
 
-    match(TokenType::TOKEN_SEMICOLON);
+    expect(TokenType::TOKEN_SEMICOLON, "expected ';' after variable declaration");
     return std::make_unique<VarDeclAST>(name, type, std::move(init));
 }
 

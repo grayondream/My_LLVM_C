@@ -37,6 +37,8 @@ private:
     bool isPointerOrArray(Type* type) const;
     bool typesCompatible(Type* left, Type* right) const;
     Type* getCommonType(Type* left, Type* right) const;
+    std::string typeToString(Type* type) const;
+    std::string binaryOpToString(BinaryOp op) const;
 
     void visit(TranslationUnitAST& node);
     void visit(FunctionDeclAST& node);

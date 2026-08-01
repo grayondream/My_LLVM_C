@@ -5,14 +5,21 @@
 #include <optional>
 #include "frontend/Token.h"
 #include "ast/Decl.h"
+#include "sema/Diagnostic.h"
 
 class Parser{
 public:
     Parser(const std::vector<Token>& tokens) : m_tokens(std::move(tokens)) {}
 
     std::unique_ptr<TranslationUnitAST> parse();
+    const std::vector<Diagnostic>& getErrors() const;
 
 private:
+    void error(const std::string& msg, const Token& token);
+    void errorUnexpected(const std::string& expected);
+    void errorUnexpectedEOF(const std::string& expected);
+    bool expect(TokenType type, const std::string& msg);
+    std::string tokenTypeName(TokenType type) const;
     bool eof() const;
 
     std::optional<Token> match(TokenType type);
@@ -88,4 +95,5 @@ private:
 private:
     std::vector<Token> m_tokens;
     size_t m_currentTokenPos{0};
+    std::vector<Diagnostic> m_errors;
 };
