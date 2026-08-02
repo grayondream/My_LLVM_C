@@ -7,7 +7,7 @@ Linker::Linker() {
 }
 
 std::string Linker::findSystemLinker() {
-    const char* linkers[] = {"ld", "ld.lld", "ld.gold", nullptr};
+    const char* linkers[] = {"cc", "gcc", "ld", "ld.lld", "ld.gold", nullptr};
     for (const char** l = linkers; *l; l++) {
         std::string cmd = std::string("which ") + *l + " 2>/dev/null";
         if (system(cmd.c_str()) == 0) {
