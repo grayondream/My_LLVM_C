@@ -8,6 +8,9 @@ target_include_directories(my_llvm_c_lib PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 find_package(spdlog CONFIG REQUIRED)
 target_link_libraries(my_llvm_c_lib PUBLIC spdlog::spdlog)
 
+find_package(cxxopts CONFIG REQUIRED)
+target_link_libraries(my_llvm_c_lib PUBLIC cxxopts::cxxopts)
+
 if(LLVM_LINK_LLVM_DYLIB)
     target_link_libraries(my_llvm_c_lib PUBLIC LLVM)
 else()

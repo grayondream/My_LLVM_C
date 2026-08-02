@@ -5,6 +5,7 @@
     "description": "A C11 subset compiler built with LLVM",
     "dependencies": [
         "llvm",
-        "spdlog"
+        "spdlog",
+        "cxxopts"
     ]
 }
