@@ -209,3 +209,9 @@ TEST_F(CompilerDriverTest, RunJitModeReturnsZero) {
     ASSERT_TRUE(driver.parseArguments(1, argv));
     EXPECT_EQ(driver.run(), 0);
 }
+
+TEST_F(CompilerDriverTest, DefaultOutputIsAOut) {
+    const char* argv[] = {"my_llvm_c", "test.c"};
+    ASSERT_TRUE(driver.parseArguments(2, argv));
+    EXPECT_EQ(driver.getOutputFile(), "a.out");
+}

@@ -109,7 +109,7 @@ bool CompilerDriver::parseArguments(int argc, const char* argv[]) {
     }
 
     if (outputFile.empty() && !inputFiles.empty()) {
-        outputFile = "output";
+        outputFile = "a.out";
     }
 
     return true;
