@@ -1,9 +1,80 @@
 #include "CompilerDriver.h"
+#include "Linker.h"
+#include "frontend/Lexer.h"
+#include "frontend/Parser.h"
+#include "codegen/CodegenContext.h"
+#include "support/File.h"
+#include "support/Log.h"
 #include <cxxopts.hpp>
 #include <iostream>
 #include <cstdlib>
-#include <algorithm>
-#include <cstring>
+
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/MC/TargetRegistry.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/TargetSelect.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetOptions.h"
+#include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/Triple.h"
+#include "llvm/Passes/PassBuilder.h"
+#include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/Verifier.h"
+#include "llvm/Bitcode/BitcodeWriter.h"
+
+static std::string getHostTargetTriple() {
+    return llvm::sys::getDefaultTargetTriple();
+}
+
+static std::unique_ptr<llvm::TargetMachine>
+createTargetMachine(llvm::Module& module) {
+    std::string triple = getHostTargetTriple();
+    llvm::Triple llvmTriple(triple);
+    module.setTargetTriple(llvmTriple.str());
+
+    std::string error;
+    const llvm::Target* target = llvm::TargetRegistry::lookupTarget(llvmTriple.str(), error);
+    if (!target) {
+        LOGE("Target lookup failed: {}", error);
+        return nullptr;
+    }
+
+    llvm::TargetOptions options;
+    auto tm = target->createTargetMachine(
+        llvmTriple.str(), "generic", "", options, llvm::Reloc::Model());
+    if (!tm) {
+        LOGE("Failed to create TargetMachine");
+        return nullptr;
+    }
+
+    module.setDataLayout(tm->createDataLayout());
+    return std::unique_ptr<llvm::TargetMachine>(tm);
+}
+
+static bool emitObjectFile(llvm::Module& module, const std::string& outputPath) {
+    auto tm = createTargetMachine(module);
+    if (!tm) return false;
+
+    std::error_code ec;
+    llvm::raw_fd_ostream dest(outputPath, ec, llvm::sys::fs::OF_None);
+    if (ec) {
+        LOGE("Failed to open output file: {} ({})", outputPath, ec.message());
+        return false;
+    }
+
+    llvm::legacy::PassManager passManager;
+    if (tm->addPassesToEmitFile(passManager, dest, nullptr,
+            llvm::CodeGenFileType::ObjectFile)) {
+        LOGE("TargetMachine cannot emit object file");
+        return false;
+    }
+
+    passManager.run(module);
+    dest.flush();
+    dest.close();
+    return true;
+}
 
 bool CompilerDriver::parseArguments(int argc, const char* argv[]) {
     inputFiles.clear();
@@ -25,37 +96,34 @@ bool CompilerDriver::parseArguments(int argc, const char* argv[]) {
     includeDebug = false;
     stdStandard.clear();
 
-    std::vector<std::string> remainingArgs;
+    std::vector<std::string> args;
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
-
-        if (arg == "-fsyntax-only") {
-            syntaxOnly = true;
-        } else if (arg == "-Wall") {
+        if (arg == "-Wall") {
             wall = true;
         } else if (arg == "-Werror") {
             werror = true;
-        } else if (arg == "-std") {
-            if (i + 1 < argc) {
-                stdStandard = argv[++i];
-            } else {
-                std::cerr << "error: -std requires an argument\n";
-                return false;
-            }
+        } else if (arg.substr(0, 5) == "-std=") {
+            stdStandard = arg.substr(5);
+        } else if (arg == "-std" && i + 1 < argc) {
+            stdStandard = argv[++i];
+        } else if (arg == "-fsyntax-only") {
+            syntaxOnly = true;
         } else {
-            remainingArgs.push_back(arg);
+            args.push_back(arg);
         }
     }
 
-    int newArgc = static_cast<int>(remainingArgs.size()) + 1;
-    std::vector<const char*> newArgv;
-    newArgv.push_back(argv[0]);
-    for (const auto& arg : remainingArgs) {
-        newArgv.push_back(arg.c_str());
+    std::vector<const char*> cArgs;
+    cArgs.push_back("my_llvm_c");
+    for (const auto& a : args) {
+        cArgs.push_back(a.c_str());
     }
+    int newArgc = static_cast<int>(cArgs.size());
+    const char** newArgv = cArgs.data();
 
     cxxopts::Options options("my_llvm_c", "A C11 subset compiler built with LLVM");
-
+    
     options.add_options()
         ("c", "Compile only, do not link")
         ("o,output", "Output file", cxxopts::value<std::string>())
@@ -75,7 +143,7 @@ bool CompilerDriver::parseArguments(int argc, const char* argv[]) {
     options.parse_positional({"positional"});
 
     try {
-        auto result = options.parse(newArgc, newArgv.data());
+        auto result = options.parse(newArgc, newArgv);
 
         if (result.count("help")) {
             printHelp();
@@ -121,34 +189,116 @@ int CompilerDriver::run() {
         return 0;
     }
 
+    int exitCode = 0;
     for (const auto& file : inputFiles) {
-        if (verbose) {
-            std::cout << "compiling: " << file << "\n";
-            std::cout << "  output: " << outputFile << "\n";
-            std::cout << "  compile-only: " << compileOnly << "\n";
-            std::cout << "  emit-ir: " << emitIR << "\n";
-            std::cout << "  emit-obj: " << emitObj << "\n";
-            std::cout << "  preprocess-only: " << preprocessOnly << "\n";
-            std::cout << "  syntax-only: " << syntaxOnly << "\n";
-            std::cout << "  opt-level: " << optLevel << "\n";
-            std::cout << "  include-debug: " << includeDebug << "\n";
-            std::cout << "  wall: " << wall << "\n";
-            std::cout << "  werror: " << werror << "\n";
-            if (!stdStandard.empty()) std::cout << "  std: " << stdStandard << "\n";
-            for (const auto& inc : includePaths) {
-                std::cout << "  include: " << inc << "\n";
-            }
-            for (const auto& def : defines) {
-                std::cout << "  define: " << def << "\n";
-            }
-            for (const auto& lib : libs) {
-                std::cout << "  lib: " << lib << "\n";
-            }
-            for (const auto& path : libPaths) {
-                std::cout << "  lib-path: " << path << "\n";
-            }
+        if (compileFile(file) != 0) {
+            exitCode = 1;
         }
     }
+    return exitCode;
+}
+
+int CompilerDriver::compileFile(const std::string& inputFile) {
+    if (verbose) {
+        std::cout << "compiling: " << inputFile << "\n";
+        std::cout << "  output: " << outputFile << "\n";
+        std::cout << "  compile-only: " << compileOnly << "\n";
+        std::cout << "  emit-ir: " << emitIR << "\n";
+        std::cout << "  opt-level: " << optLevel << "\n";
+        std::cout << "  include-debug: " << includeDebug << "\n";
+    }
+
+    File file(inputFile.c_str());
+    if (!file.isOpen()) {
+        LOGE("open file {} failed", inputFile);
+        return 1;
+    }
+
+    std::string content = file.readAll();
+    file.close();
+
+    if (content.empty()) {
+        LOGE("file {} is empty", inputFile);
+        return 1;
+    }
+
+    Lexer lexer(inputFile, content);
+    auto tokens = lexer.tokenize();
+
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    if (!ast) {
+        LOGE("parse ast failed");
+        return 1;
+    }
+
+    if (syntaxOnly) {
+        return 0;
+    }
+
+    if (preprocessOnly) {
+        std::cout << content;
+        return 0;
+    }
+
+    CodegenContext codegenCtx;
+    codegenCtx.setSourceFile(inputFile);
+    ast->codegen(codegenCtx);
+    codegenCtx.finalizeDebugInfo();
+
+    if (emitIR) {
+        codegenCtx.getModule().print(llvm::outs(), nullptr);
+        return 0;
+    }
+
+    if (optLevel > 0) {
+        llvm::LoopAnalysisManager LAM;
+        llvm::FunctionAnalysisManager FAM;
+        llvm::CGSCCAnalysisManager CGAM;
+        llvm::ModuleAnalysisManager MAM;
+
+        llvm::PassBuilder PB;
+        PB.registerModuleAnalyses(MAM);
+        PB.registerCGSCCAnalyses(CGAM);
+        PB.registerFunctionAnalyses(FAM);
+        PB.registerLoopAnalyses(LAM);
+        PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+
+        llvm::OptimizationLevel optLevelEnum;
+        switch (optLevel) {
+            case 1: optLevelEnum = llvm::OptimizationLevel::O1; break;
+            case 2: optLevelEnum = llvm::OptimizationLevel::O2; break;
+            case 3: optLevelEnum = llvm::OptimizationLevel::O3; break;
+            default: optLevelEnum = llvm::OptimizationLevel::O2; break;
+        }
+
+        llvm::ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(optLevelEnum);
+        MPM.run(codegenCtx.getModule(), MAM);
+    }
+
+    if (compileOnly) {
+        std::string objectPath = outputFile;
+        if (!emitObjectFile(codegenCtx.getModule(), objectPath)) {
+            LOGE("failed to emit object file");
+            return 1;
+        }
+        return 0;
+    }
+
+    std::string objectPath = outputFile + ".o";
+    if (!emitObjectFile(codegenCtx.getModule(), objectPath)) {
+        LOGE("failed to emit object file");
+        return 1;
+    }
+
+    Linker linker;
+    int ret = linker.link({objectPath}, outputFile);
+    if (ret != 0) {
+        LOGE("linker failed with exit code {}", ret);
+        return ret;
+    }
+
+    std::remove(objectPath.c_str());
 
     return 0;
 }

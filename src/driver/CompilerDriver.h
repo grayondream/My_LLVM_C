@@ -32,6 +32,8 @@ public:
     void printHelp() const;
 
 private:
+    int compileFile(const std::string& inputFile);
+
     std::vector<std::string> inputFiles;
     std::string outputFile;
     std::vector<std::string> includePaths;

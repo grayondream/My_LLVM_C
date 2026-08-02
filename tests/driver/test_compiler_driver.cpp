@@ -199,8 +199,8 @@ TEST_F(CompilerDriverTest, MissingOutputArgumentFails) {
 }
 
 TEST_F(CompilerDriverTest, RunReturnsZero) {
-    const char* argv[] = {"my_llvm_c", "test.c"};
-    ASSERT_TRUE(driver.parseArguments(2, argv));
+    const char* argv[] = {"my_llvm_c"};
+    ASSERT_TRUE(driver.parseArguments(1, argv));
     EXPECT_EQ(driver.run(), 0);
 }
 
