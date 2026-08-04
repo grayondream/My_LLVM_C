@@ -409,3 +409,27 @@ TEST_F(SemanticAnalyzerTest, ReturnTypeErrorContainsFunctionName) {
     ASSERT_FALSE(analyzer->getErrors().empty());
     EXPECT_NE(analyzer->getErrors()[0].message.find("myFunc"), std::string::npos);
 }
+
+TEST_F(SemanticAnalyzerTest, ConstAssignmentError) {
+    auto constIntType = typeCtx->getInt();
+    constIntType->isConst = true;
+
+    std::vector<std::unique_ptr<StmtAST>> bodyStmts;
+    bodyStmts.push_back(std::make_unique<DeclStmtAST>(
+        std::make_unique<VarDeclAST>("x", constIntType)));
+    bodyStmts.push_back(std::make_unique<ExprStmtAST>(
+        std::make_unique<AssignmentExprAST>(
+            AssignOp::Assign,
+            std::make_unique<VariableExprAST>("x"),
+            std::make_unique<NumberExprAST>(20))));
+    auto body = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
+
+    std::vector<std::unique_ptr<ParamDeclAST>> params;
+    std::vector<std::unique_ptr<DeclAST>> decls;
+    decls.push_back(std::make_unique<FunctionDeclAST>(
+        "foo", typeCtx->getVoid(), params, body));
+    TranslationUnitAST tu(std::move(decls));
+    analyzer->analyze(tu);
+    EXPECT_TRUE(analyzer->getErrors().size() >= 1);
+    EXPECT_NE(analyzer->getErrors()[0].message.find("const"), std::string::npos);
+}

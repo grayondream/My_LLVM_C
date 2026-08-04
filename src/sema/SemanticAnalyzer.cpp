@@ -345,6 +345,10 @@ void SemanticAnalyzer::visit(CallExprAST& node) {
 
 void SemanticAnalyzer::visit(AssignmentExprAST& node) {
     Type* lhsType = getExprType(*node.lhs);
+    if (lhsType && lhsType->isConst) {
+        emitError("cannot assign to const variable", node);
+        return;
+    }
     Type* rhsType = getExprType(*node.rhs);
     node.type = checkAssignmentTypes(lhsType, rhsType, node);
     node.isLValue = true;
