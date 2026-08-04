@@ -14,6 +14,7 @@
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 #include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
+#include "driver/CompilerDriver.h"
 
 namespace fs = std::filesystem;
 
@@ -116,9 +117,19 @@ TEST_F(ConstConstexprE2E, ConstexprInFunction) {
 }
 
 TEST_F(ConstConstexprE2E, ConstFromResourceFile) {
-    std::ifstream ifs(fs::path(TEST_INPUT_DIR) / "test_const.c");
+    std::ifstream ifs(fs::path(E2E_RESOURCE_DIR) / "test_const.c");
     ASSERT_TRUE(ifs.is_open());
     std::stringstream ss;
     ss << ifs.rdbuf();
     EXPECT_EQ(runSource(ss.str(), "test_const.c"), 0);
+}
+
+TEST_F(ConstConstexprE2E, DriverBasicUsage) {
+    CompilerDriver driver;
+    std::string testFile = std::string(E2E_RESOURCE_DIR) + "/test_const.c";
+    const char* argv[] = {"my_llvm_c", "-o", "test_const_e2e", testFile.c_str()};
+    ASSERT_TRUE(driver.parseArguments(4, argv));
+    EXPECT_EQ(driver.run(), 0);
+    EXPECT_EQ(system("./test_const_e2e"), 0);
+    std::remove("test_const_e2e");
 }

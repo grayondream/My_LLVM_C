@@ -19,6 +19,7 @@ target_include_directories(compiler_tests PRIVATE
 
 target_compile_definitions(compiler_tests PRIVATE
     TEST_INPUT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/resources/test_input"
+    E2E_RESOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/e2e/resources"
 )
 
 target_link_libraries(compiler_tests
