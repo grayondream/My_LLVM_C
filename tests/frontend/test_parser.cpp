@@ -1304,6 +1304,7 @@ TEST_F(ParserDeclTest, ConstVarDecl) {
     auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(var, nullptr);
     EXPECT_TRUE(var->type->isConst);
+    EXPECT_FALSE(var->isConstexpr);
 }
 
 TEST_F(ParserDeclTest, VolatileVarDecl) {
