@@ -14,9 +14,10 @@ public:
     std::string name;
     Type* type;
     std::unique_ptr<ExprAST> initExpr;
+    bool isConstexpr = false;
 
-    VarDeclAST(const std::string& n, Type* t, std::unique_ptr<ExprAST> init = nullptr)
-        : name(n), type(t), initExpr(std::move(init)) {}
+    VarDeclAST(const std::string& n, Type* t, std::unique_ptr<ExprAST> init = nullptr, bool constexpr_ = false)
+        : name(n), type(t), initExpr(std::move(init)), isConstexpr(constexpr_) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 

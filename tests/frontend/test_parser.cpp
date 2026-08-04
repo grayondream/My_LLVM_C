@@ -1483,6 +1483,16 @@ TEST_F(ParserDeclTest, TypedefArray) {
     EXPECT_EQ(var->type->kind, TypeKind::Typedef);
 }
 
+TEST_F(ParserDeclTest, ConstexprVarDecl) {
+    auto tu = parse("constexpr int x = 42;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto* varDecl = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(varDecl, nullptr);
+    EXPECT_TRUE(varDecl->isConstexpr);
+    EXPECT_EQ(varDecl->name, "x");
+}
+
 // ========== Error Message Tests ==========
 
 class ParserErrorTest : public ::testing::Test {
