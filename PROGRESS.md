@@ -44,6 +44,12 @@
 - [x] 改进错误消息（20+ 处改进）
 - [x] 代码覆盖率验证
 
+### 阶段 9: const/constexpr 支持
+- [x] Lexer: TOKEN_CONSTEXPR 关键字识别
+- [x] Parser: const/constexpr 声明解析
+- [x] Semantic Analyzer: const 赋值检查、constexpr 常量折叠
+- [x] Codegen: const/constexpr 变量代码生成
+
 ## 测试结果
 
 - **388/388 测试通过**
