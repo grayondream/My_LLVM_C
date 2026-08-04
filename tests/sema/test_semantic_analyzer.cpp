@@ -433,3 +433,48 @@ TEST_F(SemanticAnalyzerTest, ConstAssignmentError) {
     EXPECT_TRUE(analyzer->getErrors().size() >= 1);
     EXPECT_NE(analyzer->getErrors()[0].message.find("const"), std::string::npos);
 }
+
+TEST_F(SemanticAnalyzerTest, ConstexprMustHaveInitializer) {
+    std::vector<std::unique_ptr<DeclAST>> decls;
+    decls.push_back(std::make_unique<VarDeclAST>("x", typeCtx->getInt(), nullptr, true));
+    TranslationUnitAST tu(std::move(decls));
+    analyzer->analyze(tu);
+    EXPECT_FALSE(analyzer->getErrors().empty());
+    EXPECT_NE(analyzer->getErrors()[0].message.find("constexpr"), std::string::npos);
+    EXPECT_NE(analyzer->getErrors()[0].message.find("initializer"), std::string::npos);
+}
+
+TEST_F(SemanticAnalyzerTest, ConstexprConstantFolding) {
+    auto initExpr = std::make_unique<BinaryExprAST>(
+        BinaryOp::Add,
+        std::make_unique<NumberExprAST>(2),
+        std::make_unique<BinaryExprAST>(
+            BinaryOp::Mul,
+            std::make_unique<NumberExprAST>(3),
+            std::make_unique<NumberExprAST>(4)));
+
+    std::vector<std::unique_ptr<DeclAST>> decls;
+    decls.push_back(std::make_unique<VarDeclAST>("x", typeCtx->getInt(), std::move(initExpr), true));
+    TranslationUnitAST tu(std::move(decls));
+    analyzer->analyze(tu);
+    EXPECT_TRUE(analyzer->getErrors().empty());
+}
+
+TEST_F(SemanticAnalyzerTest, ConstexprNonConstantError) {
+    std::vector<std::unique_ptr<StmtAST>> bodyStmts;
+    bodyStmts.push_back(std::make_unique<DeclStmtAST>(
+        std::make_unique<VarDeclAST>("y", typeCtx->getInt())));
+    bodyStmts.push_back(std::make_unique<DeclStmtAST>(
+        std::make_unique<VarDeclAST>("x", typeCtx->getInt(),
+            std::make_unique<VariableExprAST>("y"), true)));
+    auto body = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
+
+    std::vector<std::unique_ptr<ParamDeclAST>> params;
+    std::vector<std::unique_ptr<DeclAST>> decls;
+    decls.push_back(std::make_unique<FunctionDeclAST>(
+        "foo", typeCtx->getVoid(), params, body));
+    TranslationUnitAST tu(std::move(decls));
+    analyzer->analyze(tu);
+    EXPECT_FALSE(analyzer->getErrors().empty());
+    EXPECT_NE(analyzer->getErrors()[0].message.find("constant expression"), std::string::npos);
+}

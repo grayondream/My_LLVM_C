@@ -3,6 +3,8 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <optional>
+#include <unordered_map>
 #include "sema/Diagnostic.h"
 #include "ast/Symbol.h"
 #include "ast/Type.h"
@@ -12,6 +14,11 @@
 
 class SemanticAnalyzer {
 public:
+    struct ConstValue {
+        enum Type { INT, DOUBLE, CHAR } type;
+        union { int intVal; double doubleVal; char charVal; };
+    };
+
     SemanticAnalyzer();
 
     void analyze(TranslationUnitAST& ast);
@@ -27,6 +34,7 @@ public:
     Type* checkFunctionCall(const std::string& name, const std::vector<std::unique_ptr<ExprAST>>& args, ExprAST& node);
 
     Type* getExprType(ExprAST& expr);
+    std::optional<ConstValue> evaluateConstexpr(ExprAST* expr);
 
 private:
     void emitError(const std::string& msg, const ASTNode& node);
@@ -90,4 +98,5 @@ private:
     Scope* currentScope;
     FunctionDeclAST* currentFunction;
     TypeContext* typeCtx;
+    std::unordered_map<std::string, ConstValue> constexprValues;
 };

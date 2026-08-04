@@ -252,6 +252,92 @@ Type* SemanticAnalyzer::getExprType(ExprAST& expr) {
     return expr.type;
 }
 
+std::optional<SemanticAnalyzer::ConstValue> SemanticAnalyzer::evaluateConstexpr(ExprAST* expr) {
+    if (!expr) return std::nullopt;
+
+    if (auto* num = dynamic_cast<NumberExprAST*>(expr)) {
+        ConstValue cv;
+        cv.type = ConstValue::INT;
+        cv.intVal = num->value;
+        return cv;
+    }
+
+    if (auto* chr = dynamic_cast<CharExprAST*>(expr)) {
+        ConstValue cv;
+        cv.type = ConstValue::CHAR;
+        cv.charVal = chr->value;
+        return cv;
+    }
+
+    if (auto* bin = dynamic_cast<BinaryExprAST*>(expr)) {
+        auto left = evaluateConstexpr(bin->left.get());
+        auto right = evaluateConstexpr(bin->right.get());
+        if (!left || !right) return std::nullopt;
+
+        if (left->type == ConstValue::INT && right->type == ConstValue::INT) {
+            ConstValue cv;
+            cv.type = ConstValue::INT;
+            switch (bin->op) {
+                case BinaryOp::Add: cv.intVal = left->intVal + right->intVal; break;
+                case BinaryOp::Sub: cv.intVal = left->intVal - right->intVal; break;
+                case BinaryOp::Mul: cv.intVal = left->intVal * right->intVal; break;
+                case BinaryOp::Div:
+                    if (right->intVal == 0) return std::nullopt;
+                    cv.intVal = left->intVal / right->intVal;
+                    break;
+                case BinaryOp::Mod:
+                    if (right->intVal == 0) return std::nullopt;
+                    cv.intVal = left->intVal % right->intVal;
+                    break;
+                case BinaryOp::Eq: cv.intVal = left->intVal == right->intVal; break;
+                case BinaryOp::NotEq: cv.intVal = left->intVal != right->intVal; break;
+                case BinaryOp::Lt: cv.intVal = left->intVal < right->intVal; break;
+                case BinaryOp::Gt: cv.intVal = left->intVal > right->intVal; break;
+                case BinaryOp::Le: cv.intVal = left->intVal <= right->intVal; break;
+                case BinaryOp::Ge: cv.intVal = left->intVal >= right->intVal; break;
+                case BinaryOp::And: cv.intVal = left->intVal && right->intVal; break;
+                case BinaryOp::Or: cv.intVal = left->intVal || right->intVal; break;
+                case BinaryOp::BitAnd: cv.intVal = left->intVal & right->intVal; break;
+                case BinaryOp::BitOr: cv.intVal = left->intVal | right->intVal; break;
+                case BinaryOp::BitXor: cv.intVal = left->intVal ^ right->intVal; break;
+                case BinaryOp::LShift: cv.intVal = left->intVal << right->intVal; break;
+                case BinaryOp::RShift: cv.intVal = left->intVal >> right->intVal; break;
+                default: return std::nullopt;
+            }
+            return cv;
+        }
+        return std::nullopt;
+    }
+
+    if (auto* unary = dynamic_cast<UnaryExprAST*>(expr)) {
+        auto operand = evaluateConstexpr(unary->operand.get());
+        if (!operand) return std::nullopt;
+
+        if (operand->type == ConstValue::INT) {
+            ConstValue cv;
+            cv.type = ConstValue::INT;
+            switch (unary->op) {
+                case UnaryOp::Plus: cv.intVal = operand->intVal; break;
+                case UnaryOp::Minus: cv.intVal = -operand->intVal; break;
+                case UnaryOp::Not: cv.intVal = !operand->intVal; break;
+                default: return std::nullopt;
+            }
+            return cv;
+        }
+        return std::nullopt;
+    }
+
+    if (auto* var = dynamic_cast<VariableExprAST*>(expr)) {
+        auto it = constexprValues.find(var->name);
+        if (it != constexprValues.end()) {
+            return it->second;
+        }
+        return std::nullopt;
+    }
+
+    return std::nullopt;
+}
+
 void SemanticAnalyzer::visit(NumberExprAST& node) {
     node.type = typeCtx->getInt();
     node.isLValue = false;
@@ -564,6 +650,19 @@ void SemanticAnalyzer::visit(LabelStmtAST& node) {
 void SemanticAnalyzer::visit(NullStmtAST& node) {}
 
 void SemanticAnalyzer::visit(VarDeclAST& node) {
+    if (node.isConstexpr) {
+        if (!node.initExpr) {
+            emitError("constexpr variable '" + node.name + "' must have initializer", node);
+        } else {
+            auto folded = evaluateConstexpr(node.initExpr.get());
+            if (!folded) {
+                emitError("constexpr variable '" + node.name + "' must be initialized with a constant expression", node);
+            } else {
+                constexprValues[node.name] = *folded;
+            }
+        }
+    }
+
     if (node.initExpr) {
         Type* initType = getExprType(*node.initExpr);
         if (initType && !typesCompatible(node.type, initType)) {
