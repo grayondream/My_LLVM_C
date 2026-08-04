@@ -1493,6 +1493,16 @@ TEST_F(ParserDeclTest, ConstexprVarDecl) {
     EXPECT_EQ(varDecl->name, "x");
 }
 
+TEST_F(ParserDeclTest, ConstexprWithInit) {
+    auto tu = parse("constexpr int y = 20;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto* varDecl = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(varDecl, nullptr);
+    EXPECT_TRUE(varDecl->isConstexpr);
+    EXPECT_TRUE(varDecl->type->isConst);
+}
+
 // ========== Error Message Tests ==========
 
 class ParserErrorTest : public ::testing::Test {

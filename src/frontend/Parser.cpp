@@ -1254,6 +1254,13 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
         return enumDecl;
     }
 
+    // Handle constexpr declaration specifier
+    bool isConstexpr = false;
+    if (check(TokenType::TOKEN_CONSTEXPR)) {
+        advance();
+        isConstexpr = true;
+    }
+
     Type* type = parseType();
     if (!type) return nullptr;
 
@@ -1266,7 +1273,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
     }
 
     // Variable declaration
-    return parseVariableDecl(type, nameTok->lexeme);
+    return parseVariableDecl(type, nameTok->lexeme, isConstexpr);
 }
 
 std::unique_ptr<FunctionDeclAST> Parser::parseFunctionDecl(Type* returnType, const std::string& name) {
@@ -1309,7 +1316,12 @@ std::unique_ptr<FunctionDeclAST> Parser::parseFunctionDecl(Type* returnType, con
     return std::make_unique<FunctionDeclAST>(name, returnType, params, body);
 }
 
-std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string& name) {
+std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string& name, bool isConstexpr) {
+    // constexpr implies const
+    if (isConstexpr) {
+        type->isConst = true;
+    }
+
     std::unique_ptr<ExprAST> init;
 
     // Check for array declaration: name[size]
@@ -1340,7 +1352,7 @@ std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string
     }
 
     expect(TokenType::TOKEN_SEMICOLON, "expected ';' after variable declaration");
-    return std::make_unique<VarDeclAST>(name, type, std::move(init));
+    return std::make_unique<VarDeclAST>(name, type, std::move(init), isConstexpr);
 }
 
 std::unique_ptr<ParamDeclAST> Parser::parseParamDecl() {
