@@ -35,6 +35,7 @@ public:
 
     Type* getExprType(ExprAST& expr);
     std::optional<ConstValue> evaluateConstexpr(ExprAST* expr);
+    const std::unordered_map<std::string, ConstValue>& getConstexprValues() const { return constexprValues; }
 
 private:
     void emitError(const std::string& msg, const ASTNode& node);

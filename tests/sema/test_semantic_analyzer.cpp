@@ -458,6 +458,10 @@ TEST_F(SemanticAnalyzerTest, ConstexprConstantFolding) {
     TranslationUnitAST tu(std::move(decls));
     analyzer->analyze(tu);
     EXPECT_TRUE(analyzer->getErrors().empty());
+
+    auto& values = analyzer->getConstexprValues();
+    ASSERT_TRUE(values.count("x"));
+    EXPECT_EQ(values.at("x").intVal, 14);
 }
 
 TEST_F(SemanticAnalyzerTest, ConstexprNonConstantError) {
