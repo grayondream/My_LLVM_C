@@ -4,23 +4,26 @@
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/GlobalVariable.h"
 
+static llvm::Constant* foldToConstant(CodegenContext& ctx, const FoldedValue& fv) {
+    switch (fv.type) {
+        case FoldedValue::INT:
+            return llvm::ConstantInt::get(ctx.getLLVMType(new Type(TypeKind::Int)), fv.intVal);
+        case FoldedValue::DOUBLE:
+            return llvm::ConstantFP::get(ctx.getLLVMType(new Type(TypeKind::Double)), fv.doubleVal);
+        case FoldedValue::CHAR:
+            return llvm::ConstantInt::get(ctx.getLLVMType(new Type(TypeKind::Char)), fv.charVal);
+        default:
+            return nullptr;
+    }
+}
+
 llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
     llvm::Type* llvmType = ctx.getLLVMType(type);
     
     if (ctx.isGlobalScope()) {
         llvm::Constant* initConstant = nullptr;
         if (isConstexpr && foldedValue) {
-            switch (foldedValue->type) {
-                case FoldedValue::INT:
-                    initConstant = llvm::ConstantInt::get(ctx.getContext(), llvm::APInt(32, foldedValue->intVal));
-                    break;
-                case FoldedValue::DOUBLE:
-                    initConstant = llvm::ConstantFP::get(ctx.getContext(), llvm::APFloat(foldedValue->doubleVal));
-                    break;
-                case FoldedValue::CHAR:
-                    initConstant = llvm::ConstantInt::get(ctx.getContext(), llvm::APInt(8, foldedValue->charVal));
-                    break;
-            }
+            initConstant = foldToConstant(ctx, *foldedValue);
         } else if (initExpr) {
             initConstant = llvm::dyn_cast_or_null<llvm::Constant>(initExpr->codegen(ctx));
         }
@@ -37,18 +40,7 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
     llvm::AllocaInst* alloca = ctx.getBuilder().CreateAlloca(llvmType, nullptr, name);
     
     if (isConstexpr && foldedValue) {
-        llvm::Value* constVal = nullptr;
-        switch (foldedValue->type) {
-            case FoldedValue::INT:
-                constVal = llvm::ConstantInt::get(ctx.getContext(), llvm::APInt(32, foldedValue->intVal));
-                break;
-            case FoldedValue::DOUBLE:
-                constVal = llvm::ConstantFP::get(ctx.getContext(), llvm::APFloat(foldedValue->doubleVal));
-                break;
-            case FoldedValue::CHAR:
-                constVal = llvm::ConstantInt::get(ctx.getContext(), llvm::APInt(8, foldedValue->charVal));
-                break;
-        }
+        llvm::Value* constVal = foldToConstant(ctx, *foldedValue);
         if (constVal) {
             ctx.getBuilder().CreateStore(constVal, alloca);
         }
