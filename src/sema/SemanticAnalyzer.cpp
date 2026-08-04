@@ -269,6 +269,13 @@ std::optional<SemanticAnalyzer::ConstValue> SemanticAnalyzer::evaluateConstexpr(
         return cv;
     }
 
+    if (auto* flt = dynamic_cast<FloatExprAST*>(expr)) {
+        ConstValue cv;
+        cv.type = ConstValue::DOUBLE;
+        cv.doubleVal = flt->value;
+        return cv;
+    }
+
     if (auto* bin = dynamic_cast<BinaryExprAST*>(expr)) {
         auto left = evaluateConstexpr(bin->left.get());
         auto right = evaluateConstexpr(bin->right.get());
@@ -306,6 +313,29 @@ std::optional<SemanticAnalyzer::ConstValue> SemanticAnalyzer::evaluateConstexpr(
             }
             return cv;
         }
+
+        if (left->type == ConstValue::DOUBLE && right->type == ConstValue::DOUBLE) {
+            ConstValue cv;
+            cv.type = ConstValue::DOUBLE;
+            switch (bin->op) {
+                case BinaryOp::Add: cv.doubleVal = left->doubleVal + right->doubleVal; break;
+                case BinaryOp::Sub: cv.doubleVal = left->doubleVal - right->doubleVal; break;
+                case BinaryOp::Mul: cv.doubleVal = left->doubleVal * right->doubleVal; break;
+                case BinaryOp::Div:
+                    if (right->doubleVal == 0.0) return std::nullopt;
+                    cv.doubleVal = left->doubleVal / right->doubleVal;
+                    break;
+                case BinaryOp::Eq: cv.intVal = left->doubleVal == right->doubleVal; cv.type = ConstValue::INT; break;
+                case BinaryOp::NotEq: cv.intVal = left->doubleVal != right->doubleVal; cv.type = ConstValue::INT; break;
+                case BinaryOp::Lt: cv.intVal = left->doubleVal < right->doubleVal; cv.type = ConstValue::INT; break;
+                case BinaryOp::Gt: cv.intVal = left->doubleVal > right->doubleVal; cv.type = ConstValue::INT; break;
+                case BinaryOp::Le: cv.intVal = left->doubleVal <= right->doubleVal; cv.type = ConstValue::INT; break;
+                case BinaryOp::Ge: cv.intVal = left->doubleVal >= right->doubleVal; cv.type = ConstValue::INT; break;
+                default: return std::nullopt;
+            }
+            return cv;
+        }
+
         return std::nullopt;
     }
 
