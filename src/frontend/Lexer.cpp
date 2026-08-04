@@ -35,6 +35,7 @@ static const std::unordered_map<std::string, TokenType> keywordMap = {
 
     // ===== 存储类 / 修饰符 =====
     {"const", TokenType::TOKEN_CONST},
+    {"constexpr", TokenType::TOKEN_CONSTEXPR},
     {"static", TokenType::TOKEN_STATIC},
     {"extern", TokenType::TOKEN_EXTERN},
     {"volatile", TokenType::TOKEN_VOLATILE},

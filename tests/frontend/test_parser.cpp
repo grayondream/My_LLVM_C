@@ -753,6 +753,13 @@ TEST_F(LexerTest, TokenizeShiftRightEqual) {
     EXPECT_EQ(tokens[0].type, TokenType::TOKEN_RSHIFT_EQ);
 }
 
+TEST_F(LexerTest, RecognizesConstexpr) {
+    Lexer lexer("test.c", "constexpr");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::TOKEN_CONSTEXPR);
+    EXPECT_EQ(tok.lexeme, "constexpr");
+}
+
 // ========== Statement Parser Tests ==========
 
 class ParserStmtTest : public ::testing::Test {

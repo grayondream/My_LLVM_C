@@ -44,6 +44,7 @@ enum class TokenType : int32_t {
     TOKEN_SWITCH,
     TOKEN_CASE,
     TOKEN_DEFAULT,
+    TOKEN_CONSTEXPR,
 
     // 运算符
     TOKEN_PLUS,         // +
