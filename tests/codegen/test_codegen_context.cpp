@@ -623,3 +623,155 @@ TEST_F(CodegenContextTest, GetLLVMTypePointer) {
     llvm::Type* t = ctx->getLLVMType(ptrType);
     EXPECT_TRUE(t->isPointerTy());
 }
+
+// ============================================================
+// Constexpr/Const Variable Codegen Tests
+// ============================================================
+
+TEST_F(CodegenContextTest, ConstexprLocalVariable) {
+    ctx->pushScope(); // Simulate being inside a function
+    auto* intType = typeCtx->getInt();
+    intType->isConst = true;
+    auto varDecl = std::make_unique<VarDeclAST>("x", intType, nullptr, true);
+    FoldedValue fv;
+    fv.type = FoldedValue::INT;
+    fv.intVal = 42;
+    varDecl->foldedValue = fv;
+    
+    llvm::Value* val = varDecl->codegen(*ctx);
+    ASSERT_NE(val, nullptr);
+    auto* alloca = llvm::dyn_cast<llvm::AllocaInst>(val);
+    ASSERT_NE(alloca, nullptr);
+    
+    // Find the store instruction
+    llvm::StoreInst* storeInst = nullptr;
+    for (auto& I : *entryBB) {
+        if (auto* si = llvm::dyn_cast<llvm::StoreInst>(&I)) {
+            if (si->getPointerOperand() == alloca) {
+                storeInst = si;
+                break;
+            }
+        }
+    }
+    ASSERT_NE(storeInst, nullptr);
+    
+    // Verify the stored value is constant 42
+    auto* constVal = llvm::dyn_cast<llvm::ConstantInt>(storeInst->getValueOperand());
+    ASSERT_NE(constVal, nullptr);
+    EXPECT_EQ(constVal->getSExtValue(), 42);
+    intType->isConst = false;
+    ctx->popScope();
+}
+
+TEST_F(CodegenContextTest, ConstexprLocalVariableDouble) {
+    ctx->pushScope(); // Simulate being inside a function
+    auto* doubleType = typeCtx->getDouble();
+    doubleType->isConst = true;
+    auto varDecl = std::make_unique<VarDeclAST>("d", doubleType, nullptr, true);
+    FoldedValue fv;
+    fv.type = FoldedValue::DOUBLE;
+    fv.doubleVal = 3.14;
+    varDecl->foldedValue = fv;
+    
+    llvm::Value* val = varDecl->codegen(*ctx);
+    ASSERT_NE(val, nullptr);
+    
+    // Find the store instruction
+    llvm::StoreInst* storeInst = nullptr;
+    for (auto& I : *entryBB) {
+        if (auto* si = llvm::dyn_cast<llvm::StoreInst>(&I)) {
+            storeInst = si;
+            break;
+        }
+    }
+    ASSERT_NE(storeInst, nullptr);
+    
+    // Verify the stored value is constant 3.14
+    auto* constVal = llvm::dyn_cast<llvm::ConstantFP>(storeInst->getValueOperand());
+    ASSERT_NE(constVal, nullptr);
+    EXPECT_DOUBLE_EQ(constVal->getValueAPF().convertToDouble(), 3.14);
+    doubleType->isConst = false;
+    ctx->popScope();
+}
+
+TEST_F(CodegenContextTest, ConstexprLocalVariableChar) {
+    ctx->pushScope(); // Simulate being inside a function
+    auto* charType = typeCtx->getChar();
+    charType->isConst = true;
+    auto varDecl = std::make_unique<VarDeclAST>("c", charType, nullptr, true);
+    FoldedValue fv;
+    fv.type = FoldedValue::CHAR;
+    fv.charVal = 'A';
+    varDecl->foldedValue = fv;
+    
+    llvm::Value* val = varDecl->codegen(*ctx);
+    ASSERT_NE(val, nullptr);
+    
+    // Find the store instruction
+    llvm::StoreInst* storeInst = nullptr;
+    for (auto& I : *entryBB) {
+        if (auto* si = llvm::dyn_cast<llvm::StoreInst>(&I)) {
+            storeInst = si;
+            break;
+        }
+    }
+    ASSERT_NE(storeInst, nullptr);
+    
+    // Verify the stored value is constant 'A'
+    auto* constVal = llvm::dyn_cast<llvm::ConstantInt>(storeInst->getValueOperand());
+    ASSERT_NE(constVal, nullptr);
+    EXPECT_EQ(constVal->getZExtValue(), static_cast<uint64_t>('A'));
+    charType->isConst = false;
+    ctx->popScope();
+}
+
+TEST_F(CodegenContextTest, ConstGlobalVariable) {
+    // Global scope test - need to use a fresh context
+    auto globalCtx = std::make_unique<CodegenContext>();
+    auto* intType = typeCtx->getInt();
+    intType->isConst = true;
+    
+    auto varDecl = std::make_unique<VarDeclAST>("g", intType, std::make_unique<NumberExprAST>(10));
+    llvm::Value* val = varDecl->codegen(*globalCtx);
+    
+    ASSERT_NE(val, nullptr);
+    auto* globalVar = llvm::dyn_cast<llvm::GlobalVariable>(val);
+    ASSERT_NE(globalVar, nullptr);
+    
+    // Verify it's a constant (not mutable)
+    EXPECT_TRUE(globalVar->isConstant());
+    
+    // Verify the initializer is 10
+    auto* initVal = llvm::dyn_cast<llvm::ConstantInt>(globalVar->getInitializer());
+    ASSERT_NE(initVal, nullptr);
+    EXPECT_EQ(initVal->getSExtValue(), 10);
+    
+    // Verify the linkage
+    EXPECT_EQ(globalVar->getLinkage(), llvm::GlobalVariable::PrivateLinkage);
+    intType->isConst = false;
+}
+
+TEST_F(CodegenContextTest, ConstexprGlobalVariable) {
+    auto globalCtx = std::make_unique<CodegenContext>();
+    auto* intType = typeCtx->getInt();
+    intType->isConst = true;
+    
+    auto varDecl = std::make_unique<VarDeclAST>("gc", intType, nullptr, true);
+    FoldedValue fv;
+    fv.type = FoldedValue::INT;
+    fv.intVal = 42;
+    varDecl->foldedValue = fv;
+    
+    llvm::Value* val = varDecl->codegen(*globalCtx);
+    
+    ASSERT_NE(val, nullptr);
+    auto* globalVar = llvm::dyn_cast<llvm::GlobalVariable>(val);
+    ASSERT_NE(globalVar, nullptr);
+    
+    EXPECT_TRUE(globalVar->isConstant());
+    
+    auto* initVal = llvm::dyn_cast<llvm::ConstantInt>(globalVar->getInitializer());
+    ASSERT_NE(initVal, nullptr);
+    EXPECT_EQ(initVal->getSExtValue(), 42);
+    intType->isConst = false;
+}

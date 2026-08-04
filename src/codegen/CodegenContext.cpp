@@ -111,6 +111,10 @@ Scope* CodegenContext::currentScope() {
     return scopes.back().get();
 }
 
+bool CodegenContext::isGlobalScope() const {
+    return scopes.size() == 1;
+}
+
 llvm::Value* CodegenContext::lookupVariable(const std::string& name) {
     Symbol* sym = currentScope()->lookup(name);
     if (!sym || !sym->value) return nullptr;

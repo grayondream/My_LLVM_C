@@ -2,7 +2,13 @@
 
 #include <string>
 #include <vector>
+#include <optional>
 #include "Stmt.h"
+
+struct FoldedValue {
+    enum Type { INT, DOUBLE, CHAR } type;
+    union { int intVal; double doubleVal; char charVal; };
+};
 
 class DeclAST : public ASTNode {
 public:
@@ -15,6 +21,7 @@ public:
     Type* type;
     std::unique_ptr<ExprAST> initExpr;
     bool isConstexpr = false;
+    std::optional<FoldedValue> foldedValue;
 
     VarDeclAST(const std::string& n, Type* t, std::unique_ptr<ExprAST> init = nullptr, bool constexpr_ = false)
         : name(n), type(t), initExpr(std::move(init)), isConstexpr(constexpr_) {}

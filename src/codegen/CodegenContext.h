@@ -26,6 +26,7 @@ public:
     void pushScope();
     void popScope();
     Scope* currentScope();
+    bool isGlobalScope() const;
 
     llvm::Value* lookupVariable(const std::string& name);
     llvm::Value* lookupVariableAddr(const std::string& name);

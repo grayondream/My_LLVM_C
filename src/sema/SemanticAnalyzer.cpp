@@ -659,6 +659,14 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
                 emitError("constexpr variable '" + node.name + "' must be initialized with a constant expression", node);
             } else {
                 constexprValues[node.name] = *folded;
+                FoldedValue fv;
+                fv.type = static_cast<FoldedValue::Type>(folded->type);
+                switch (folded->type) {
+                    case ConstValue::INT: fv.intVal = folded->intVal; break;
+                    case ConstValue::DOUBLE: fv.doubleVal = folded->doubleVal; break;
+                    case ConstValue::CHAR: fv.charVal = folded->charVal; break;
+                }
+                node.foldedValue = fv;
             }
         }
     }

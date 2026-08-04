@@ -2,11 +2,57 @@
 #include "codegen/CodegenContext.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/GlobalVariable.h"
 
 llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
     llvm::Type* llvmType = ctx.getLLVMType(type);
+    
+    if (ctx.isGlobalScope()) {
+        llvm::Constant* initConstant = nullptr;
+        if (isConstexpr && foldedValue) {
+            switch (foldedValue->type) {
+                case FoldedValue::INT:
+                    initConstant = llvm::ConstantInt::get(ctx.getContext(), llvm::APInt(32, foldedValue->intVal));
+                    break;
+                case FoldedValue::DOUBLE:
+                    initConstant = llvm::ConstantFP::get(ctx.getContext(), llvm::APFloat(foldedValue->doubleVal));
+                    break;
+                case FoldedValue::CHAR:
+                    initConstant = llvm::ConstantInt::get(ctx.getContext(), llvm::APInt(8, foldedValue->charVal));
+                    break;
+            }
+        } else if (initExpr) {
+            initConstant = llvm::dyn_cast_or_null<llvm::Constant>(initExpr->codegen(ctx));
+        }
+        
+        llvm::GlobalVariable::LinkageTypes linkage = type->isConst 
+            ? llvm::GlobalVariable::PrivateLinkage 
+            : llvm::GlobalVariable::ExternalLinkage;
+        llvm::GlobalVariable* global = new llvm::GlobalVariable(
+            ctx.getModule(), llvmType, type->isConst, linkage, initConstant, name);
+        ctx.declareVariable(name, global, type);
+        return global;
+    }
+    
     llvm::AllocaInst* alloca = ctx.getBuilder().CreateAlloca(llvmType, nullptr, name);
-    if (initExpr) {
+    
+    if (isConstexpr && foldedValue) {
+        llvm::Value* constVal = nullptr;
+        switch (foldedValue->type) {
+            case FoldedValue::INT:
+                constVal = llvm::ConstantInt::get(ctx.getContext(), llvm::APInt(32, foldedValue->intVal));
+                break;
+            case FoldedValue::DOUBLE:
+                constVal = llvm::ConstantFP::get(ctx.getContext(), llvm::APFloat(foldedValue->doubleVal));
+                break;
+            case FoldedValue::CHAR:
+                constVal = llvm::ConstantInt::get(ctx.getContext(), llvm::APInt(8, foldedValue->charVal));
+                break;
+        }
+        if (constVal) {
+            ctx.getBuilder().CreateStore(constVal, alloca);
+        }
+    } else if (initExpr) {
         llvm::Value* initVal = initExpr->codegen(ctx);
         if (initVal) {
             ctx.getBuilder().CreateStore(initVal, alloca);
