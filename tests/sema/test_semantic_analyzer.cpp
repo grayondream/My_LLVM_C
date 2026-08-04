@@ -411,7 +411,7 @@ TEST_F(SemanticAnalyzerTest, ReturnTypeErrorContainsFunctionName) {
 }
 
 TEST_F(SemanticAnalyzerTest, ConstAssignmentError) {
-    auto constIntType = typeCtx->getInt();
+    auto constIntType = new Type(TypeKind::Int);
     constIntType->isConst = true;
 
     std::vector<std::unique_ptr<StmtAST>> bodyStmts;
