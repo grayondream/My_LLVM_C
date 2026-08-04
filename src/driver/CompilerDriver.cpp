@@ -2,6 +2,7 @@
 #include "Linker.h"
 #include "frontend/Lexer.h"
 #include "frontend/Parser.h"
+#include "sema/SemanticAnalyzer.h"
 #include "codegen/CodegenContext.h"
 #include "support/File.h"
 #include "support/Log.h"
@@ -239,6 +240,15 @@ int CompilerDriver::compileFile(const std::string& inputFile) {
     if (preprocessOnly) {
         std::cout << content;
         return 0;
+    }
+
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    if (!analyzer.getErrors().empty()) {
+        for (const auto& err : analyzer.getErrors()) {
+            LOGE("semantic error: {}", err.message);
+        }
+        return 1;
     }
 
     CodegenContext codegenCtx;
