@@ -607,6 +607,50 @@ TEST_F(ParserTest, NestedFunctionCall) {
     EXPECT_EQ(inner->callee, "bar");
 }
 
+// ========== Function Overloading ==========
+
+TEST_F(ParserTest, FunctionOverloading) {
+    auto tu = parse(R"(
+        int add_int_int(int a, int b) { return a + b; }
+        float add_float_float(float a, float b) { return a + b; }
+    )");
+    ASSERT_NE(tu, nullptr);
+    EXPECT_EQ(tu->declarations.size(), 2);
+    
+    auto* func1 = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
+    auto* func2 = dynamic_cast<FunctionDeclAST*>(tu->declarations[1].get());
+    ASSERT_NE(func1, nullptr);
+    ASSERT_NE(func2, nullptr);
+    EXPECT_EQ(func1->name, "add_int_int");
+    EXPECT_EQ(func2->name, "add_float_float");
+}
+
+TEST_F(ParserTest, OperatorOverloading) {
+    auto tu = parse(R"(
+        struct Point { int x; int y; };
+        struct Point operator+(struct Point a, struct Point b) {
+            struct Point result;
+            result.x = a.x + b.x;
+            result.y = a.y + b.y;
+            return result;
+        }
+    )");
+    ASSERT_NE(tu, nullptr);
+    EXPECT_GE(tu->declarations.size(), 2);
+    
+    // Find the operator function
+    for (auto& decl : tu->declarations) {
+        if (auto* func = dynamic_cast<FunctionDeclAST*>(decl.get())) {
+            if (func->name.find("operator") != std::string::npos) {
+                EXPECT_EQ(func->name, "operator+");
+                EXPECT_EQ(func->params.size(), 2);
+                return;
+            }
+        }
+    }
+    FAIL() << "operator+ function not found";
+}
+
 // ========== Lexer Token Tests ==========
 
 TEST_F(LexerTest, TokenizeDoubleEqual) {
@@ -685,6 +729,14 @@ TEST_F(LexerTest, TokenizeArrow) {
     auto tokens = lex("->");
     ASSERT_EQ(tokens.size(), 1u);
     EXPECT_EQ(tokens[0].type, TokenType::TOKEN_ARROW);
+}
+
+TEST_F(LexerTest, TokenizeOperatorKeyword) {
+    auto tokens = lex("operator+");
+    ASSERT_EQ(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::TOKEN_OPERATOR);
+    EXPECT_EQ(tokens[0].lexeme, "operator");
+    EXPECT_EQ(tokens[1].type, TokenType::TOKEN_PLUS);
 }
 
 TEST_F(LexerTest, TokenizeAssign) {

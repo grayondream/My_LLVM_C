@@ -44,6 +44,7 @@ static const std::unordered_map<std::string, TokenType> keywordMap = {
     // ===== sizeof / 类型 =====
     {"sizeof", TokenType::TOKEN_SIZEOF},
     {"typedef", TokenType::TOKEN_TYPEDEF},
+    {"operator", TokenType::TOKEN_OPERATOR},
 
     // ===== C99 / 扩展（可选）=====
     {"inline", TokenType::TOKEN_INLINE},

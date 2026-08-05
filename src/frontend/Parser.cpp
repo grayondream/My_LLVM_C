@@ -66,6 +66,7 @@ std::string Parser::tokenTypeName(TokenType type) const {
         case TokenType::TOKEN_ENUM:          return "'enum'";
         case TokenType::TOKEN_TYPEDEF:       return "'typedef'";
         case TokenType::TOKEN_SIZEOF:        return "'sizeof'";
+        case TokenType::TOKEN_OPERATOR:      return "'operator'";
         case TokenType::TOKEN_SEMICOLON:     return "';'";
         case TokenType::TOKEN_COMMA:         return "','";
         case TokenType::TOKEN_LBRACE:        return "'{'";
@@ -1178,6 +1179,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
     }
 
     if (check(TokenType::TOKEN_STRUCT)) {
+        size_t savedPos = m_currentTokenPos;
         auto structDecl = parseStructDecl();
         if (!structDecl) return nullptr;
 
@@ -1201,10 +1203,20 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
             }
             return parseVariableDecl(type, nameTok->lexeme);
         }
+
+        // If this is a forward declaration (empty fields) and not followed by ';',
+        // it might be a type reference (e.g., "struct Point operator+(...)")
+        // Fall through to normal type parsing
+        if (structDecl->fields.empty() && !check(TokenType::TOKEN_SEMICOLON)) {
+            m_currentTokenPos = savedPos;
+            return parseDeclarationAsType();
+        }
+
         return structDecl;
     }
 
     if (check(TokenType::TOKEN_UNION)) {
+        size_t savedPos = m_currentTokenPos;
         auto unionDecl = parseUnionDecl();
         if (!unionDecl) return nullptr;
 
@@ -1226,10 +1238,20 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
             }
             return parseVariableDecl(type, nameTok->lexeme);
         }
+
+        // If this is a forward declaration (empty members) and not followed by ';',
+        // it might be a type reference (e.g., "union U operator+(...)")
+        // Fall through to normal type parsing
+        if (unionDecl->members.empty() && !check(TokenType::TOKEN_SEMICOLON)) {
+            m_currentTokenPos = savedPos;
+            return parseDeclarationAsType();
+        }
+
         return unionDecl;
     }
 
     if (check(TokenType::TOKEN_ENUM)) {
+        size_t savedPos = m_currentTokenPos;
         auto enumDecl = parseEnumDecl();
         if (!enumDecl) return nullptr;
 
@@ -1251,9 +1273,22 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
             }
             return parseVariableDecl(type, nameTok->lexeme);
         }
+
+        // If this is a forward declaration (empty values) and not followed by ';',
+        // it might be a type reference (e.g., "enum E operator+(...)")
+        // Fall through to normal type parsing
+        if (enumDecl->values.empty() && !check(TokenType::TOKEN_SEMICOLON)) {
+            m_currentTokenPos = savedPos;
+            return parseDeclarationAsType();
+        }
+
         return enumDecl;
     }
 
+    return parseDeclarationAsType();
+}
+
+std::unique_ptr<DeclAST> Parser::parseDeclarationAsType() {
     // Handle constexpr declaration specifier
     bool isConstexpr = false;
     if (check(TokenType::TOKEN_CONSTEXPR)) {
@@ -1263,6 +1298,52 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
 
     Type* type = parseType();
     if (!type) return nullptr;
+
+    // Check for operator keyword (operator overloading)
+    if (check(TokenType::TOKEN_OPERATOR)) {
+        advance(); // consume 'operator'
+        auto opToken = peek();
+        if (!opToken) {
+            errorUnexpected("expected operator symbol after 'operator'");
+            return nullptr;
+        }
+        // Map token type to operator string (token lexemes may be empty for single-char tokens)
+        std::string opSym;
+        switch (opToken->type) {
+            case TokenType::TOKEN_PLUS:      opSym = "+"; break;
+            case TokenType::TOKEN_MINUS:     opSym = "-"; break;
+            case TokenType::TOKEN_STAR:      opSym = "*"; break;
+            case TokenType::TOKEN_SLASH:     opSym = "/"; break;
+            case TokenType::TOKEN_PERCENT:   opSym = "%"; break;
+            case TokenType::TOKEN_EQ:        opSym = "=="; break;
+            case TokenType::TOKEN_NOT_EQ:    opSym = "!="; break;
+            case TokenType::TOKEN_LT:        opSym = "<"; break;
+            case TokenType::TOKEN_GT:        opSym = ">"; break;
+            case TokenType::TOKEN_LE:        opSym = "<="; break;
+            case TokenType::TOKEN_GE:        opSym = ">="; break;
+            case TokenType::TOKEN_AND:       opSym = "&&"; break;
+            case TokenType::TOKEN_OR:        opSym = "||"; break;
+            case TokenType::TOKEN_BIT_AND:   opSym = "&"; break;
+            case TokenType::TOKEN_BIT_OR:    opSym = "|"; break;
+            case TokenType::TOKEN_CARET:     opSym = "^"; break;
+            case TokenType::TOKEN_LSHIFT:    opSym = "<<"; break;
+            case TokenType::TOKEN_RSHIFT:    opSym = ">>"; break;
+            case TokenType::TOKEN_TILDE:     opSym = "~"; break;
+            case TokenType::TOKEN_PLUS_PLUS: opSym = "++"; break;
+            case TokenType::TOKEN_MINUS_MINUS: opSym = "--"; break;
+            default:
+                errorUnexpected("expected operator symbol after 'operator'");
+                return nullptr;
+        }
+        std::string opName = "operator" + opSym;
+        advance(); // consume operator symbol
+        
+        if (!check(TokenType::TOKEN_LPAREN)) {
+            errorUnexpected("expected '(' after operator name");
+            return nullptr;
+        }
+        return parseFunctionDecl(type, opName, isConstexpr);
+    }
 
     if (!check(TokenType::TOKEN_IDENTIFIER)) return nullptr;
     auto nameTok = advance();
