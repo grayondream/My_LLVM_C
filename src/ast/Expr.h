@@ -122,6 +122,7 @@ public:
     BinaryOp op;
     std::unique_ptr<ExprAST> left;
     std::unique_ptr<ExprAST> right;
+    std::string mangledCallee;  // Set by sema for operator overloading
 
     BinaryExprAST(BinaryOp oper, std::unique_ptr<ExprAST> l, std::unique_ptr<ExprAST> r)
         : op(oper), left(std::move(l)), right(std::move(r)) {}

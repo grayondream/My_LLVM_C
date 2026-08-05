@@ -3,6 +3,7 @@
 #include "ast/Stmt.h"
 #include "ast/Decl.h"
 #include "ast/Type.h"
+#include "ast/Mangle.h"
 
 SemanticAnalyzer::SemanticAnalyzer()
     : globalScope(std::make_unique<Scope>(nullptr)),
@@ -149,6 +150,29 @@ std::string SemanticAnalyzer::binaryOpToString(BinaryOp op) const {
     }
 }
 
+bool SemanticAnalyzer::isStructOrUnionType(Type* type) const {
+    if (!type) return false;
+    return type->kind == TypeKind::Struct || type->kind == TypeKind::Union;
+}
+
+std::string SemanticAnalyzer::getOperatorMangledName(BinaryOp op, Type* left, Type* right) {
+    std::string opName;
+    switch (op) {
+        case BinaryOp::Add: opName = "operator+"; break;
+        case BinaryOp::Sub: opName = "operator-"; break;
+        case BinaryOp::Mul: opName = "operator*"; break;
+        case BinaryOp::Div: opName = "operator/"; break;
+        case BinaryOp::Eq: opName = "operator=="; break;
+        case BinaryOp::NotEq: opName = "operator!="; break;
+        case BinaryOp::Lt: opName = "operator<"; break;
+        case BinaryOp::Gt: opName = "operator>"; break;
+        case BinaryOp::Le: opName = "operator<="; break;
+        case BinaryOp::Ge: opName = "operator>="; break;
+        default: return "";
+    }
+    return mangleFunction(opName, {left, right});
+}
+
 Type* SemanticAnalyzer::checkBinaryTypes(BinaryOp op, Type* left, Type* right, ExprAST& node) {
     if (!left || !right) return nullptr;
 
@@ -219,30 +243,51 @@ Type* SemanticAnalyzer::checkAssignmentTypes(Type* lhs, Type* rhs, ExprAST& node
 }
 
 Type* SemanticAnalyzer::checkFunctionCall(const std::string& name, const std::vector<std::unique_ptr<ExprAST>>& args, ExprAST& node) {
-    Symbol* sym = lookup(name);
-    if (!sym) {
+    OverloadSet* overloadSet = currentScope->lookupOverload(name);
+    if (!overloadSet || overloadSet->empty()) {
         emitError("use of undeclared function '" + name + "'", node);
         return nullptr;
     }
 
-    if (sym->type->kind != TypeKind::Function) {
-        emitError("cannot call non-function '" + name + "' (type: " + typeToString(sym->type) + ")", node);
+    // Collect argument types
+    std::vector<Type*> argTypes;
+    for (auto& arg : args) {
+        Type* argType = getExprType(*arg);
+        argTypes.push_back(argType);
+    }
+
+    // Resolve overload
+    Symbol* resolved = overloadSet->resolve(argTypes);
+    if (!resolved) {
+        // Check if no candidates match at all
+        bool anyMatch = false;
+        for (auto* sym : overloadSet->getCandidates()) {
+            if (sym->type->kind == TypeKind::Function) {
+                auto* funcType = static_cast<FunctionType*>(sym->type);
+                if (funcType->paramTypes.size() == argTypes.size()) {
+                    anyMatch = true;
+                    break;
+                }
+            }
+        }
+        if (!anyMatch) {
+            emitError("no matching function for call to '" + name + "'", node);
+        } else {
+            emitError("ambiguous call to overloaded function '" + name + "'", node);
+        }
         return nullptr;
     }
 
-    FunctionType* funcType = static_cast<FunctionType*>(sym->type);
+    if (resolved->type->kind != TypeKind::Function) {
+        emitError("cannot call non-function '" + name + "' (type: " + typeToString(resolved->type) + ")", node);
+        return nullptr;
+    }
+
+    FunctionType* funcType = static_cast<FunctionType*>(resolved->type);
     if (!funcType->isVarArg && args.size() != funcType->paramTypes.size()) {
         emitError("wrong number of arguments to function '" + name + "': expected " 
             + std::to_string(funcType->paramTypes.size()) + ", got " + std::to_string(args.size()), node);
         return nullptr;
-    }
-
-    for (size_t i = 0; i < args.size() && i < funcType->paramTypes.size(); ++i) {
-        Type* argType = getExprType(*args[i]);
-        if (argType && !typesCompatible(funcType->paramTypes[i], argType)) {
-            emitError("type mismatch in argument " + std::to_string(i + 1) + " of call to '" + name + "': expected '" 
-                + typeToString(funcType->paramTypes[i]) + "', got '" + typeToString(argType) + "'", node);
-        }
     }
 
     return funcType->returnType;
@@ -403,6 +448,38 @@ void SemanticAnalyzer::visit(VariableExprAST& node) {
 void SemanticAnalyzer::visit(BinaryExprAST& node) {
     Type* leftType = getExprType(*node.left);
     Type* rightType = getExprType(*node.right);
+
+    // Check for operator overloading on struct/union types
+    if (isStructOrUnionType(leftType) || isStructOrUnionType(rightType)) {
+        std::string mangledName = getOperatorMangledName(node.op, leftType, rightType);
+        if (!mangledName.empty()) {
+            OverloadSet* overloadSet = currentScope->lookupOverload(mangledName);
+            if (overloadSet && !overloadSet->empty()) {
+                std::vector<Type*> argTypes = {leftType, rightType};
+                Symbol* resolved = overloadSet->resolve(argTypes);
+                if (resolved) {
+                    // Store the mangled name for codegen
+                    node.mangledCallee = mangledName;
+                    node.type = leftType; // Return type will be resolved during codegen
+                    node.isLValue = false;
+                    return;
+                } else {
+                    emitError("no matching " + binaryOpToString(node.op) + " operator for types '" 
+                        + typeToString(leftType) + "' and '" + typeToString(rightType) + "'", node);
+                    node.type = nullptr;
+                    node.isLValue = false;
+                    return;
+                }
+            } else {
+                emitError("no matching " + binaryOpToString(node.op) + " operator for types '" 
+                    + typeToString(leftType) + "' and '" + typeToString(rightType) + "'", node);
+                node.type = nullptr;
+                node.isLValue = false;
+                return;
+            }
+        }
+    }
+
     node.type = checkBinaryTypes(node.op, leftType, rightType, node);
     node.isLValue = false;
 }

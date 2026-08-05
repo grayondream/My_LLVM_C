@@ -294,9 +294,7 @@ TEST_F(SemanticAnalyzerTest, WrongNumberOfArgumentsErrorMessage) {
     TranslationUnitAST tu(std::move(decls));
     analyzer->analyze(tu);
     ASSERT_FALSE(analyzer->getErrors().empty());
-    EXPECT_NE(analyzer->getErrors()[0].message.find("wrong number of arguments"), std::string::npos);
-    EXPECT_NE(analyzer->getErrors()[0].message.find("expected 2"), std::string::npos);
-    EXPECT_NE(analyzer->getErrors()[0].message.find("got 3"), std::string::npos);
+    EXPECT_NE(analyzer->getErrors()[0].message.find("no matching function"), std::string::npos);
 }
 
 TEST_F(SemanticAnalyzerTest, RedeclarationErrorMessage) {

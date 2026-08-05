@@ -48,6 +48,9 @@ private:
     Type* getCommonType(Type* left, Type* right) const;
     std::string typeToString(Type* type) const;
     std::string binaryOpToString(BinaryOp op) const;
+    Symbol* resolveOverload(const std::string& name, const std::vector<Type*>& argTypes);
+    bool isStructOrUnionType(Type* type) const;
+    std::string getOperatorMangledName(BinaryOp op, Type* left, Type* right);
 
     void visit(TranslationUnitAST& node);
     void visit(FunctionDeclAST& node);
