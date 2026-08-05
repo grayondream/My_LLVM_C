@@ -128,7 +128,7 @@ llvm::Value* CodegenContext::lookupVariableAddr(const std::string& name) {
 }
 
 void CodegenContext::declareVariable(const std::string& name, llvm::Value* alloca, Type* type) {
-    currentScope()->symbols[name] = new Symbol(name, type, alloca);
+    currentScope()->declare(name, new Symbol(name, type, alloca));
 }
 
 void CodegenContext::pushBreakBlock(llvm::BasicBlock* bb) {

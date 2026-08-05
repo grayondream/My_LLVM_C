@@ -35,10 +35,11 @@ void SemanticAnalyzer::exitScope() {
 }
 
 bool SemanticAnalyzer::declare(const std::string& name, Type* type) {
-    if (currentScope->symbols.count(name)) {
+    Symbol* sym = new Symbol(name, type);
+    if (!currentScope->declare(name, sym)) {
+        delete sym;
         return false;
     }
-    currentScope->symbols[name] = new Symbol(name, type);
     return true;
 }
 
