@@ -482,3 +482,66 @@ TEST_F(SemanticAnalyzerTest, ConstexprNonConstantError) {
     EXPECT_FALSE(analyzer->getErrors().empty());
     EXPECT_NE(analyzer->getErrors()[0].message.find("constant expression"), std::string::npos);
 }
+
+TEST_F(SemanticAnalyzerTest, ConstexprFunctionWithValidSignature) {
+    // constexpr int square(int x) { return x * x; }
+    // Should pass - no errors
+    auto returnExpr = std::make_unique<BinaryExprAST>(
+        BinaryOp::Mul,
+        std::make_unique<VariableExprAST>("x"),
+        std::make_unique<VariableExprAST>("x"));
+    std::vector<std::unique_ptr<StmtAST>> bodyStmts;
+    bodyStmts.push_back(std::make_unique<ReturnStmtAST>(std::move(returnExpr)));
+    auto body = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
+
+    std::vector<std::unique_ptr<ParamDeclAST>> params;
+    params.push_back(std::make_unique<ParamDeclAST>("x", typeCtx->getInt()));
+
+    std::vector<std::unique_ptr<DeclAST>> decls;
+    decls.push_back(std::make_unique<FunctionDeclAST>(
+        "square", typeCtx->getInt(), params, body, true));
+    TranslationUnitAST tu(std::move(decls));
+    analyzer->analyze(tu);
+    EXPECT_TRUE(analyzer->getErrors().empty());
+}
+
+TEST_F(SemanticAnalyzerTest, ConstexprFunctionWithNonLiteralReturnType) {
+    // constexpr void bad() { return; }
+    // Should emit error: constexpr function must have literal return type
+    std::vector<std::unique_ptr<StmtAST>> bodyStmts;
+    bodyStmts.push_back(std::make_unique<ReturnStmtAST>(nullptr));
+    auto body = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
+
+    std::vector<std::unique_ptr<ParamDeclAST>> params;
+
+    std::vector<std::unique_ptr<DeclAST>> decls;
+    decls.push_back(std::make_unique<FunctionDeclAST>(
+        "bad", typeCtx->getVoid(), params, body, true));
+    TranslationUnitAST tu(std::move(decls));
+    analyzer->analyze(tu);
+    EXPECT_FALSE(analyzer->getErrors().empty());
+    EXPECT_NE(analyzer->getErrors()[0].message.find("literal return type"), std::string::npos);
+}
+
+TEST_F(SemanticAnalyzerTest, ConstexprFunctionWithNonLiteralParameter) {
+    // constexpr int bad(int* p) { return *p; }
+    // Should emit error: parameter must have literal type
+    std::vector<std::unique_ptr<StmtAST>> bodyStmts;
+    bodyStmts.push_back(std::make_unique<ReturnStmtAST>(
+        std::make_unique<UnaryExprAST>(
+            UnaryOp::Deref,
+            std::make_unique<VariableExprAST>("p"))));
+    auto body = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
+
+    std::vector<std::unique_ptr<ParamDeclAST>> params;
+    auto pointerType = std::make_unique<Type>(TypeKind::Pointer, typeCtx->getInt());
+    params.push_back(std::make_unique<ParamDeclAST>("p", pointerType.get()));
+
+    std::vector<std::unique_ptr<DeclAST>> decls;
+    decls.push_back(std::make_unique<FunctionDeclAST>(
+        "bad", typeCtx->getInt(), params, body, true));
+    TranslationUnitAST tu(std::move(decls));
+    analyzer->analyze(tu);
+    EXPECT_FALSE(analyzer->getErrors().empty());
+    EXPECT_NE(analyzer->getErrors()[0].message.find("literal type"), std::string::npos);
+}
