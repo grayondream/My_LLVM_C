@@ -1,6 +1,6 @@
 # Design: Constexpr Function Support
 
-> **Status**: Design
+> **Status**: Implemented
 
 ## Overview
 
