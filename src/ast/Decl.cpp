@@ -3,6 +3,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "Mangle.h"
 
 static llvm::Constant* foldToConstant(CodegenContext& ctx, const FoldedValue& fv) {
     switch (fv.type) {
@@ -66,9 +67,16 @@ llvm::Value* FunctionDeclAST::codegen(CodegenContext& ctx) {
         paramTypes.push_back(ctx.getLLVMType(param->type));
     }
 
+    // Use mangled name for LLVM IR
+    std::vector<Type*> astParamTypes;
+    for (auto& param : params) {
+        astParamTypes.push_back(param->type);
+    }
+    std::string mangledName = mangleFunction(name, astParamTypes);
+
     llvm::FunctionType* funcType = llvm::FunctionType::get(retType, paramTypes, false);
     llvm::Function* function = llvm::Function::Create(
-        funcType, llvm::Function::ExternalLinkage, name, ctx.getModule());
+        funcType, llvm::Function::ExternalLinkage, mangledName, ctx.getModule());
 
     if (!sourceFile.empty()) {
         ctx.emitFunctionDebug(function, returnType, name, sourceLine);

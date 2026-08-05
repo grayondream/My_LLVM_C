@@ -1,6 +1,7 @@
 #include "Expr.h"
 #include "codegen/CodegenContext.h"
 #include "support/Log.h"
+#include "Mangle.h"
 
 static llvm::Value* emitLoad(CodegenContext& ctx, llvm::Value* ptr, Type* astType = nullptr) {
     if (!ptr) return nullptr;
@@ -92,7 +93,14 @@ llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
-    llvm::Function* calleeFn = ctx.getModule().getFunction(callee);
+    // Compute mangled name from argument types
+    std::vector<Type*> argTypes;
+    for (auto& arg : args) {
+        argTypes.push_back(arg->type);
+    }
+    std::string mangledName = mangleFunction(callee, argTypes);
+    
+    llvm::Function* calleeFn = ctx.getModule().getFunction(mangledName);
     if (!calleeFn) {
         LOGE("unknown function: {}", callee);
         return nullptr;
