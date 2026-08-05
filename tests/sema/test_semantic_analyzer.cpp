@@ -543,3 +543,67 @@ TEST_F(SemanticAnalyzerTest, ConstexprFunctionWithNonLiteralParameter) {
     EXPECT_FALSE(analyzer->getErrors().empty());
     EXPECT_NE(analyzer->getErrors()[0].message.find("literal type"), std::string::npos);
 }
+
+// ========== Overload Resolution ==========
+
+TEST_F(SemanticAnalyzerTest, OverloadResolutionExactMatch) {
+    // Declare two overloaded functions: add(int, int) and add(float, float)
+    std::vector<std::unique_ptr<ParamDeclAST>> params1;
+    params1.push_back(std::make_unique<ParamDeclAST>("a", typeCtx->getInt()));
+    params1.push_back(std::make_unique<ParamDeclAST>("b", typeCtx->getInt()));
+    auto body1 = std::make_unique<CompoundStmtAST>(std::vector<std::unique_ptr<StmtAST>>());
+    
+    std::vector<std::unique_ptr<ParamDeclAST>> params2;
+    params2.push_back(std::make_unique<ParamDeclAST>("a", typeCtx->getFloat()));
+    params2.push_back(std::make_unique<ParamDeclAST>("b", typeCtx->getFloat()));
+    auto body2 = std::make_unique<CompoundStmtAST>(std::vector<std::unique_ptr<StmtAST>>());
+    
+    // Call with int arguments
+    std::vector<std::unique_ptr<ExprAST>> callArgs;
+    callArgs.push_back(std::make_unique<NumberExprAST>(1));
+    callArgs.push_back(std::make_unique<NumberExprAST>(2));
+    auto callExpr = std::make_unique<CallExprAST>("add", std::move(callArgs));
+    
+    std::vector<std::unique_ptr<StmtAST>> bodyStmts;
+    bodyStmts.push_back(std::make_unique<ExprStmtAST>(std::move(callExpr)));
+    auto callerBody = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
+    
+    std::vector<std::unique_ptr<DeclAST>> decls;
+    decls.push_back(std::make_unique<FunctionDeclAST>("add", typeCtx->getInt(), params1, body1));
+    decls.push_back(std::make_unique<FunctionDeclAST>("add", typeCtx->getFloat(), params2, body2));
+    
+    // Add caller function
+    std::vector<std::unique_ptr<ParamDeclAST>> callerParams;
+    decls.push_back(std::make_unique<FunctionDeclAST>("caller", typeCtx->getInt(), callerParams, callerBody));
+    
+    TranslationUnitAST tu(std::move(decls));
+    analyzer->analyze(tu);
+    EXPECT_TRUE(analyzer->getErrors().empty());
+}
+
+TEST_F(SemanticAnalyzerTest, OverloadResolutionNoMatch) {
+    std::vector<std::unique_ptr<ParamDeclAST>> params;
+    params.push_back(std::make_unique<ParamDeclAST>("a", typeCtx->getInt()));
+    params.push_back(std::make_unique<ParamDeclAST>("b", typeCtx->getInt()));
+    auto body = std::make_unique<CompoundStmtAST>(std::vector<std::unique_ptr<StmtAST>>());
+    
+    // Call with float arguments (no matching overload)
+    std::vector<std::unique_ptr<ExprAST>> callArgs;
+    callArgs.push_back(std::make_unique<FloatExprAST>(1.0));
+    callArgs.push_back(std::make_unique<FloatExprAST>(2.0));
+    auto callExpr = std::make_unique<CallExprAST>("add", std::move(callArgs));
+    
+    std::vector<std::unique_ptr<StmtAST>> bodyStmts;
+    bodyStmts.push_back(std::make_unique<ExprStmtAST>(std::move(callExpr)));
+    auto callerBody = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
+    
+    std::vector<std::unique_ptr<DeclAST>> decls;
+    decls.push_back(std::make_unique<FunctionDeclAST>("add", typeCtx->getInt(), params, body));
+    
+    std::vector<std::unique_ptr<ParamDeclAST>> callerParams;
+    decls.push_back(std::make_unique<FunctionDeclAST>("caller", typeCtx->getInt(), callerParams, callerBody));
+    
+    TranslationUnitAST tu(std::move(decls));
+    analyzer->analyze(tu);
+    EXPECT_FALSE(analyzer->getErrors().empty());
+}
