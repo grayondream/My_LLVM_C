@@ -38,7 +38,7 @@ private:
 
     std::unique_ptr<DeclAST> parseDeclaration();
 
-    std::unique_ptr<FunctionDeclAST> parseFunctionDecl(Type* returnType, const std::string& name);
+    std::unique_ptr<FunctionDeclAST> parseFunctionDecl(Type* returnType, const std::string& name, bool isConstexpr = false);
 
     std::unique_ptr<DeclAST> parseVariableDecl(Type* type, const std::string& name, bool isConstexpr = false);
 

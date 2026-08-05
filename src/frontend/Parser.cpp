@@ -1269,14 +1269,14 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
 
     // Function declaration/definition: type name '('
     if (check(TokenType::TOKEN_LPAREN)) {
-        return parseFunctionDecl(type, nameTok->lexeme);
+        return parseFunctionDecl(type, nameTok->lexeme, isConstexpr);
     }
 
     // Variable declaration
     return parseVariableDecl(type, nameTok->lexeme, isConstexpr);
 }
 
-std::unique_ptr<FunctionDeclAST> Parser::parseFunctionDecl(Type* returnType, const std::string& name) {
+std::unique_ptr<FunctionDeclAST> Parser::parseFunctionDecl(Type* returnType, const std::string& name, bool isConstexpr) {
     if (!expect(TokenType::TOKEN_LPAREN, "expected '(' after function name")) return nullptr;
 
     std::vector<std::unique_ptr<ParamDeclAST>> params;
@@ -1313,7 +1313,7 @@ std::unique_ptr<FunctionDeclAST> Parser::parseFunctionDecl(Type* returnType, con
         errorUnexpected("expected '{' or ';' after function declaration");
     }
 
-    return std::make_unique<FunctionDeclAST>(name, returnType, params, body);
+    return std::make_unique<FunctionDeclAST>(name, returnType, params, body, isConstexpr);
 }
 
 std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string& name, bool isConstexpr) {
