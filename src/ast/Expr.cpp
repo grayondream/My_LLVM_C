@@ -36,6 +36,24 @@ llvm::Value* VariableExprAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
+    // Check if this is an overloaded operator call
+    if (!mangledCallee.empty()) {
+        llvm::Function* calleeFn = ctx.getModule().getFunction(mangledCallee);
+        if (!calleeFn) {
+            LOGE("unknown operator function: {}", mangledCallee);
+            return nullptr;
+        }
+        
+        llvm::Value* lhs = left->codegen(ctx);
+        llvm::Value* rhs = right->codegen(ctx);
+        if (!lhs || !rhs) return nullptr;
+        
+        lhs = emitLoad(ctx, lhs, left->type);
+        rhs = emitLoad(ctx, rhs, right->type);
+        
+        return ctx.getBuilder().CreateCall(calleeFn, {lhs, rhs}, "opcalltmp");
+    }
+    
     llvm::Value* lhs = left->codegen(ctx);
     llvm::Value* rhs = right->codegen(ctx);
     if (!lhs || !rhs) return nullptr;
