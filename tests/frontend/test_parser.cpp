@@ -1504,6 +1504,15 @@ TEST_F(ParserDeclTest, ConstexprWithInit) {
     EXPECT_TRUE(varDecl->type->isConst);
 }
 
+TEST_F(ParserDeclTest, ConstexprFunctionDeclaration) {
+    auto tu = parse("constexpr int square(int x) { return x * x; }");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto& func = dynamic_cast<FunctionDeclAST&>(*tu->declarations[0]);
+    EXPECT_TRUE(func.isConstexpr);
+    EXPECT_EQ(func.name, "square");
+}
+
 // ========== Error Message Tests ==========
 
 class ParserErrorTest : public ::testing::Test {
