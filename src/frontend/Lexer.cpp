@@ -245,6 +245,7 @@ Token Lexer::scanNumber(){
     bool isfloat = false;
     if(peek() == '.' and std::isdigit(peekNext())) {
         isfloat = true;
+        advance(); // consume the '.'
         while(true){
             const char ch = peek();
             if(std::isdigit(ch)) {

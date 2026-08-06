@@ -453,7 +453,22 @@ void SemanticAnalyzer::visit(BinaryExprAST& node) {
     if (isStructOrUnionType(leftType) || isStructOrUnionType(rightType)) {
         std::string mangledName = getOperatorMangledName(node.op, leftType, rightType);
         if (!mangledName.empty()) {
-            OverloadSet* overloadSet = currentScope->lookupOverload(mangledName);
+            // Look up by the unmangled operator name (e.g., "operator+")
+            std::string opName;
+            switch (node.op) {
+                case BinaryOp::Add: opName = "operator+"; break;
+                case BinaryOp::Sub: opName = "operator-"; break;
+                case BinaryOp::Mul: opName = "operator*"; break;
+                case BinaryOp::Div: opName = "operator/"; break;
+                case BinaryOp::Eq: opName = "operator=="; break;
+                case BinaryOp::NotEq: opName = "operator!="; break;
+                case BinaryOp::Lt: opName = "operator<"; break;
+                case BinaryOp::Gt: opName = "operator>"; break;
+                case BinaryOp::Le: opName = "operator<="; break;
+                case BinaryOp::Ge: opName = "operator>="; break;
+                default: opName = ""; break;
+            }
+            OverloadSet* overloadSet = currentScope->lookupOverload(opName);
             if (overloadSet && !overloadSet->empty()) {
                 std::vector<Type*> argTypes = {leftType, rightType};
                 Symbol* resolved = overloadSet->resolve(argTypes);

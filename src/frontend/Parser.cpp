@@ -437,7 +437,7 @@ std::unique_ptr<ExprAST> Parser::parsePrimary() {
 
             if (!peek() || peek()->type != TokenType::TOKEN_RPAREN) {
                 while (true) {
-                    auto arg = parseExpr();
+                    auto arg = parseExpr(2); // minPrec=2 to avoid consuming comma operator
                     if (!arg) {
                         return nullptr;
                     }
