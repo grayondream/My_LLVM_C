@@ -12,6 +12,11 @@ bool typesEqual(Type* a, Type* b) {
             auto* sb = static_cast<StructType*>(b);
             return sa->name == sb->name;
         }
+        case TypeKind::Class: {
+            auto* ca = static_cast<ClassType*>(a);
+            auto* cb = static_cast<ClassType*>(b);
+            return ca->name == cb->name;
+        }
         case TypeKind::Union: {
             auto* ua = static_cast<UnionType*>(a);
             auto* ub = static_cast<UnionType*>(b);

@@ -109,6 +109,10 @@ std::string SemanticAnalyzer::typeToString(Type* type) const {
             auto* structType = static_cast<StructType*>(type);
             return "struct " + structType->name;
         }
+        case TypeKind::Class: {
+            auto* classType = static_cast<ClassType*>(type);
+            return "class " + classType->name;
+        }
         case TypeKind::Union: {
             auto* unionType = static_cast<UnionType*>(type);
             return "union " + unionType->name;
@@ -152,7 +156,7 @@ std::string SemanticAnalyzer::binaryOpToString(BinaryOp op) const {
 
 bool SemanticAnalyzer::isStructOrUnionType(Type* type) const {
     if (!type) return false;
-    return type->kind == TypeKind::Struct || type->kind == TypeKind::Union;
+    return type->kind == TypeKind::Struct || type->kind == TypeKind::Class || type->kind == TypeKind::Union;
 }
 
 std::string SemanticAnalyzer::getOperatorMangledName(BinaryOp op, Type* left, Type* right) {
@@ -630,39 +634,52 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
         return;
     }
 
-    StructType* structType = nullptr;
+    Type* memberBaseType = nullptr;
     if (node.accessKind == MemberAccessKind::Arrow) {
         if (objType->kind != TypeKind::Pointer) {
-            emitError("member access with '->' requires pointer to struct, but got '" + typeToString(objType) + "'", node);
+            emitError("member access with '->' requires pointer to struct/class, but got '" + typeToString(objType) + "'", node);
             node.type = nullptr;
             node.isLValue = false;
             return;
         }
-        if (objType->base->kind != TypeKind::Struct) {
-            emitError("member access with '->' requires pointer to struct, but '" + typeToString(objType) + "' points to '" + typeToString(objType->base) + "'", node);
+        if (objType->base->kind != TypeKind::Struct && objType->base->kind != TypeKind::Class) {
+            emitError("member access with '->' requires pointer to struct/class, but '" + typeToString(objType) + "' points to '" + typeToString(objType->base) + "'", node);
             node.type = nullptr;
             node.isLValue = false;
             return;
         }
-        structType = static_cast<StructType*>(objType->base);
+        memberBaseType = objType->base;
     } else {
-        if (objType->kind != TypeKind::Struct) {
-            emitError("member access with '.' requires struct type, but got '" + typeToString(objType) + "'", node);
+        if (objType->kind != TypeKind::Struct && objType->kind != TypeKind::Class) {
+            emitError("member access with '.' requires struct/class type, but got '" + typeToString(objType) + "'", node);
             node.type = nullptr;
             node.isLValue = false;
             return;
         }
-        structType = static_cast<StructType*>(objType);
+        memberBaseType = objType;
     }
 
-    for (auto& field : structType->fields) {
-        if (field.first == node.memberName) {
-            node.type = field.second;
-            node.isLValue = true;
-            return;
+    if (memberBaseType->kind == TypeKind::Struct) {
+        auto* structType = static_cast<StructType*>(memberBaseType);
+        for (auto& field : structType->fields) {
+            if (field.first == node.memberName) {
+                node.type = field.second;
+                node.isLValue = true;
+                return;
+            }
         }
+        emitError("no member named '" + node.memberName + "' in struct '" + structType->name + "'", node);
+    } else if (memberBaseType->kind == TypeKind::Class) {
+        auto* classType = static_cast<ClassType*>(memberBaseType);
+        for (auto& field : classType->fields) {
+            if (field.first == node.memberName) {
+                node.type = field.second;
+                node.isLValue = true;
+                return;
+            }
+        }
+        emitError("no member named '" + node.memberName + "' in class '" + classType->name + "'", node);
     }
-    emitError("no member named '" + node.memberName + "' in struct '" + structType->name + "'", node);
     node.type = nullptr;
     node.isLValue = false;
 }

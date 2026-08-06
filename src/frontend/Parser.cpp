@@ -1219,22 +1219,22 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
         auto classDecl = parseClassDecl();
         if (!classDecl) return nullptr;
 
-        // Register class as struct type in TypeContext if it has fields
+        // Register class as class type in TypeContext if it has fields
         if (!classDecl->fields.empty()) {
-            auto structType = new StructType(classDecl->name);
+            auto classType = new ClassType(classDecl->name);
             for (auto& field : classDecl->fields) {
-                structType->addField(field.first, field.second);
+                classType->addField(field.first, field.second);
             }
-            TypeContext::instance().addStruct(classDecl->name, structType);
+            TypeContext::instance().addClass(classDecl->name, classType);
         }
 
         // Check if there's a variable name after class declaration
         if (check(TokenType::TOKEN_IDENTIFIER)) {
             auto nameTok = advance();
-            auto type = TypeContext::instance().getStruct(classDecl->name);
+            auto type = TypeContext::instance().getClass(classDecl->name);
             if (!type) {
-                type = new StructType(classDecl->name);
-                TypeContext::instance().addStruct(classDecl->name, static_cast<StructType*>(type));
+                type = new ClassType(classDecl->name);
+                TypeContext::instance().addClass(classDecl->name, static_cast<ClassType*>(type));
             }
             return parseVariableDecl(type, nameTok->lexeme);
         }

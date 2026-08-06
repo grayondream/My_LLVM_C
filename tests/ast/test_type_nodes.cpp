@@ -106,3 +106,29 @@ TEST_F(TypeNodeTest, PointerType) {
 
     delete ptrType;
 }
+
+TEST_F(TypeNodeTest, ClassTypeCreation) {
+    auto* classType = typeCtx->getOrCreateClass("Foo");
+    EXPECT_NE(classType, nullptr);
+    EXPECT_EQ(classType->kind, TypeKind::Class);
+    EXPECT_EQ(classType->name, "Foo");
+    EXPECT_EQ(classType->fields.size(), 0);
+}
+
+TEST_F(TypeNodeTest, ClassTypeWithFields) {
+    auto classType = std::make_unique<ClassType>("Person");
+    classType->addField("name", typeCtx->getInt());
+    classType->addField("age", typeCtx->getInt());
+
+    EXPECT_EQ(classType->kind, TypeKind::Class);
+    EXPECT_EQ(classType->name, "Person");
+    EXPECT_EQ(classType->fields.size(), 2);
+    EXPECT_EQ(classType->fields[0].first, "name");
+    EXPECT_EQ(classType->fields[1].first, "age");
+}
+
+TEST_F(TypeNodeTest, ClassTypeGetMethod) {
+    auto* classType = typeCtx->getOrCreateClass("Bar");
+    EXPECT_EQ(typeCtx->getClass("Bar"), classType);
+    EXPECT_EQ(typeCtx->getClass("NonExistent"), nullptr);
+}

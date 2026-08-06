@@ -12,6 +12,7 @@ enum class TypeKind {
     Pointer,
     Array,
     Struct,
+    Class,
     Union,
     Enum,
     Function,
@@ -97,6 +98,25 @@ public:
         : Type(TypeKind::Typedef), name(n), aliasedType(aliased) {}
 };
 
+class ClassType : public Type {
+public:
+    std::string name;
+    std::vector<std::pair<std::string, Type*>> fields;
+    std::vector<std::pair<std::string, FunctionType*>> methods;
+    std::string baseClass;
+
+    ClassType(const std::string& n)
+        : Type(TypeKind::Class), name(n) {}
+
+    void addField(const std::string& fieldName, Type* fieldType) {
+        fields.push_back({fieldName, fieldType});
+    }
+
+    void addMethod(const std::string& methodName, FunctionType* methodType) {
+        methods.push_back({methodName, methodType});
+    }
+};
+
 class TypeContext{
 public:
     static TypeContext& instance();
@@ -120,10 +140,15 @@ public:
     void addEnum(const std::string& name, EnumType* type);
     EnumType* getEnum(const std::string& name) const;
 
+    void addClass(const std::string& name, ClassType* type);
+    ClassType* getClass(const std::string& name) const;
+    ClassType* getOrCreateClass(const std::string& name);
+
 private:
     std::unordered_map<TypeKind, Type*> m_types;
     std::unordered_map<std::string, Type*> m_typedefs;
     std::unordered_map<std::string, StructType*> m_structs;
     std::unordered_map<std::string, UnionType*> m_unions;
     std::unordered_map<std::string, EnumType*> m_enums;
+    std::unordered_map<std::string, ClassType*> m_classes;
 };

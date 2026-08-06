@@ -21,6 +21,10 @@ std::string typeToMangled(Type* type) {
             auto* s = static_cast<StructType*>(type);
             return s->name;
         }
+        case TypeKind::Class: {
+            auto* c = static_cast<ClassType*>(type);
+            return c->name;
+        }
         case TypeKind::Union: {
             auto* u = static_cast<UnionType*>(type);
             return u->name;

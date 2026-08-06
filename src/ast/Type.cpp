@@ -96,3 +96,25 @@ EnumType* TypeContext::getEnum(const std::string& name) const {
     }
     return nullptr;
 }
+
+void TypeContext::addClass(const std::string& name, ClassType* type) {
+    m_classes[name] = type;
+}
+
+ClassType* TypeContext::getClass(const std::string& name) const {
+    auto it = m_classes.find(name);
+    if (it != m_classes.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+ClassType* TypeContext::getOrCreateClass(const std::string& name) {
+    auto it = m_classes.find(name);
+    if (it != m_classes.end()) {
+        return it->second;
+    }
+    auto* classType = new ClassType(name);
+    m_classes[name] = classType;
+    return classType;
+}

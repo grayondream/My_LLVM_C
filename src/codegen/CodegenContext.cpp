@@ -213,6 +213,18 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
             }
             return llvm::StructType::create(*context, fieldTypes, st->name);
         }
+        case TypeKind::Class: {
+            auto* ct = static_cast<ClassType*>(type);
+            // Reuse existing struct type if one with this name already exists
+            if (auto* existing = llvm::StructType::getTypeByName(*context, ct->name)) {
+                return existing;
+            }
+            std::vector<llvm::Type*> fieldTypes;
+            for (auto& f : ct->fields) {
+                fieldTypes.push_back(getLLVMType(f.second));
+            }
+            return llvm::StructType::create(*context, fieldTypes, ct->name);
+        }
         case TypeKind::Array: {
             auto* at = static_cast<ArrayType*>(type);
             return llvm::ArrayType::get(getLLVMType(at->elementType), at->size);

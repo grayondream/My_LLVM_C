@@ -280,11 +280,30 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
             }
         }
         objType = ctx.getLLVMType(object->type);
+    } else if (object->type && object->type->kind == TypeKind::Class) {
+        auto* classType = static_cast<ClassType*>(object->type);
+        for (size_t i = 0; i < classType->fields.size(); ++i) {
+            if (classType->fields[i].first == memberName) {
+                fieldIndex = i;
+                break;
+            }
+        }
+        objType = ctx.getLLVMType(object->type);
     } else if (object->type && object->type->kind == TypeKind::Pointer &&
                object->type->base && object->type->base->kind == TypeKind::Struct) {
         auto* structType = static_cast<StructType*>(object->type->base);
         for (size_t i = 0; i < structType->fields.size(); ++i) {
             if (structType->fields[i].first == memberName) {
+                fieldIndex = i;
+                break;
+            }
+        }
+        objType = ctx.getLLVMType(object->type->base);
+    } else if (object->type && object->type->kind == TypeKind::Pointer &&
+               object->type->base && object->type->base->kind == TypeKind::Class) {
+        auto* classType = static_cast<ClassType*>(object->type->base);
+        for (size_t i = 0; i < classType->fields.size(); ++i) {
+            if (classType->fields[i].first == memberName) {
                 fieldIndex = i;
                 break;
             }
