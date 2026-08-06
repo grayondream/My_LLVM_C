@@ -1807,3 +1807,59 @@ TEST_F(ParserErrorTest, NestedCompoundStmtError) {
     }
     EXPECT_TRUE(found);
 }
+
+// ========== Class Declaration Tests ==========
+
+class ParserClassTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        spdlog::set_level(spdlog::level::off);
+    }
+
+    static std::vector<Token> lex(const std::string& source) {
+        Lexer lexer("test.c", source);
+        return lexer.tokenize();
+    }
+
+    static auto parse(const std::string& source) {
+        auto tokens = lex(source);
+        Parser parser(tokens);
+        return parser.parse();
+    }
+};
+
+TEST_F(ParserClassTest, ClassWithMethods) {
+    std::string source = R"(
+        class Foo {
+            int x;
+            void setX(int v) { this->x = v; }
+            int getX() { return this->x; }
+        };
+    )";
+    auto tokens = lex(source);
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    ASSERT_EQ(ast->declarations.size(), 1);
+
+    auto& classDecl = dynamic_cast<StructDeclAST&>(*ast->declarations[0]);
+    EXPECT_EQ(classDecl.name, "Foo");
+    EXPECT_EQ(classDecl.fields.size(), 1);
+    EXPECT_EQ(classDecl.methods.size(), 2);
+}
+
+TEST_F(ParserClassTest, ClassInheritance) {
+    std::string source = R"(
+        class Base { int x; };
+        class Derived : public Base { int y; };
+    )";
+    auto tokens = lex(source);
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    ASSERT_EQ(ast->declarations.size(), 2);
+
+    auto& derivedDecl = dynamic_cast<StructDeclAST&>(*ast->declarations[1]);
+    EXPECT_EQ(derivedDecl.name, "Derived");
+    EXPECT_EQ(derivedDecl.baseClass, "Base");
+}

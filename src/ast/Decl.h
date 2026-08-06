@@ -85,6 +85,8 @@ class StructDeclAST : public DeclAST {
 public:
     std::string name;
     std::vector<std::pair<std::string, Type*>> fields;
+    std::vector<std::unique_ptr<FunctionDeclAST>> methods;
+    std::string baseClass;
 
     StructDeclAST(const std::string& n, std::vector<std::pair<std::string, Type*>> flds)
         : name(n), fields(std::move(flds)) {}

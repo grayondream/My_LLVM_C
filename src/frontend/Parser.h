@@ -48,6 +48,8 @@ private:
 
     std::unique_ptr<StructDeclAST> parseStructDecl();
 
+    std::unique_ptr<StructDeclAST> parseClassDecl();
+
     std::unique_ptr<UnionDeclAST> parseUnionDecl();
 
     std::unique_ptr<EnumDeclAST> parseEnumDecl();

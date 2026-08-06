@@ -1215,6 +1215,33 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
         return structDecl;
     }
 
+    if (check(TokenType::TOKEN_CLASS)) {
+        auto classDecl = parseClassDecl();
+        if (!classDecl) return nullptr;
+
+        // Register class as struct type in TypeContext if it has fields
+        if (!classDecl->fields.empty()) {
+            auto structType = new StructType(classDecl->name);
+            for (auto& field : classDecl->fields) {
+                structType->addField(field.first, field.second);
+            }
+            TypeContext::instance().addStruct(classDecl->name, structType);
+        }
+
+        // Check if there's a variable name after class declaration
+        if (check(TokenType::TOKEN_IDENTIFIER)) {
+            auto nameTok = advance();
+            auto type = TypeContext::instance().getStruct(classDecl->name);
+            if (!type) {
+                type = new StructType(classDecl->name);
+                TypeContext::instance().addStruct(classDecl->name, static_cast<StructType*>(type));
+            }
+            return parseVariableDecl(type, nameTok->lexeme);
+        }
+
+        return classDecl;
+    }
+
     if (check(TokenType::TOKEN_UNION)) {
         size_t savedPos = m_currentTokenPos;
         auto unionDecl = parseUnionDecl();
@@ -1480,6 +1507,94 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
     match(TokenType::TOKEN_SEMICOLON);
 
     return std::make_unique<StructDeclAST>(name, std::move(fields));
+}
+
+std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
+    if (!match(TokenType::TOKEN_CLASS)) return nullptr;
+
+    std::string name;
+    if (check(TokenType::TOKEN_IDENTIFIER)) {
+        name = advance()->lexeme;
+    }
+
+    // Parse optional inheritance: : public BaseName
+    std::string baseClass;
+    if (match(TokenType::TOKEN_COLON)) {
+        // Skip optional access specifier (public/private/protected)
+        if (check(TokenType::TOKEN_IDENTIFIER)) {
+            std::string access = peek()->lexeme;
+            if (access == "public" || access == "private" || access == "protected") {
+                advance();
+            }
+        }
+        if (check(TokenType::TOKEN_IDENTIFIER)) {
+            baseClass = advance()->lexeme;
+        }
+    }
+
+    if (!check(TokenType::TOKEN_LBRACE)) {
+        // Forward declaration
+        auto decl = std::make_unique<StructDeclAST>(name, std::vector<std::pair<std::string, Type*>>{});
+        decl->baseClass = std::move(baseClass);
+        return decl;
+    }
+
+    advance(); // consume '{'
+
+    std::vector<std::pair<std::string, Type*>> fields;
+    std::vector<std::unique_ptr<FunctionDeclAST>> methods;
+
+    while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
+        // Check if this looks like a member function declaration:
+        // type identifier '(' ... or operator symbol '('
+        size_t savedPos = m_currentTokenPos;
+
+        if (isTypeStart()) {
+            Type* declType = parseType();
+            if (!declType) break;
+
+            if (check(TokenType::TOKEN_IDENTIFIER)) {
+                std::string memberName = advance()->lexeme;
+
+                if (check(TokenType::TOKEN_LPAREN)) {
+                    // Member function declaration
+                    auto func = parseFunctionDecl(declType, memberName);
+                    if (func) {
+                        methods.push_back(std::move(func));
+                    }
+                } else {
+                    // Field declaration
+                    fields.push_back({memberName, declType});
+                    match(TokenType::TOKEN_SEMICOLON);
+                }
+            } else if (check(TokenType::TOKEN_OPERATOR)) {
+                // Operator overload: type operator+(...)
+                advance(); // consume 'operator'
+                auto opToken = peek();
+                if (opToken) {
+                    std::string opName = "operator" + opToken->lexeme;
+                    advance(); // consume operator symbol
+                    auto func = parseFunctionDecl(declType, opName);
+                    if (func) {
+                        methods.push_back(std::move(func));
+                    }
+                }
+            } else {
+                m_currentTokenPos = savedPos;
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    match(TokenType::TOKEN_RBRACE);
+    match(TokenType::TOKEN_SEMICOLON);
+
+    auto decl = std::make_unique<StructDeclAST>(name, std::move(fields));
+    decl->methods = std::move(methods);
+    decl->baseClass = std::move(baseClass);
+    return decl;
 }
 
 std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
