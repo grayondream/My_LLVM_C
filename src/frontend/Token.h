@@ -30,6 +30,7 @@ enum class TokenType : int32_t {
     TOKEN_STRUCT,
     TOKEN_UNION,
     TOKEN_ENUM,
+    TOKEN_CLASS,
     TOKEN_CONST,
     TOKEN_STATIC,
     TOKEN_EXTERN,

@@ -26,6 +26,7 @@ static std::string TokenTypeToString(TokenType type) {
         case TokenType::TOKEN_STRUCT:     return "struct";
         case TokenType::TOKEN_UNION:      return "union";
         case TokenType::TOKEN_ENUM:       return "enum";
+        case TokenType::TOKEN_CLASS:      return "class";
         case TokenType::TOKEN_CONST:      return "const";
         case TokenType::TOKEN_STATIC:     return "static";
         case TokenType::TOKEN_EXTERN:     return "extern";

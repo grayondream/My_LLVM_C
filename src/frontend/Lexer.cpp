@@ -32,6 +32,7 @@ static const std::unordered_map<std::string, TokenType> keywordMap = {
     {"struct", TokenType::TOKEN_STRUCT},
     {"union", TokenType::TOKEN_UNION},
     {"enum", TokenType::TOKEN_ENUM},
+    {"class", TokenType::TOKEN_CLASS},
 
     // ===== 存储类 / 修饰符 =====
     {"const", TokenType::TOKEN_CONST},
