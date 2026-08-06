@@ -83,9 +83,25 @@ TEST_F(OverloadingE2E, FunctionOverloading) {
 }
 
 TEST_F(OverloadingE2E, OperatorOverloading) {
-    GTEST_SKIP() << "Operator overloading on struct types fails due to LLVM IR "
-                    "struct type unification issue: same C struct produces different "
-                    "LLVM type IDs in different contexts, causing 'bad signature' "
-                    "assertion in CallInst::init. Requires codegen fix to unify "
-                    "struct types by name.";
+    EXPECT_EQ(runSource(R"(
+        struct Point { int x; int y; };
+        
+        struct Point operator+(struct Point a, struct Point b) {
+            struct Point result;
+            result.x = a.x + b.x;
+            result.y = a.y + b.y;
+            return result;
+        }
+        
+        int main() {
+            struct Point p1;
+            p1.x = 1;
+            p1.y = 2;
+            struct Point p2;
+            p2.x = 3;
+            p2.y = 4;
+            struct Point p3 = p1 + p2;
+            return p3.x - 4;
+        }
+    )", "test_op_overload.c"), 0);
 }

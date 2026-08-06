@@ -203,6 +203,10 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
         }
         case TypeKind::Struct: {
             auto* st = static_cast<StructType*>(type);
+            // Reuse existing struct type if one with this name already exists
+            if (auto* existing = llvm::StructType::getTypeByName(*context, st->name)) {
+                return existing;
+            }
             std::vector<llvm::Type*> fieldTypes;
             for (auto& f : st->fields) {
                 fieldTypes.push_back(getLLVMType(f.second));

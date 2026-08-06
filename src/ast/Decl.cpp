@@ -144,6 +144,10 @@ llvm::Value* ArrayDeclAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* StructDeclAST::codegen(CodegenContext& ctx) {
+    // Reuse existing struct type if one with this name already exists
+    if (auto* existing = llvm::StructType::getTypeByName(ctx.getContext(), name)) {
+        return nullptr;
+    }
     std::vector<llvm::Type*> fieldTypes;
     for (auto& field : fields) {
         fieldTypes.push_back(ctx.getLLVMType(field.second));
@@ -154,6 +158,10 @@ llvm::Value* StructDeclAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* UnionDeclAST::codegen(CodegenContext& ctx) {
+    // Reuse existing union type if one with this name already exists
+    if (auto* existing = llvm::StructType::getTypeByName(ctx.getContext(), name)) {
+        return nullptr;
+    }
     std::vector<llvm::Type*> memberTypes;
     for (auto& member : members) {
         memberTypes.push_back(ctx.getLLVMType(member.second));
