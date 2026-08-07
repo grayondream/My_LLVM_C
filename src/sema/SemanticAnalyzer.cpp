@@ -838,11 +838,52 @@ void SemanticAnalyzer::visit(ArrayDeclAST& node) {
 }
 
 void SemanticAnalyzer::visit(StructDeclAST& node) {
-    auto* structType = new StructType(node.name);
-    for (auto& field : node.fields) {
-        structType->addField(field.first, field.second);
+    bool isClass = !node.methods.empty() || !node.baseClass.empty();
+
+    if (isClass) {
+        auto* classType = new ClassType(node.name);
+
+        for (auto& field : node.fields) {
+            classType->addField(field.first, field.second);
+        }
+
+        if (!node.baseClass.empty()) {
+            auto* baseType = typeCtx->getClass(node.baseClass);
+            if (!baseType) {
+                emitError("base class '" + node.baseClass + "' of class '" + node.name + "' not found", node);
+            } else {
+                classType->baseClass = node.baseClass;
+                for (auto& method : baseType->methods) {
+                    classType->addMethod(method.first, method.second);
+                }
+            }
+        }
+
+        for (auto& method : node.methods) {
+            std::vector<Type*> paramTypes;
+            paramTypes.push_back(new Type(TypeKind::Pointer, classType));
+            for (auto& param : method->params) {
+                paramTypes.push_back(param->type);
+            }
+            auto* methodType = new FunctionType(method->returnType, std::move(paramTypes));
+            classType->addMethod(method->name, methodType);
+        }
+
+        typeCtx->addClass(node.name, classType);
+
+        for (auto& method : node.methods) {
+            auto* thisType = new Type(TypeKind::Pointer, classType);
+            auto thisParam = std::make_unique<ParamDeclAST>("this", thisType);
+            method->params.insert(method->params.begin(), std::move(thisParam));
+            visit(*method);
+        }
+    } else {
+        auto* structType = new StructType(node.name);
+        for (auto& field : node.fields) {
+            structType->addField(field.first, field.second);
+        }
+        typeCtx->addStruct(node.name, structType);
     }
-    typeCtx->addStruct(node.name, structType);
 }
 
 void SemanticAnalyzer::visit(UnionDeclAST& node) {
@@ -1000,4 +1041,55 @@ void SemanticAnalyzer::visit(StmtAST& stmt) {
     if (auto* s = dynamic_cast<LabelStmtAST*>(&stmt)) { visit(*s); return; }
     if (auto* s = dynamic_cast<NullStmtAST*>(&stmt)) { visit(*s); return; }
     if (auto* s = dynamic_cast<DeclStmtAST*>(&stmt)) { visit(*s); return; }
+}
+
+Symbol* SemanticAnalyzer::resolveMethod(ClassType* classType, const std::string& methodName, const std::vector<Type*>& argTypes) {
+    for (auto& method : classType->methods) {
+        if (method.first == methodName) {
+            if (method.second->paramTypes.size() - 1 == argTypes.size()) {
+                bool match = true;
+                for (size_t i = 0; i < argTypes.size(); ++i) {
+                    if (method.second->paramTypes[i + 1] != argTypes[i]) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) {
+                    Symbol* sym = new Symbol(methodName, method.second);
+                    return sym;
+                }
+            }
+        }
+    }
+
+    if (!classType->baseClass.empty()) {
+        auto* baseType = typeCtx->getClass(classType->baseClass);
+        if (baseType) {
+            Symbol* result = resolveMethod(baseType, methodName, argTypes);
+            if (result) return result;
+        }
+    }
+
+    return nullptr;
+}
+
+bool SemanticAnalyzer::isMethodCall(ExprAST& expr) {
+    auto* memberAccess = dynamic_cast<MemberAccessExprAST*>(&expr);
+    if (!memberAccess) return false;
+
+    Type* objType = memberAccess->object->type;
+    if (!objType) return false;
+
+    if (memberAccess->accessKind == MemberAccessKind::Arrow) {
+        if (objType->kind == TypeKind::Pointer && objType->base &&
+            objType->base->kind == TypeKind::Class) {
+            return true;
+        }
+    } else {
+        if (objType->kind == TypeKind::Class) {
+            return true;
+        }
+    }
+
+    return false;
 }

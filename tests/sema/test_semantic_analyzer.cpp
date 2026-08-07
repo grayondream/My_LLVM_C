@@ -4,6 +4,8 @@
 #include "ast/Stmt.h"
 #include "ast/Decl.h"
 #include "ast/Type.h"
+#include "frontend/Lexer.h"
+#include "frontend/Parser.h"
 
 class SemanticAnalyzerTest : public ::testing::Test {
 protected:
@@ -606,4 +608,60 @@ TEST_F(SemanticAnalyzerTest, OverloadResolutionNoMatch) {
     TranslationUnitAST tu(std::move(decls));
     analyzer->analyze(tu);
     EXPECT_FALSE(analyzer->getErrors().empty());
+}
+
+// ========== Class Support ==========
+
+TEST(ClassSupport, SemanticAnalysisValidClass) {
+    std::string source = R"(
+        class Foo {
+            int x;
+            void setX(int v) { this->x = v; }
+        };
+    )";
+    Lexer lexer("test.c", source);
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    EXPECT_TRUE(analyzer.getErrors().empty());
+}
+
+TEST(ClassSupport, SemanticAnalysisInvalidBaseClass) {
+    std::string source = R"(
+        class Derived : public Nonexistent { int y; };
+    )";
+    Lexer lexer("test.c", source);
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    EXPECT_FALSE(analyzer.getErrors().empty());
+}
+
+TEST(ClassSupport, SemanticAnalysisInheritedMethod) {
+    std::string source = R"(
+        class Base {
+            int x;
+            void setX(int v) { this->x = v; }
+        };
+        class Derived : public Base {
+            int y;
+        };
+    )";
+    Lexer lexer("test.c", source);
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    EXPECT_TRUE(analyzer.getErrors().empty());
 }

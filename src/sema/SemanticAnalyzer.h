@@ -51,6 +51,8 @@ private:
     Symbol* resolveOverload(const std::string& name, const std::vector<Type*>& argTypes);
     bool isStructOrUnionType(Type* type) const;
     std::string getOperatorMangledName(BinaryOp op, Type* left, Type* right);
+    Symbol* resolveMethod(ClassType* classType, const std::string& methodName, const std::vector<Type*>& argTypes);
+    bool isMethodCall(ExprAST& expr);
 
     void visit(TranslationUnitAST& node);
     void visit(FunctionDeclAST& node);
