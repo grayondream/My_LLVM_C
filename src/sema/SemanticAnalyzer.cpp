@@ -684,6 +684,48 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
     node.isLValue = false;
 }
 
+void SemanticAnalyzer::visit(MethodCallExprAST& node) {
+    Type* objType = getExprType(*node.object);
+    if (!objType) {
+        node.type = nullptr;
+        node.isLValue = false;
+        return;
+    }
+
+    ClassType* classType = nullptr;
+    if (objType->kind == TypeKind::Class) {
+        classType = static_cast<ClassType*>(objType);
+    } else if (objType->kind == TypeKind::Pointer && objType->base && objType->base->kind == TypeKind::Class) {
+        classType = static_cast<ClassType*>(objType->base);
+    }
+
+    if (!classType) {
+        emitError("cannot call method on non-class type '" + typeToString(objType) + "'", node);
+        node.type = nullptr;
+        node.isLValue = false;
+        return;
+    }
+
+    std::vector<Type*> argTypes;
+    for (auto& arg : node.args) {
+        Type* argType = getExprType(*arg);
+        argTypes.push_back(argType);
+    }
+
+    Symbol* method = resolveMethod(classType, node.methodName, argTypes);
+    if (!method || method->type->kind != TypeKind::Function) {
+        emitError("no matching method '" + node.methodName + "' in class '" + classType->name + "'", node);
+        node.type = nullptr;
+        node.isLValue = false;
+        return;
+    }
+
+    auto* funcType = static_cast<FunctionType*>(method->type);
+    node.type = funcType->returnType;
+    node.isLValue = false;
+    delete method;
+}
+
 void SemanticAnalyzer::visit(SizeofExprAST& node) {
     node.type = typeCtx->getInt();
     node.isLValue = false;
@@ -1031,6 +1073,7 @@ void SemanticAnalyzer::visit(ExprAST& expr) {
     if (auto* e = dynamic_cast<PostfixIncDecExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<ArrayAccessExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<MemberAccessExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<MethodCallExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<SizeofExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<InitializerListExprAST*>(&expr)) { visit(*e); return; }
 }

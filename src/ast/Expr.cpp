@@ -1,4 +1,5 @@
 #include "Expr.h"
+#include "Type.h"
 #include "codegen/CodegenContext.h"
 #include "support/Log.h"
 #include "Mangle.h"
@@ -156,8 +157,9 @@ llvm::Value* MethodCallExprAST::codegen(CodegenContext& ctx) {
     if (objType && objType->kind == TypeKind::Pointer && objType->base) {
         objType = objType->base;
     }
+    ClassType* classType = nullptr;
     if (objType && objType->kind == TypeKind::Class) {
-        auto* classType = static_cast<ClassType*>(objType);
+        classType = static_cast<ClassType*>(objType);
         className = classType->name;
     } else if (objType && objType->kind == TypeKind::Struct) {
         auto* structType = static_cast<StructType*>(objType);
@@ -176,8 +178,26 @@ llvm::Value* MethodCallExprAST::codegen(CodegenContext& ctx) {
 
     llvm::Function* calleeFn = ctx.getModule().getFunction(mangledName);
     if (!calleeFn) {
-        LOGE("unknown method: {}.{}", className, methodName);
-        return nullptr;
+        // Walk inheritance chain to find the declaring class
+        ClassType* searchType = classType;
+        while (!calleeFn && searchType && !searchType->baseClass.empty()) {
+            ClassType* baseType = TypeContext::instance().getClass(searchType->baseClass);
+            if (!baseType) break;
+            std::vector<Type*> baseArgTypes;
+            Type* baseThisType = new Type(TypeKind::Pointer, baseType);
+            baseArgTypes.push_back(baseThisType);
+            for (auto& arg : args) {
+                baseArgTypes.push_back(arg->type);
+            }
+            std::string baseMangledName = mangleFunction(methodName, baseArgTypes);
+            calleeFn = ctx.getModule().getFunction(baseMangledName);
+            if (calleeFn) {
+                mangledName = baseMangledName;
+                className = baseType->name;
+                break;
+            }
+            searchType = baseType;
+        }
     }
 
     std::vector<llvm::Value*> argsV;
@@ -349,6 +369,10 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
                 break;
             }
         }
+        // Offset field index by 1 if class has a base class (base struct occupies index 0)
+        if (!classType->baseClass.empty()) {
+            fieldIndex += 1;
+        }
         objType = ctx.getLLVMType(object->type);
     } else if (object->type && object->type->kind == TypeKind::Pointer &&
                object->type->base && object->type->base->kind == TypeKind::Struct) {
@@ -370,6 +394,10 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
                 fieldIndex = i;
                 break;
             }
+        }
+        // Offset field index by 1 if class has a base class (base struct occupies index 0)
+        if (!classType->baseClass.empty()) {
+            fieldIndex += 1;
         }
         objType = ctx.getLLVMType(object->type->base);
         // Load the pointer from the alloca before doing GEP
