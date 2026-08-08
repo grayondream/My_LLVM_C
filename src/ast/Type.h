@@ -115,6 +115,20 @@ public:
     void addMethod(const std::string& methodName, FunctionType* methodType) {
         methods.push_back({methodName, methodType});
     }
+
+    Type* getFieldType(const std::string& fieldName) const {
+        for (auto& [name, type] : fields) {
+            if (name == fieldName) return type;
+        }
+        return nullptr;
+    }
+
+    FunctionType* getMethod(const std::string& methodName) const {
+        for (auto& [name, type] : methods) {
+            if (name == methodName) return type;
+        }
+        return nullptr;
+    }
 };
 
 class TypeContext{

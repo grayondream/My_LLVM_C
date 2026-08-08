@@ -105,6 +105,12 @@ llvm::Value* FunctionDeclAST::codegen(CodegenContext& ctx) {
     if (body) {
         body->codegen(ctx);
     }
+
+    // Add implicit return for void functions if no terminator exists
+    if (returnType->kind == TypeKind::Void && !ctx.getBuilder().GetInsertBlock()->getTerminator()) {
+        ctx.getBuilder().CreateRetVoid();
+    }
+
     ctx.popScope();
 
     return function;
@@ -146,14 +152,38 @@ llvm::Value* ArrayDeclAST::codegen(CodegenContext& ctx) {
 llvm::Value* StructDeclAST::codegen(CodegenContext& ctx) {
     // Reuse existing struct type if one with this name already exists
     if (auto* existing = llvm::StructType::getTypeByName(ctx.getContext(), name)) {
+        // Still need to generate methods if this is a class
+        if (!methods.empty()) {
+            for (auto& method : methods) {
+                method->codegen(ctx);
+            }
+        }
         return nullptr;
     }
+
+    bool isClass = !methods.empty() || !baseClass.empty();
     std::vector<llvm::Type*> fieldTypes;
+
+    // For classes with inheritance, add base class struct as first field
+    if (isClass && !baseClass.empty()) {
+        if (auto* baseType = llvm::StructType::getTypeByName(ctx.getContext(), baseClass)) {
+            fieldTypes.push_back(baseType);
+        }
+    }
+
     for (auto& field : fields) {
         fieldTypes.push_back(ctx.getLLVMType(field.second));
     }
 
     llvm::StructType* structType = llvm::StructType::create(ctx.getContext(), fieldTypes, name);
+
+    // Generate methods as separate functions
+    if (isClass) {
+        for (auto& method : methods) {
+            method->codegen(ctx);
+        }
+    }
+
     return nullptr;
 }
 

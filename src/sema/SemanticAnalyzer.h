@@ -93,6 +93,7 @@ private:
     void visit(PostfixIncDecExprAST& node);
     void visit(ArrayAccessExprAST& node);
     void visit(MemberAccessExprAST& node);
+    void visit(MethodCallExprAST& node);
     void visit(SizeofExprAST& node);
     void visit(InitializerListExprAST& node);
 

@@ -841,10 +841,13 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
     bool isClass = !node.methods.empty() || !node.baseClass.empty();
 
     if (isClass) {
-        auto* classType = new ClassType(node.name);
+        auto* classType = typeCtx->getOrCreateClass(node.name);
 
+        // Add fields if not already added
         for (auto& field : node.fields) {
-            classType->addField(field.first, field.second);
+            if (!classType->getFieldType(field.first)) {
+                classType->addField(field.first, field.second);
+            }
         }
 
         if (!node.baseClass.empty()) {
@@ -854,19 +857,25 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
             } else {
                 classType->baseClass = node.baseClass;
                 for (auto& method : baseType->methods) {
-                    classType->addMethod(method.first, method.second);
+                    // Only add if not already present
+                    if (!classType->getMethod(method.first)) {
+                        classType->addMethod(method.first, method.second);
+                    }
                 }
             }
         }
 
         for (auto& method : node.methods) {
-            std::vector<Type*> paramTypes;
-            paramTypes.push_back(new Type(TypeKind::Pointer, classType));
-            for (auto& param : method->params) {
-                paramTypes.push_back(param->type);
+            // Only add if not already present
+            if (!classType->getMethod(method->name)) {
+                std::vector<Type*> paramTypes;
+                paramTypes.push_back(new Type(TypeKind::Pointer, classType));
+                for (auto& param : method->params) {
+                    paramTypes.push_back(param->type);
+                }
+                auto* methodType = new FunctionType(method->returnType, std::move(paramTypes));
+                classType->addMethod(method->name, methodType);
             }
-            auto* methodType = new FunctionType(method->returnType, std::move(paramTypes));
-            classType->addMethod(method->name, methodType);
         }
 
         typeCtx->addClass(node.name, classType);

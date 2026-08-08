@@ -136,6 +136,67 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
         return nullptr;
     }
 
+    if (calleeFn->getReturnType()->isVoidTy()) {
+        return ctx.getBuilder().CreateCall(calleeFn, argsV);
+    }
+    return ctx.getBuilder().CreateCall(calleeFn, argsV, "calltmp");
+}
+
+llvm::Value* MethodCallExprAST::codegen(CodegenContext& ctx) {
+    llvm::Value* objVal = object->codegen(ctx);
+    if (!objVal) return nullptr;
+
+    // Get the object's type (should be a pointer to a class type)
+    llvm::Type* objLLVMType = objVal->getType();
+    if (!objLLVMType->isPointerTy()) return nullptr;
+
+    // Determine the class type name for method mangling
+    std::string className;
+    Type* objType = object->type;
+    if (objType && objType->kind == TypeKind::Pointer && objType->base) {
+        objType = objType->base;
+    }
+    if (objType && objType->kind == TypeKind::Class) {
+        auto* classType = static_cast<ClassType*>(objType);
+        className = classType->name;
+    } else if (objType && objType->kind == TypeKind::Struct) {
+        auto* structType = static_cast<StructType*>(objType);
+        className = structType->name;
+    }
+
+    // Build argument types: this pointer first, then explicit args
+    std::vector<Type*> argTypes;
+    Type* thisType = new Type(TypeKind::Pointer, objType);
+    argTypes.push_back(thisType);
+    for (auto& arg : args) {
+        argTypes.push_back(arg->type);
+    }
+
+    std::string mangledName = mangleFunction(methodName, argTypes);
+
+    llvm::Function* calleeFn = ctx.getModule().getFunction(mangledName);
+    if (!calleeFn) {
+        LOGE("unknown method: {}.{}", className, methodName);
+        return nullptr;
+    }
+
+    std::vector<llvm::Value*> argsV;
+    // Pass object pointer as the this argument
+    argsV.push_back(objVal);
+    for (auto& arg : args) {
+        llvm::Value* argVal = arg->codegen(ctx);
+        if (!argVal) return nullptr;
+        argsV.push_back(argVal);
+    }
+
+    if (argsV.size() != calleeFn->arg_size()) {
+        LOGE("method {}.{} expects {} args, got {}", className, methodName, calleeFn->arg_size(), argsV.size());
+        return nullptr;
+    }
+
+    if (calleeFn->getReturnType()->isVoidTy()) {
+        return ctx.getBuilder().CreateCall(calleeFn, argsV);
+    }
     return ctx.getBuilder().CreateCall(calleeFn, argsV, "calltmp");
 }
 
@@ -299,6 +360,8 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
             }
         }
         objType = ctx.getLLVMType(object->type->base);
+        // Load the pointer from the alloca before doing GEP
+        objVal = builder.CreateLoad(llvm::PointerType::get(ctx.getContext(), 0), objVal, "deref");
     } else if (object->type && object->type->kind == TypeKind::Pointer &&
                object->type->base && object->type->base->kind == TypeKind::Class) {
         auto* classType = static_cast<ClassType*>(object->type->base);
@@ -309,6 +372,8 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
             }
         }
         objType = ctx.getLLVMType(object->type->base);
+        // Load the pointer from the alloca before doing GEP
+        objVal = builder.CreateLoad(llvm::PointerType::get(ctx.getContext(), 0), objVal, "deref");
     } else if (object->type && object->type->kind == TypeKind::Pointer) {
         objType = ctx.getLLVMType(object->type->base);
     }

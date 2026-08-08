@@ -220,6 +220,12 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
                 return existing;
             }
             std::vector<llvm::Type*> fieldTypes;
+            // For inheritance, add base class struct as first field
+            if (!ct->baseClass.empty()) {
+                if (auto* baseType = llvm::StructType::getTypeByName(*context, ct->baseClass)) {
+                    fieldTypes.push_back(baseType);
+                }
+            }
             for (auto& f : ct->fields) {
                 fieldTypes.push_back(getLLVMType(f.second));
             }

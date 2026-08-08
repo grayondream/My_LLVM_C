@@ -224,6 +224,18 @@ public:
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
+class MethodCallExprAST : public ExprAST {
+public:
+    std::unique_ptr<ExprAST> object;
+    std::string methodName;
+    std::vector<std::unique_ptr<ExprAST>> args;
+
+    MethodCallExprAST(std::unique_ptr<ExprAST> obj, const std::string& method,
+                      std::vector<std::unique_ptr<ExprAST>> arguments)
+        : object(std::move(obj)), methodName(method), args(std::move(arguments)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
 class SizeofExprAST : public ExprAST {
 public:
     Type* sizeofType;

@@ -502,8 +502,6 @@ std::unique_ptr<ExprAST> Parser::parsePostfix(std::unique_ptr<ExprAST> lhs) {
                 break;
             }
             case TokenType::TOKEN_LPAREN: {
-                // Function call on expression result - not supported in standard C
-                // but we handle it for completeness
                 advance(); // consume '('
                 std::vector<std::unique_ptr<ExprAST>> args;
                 if (!peek() || peek()->type != TokenType::TOKEN_RPAREN) {
@@ -515,8 +513,12 @@ std::unique_ptr<ExprAST> Parser::parsePostfix(std::unique_ptr<ExprAST> lhs) {
                     }
                 }
                 expect(TokenType::TOKEN_RPAREN, "expected ')' after function arguments");
-                // This would need a different AST node for indirect calls
-                // For now, return the lhs as-is (the call args are parsed but unused)
+                // For member access expressions, create a method call
+                if (auto* memberAccess = dynamic_cast<MemberAccessExprAST*>(lhs.get())) {
+                    auto object = std::move(memberAccess->object);
+                    lhs = std::make_unique<MethodCallExprAST>(
+                        std::move(object), memberAccess->memberName, std::move(args));
+                }
                 break;
             }
             case TokenType::TOKEN_LBRACKET: {
@@ -974,9 +976,13 @@ bool Parser::isTypeStart() const {
         case TokenType::TOKEN_TYPEDEF:
             return true;
         case TokenType::TOKEN_IDENTIFIER: {
-            // Check if identifier is a typedef name
+            // Check if identifier is a typedef name, class type, or struct type
             Type* t = TypeContext::instance().getTypedef(peek()->lexeme);
-            return t != nullptr;
+            if (t) return true;
+            ClassType* ct = TypeContext::instance().getClass(peek()->lexeme);
+            if (ct) return true;
+            StructType* st = TypeContext::instance().getStruct(peek()->lexeme);
+            return st != nullptr;
         }
         default:
             return false;
@@ -1119,6 +1125,18 @@ Type* Parser::parseBaseType() {
                 advance();
                 return typedefType;
             }
+            // Check if it's a class type
+            ClassType* classType = TypeContext::instance().getClass(tok->lexeme);
+            if (classType) {
+                advance();
+                return classType;
+            }
+            // Check if it's a struct type
+            StructType* structType = TypeContext::instance().getStruct(tok->lexeme);
+            if (structType) {
+                advance();
+                return structType;
+            }
             return nullptr;
         }
         default:
@@ -1219,9 +1237,10 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
         auto classDecl = parseClassDecl();
         if (!classDecl) return nullptr;
 
-        // Register class as class type in TypeContext if it has fields
-        if (!classDecl->fields.empty()) {
-            auto classType = new ClassType(classDecl->name);
+        // Register class type in TypeContext (methods will be added by semantic analyzer)
+        auto existingType = TypeContext::instance().getClass(classDecl->name);
+        if (!existingType) {
+            auto* classType = new ClassType(classDecl->name);
             for (auto& field : classDecl->fields) {
                 classType->addField(field.first, field.second);
             }
