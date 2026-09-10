@@ -118,3 +118,124 @@ ClassType* TypeContext::getOrCreateClass(const std::string& name) {
     m_classes[name] = classType;
     return classType;
 }
+
+// 新增类型获取方法
+Type* TypeContext::getBool() {
+    if (m_types.find(TypeKind::Bool) == m_types.end()) {
+        m_types[TypeKind::Bool] = new Type(TypeKind::Bool);
+    }
+    return m_types[TypeKind::Bool];
+}
+
+Type* TypeContext::getInt8() {
+    if (m_types.find(TypeKind::Int8) == m_types.end()) {
+        m_types[TypeKind::Int8] = new Type(TypeKind::Int8);
+    }
+    return m_types[TypeKind::Int8];
+}
+
+Type* TypeContext::getInt16() {
+    if (m_types.find(TypeKind::Int16) == m_types.end()) {
+        m_types[TypeKind::Int16] = new Type(TypeKind::Int16);
+    }
+    return m_types[TypeKind::Int16];
+}
+
+Type* TypeContext::getInt32() {
+    if (m_types.find(TypeKind::Int32) == m_types.end()) {
+        m_types[TypeKind::Int32] = new Type(TypeKind::Int32);
+    }
+    return m_types[TypeKind::Int32];
+}
+
+Type* TypeContext::getInt64() {
+    if (m_types.find(TypeKind::Int64) == m_types.end()) {
+        m_types[TypeKind::Int64] = new Type(TypeKind::Int64);
+    }
+    return m_types[TypeKind::Int64];
+}
+
+Type* TypeContext::getInt128() {
+    if (m_types.find(TypeKind::Int128) == m_types.end()) {
+        m_types[TypeKind::Int128] = new Type(TypeKind::Int128);
+    }
+    return m_types[TypeKind::Int128];
+}
+
+Type* TypeContext::getUInt8() {
+    if (m_types.find(TypeKind::UInt8) == m_types.end()) {
+        m_types[TypeKind::UInt8] = new Type(TypeKind::UInt8);
+    }
+    return m_types[TypeKind::UInt8];
+}
+
+Type* TypeContext::getUInt16() {
+    if (m_types.find(TypeKind::UInt16) == m_types.end()) {
+        m_types[TypeKind::UInt16] = new Type(TypeKind::UInt16);
+    }
+    return m_types[TypeKind::UInt16];
+}
+
+Type* TypeContext::getUInt32() {
+    if (m_types.find(TypeKind::UInt32) == m_types.end()) {
+        m_types[TypeKind::UInt32] = new Type(TypeKind::UInt32);
+    }
+    return m_types[TypeKind::UInt32];
+}
+
+Type* TypeContext::getUInt64() {
+    if (m_types.find(TypeKind::UInt64) == m_types.end()) {
+        m_types[TypeKind::UInt64] = new Type(TypeKind::UInt64);
+    }
+    return m_types[TypeKind::UInt64];
+}
+
+Type* TypeContext::getUInt128() {
+    if (m_types.find(TypeKind::UInt128) == m_types.end()) {
+        m_types[TypeKind::UInt128] = new Type(TypeKind::UInt128);
+    }
+    return m_types[TypeKind::UInt128];
+}
+
+Type* TypeContext::getISize() {
+    if (m_types.find(TypeKind::ISize) == m_types.end()) {
+        m_types[TypeKind::ISize] = new Type(TypeKind::ISize);
+    }
+    return m_types[TypeKind::ISize];
+}
+
+Type* TypeContext::getUSize() {
+    if (m_types.find(TypeKind::USize) == m_types.end()) {
+        m_types[TypeKind::USize] = new Type(TypeKind::USize);
+    }
+    return m_types[TypeKind::USize];
+}
+
+Type* TypeContext::getFloat32() {
+    if (m_types.find(TypeKind::Float32) == m_types.end()) {
+        m_types[TypeKind::Float32] = new Type(TypeKind::Float32);
+    }
+    return m_types[TypeKind::Float32];
+}
+
+Type* TypeContext::getFloat64() {
+    if (m_types.find(TypeKind::Float64) == m_types.end()) {
+        m_types[TypeKind::Float64] = new Type(TypeKind::Float64);
+    }
+    return m_types[TypeKind::Float64];
+}
+
+SliceType* TypeContext::getSliceType(Type* elementType) {
+    // 切片类型不需要缓存，因为每个切片类型都有不同的元素类型
+    return new SliceType(elementType);
+}
+
+OptionalType* TypeContext::getOptionalType(Type* elementType) {
+    // 可选类型不需要缓存，因为每个可选类型都有不同的元素类型
+    return new OptionalType(elementType);
+}
+
+ResultType* TypeContext::getResultType(Type* successType, Type* errorType) {
+    // 结果类型不需要缓存，因为每个结果类型都有不同的成功和错误类型
+    return new ResultType(successType, errorType);
+}

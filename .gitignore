@@ -8,3 +8,5 @@ docs/
 *.gcov
 *.gcda
 *.gcno
+TODO.md
+PROGRESS.md

@@ -37,6 +37,37 @@ llvm::DIType* getDIType(CodegenContext& ctx, Type* type) {
             return builder.createBasicType("double", 64, llvm::dwarf::DW_ATE_float);
         case TypeKind::Char:
             return builder.createBasicType("char", 8, llvm::dwarf::DW_ATE_signed_char);
+        case TypeKind::Bool:
+            return builder.createBasicType("bool", 1, llvm::dwarf::DW_ATE_boolean);
+        // 新增整数类型
+        case TypeKind::Int8:
+            return builder.createBasicType("int8", 8, llvm::dwarf::DW_ATE_signed);
+        case TypeKind::Int16:
+            return builder.createBasicType("int16", 16, llvm::dwarf::DW_ATE_signed);
+        case TypeKind::Int32:
+            return builder.createBasicType("int32", 32, llvm::dwarf::DW_ATE_signed);
+        case TypeKind::Int64:
+            return builder.createBasicType("int64", 64, llvm::dwarf::DW_ATE_signed);
+        case TypeKind::Int128:
+            return builder.createBasicType("int128", 128, llvm::dwarf::DW_ATE_signed);
+        case TypeKind::UInt8:
+            return builder.createBasicType("uint8", 8, llvm::dwarf::DW_ATE_unsigned);
+        case TypeKind::UInt16:
+            return builder.createBasicType("uint16", 16, llvm::dwarf::DW_ATE_unsigned);
+        case TypeKind::UInt32:
+            return builder.createBasicType("uint32", 32, llvm::dwarf::DW_ATE_unsigned);
+        case TypeKind::UInt64:
+            return builder.createBasicType("uint64", 64, llvm::dwarf::DW_ATE_unsigned);
+        case TypeKind::UInt128:
+            return builder.createBasicType("uint128", 128, llvm::dwarf::DW_ATE_unsigned);
+        case TypeKind::ISize:
+            return builder.createBasicType("isize", 64, llvm::dwarf::DW_ATE_signed);
+        case TypeKind::USize:
+            return builder.createBasicType("usize", 64, llvm::dwarf::DW_ATE_unsigned);
+        case TypeKind::Float32:
+            return builder.createBasicType("float32", 32, llvm::dwarf::DW_ATE_float);
+        case TypeKind::Float64:
+            return builder.createBasicType("float64", 64, llvm::dwarf::DW_ATE_float);
         case TypeKind::Pointer: {
             auto* pointee = getDIType(ctx, type->base);
             if (!pointee) {
@@ -197,6 +228,22 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
         case TypeKind::Double: return llvm::Type::getDoubleTy(*context);
         case TypeKind::Char:   return llvm::Type::getInt8Ty(*context);
         case TypeKind::Void:   return llvm::Type::getVoidTy(*context);
+        case TypeKind::Bool:   return llvm::Type::getInt1Ty(*context);
+        // 新增整数类型
+        case TypeKind::Int8:   return llvm::Type::getInt8Ty(*context);
+        case TypeKind::Int16:  return llvm::Type::getInt16Ty(*context);
+        case TypeKind::Int32:  return llvm::Type::getInt32Ty(*context);
+        case TypeKind::Int64:  return llvm::Type::getInt64Ty(*context);
+        case TypeKind::Int128: return llvm::Type::getInt128Ty(*context);
+        case TypeKind::UInt8:  return llvm::Type::getInt8Ty(*context);
+        case TypeKind::UInt16: return llvm::Type::getInt16Ty(*context);
+        case TypeKind::UInt32: return llvm::Type::getInt32Ty(*context);
+        case TypeKind::UInt64: return llvm::Type::getInt64Ty(*context);
+        case TypeKind::UInt128:return llvm::Type::getInt128Ty(*context);
+        case TypeKind::ISize:  return llvm::Type::getInt64Ty(*context);
+        case TypeKind::USize:  return llvm::Type::getInt64Ty(*context);
+        case TypeKind::Float32:return llvm::Type::getFloatTy(*context);
+        case TypeKind::Float64:return llvm::Type::getDoubleTy(*context);
         case TypeKind::Pointer: {
             auto* pointee = getLLVMType(type->base);
             return llvm::PointerType::get(*context, 0);
@@ -239,6 +286,30 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
         case TypeKind::Typedef: {
             auto* td = static_cast<TypedefType*>(type);
             return getLLVMType(td->aliasedType);
+        }
+        // 新增类型
+        case TypeKind::Slice: {
+            // 切片类型表示为 { pointer, length } 结构体
+            std::vector<llvm::Type*> fieldTypes;
+            fieldTypes.push_back(llvm::PointerType::get(*context, 0)); // pointer
+            fieldTypes.push_back(llvm::Type::getInt64Ty(*context));    // length
+            return llvm::StructType::create(*context, fieldTypes, "Slice");
+        }
+        case TypeKind::Optional: {
+            // 可选类型表示为 { value, has_value } 结构体
+            auto* sliceType = static_cast<SliceType*>(type);
+            std::vector<llvm::Type*> fieldTypes;
+            fieldTypes.push_back(getLLVMType(sliceType->elementType)); // value
+            fieldTypes.push_back(llvm::Type::getInt1Ty(*context));    // has_value
+            return llvm::StructType::create(*context, fieldTypes, "Optional");
+        }
+        case TypeKind::Result: {
+            // 结果类型表示为 { value, error } 结构体
+            auto* resultType = static_cast<ResultType*>(type);
+            std::vector<llvm::Type*> fieldTypes;
+            fieldTypes.push_back(getLLVMType(resultType->successType)); // value
+            fieldTypes.push_back(getLLVMType(resultType->errorType));   // error
+            return llvm::StructType::create(*context, fieldTypes, "Result");
         }
         default:               return llvm::Type::getInt32Ty(*context);
     }

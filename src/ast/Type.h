@@ -9,6 +9,7 @@ enum class TypeKind {
     Float,
     Double,
     Char,
+    Bool,
     Pointer,
     Array,
     Struct,
@@ -17,6 +18,24 @@ enum class TypeKind {
     Enum,
     Function,
     Typedef,
+    // 新增类型
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    Int128,
+    UInt8,
+    UInt16,
+    UInt32,
+    UInt64,
+    UInt128,
+    ISize,
+    USize,
+    Float32,
+    Float64,
+    Slice,
+    Optional,
+    Result,
 };
 
 class Type {
@@ -98,6 +117,31 @@ public:
         : Type(TypeKind::Typedef), name(n), aliasedType(aliased) {}
 };
 
+class SliceType : public Type {
+public:
+    Type* elementType;
+
+    SliceType(Type* elem)
+        : Type(TypeKind::Slice), elementType(elem) {}
+};
+
+class OptionalType : public Type {
+public:
+    Type* elementType;
+
+    OptionalType(Type* elem)
+        : Type(TypeKind::Optional), elementType(elem) {}
+};
+
+class ResultType : public Type {
+public:
+    Type* successType;
+    Type* errorType;
+
+    ResultType(Type* success, Type* error)
+        : Type(TypeKind::Result), successType(success), errorType(error) {}
+};
+
 class ClassType : public Type {
 public:
     std::string name;
@@ -157,6 +201,26 @@ public:
     void addClass(const std::string& name, ClassType* type);
     ClassType* getClass(const std::string& name) const;
     ClassType* getOrCreateClass(const std::string& name);
+
+    // 新增类型获取方法
+    Type* getBool();
+    Type* getInt8();
+    Type* getInt16();
+    Type* getInt32();
+    Type* getInt64();
+    Type* getInt128();
+    Type* getUInt8();
+    Type* getUInt16();
+    Type* getUInt32();
+    Type* getUInt64();
+    Type* getUInt128();
+    Type* getISize();
+    Type* getUSize();
+    Type* getFloat32();
+    Type* getFloat64();
+    SliceType* getSliceType(Type* elementType);
+    OptionalType* getOptionalType(Type* elementType);
+    ResultType* getResultType(Type* successType, Type* errorType);
 
 private:
     std::unordered_map<TypeKind, Type*> m_types;

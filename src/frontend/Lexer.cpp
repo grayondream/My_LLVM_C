@@ -55,7 +55,42 @@ static const std::unordered_map<std::string, TokenType> keywordMap = {
     {"bool", TokenType::TOKEN_BOOL},
 
     // ===== 空语句 / goto（可选）=====
-    {"goto", TokenType::TOKEN_GOTO}
+    {"goto", TokenType::TOKEN_GOTO},
+
+    // ===== 新增关键字 =====
+    {"true", TokenType::TOKEN_TRUE},
+    {"false", TokenType::TOKEN_FALSE},
+    {"null", TokenType::TOKEN_NULL},
+    {"module", TokenType::TOKEN_MODULE},
+    {"import", TokenType::TOKEN_IMPORT},
+    {"export", TokenType::TOKEN_EXPORT},
+    {"public", TokenType::TOKEN_PUBLIC},
+    {"private", TokenType::TOKEN_PRIVATE},
+    {"comptime", TokenType::TOKEN_COMPTIME},
+    {"defer", TokenType::TOKEN_DEFER},
+    {"generic", TokenType::TOKEN_GENERIC},
+    {"cast", TokenType::TOKEN_CAST},
+    {"typeof", TokenType::TOKEN_TYPEOF},
+    {"alignof", TokenType::TOKEN_ALIGNOF},
+    {"offsetof", TokenType::TOKEN_OFFSETOF},
+
+    // ===== 新增整数类型 =====
+    {"int8", TokenType::TOKEN_INT8},
+    {"int16", TokenType::TOKEN_INT16},
+    {"int32", TokenType::TOKEN_INT32},
+    {"int64", TokenType::TOKEN_INT64},
+    {"int128", TokenType::TOKEN_INT128},
+    {"uint8", TokenType::TOKEN_UINT8},
+    {"uint16", TokenType::TOKEN_UINT16},
+    {"uint32", TokenType::TOKEN_UINT32},
+    {"uint64", TokenType::TOKEN_UINT64},
+    {"uint128", TokenType::TOKEN_UINT128},
+    {"isize", TokenType::TOKEN_ISIZE},
+    {"usize", TokenType::TOKEN_USIZE},
+
+    // ===== 新增浮点类型 =====
+    {"float32", TokenType::TOKEN_FLOAT32},
+    {"float64", TokenType::TOKEN_FLOAT64}
 };
 
 Lexer::Lexer(const std::string& filename, const std::string& source)
@@ -234,9 +269,88 @@ Token Lexer::scanIdentifier() {
 }
 
 Token Lexer::scanNumber(){
+    // 检查是否是二进制、八进制或十六进制
+    if(peek() == '0' && !isEof()) {
+        char next = peekNext();
+        if(next == 'b' || next == 'B') {
+            // 二进制字面量
+            advance(); // 消耗 '0'
+            advance(); // 消耗 'b' 或 'B'
+            while(true){
+                const char ch = peek();
+                if(ch == '0' || ch == '1' || ch == '_') {
+                    advance();
+                } else {
+                    break;
+                }
+            }
+            const auto lexName = lexeme();
+            // 移除下划线并转换为整数
+            std::string binaryStr;
+            for(char c : lexName) {
+                if(c != '_') binaryStr += c;
+            }
+            // 跳过 "0b" 前缀
+            binaryStr = binaryStr.substr(2);
+            int value = 0;
+            for(char c : binaryStr) {
+                value = value * 2 + (c - '0');
+            }
+            return makeToken(TokenType::TOKEN_NUMBER, lexName, value);
+        } else if(next == 'o' || next == 'O') {
+            // 八进制字面量
+            advance(); // 消耗 '0'
+            advance(); // 消耗 'o' 或 'O'
+            while(true){
+                const char ch = peek();
+                if((ch >= '0' && ch <= '7') || ch == '_') {
+                    advance();
+                } else {
+                    break;
+                }
+            }
+            const auto lexName = lexeme();
+            // 移除下划线并转换为整数
+            std::string octalStr;
+            for(char c : lexName) {
+                if(c != '_') octalStr += c;
+            }
+            // 跳过 "0o" 前缀
+            octalStr = octalStr.substr(2);
+            int value = 0;
+            for(char c : octalStr) {
+                value = value * 8 + (c - '0');
+            }
+            return makeToken(TokenType::TOKEN_NUMBER, lexName, value);
+        } else if(next == 'x' || next == 'X') {
+            // 十六进制字面量（已支持）
+            advance(); // 消耗 '0'
+            advance(); // 消耗 'x' 或 'X'
+            while(true){
+                const char ch = peek();
+                if(std::isxdigit(ch) || ch == '_') {
+                    advance();
+                } else {
+                    break;
+                }
+            }
+            const auto lexName = lexeme();
+            // 移除下划线并转换为整数
+            std::string hexStr;
+            for(char c : lexName) {
+                if(c != '_') hexStr += c;
+            }
+            // 跳过 "0x" 前缀
+            hexStr = hexStr.substr(2);
+            int value = std::stoi(hexStr, nullptr, 16);
+            return makeToken(TokenType::TOKEN_NUMBER, lexName, value);
+        }
+    }
+
+    // 十进制整数或浮点数
     while(true){
         const char ch = peek();
-        if(std::isdigit(ch)) {
+        if(std::isdigit(ch) || ch == '_') {
             advance();
         } else {
             break;
@@ -249,11 +363,30 @@ Token Lexer::scanNumber(){
         advance(); // consume the '.'
         while(true){
             const char ch = peek();
-            if(std::isdigit(ch)) {
+            if(std::isdigit(ch) || ch == '_') {
                 advance();
             } else {
                 break;
             }
+        }
+    }
+
+    // 检查后缀
+    std::string suffix;
+    if(peek() == 'i' || peek() == 'u' || peek() == 'f') {
+        // 可能是后缀
+        size_t startPos = m_currentPos;
+        while(std::isalnum(peek()) || peek() == '_') {
+            advance();
+        }
+        suffix = lexeme().substr(startPos - m_startPos);
+        // 检查是否是有效的后缀
+        if(suffix != "i8" && suffix != "i16" && suffix != "i32" && suffix != "i64" && suffix != "i128" &&
+           suffix != "u8" && suffix != "u16" && suffix != "u32" && suffix != "u64" && suffix != "u128" &&
+           suffix != "f32" && suffix != "f64") {
+            // 不是有效后缀，回退
+            m_currentPos = startPos;
+            suffix.clear();
         }
     }
 
@@ -266,12 +399,48 @@ Token Lexer::scanNumber(){
 }
 
 Token Lexer::scanString() {
+    // 检查是否是原始字符串 r"..."
+    if(peek() == 'r' && peekNext() == '"') {
+        advance(); // 消耗 'r'
+        advance(); // 消耗 '"'
+        while(true){
+            const char ch = peek();
+            if(ch == '"') {
+                advance();
+                break;
+            } else {
+                advance();
+            }
+        }
+        return makeToken(TokenType::TOKEN_STRING, lexeme());
+    }
+    
+    // 普通字符串
     advance();
     while(true){
         const char ch = peek();
         if(ch == '"') {
             advance();
             break;
+        } else if(ch == '\\' && !isEof()) {
+            // 处理转义序列
+            advance(); // 消耗 '\'
+            char escapeChar = peek();
+            if(escapeChar == 'u' && !isEof()) {
+                // Unicode转义 \u{XXXX}
+                advance(); // 消耗 'u'
+                if(peek() == '{') {
+                    advance(); // 消耗 '{'
+                    while(peek() != '}' && !isEof()) {
+                        advance();
+                    }
+                    if(peek() == '}') {
+                        advance(); // 消耗 '}'
+                    }
+                }
+            } else {
+                advance(); // 消耗转义字符
+            }
         } else {
             advance();
         }
@@ -281,11 +450,31 @@ Token Lexer::scanString() {
 }
 
 Token Lexer::scanChar() {
+    advance(); // 消耗开始的引号
     while(true){
         const char ch = peek();
         if(ch == '\'') {
             advance();
             break;
+        } else if(ch == '\\' && !isEof()) {
+            // 处理转义序列
+            advance(); // 消耗 '\'
+            char escapeChar = peek();
+            if(escapeChar == 'u' && !isEof()) {
+                // Unicode转义 \u{XXXX}
+                advance(); // 消耗 'u'
+                if(peek() == '{') {
+                    advance(); // 消耗 '{'
+                    while(peek() != '}' && !isEof()) {
+                        advance();
+                    }
+                    if(peek() == '}') {
+                        advance(); // 消耗 '}'
+                    }
+                }
+            } else {
+                advance(); // 消耗转义字符
+            }
         } else {
             advance();
         }

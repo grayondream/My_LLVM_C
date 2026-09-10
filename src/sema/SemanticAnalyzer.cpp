@@ -1047,6 +1047,12 @@ void SemanticAnalyzer::visit(TranslationUnitAST& node) {
                 visit(*typedefDecl);
             } else if (auto* fwdDecl = dynamic_cast<ForwardDeclAST*>(decl.get())) {
                 visit(*fwdDecl);
+            } else if (auto* usingDecl = dynamic_cast<UsingDeclAST*>(decl.get())) {
+                visit(*usingDecl);
+            } else if (auto* typeDecl = dynamic_cast<TypeDeclAST*>(decl.get())) {
+                visit(*typeDecl);
+            } else if (auto* moduleDecl = dynamic_cast<ModuleDeclAST*>(decl.get())) {
+                visit(*moduleDecl);
             }
         }
     }
@@ -1093,6 +1099,7 @@ void SemanticAnalyzer::visit(StmtAST& stmt) {
     if (auto* s = dynamic_cast<LabelStmtAST*>(&stmt)) { visit(*s); return; }
     if (auto* s = dynamic_cast<NullStmtAST*>(&stmt)) { visit(*s); return; }
     if (auto* s = dynamic_cast<DeclStmtAST*>(&stmt)) { visit(*s); return; }
+    if (auto* s = dynamic_cast<DeferStmtAST*>(&stmt)) { visit(*s); return; }
 }
 
 Symbol* SemanticAnalyzer::resolveMethod(ClassType* classType, const std::string& methodName, const std::vector<Type*>& argTypes) {
@@ -1144,4 +1151,30 @@ bool SemanticAnalyzer::isMethodCall(ExprAST& expr) {
     }
 
     return false;
+}
+
+// 新增AST节点的visit方法实现
+void SemanticAnalyzer::visit(UsingDeclAST& node) {
+    // using 声明：将类型别名添加到类型上下文
+    typeCtx->addTypedef(node.name, node.aliasedType);
+    declare(node.name, node.aliasedType);
+}
+
+void SemanticAnalyzer::visit(TypeDeclAST& node) {
+    // type 声明：创建新类型（distinct type）
+    // 目前简单实现为类型别名
+    typeCtx->addTypedef(node.name, node.aliasedType);
+    declare(node.name, node.aliasedType);
+}
+
+void SemanticAnalyzer::visit(ModuleDeclAST& node) {
+    // 模块声明：在语义分析阶段不需要做任何事情
+    // 模块系统将在后续版本中实现
+}
+
+void SemanticAnalyzer::visit(DeferStmtAST& node) {
+    // defer 语句：检查表达式是否有效
+    if (node.callExpr) {
+        visit(*node.callExpr);
+    }
 }

@@ -722,6 +722,18 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
         return stmt;
     }
 
+    // defer statement
+    if (peek() && peek()->type == TokenType::TOKEN_DEFER) {
+        advance(); // 消耗 "defer"
+        auto callExpr = parseExpr();
+        if (!callExpr) {
+            errorUnexpected("expected expression after 'defer'");
+            return nullptr;
+        }
+        expect(TokenType::TOKEN_SEMICOLON, "expected ';' after defer statement");
+        return std::make_unique<DeferStmtAST>(std::move(callExpr));
+    }
+
     // compound statement (block)
     if (peek() && peek()->type == TokenType::TOKEN_LBRACE) {
         return parseCompoundStmt();
@@ -946,7 +958,45 @@ std::unique_ptr<StmtAST> Parser::parseExprStmt() {
 
 std::unique_ptr<TranslationUnitAST> Parser::parse() {
     std::vector<std::unique_ptr<DeclAST>> decls{};
+    
+    // 新增：支持模块声明
+    std::string moduleName;
+    std::vector<std::string> imports;
+    std::vector<std::string> exports;
+    
     while (!eof()) {
+        // 检查模块声明
+        if (check(TokenType::TOKEN_MODULE)) {
+            advance(); // 消耗 "module"
+            if (check(TokenType::TOKEN_IDENTIFIER)) {
+                moduleName = advance()->lexeme;
+                match(TokenType::TOKEN_SEMICOLON);
+            }
+            continue;
+        }
+        
+        // 检查导入声明
+        if (check(TokenType::TOKEN_IMPORT)) {
+            advance(); // 消耗 "import"
+            if (check(TokenType::TOKEN_IDENTIFIER)) {
+                std::string importName = advance()->lexeme;
+                imports.push_back(importName);
+                match(TokenType::TOKEN_SEMICOLON);
+            }
+            continue;
+        }
+        
+        // 检查导出声明
+        if (check(TokenType::TOKEN_EXPORT)) {
+            advance(); // 消耗 "export"
+            if (check(TokenType::TOKEN_IDENTIFIER)) {
+                std::string exportName = advance()->lexeme;
+                exports.push_back(exportName);
+                match(TokenType::TOKEN_SEMICOLON);
+            }
+            continue;
+        }
+        
         auto decl = parseDeclaration();
         if (decl) {
             decls.push_back(std::move(decl));
@@ -954,6 +1004,12 @@ std::unique_ptr<TranslationUnitAST> Parser::parse() {
             advance();
         }
     }
+    
+    // 如果有模块声明，创建模块声明节点
+    if (!moduleName.empty()) {
+        decls.push_back(std::make_unique<ModuleDeclAST>(moduleName, std::move(imports), std::move(exports)));
+    }
+    
     return std::make_unique<TranslationUnitAST>(std::move(decls));
 }
 
@@ -1013,6 +1069,66 @@ Type* Parser::parseBaseType() {
         case TokenType::TOKEN_VOID: {
             advance();
             return TypeContext::instance().getVoid();
+        }
+        case TokenType::TOKEN_BOOL: {
+            advance();
+            return TypeContext::instance().getBool();
+        }
+        case TokenType::TOKEN_INT8: {
+            advance();
+            return TypeContext::instance().getInt8();
+        }
+        case TokenType::TOKEN_INT16: {
+            advance();
+            return TypeContext::instance().getInt16();
+        }
+        case TokenType::TOKEN_INT32: {
+            advance();
+            return TypeContext::instance().getInt32();
+        }
+        case TokenType::TOKEN_INT64: {
+            advance();
+            return TypeContext::instance().getInt64();
+        }
+        case TokenType::TOKEN_INT128: {
+            advance();
+            return TypeContext::instance().getInt128();
+        }
+        case TokenType::TOKEN_UINT8: {
+            advance();
+            return TypeContext::instance().getUInt8();
+        }
+        case TokenType::TOKEN_UINT16: {
+            advance();
+            return TypeContext::instance().getUInt16();
+        }
+        case TokenType::TOKEN_UINT32: {
+            advance();
+            return TypeContext::instance().getUInt32();
+        }
+        case TokenType::TOKEN_UINT64: {
+            advance();
+            return TypeContext::instance().getUInt64();
+        }
+        case TokenType::TOKEN_UINT128: {
+            advance();
+            return TypeContext::instance().getUInt128();
+        }
+        case TokenType::TOKEN_ISIZE: {
+            advance();
+            return TypeContext::instance().getISize();
+        }
+        case TokenType::TOKEN_USIZE: {
+            advance();
+            return TypeContext::instance().getUSize();
+        }
+        case TokenType::TOKEN_FLOAT32: {
+            advance();
+            return TypeContext::instance().getFloat32();
+        }
+        case TokenType::TOKEN_FLOAT64: {
+            advance();
+            return TypeContext::instance().getFloat64();
         }
         case TokenType::TOKEN_STRUCT: {
             advance(); // consume 'struct'
@@ -1188,12 +1304,69 @@ Type* Parser::parseType() {
         baseType = ptrType;
     }
 
+    // 新增：支持切片类型 T[]
+    if (check(TokenType::TOKEN_LBRACKET)) {
+        advance(); // 消耗 '['
+        if (check(TokenType::TOKEN_RBRACKET)) {
+            advance(); // 消耗 ']'
+            return TypeContext::instance().getSliceType(baseType);
+        }
+    }
+
+    // 新增：支持可选类型 T?
+    if (check(TokenType::TOKEN_QUESTION)) {
+        advance(); // 消耗 '?'
+        return TypeContext::instance().getOptionalType(baseType);
+    }
+
     return baseType;
 }
 
 std::unique_ptr<DeclAST> Parser::parseDeclaration() {
     if (check(TokenType::TOKEN_TYPEDEF)) {
         return parseTypedefDecl();
+    }
+
+    // 新增：支持 using 类型别名
+    if (check(TokenType::TOKEN_IDENTIFIER)) {
+        std::string name = peek()->lexeme;
+        if (name == "using") {
+            advance(); // 消耗 "using"
+            // 解析: using Name = Type;
+            if (check(TokenType::TOKEN_IDENTIFIER)) {
+                std::string aliasName = advance()->lexeme;
+                if (match(TokenType::TOKEN_ASSIGN)) {
+                    Type* aliasedType = parseType();
+                    if (aliasedType) {
+                        match(TokenType::TOKEN_SEMICOLON);
+                        return std::make_unique<UsingDeclAST>(aliasName, aliasedType);
+                    }
+                }
+            }
+            // 如果解析失败，回退
+            m_currentTokenPos -= 1; // 回退 "using"
+        }
+    }
+
+    // 新增：支持 type 新类型（distinct type）
+    if (check(TokenType::TOKEN_IDENTIFIER)) {
+        std::string name = peek()->lexeme;
+        if (name == "type") {
+            advance(); // 消耗 "type"
+            // 解析: type Name = Type;
+            if (check(TokenType::TOKEN_IDENTIFIER)) {
+                std::string typeName = advance()->lexeme;
+                if (match(TokenType::TOKEN_ASSIGN)) {
+                    Type* aliasedType = parseType();
+                    if (aliasedType) {
+                        match(TokenType::TOKEN_SEMICOLON);
+                        return std::make_unique<TypeDeclAST>(typeName, aliasedType);
+                    }
+                }
+            }
+            // 如果解析失败，回退
+            m_currentTokenPos -= 1; // 回退 "type"
+        }
     }
 
     if (check(TokenType::TOKEN_STRUCT)) {
@@ -1540,7 +1713,7 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
     std::string baseClass;
     if (match(TokenType::TOKEN_COLON)) {
         // Skip optional access specifier (public/private/protected)
-        if (check(TokenType::TOKEN_IDENTIFIER)) {
+        if (check(TokenType::TOKEN_PUBLIC) || check(TokenType::TOKEN_PRIVATE) || check(TokenType::TOKEN_IDENTIFIER)) {
             std::string access = peek()->lexeme;
             if (access == "public" || access == "private" || access == "protected") {
                 advance();

@@ -130,3 +130,44 @@ public:
     explicit ForwardDeclAST(const std::string& n) : name(n) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
+
+// 新增AST节点
+class UsingDeclAST : public DeclAST {
+public:
+    std::string name;
+    Type* aliasedType;
+
+    UsingDeclAST(const std::string& n, Type* aliased)
+        : name(n), aliasedType(aliased) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+class TypeDeclAST : public DeclAST {
+public:
+    std::string name;
+    Type* aliasedType;
+
+    TypeDeclAST(const std::string& n, Type* aliased)
+        : name(n), aliasedType(aliased) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+class DeferStmtAST : public StmtAST {
+public:
+    std::unique_ptr<ExprAST> callExpr;
+
+    explicit DeferStmtAST(std::unique_ptr<ExprAST> call)
+        : callExpr(std::move(call)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+class ModuleDeclAST : public DeclAST {
+public:
+    std::string name;
+    std::vector<std::string> imports;
+    std::vector<std::string> exports;
+
+    ModuleDeclAST(const std::string& n, std::vector<std::string> imp, std::vector<std::string> exp)
+        : name(n), imports(std::move(imp)), exports(std::move(exp)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};

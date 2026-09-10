@@ -212,3 +212,32 @@ llvm::Value* TypedefDeclAST::codegen(CodegenContext& ctx) {
 llvm::Value* ForwardDeclAST::codegen(CodegenContext& ctx) {
     return nullptr;
 }
+
+// 新增AST节点的codegen实现
+llvm::Value* UsingDeclAST::codegen(CodegenContext& ctx) {
+    // using 声明在代码生成阶段不需要做任何事情
+    // 类型别名已经在语义分析阶段处理
+    return nullptr;
+}
+
+llvm::Value* TypeDeclAST::codegen(CodegenContext& ctx) {
+    // type 声明在代码生成阶段不需要做任何事情
+    // 新类型已经在语义分析阶段处理
+    return nullptr;
+}
+
+llvm::Value* DeferStmtAST::codegen(CodegenContext& ctx) {
+    // defer 语句需要在代码生成阶段特殊处理
+    // 目前先简单实现：在作用域结束时执行表达式
+    // TODO: 实现完整的 defer 语义
+    if (callExpr) {
+        return callExpr->codegen(ctx);
+    }
+    return nullptr;
+}
+
+llvm::Value* ModuleDeclAST::codegen(CodegenContext& ctx) {
+    // 模块声明在代码生成阶段不需要做任何事情
+    // 模块系统已经在语义分析阶段处理
+    return nullptr;
+}

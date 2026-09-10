@@ -63,6 +63,9 @@ private:
     void visit(EnumDeclAST& node);
     void visit(TypedefDeclAST& node);
     void visit(ForwardDeclAST& node);
+    void visit(UsingDeclAST& node);
+    void visit(TypeDeclAST& node);
+    void visit(ModuleDeclAST& node);
     void visit(DeclStmtAST& node);
     void visit(CompoundStmtAST& node);
     void visit(ExprStmtAST& node);
@@ -77,6 +80,7 @@ private:
     void visit(GotoStmtAST& node);
     void visit(LabelStmtAST& node);
     void visit(NullStmtAST& node);
+    void visit(DeferStmtAST& node);
 
     void visit(NumberExprAST& node);
     void visit(FloatExprAST& node);
