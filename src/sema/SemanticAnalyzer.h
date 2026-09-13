@@ -31,7 +31,7 @@ public:
 
     Type* checkBinaryTypes(BinaryOp op, Type* left, Type* right, ExprAST& node);
     Type* checkAssignmentTypes(Type* lhs, Type* rhs, ExprAST& node);
-    Type* checkFunctionCall(const std::string& name, const std::vector<std::unique_ptr<ExprAST>>& args, ExprAST& node);
+    Type* checkFunctionCall(const std::string& name, const std::vector<std::unique_ptr<ExprAST>>& args, ExprAST& node, FunctionType** outFuncType = nullptr);
 
     Type* getExprType(ExprAST& expr);
     std::optional<ConstValue> evaluateConstexpr(ExprAST* expr);

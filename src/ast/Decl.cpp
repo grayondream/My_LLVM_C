@@ -28,6 +28,9 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
         } else if (initExpr) {
             initConstant = llvm::dyn_cast_or_null<llvm::Constant>(initExpr->codegen(ctx));
         }
+        if (initConstant) {
+            initConstant = llvm::dyn_cast_or_null<llvm::Constant>(ctx.castValue(initConstant, llvmType));
+        }
         
         llvm::GlobalVariable::LinkageTypes linkage = type->isConst 
             ? llvm::GlobalVariable::PrivateLinkage 
@@ -43,11 +46,13 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
     if (isConstexpr && foldedValue) {
         llvm::Value* constVal = foldToConstant(ctx, *foldedValue);
         if (constVal) {
+            constVal = ctx.castValue(constVal, llvmType);
             ctx.getBuilder().CreateStore(constVal, alloca);
         }
     } else if (initExpr) {
         llvm::Value* initVal = initExpr->codegen(ctx);
         if (initVal) {
+            initVal = ctx.castValue(initVal, llvmType);
             ctx.getBuilder().CreateStore(initVal, alloca);
         }
     }
@@ -74,9 +79,18 @@ llvm::Value* FunctionDeclAST::codegen(CodegenContext& ctx) {
     }
     std::string mangledName = mangleFunction(name, astParamTypes);
 
-    llvm::FunctionType* funcType = llvm::FunctionType::get(retType, paramTypes, false);
-    llvm::Function* function = llvm::Function::Create(
-        funcType, llvm::Function::ExternalLinkage, mangledName, ctx.getModule());
+    // Reuse a previous declaration (prototype) if one already exists.
+    llvm::Function* function = ctx.getModule().getFunction(mangledName);
+    if (!function) {
+        llvm::FunctionType* funcType = llvm::FunctionType::get(retType, paramTypes, isVarArg);
+        function = llvm::Function::Create(
+            funcType, llvm::Function::ExternalLinkage, mangledName, ctx.getModule());
+    }
+
+    // A declaration without a body needs no entry block or code.
+    if (!body) {
+        return function;
+    }
 
     if (!sourceFile.empty()) {
         ctx.emitFunctionDebug(function, returnType, name, sourceLine);

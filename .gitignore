@@ -10,3 +10,4 @@ docs/
 *.gcno
 TODO.md
 PROGRESS.md
+.tmp

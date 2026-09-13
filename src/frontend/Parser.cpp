@@ -1,7 +1,90 @@
 #include "Parser.h"
 #include <memory>
 #include "ast/Decl.h"
+#include "ast/Mangle.h"
 #include "frontend/Token.h"
+
+namespace {
+
+int hexDigit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+void appendUtf8(std::string& out, unsigned int cp) {
+    if (cp <= 0x7F) {
+        out.push_back(static_cast<char>(cp));
+    } else if (cp <= 0x7FF) {
+        out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else if (cp <= 0xFFFF) {
+        out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else {
+        out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    }
+}
+
+// Decode C escape sequences from a string literal body (quotes already removed).
+std::string decodeEscapes(const std::string& s) {
+    std::string out;
+    for (size_t i = 0; i < s.size(); ++i) {
+        char c = s[i];
+        if (c != '\\' || i + 1 >= s.size()) {
+            out.push_back(c);
+            continue;
+        }
+        char e = s[++i];
+        switch (e) {
+            case 'n': out.push_back('\n'); break;
+            case 't': out.push_back('\t'); break;
+            case 'r': out.push_back('\r'); break;
+            case '0': out.push_back('\0'); break;
+            case 'a': out.push_back('\a'); break;
+            case 'b': out.push_back('\b'); break;
+            case 'f': out.push_back('\f'); break;
+            case 'v': out.push_back('\v'); break;
+            case '\\': out.push_back('\\'); break;
+            case '\'': out.push_back('\''); break;
+            case '"': out.push_back('"'); break;
+            case '?': out.push_back('?'); break;
+            case 'x': {
+                int v = 0, n = 0;
+                while (i + 1 < s.size() && n < 2 && hexDigit(s[i + 1]) >= 0) {
+                    v = v * 16 + hexDigit(s[++i]);
+                    ++n;
+                }
+                out.push_back(static_cast<char>(v));
+                break;
+            }
+            case 'u': {
+                unsigned int cp = 0;
+                if (i + 1 < s.size() && s[i + 1] == '{') {
+                    ++i; // consume '{'
+                    while (i + 1 < s.size() && s[i + 1] != '}') {
+                        int d = hexDigit(s[++i]);
+                        if (d >= 0) cp = cp * 16 + static_cast<unsigned int>(d);
+                    }
+                    if (i + 1 < s.size() && s[i + 1] == '}') ++i; // consume '}'
+                }
+                appendUtf8(out, cp);
+                break;
+            }
+            default:
+                out.push_back(e);
+                break;
+        }
+    }
+    return out;
+}
+
+} // namespace
 
 const std::vector<Diagnostic>& Parser::getErrors() const {
     return m_errors;
@@ -412,17 +495,42 @@ std::unique_ptr<ExprAST> Parser::parsePrimary() {
     // Char literal
     if (token->type == TokenType::TOKEN_CHAR) {
         advance();
-        // Char literal value parsing - take the character between quotes
-        char val = token->lexeme.size() > 2 ? token->lexeme[1] : 0;
+        std::string lex = token->lexeme;
+        char val = 0;
+        if (lex.size() >= 2 && lex.front() == '\'' && lex.back() == '\'') {
+            std::string decoded = decodeEscapes(lex.substr(1, lex.size() - 2));
+            if (!decoded.empty()) val = decoded[0];
+        }
         return std::make_unique<CharExprAST>(val);
     }
 
     // String literal
     if (token->type == TokenType::TOKEN_STRING) {
         advance();
-        // Strip surrounding quotes
-        std::string val = token->lexeme.substr(1, token->lexeme.size() - 2);
+        std::string lex = token->lexeme;
+        std::string val;
+        if (lex.size() >= 2 && lex[0] == 'r' && lex[1] == '"') {
+            // Raw string: r"..." — no escape processing.
+            if (lex.size() >= 3) val = lex.substr(2, lex.size() - 3);
+        } else if (lex.size() >= 2 && lex.front() == '"' && lex.back() == '"') {
+            val = decodeEscapes(lex.substr(1, lex.size() - 2));
+        }
         return std::make_unique<StringExprAST>(val);
+    }
+
+    // Boolean literals
+    if (token->type == TokenType::TOKEN_TRUE) {
+        advance();
+        return std::make_unique<NumberExprAST>(1);
+    }
+    if (token->type == TokenType::TOKEN_FALSE) {
+        advance();
+        return std::make_unique<NumberExprAST>(0);
+    }
+    // null literal
+    if (token->type == TokenType::TOKEN_NULL) {
+        advance();
+        return std::make_unique<NumberExprAST>(0);
     }
 
     // Identifier or function call
@@ -986,13 +1094,14 @@ std::unique_ptr<TranslationUnitAST> Parser::parse() {
             continue;
         }
         
-        // 检查导出声明
+        // 检查导出声明：export 只是修饰符，后面仍是一个完整声明
         if (check(TokenType::TOKEN_EXPORT)) {
             advance(); // 消耗 "export"
-            if (check(TokenType::TOKEN_IDENTIFIER)) {
-                std::string exportName = advance()->lexeme;
-                exports.push_back(exportName);
-                match(TokenType::TOKEN_SEMICOLON);
+            auto decl = parseDeclaration();
+            if (decl) {
+                decls.push_back(std::move(decl));
+            } else {
+                advance();
             }
             continue;
         }
@@ -1026,10 +1135,25 @@ bool Parser::isTypeStart() const {
         case TokenType::TOKEN_DOUBLE:
         case TokenType::TOKEN_CHAR_KW:
         case TokenType::TOKEN_VOID:
+        case TokenType::TOKEN_BOOL:
         case TokenType::TOKEN_STRUCT:
         case TokenType::TOKEN_UNION:
         case TokenType::TOKEN_ENUM:
         case TokenType::TOKEN_TYPEDEF:
+        case TokenType::TOKEN_INT8:
+        case TokenType::TOKEN_INT16:
+        case TokenType::TOKEN_INT32:
+        case TokenType::TOKEN_INT64:
+        case TokenType::TOKEN_INT128:
+        case TokenType::TOKEN_UINT8:
+        case TokenType::TOKEN_UINT16:
+        case TokenType::TOKEN_UINT32:
+        case TokenType::TOKEN_UINT64:
+        case TokenType::TOKEN_UINT128:
+        case TokenType::TOKEN_ISIZE:
+        case TokenType::TOKEN_USIZE:
+        case TokenType::TOKEN_FLOAT32:
+        case TokenType::TOKEN_FLOAT64:
             return true;
         case TokenType::TOKEN_IDENTIFIER: {
             // Check if identifier is a typedef name, class type, or struct type
@@ -1323,6 +1447,16 @@ Type* Parser::parseType() {
 }
 
 std::unique_ptr<DeclAST> Parser::parseDeclaration() {
+    // C linkage: `extern` declarations keep their plain, unmangled symbol name.
+    if (check(TokenType::TOKEN_EXTERN)) {
+        advance();
+        auto decl = parseDeclaration();
+        if (auto* fn = dynamic_cast<FunctionDeclAST*>(decl.get())) {
+            markCName(fn->name);
+        }
+        return decl;
+    }
+
     if (check(TokenType::TOKEN_TYPEDEF)) {
         return parseTypedefDecl();
     }
@@ -1331,6 +1465,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
     if (check(TokenType::TOKEN_IDENTIFIER)) {
         std::string name = peek()->lexeme;
         if (name == "using") {
+            size_t savedPos = m_currentTokenPos;
             advance(); // 消耗 "using"
             // 解析: using Name = Type;
             if (check(TokenType::TOKEN_IDENTIFIER)) {
@@ -1339,12 +1474,13 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
                     Type* aliasedType = parseType();
                     if (aliasedType) {
                         match(TokenType::TOKEN_SEMICOLON);
+                        TypeContext::instance().addTypedef(aliasName, aliasedType);
                         return std::make_unique<UsingDeclAST>(aliasName, aliasedType);
                     }
                 }
             }
             // 如果解析失败，回退
-            m_currentTokenPos -= 1; // 回退 "using"
+            m_currentTokenPos = savedPos;
         }
     }
 
@@ -1352,6 +1488,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
     if (check(TokenType::TOKEN_IDENTIFIER)) {
         std::string name = peek()->lexeme;
         if (name == "type") {
+            size_t savedPos = m_currentTokenPos;
             advance(); // 消耗 "type"
             // 解析: type Name = Type;
             if (check(TokenType::TOKEN_IDENTIFIER)) {
@@ -1360,12 +1497,13 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
                     Type* aliasedType = parseType();
                     if (aliasedType) {
                         match(TokenType::TOKEN_SEMICOLON);
+                        TypeContext::instance().addTypedef(typeName, aliasedType);
                         return std::make_unique<TypeDeclAST>(typeName, aliasedType);
                     }
                 }
             }
             // 如果解析失败，回退
-            m_currentTokenPos -= 1; // 回退 "type"
+            m_currentTokenPos = savedPos;
         }
     }
 
@@ -1613,7 +1751,7 @@ std::unique_ptr<FunctionDeclAST> Parser::parseFunctionDecl(Type* returnType, con
         errorUnexpected("expected '{' or ';' after function declaration");
     }
 
-    return std::make_unique<FunctionDeclAST>(name, returnType, params, body, isConstexpr);
+    return std::make_unique<FunctionDeclAST>(name, returnType, params, body, isConstexpr, isVarArg);
 }
 
 std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string& name, bool isConstexpr) {

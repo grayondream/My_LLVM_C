@@ -15,6 +15,12 @@ public:
     llvm::Value* value;
 };
 
+// Returns the implicit-conversion rank from `from` to `to`:
+//   0  = exact match
+//   1  = safe arithmetic conversion (integer widening, int -> float, float widening)
+//   -1 = not implicitly convertible
+int conversionRank(Type* from, Type* to);
+
 class OverloadSet {
 public:
     void add(Symbol* sym);

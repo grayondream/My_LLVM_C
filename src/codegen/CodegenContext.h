@@ -55,6 +55,11 @@ public:
 
     llvm::Value* coerceToBool(llvm::Value* val);
 
+    // Insert an implicit conversion of `val` to `targetLLVMType`, following the
+    // usual C arithmetic conversion rules. Returns `val` unchanged when no
+    // conversion is needed or possible.
+    llvm::Value* castValue(llvm::Value* val, llvm::Type* targetLLVMType);
+
 private:
     std::unique_ptr<llvm::LLVMContext> context;
     llvm::IRBuilder<> builder;

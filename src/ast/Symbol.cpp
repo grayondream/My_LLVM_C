@@ -42,34 +42,105 @@ bool typesEqual(Type* a, Type* b) {
     }
 }
 
+static int integerWidth(TypeKind kind) {
+    switch (kind) {
+        case TypeKind::Bool:     return 1;
+        case TypeKind::Char:     return 8;
+        case TypeKind::Int8:     return 8;
+        case TypeKind::UInt8:    return 8;
+        case TypeKind::Int16:    return 16;
+        case TypeKind::UInt16:   return 16;
+        case TypeKind::Int:
+        case TypeKind::Int32:    return 32;
+        case TypeKind::UInt32:   return 32;
+        case TypeKind::Int64:
+        case TypeKind::UInt64:
+        case TypeKind::ISize:
+        case TypeKind::USize:    return 64;
+        case TypeKind::Int128:
+        case TypeKind::UInt128:  return 128;
+        case TypeKind::Enum:     return 32;
+        default:                 return 0;
+    }
+}
+
+static int floatWidth(TypeKind kind) {
+    switch (kind) {
+        case TypeKind::Float:
+        case TypeKind::Float32:  return 32;
+        case TypeKind::Double:
+        case TypeKind::Float64:  return 64;
+        default:                 return 0;
+    }
+}
+
+int conversionRank(Type* from, Type* to) {
+    if (!from || !to) return -1;
+    if (typesEqual(from, to)) return 0;
+
+    while (from->kind == TypeKind::Typedef) from = static_cast<TypedefType*>(from)->aliasedType;
+    while (to->kind == TypeKind::Typedef) to = static_cast<TypedefType*>(to)->aliasedType;
+    if (!from || !to) return -1;
+    if (typesEqual(from, to)) return 0;
+
+    int fw = integerWidth(from->kind);
+    int tw = integerWidth(to->kind);
+    int fb = floatWidth(from->kind);
+    int tb = floatWidth(to->kind);
+
+    if (fw > 0 && tw > 0 && tw >= fw) return 1;   // integer widening
+    if (fw > 0 && tb > 0) return 1;               // integer -> floating point
+    if (fb > 0 && tb > 0 && tb >= fb) return 1;   // floating point widening
+
+    return -1;
+}
+
 void OverloadSet::add(Symbol* sym) {
     candidates.push_back(sym);
 }
 
 Symbol* OverloadSet::resolve(const std::vector<Type*>& argTypes) const {
-    Symbol* match = nullptr;
+    Symbol* best = nullptr;
+    int bestRank = 0;
+    bool ambiguous = false;
+
     for (auto* sym : candidates) {
         if (sym->type->kind != TypeKind::Function) continue;
         auto* funcType = static_cast<FunctionType*>(sym->type);
-        if (funcType->isVarArg) continue; // Skip vararg for now
-        if (funcType->paramTypes.size() != argTypes.size()) continue;
+        size_t fixedCount = funcType->paramTypes.size();
 
-        bool allMatch = true;
-        for (size_t i = 0; i < argTypes.size(); ++i) {
-            if (!typesEqual(funcType->paramTypes[i], argTypes[i])) {
-                allMatch = false;
+        if (funcType->isVarArg) {
+            if (argTypes.size() < fixedCount) continue;
+        } else {
+            if (argTypes.size() != fixedCount) continue;
+        }
+
+        int totalRank = 0;
+        bool viable = true;
+        for (size_t i = 0; i < fixedCount; ++i) {
+            int rank = conversionRank(argTypes[i], funcType->paramTypes[i]);
+            if (rank < 0) {
+                viable = false;
                 break;
             }
+            totalRank += rank;
         }
+        if (!viable) continue;
 
-        if (allMatch) {
-            if (match != nullptr) {
-                return nullptr; // Ambiguous
-            }
-            match = sym;
+        // Prefer non-vararg candidates over vararg ones on equal conversions.
+        if (funcType->isVarArg) totalRank += 1;
+
+        if (best == nullptr || totalRank < bestRank) {
+            best = sym;
+            bestRank = totalRank;
+            ambiguous = false;
+        } else if (totalRank == bestRank) {
+            ambiguous = true;
         }
     }
-    return match;
+
+    if (ambiguous) return nullptr; // Ambiguous
+    return best;
 }
 
 const std::vector<Symbol*>& OverloadSet::getCandidates() const {

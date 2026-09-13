@@ -64,18 +64,50 @@ llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
 
     auto& builder = ctx.getBuilder();
 
+    // Coerce both operands to a common arithmetic type. Floating-point
+    // operations must use the FP opcodes (FAdd/FMul/FCmp...), not the integer
+    // ones.
+    llvm::Type* lhsTy = lhs->getType();
+    llvm::Type* rhsTy = rhs->getType();
+    llvm::Type* opType = lhsTy;
+    if (lhsTy->isFloatingPointTy() || rhsTy->isFloatingPointTy()) {
+        if (lhsTy->isFloatingPointTy() && rhsTy->isFloatingPointTy()) {
+            opType = (lhsTy->getFPMantissaWidth() >= rhsTy->getFPMantissaWidth()) ? lhsTy : rhsTy;
+        } else if (lhsTy->isFloatingPointTy()) {
+            opType = lhsTy;
+        } else {
+            opType = rhsTy;
+        }
+    } else if (lhsTy->isIntegerTy() && rhsTy->isIntegerTy()) {
+        opType = (lhsTy->getIntegerBitWidth() >= rhsTy->getIntegerBitWidth()) ? lhsTy : rhsTy;
+    }
+    lhs = ctx.castValue(lhs, opType);
+    rhs = ctx.castValue(rhs, opType);
+    bool isFloat = opType->isFloatingPointTy();
+
     switch (op) {
-        case BinaryOp::Add:    return builder.CreateAdd(lhs, rhs, "addtmp");
-        case BinaryOp::Sub:    return builder.CreateSub(lhs, rhs, "subtmp");
-        case BinaryOp::Mul:    return builder.CreateMul(lhs, rhs, "multmp");
-        case BinaryOp::Div:    return builder.CreateSDiv(lhs, rhs, "divtmp");
-        case BinaryOp::Mod:    return builder.CreateSRem(lhs, rhs, "modtmp");
-        case BinaryOp::Eq:     return builder.CreateICmpEQ(lhs, rhs, "eqtmp");
-        case BinaryOp::NotEq:  return builder.CreateICmpNE(lhs, rhs, "netmp");
-        case BinaryOp::Lt:     return builder.CreateICmpSLT(lhs, rhs, "lttmp");
-        case BinaryOp::Gt:     return builder.CreateICmpSGT(lhs, rhs, "gttmp");
-        case BinaryOp::Le:     return builder.CreateICmpSLE(lhs, rhs, "letmp");
-        case BinaryOp::Ge:     return builder.CreateICmpSGE(lhs, rhs, "getmp");
+        case BinaryOp::Add:    return isFloat ? builder.CreateFAdd(lhs, rhs, "addtmp")
+                                              : builder.CreateAdd(lhs, rhs, "addtmp");
+        case BinaryOp::Sub:    return isFloat ? builder.CreateFSub(lhs, rhs, "subtmp")
+                                              : builder.CreateSub(lhs, rhs, "subtmp");
+        case BinaryOp::Mul:    return isFloat ? builder.CreateFMul(lhs, rhs, "multmp")
+                                              : builder.CreateMul(lhs, rhs, "multmp");
+        case BinaryOp::Div:    return isFloat ? builder.CreateFDiv(lhs, rhs, "divtmp")
+                                              : builder.CreateSDiv(lhs, rhs, "divtmp");
+        case BinaryOp::Mod:    return isFloat ? builder.CreateFRem(lhs, rhs, "modtmp")
+                                              : builder.CreateSRem(lhs, rhs, "modtmp");
+        case BinaryOp::Eq:     return isFloat ? builder.CreateFCmpOEQ(lhs, rhs, "eqtmp")
+                                              : builder.CreateICmpEQ(lhs, rhs, "eqtmp");
+        case BinaryOp::NotEq:  return isFloat ? builder.CreateFCmpONE(lhs, rhs, "netmp")
+                                              : builder.CreateICmpNE(lhs, rhs, "netmp");
+        case BinaryOp::Lt:     return isFloat ? builder.CreateFCmpOLT(lhs, rhs, "lttmp")
+                                              : builder.CreateICmpSLT(lhs, rhs, "lttmp");
+        case BinaryOp::Gt:     return isFloat ? builder.CreateFCmpOGT(lhs, rhs, "gttmp")
+                                              : builder.CreateICmpSGT(lhs, rhs, "gttmp");
+        case BinaryOp::Le:     return isFloat ? builder.CreateFCmpOLE(lhs, rhs, "letmp")
+                                              : builder.CreateICmpSLE(lhs, rhs, "letmp");
+        case BinaryOp::Ge:     return isFloat ? builder.CreateFCmpOGE(lhs, rhs, "getmp")
+                                              : builder.CreateICmpSGE(lhs, rhs, "getmp");
         case BinaryOp::And:    return builder.CreateAnd(lhs, rhs, "andtmp");
         case BinaryOp::Or:     return builder.CreateOr(lhs, rhs, "ortmp");
         case BinaryOp::BitAnd: return builder.CreateAnd(lhs, rhs, "bitandtmp");
@@ -102,7 +134,8 @@ llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
         case UnaryOp::Deref: {
             llvm::Type* pointeeType = ctx.getLLVMType(operand->type ? operand->type->base : nullptr);
             if (!pointeeType) pointeeType = llvm::Type::getInt8Ty(ctx.getContext());
-            return builder.CreateLoad(pointeeType, v, "dereftmp");
+            llvm::Value* ptrVal = emitLoad(ctx, v, operand->type);
+            return builder.CreateLoad(pointeeType, ptrVal, "dereftmp");
         }
         case UnaryOp::AddressOf: return v;
         default:
@@ -112,10 +145,15 @@ llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
-    // Compute mangled name from argument types
+    // Prefer the overload chosen by semantic analysis so that implicit
+    // conversions (e.g. int8 -> int) resolve to the right symbol.
     std::vector<Type*> argTypes;
-    for (auto& arg : args) {
-        argTypes.push_back(arg->type);
+    if (!resolvedParamTypes.empty()) {
+        argTypes = resolvedParamTypes;
+    } else {
+        for (auto& arg : args) {
+            argTypes.push_back(arg->type);
+        }
     }
     std::string mangledName = mangleFunction(callee, argTypes);
     
@@ -126,13 +164,24 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
     }
 
     std::vector<llvm::Value*> argsV;
-    for (auto& arg : args) {
-        llvm::Value* argVal = arg->codegen(ctx);
+    for (size_t i = 0; i < args.size(); ++i) {
+        llvm::Value* argVal = args[i]->codegen(ctx);
         if (!argVal) return nullptr;
+        if (args[i]->isLValue) {
+            argVal = emitLoad(ctx, argVal, args[i]->type);
+        }
+        if (i < resolvedParamTypes.size()) {
+            argVal = ctx.castValue(argVal, ctx.getLLVMType(resolvedParamTypes[i]));
+        }
         argsV.push_back(argVal);
     }
 
-    if (argsV.size() != calleeFn->arg_size()) {
+    if (calleeFn->isVarArg()) {
+        if (argsV.size() < calleeFn->arg_size()) {
+            LOGE("function {} expects at least {} args, got {}", callee, calleeFn->arg_size(), argsV.size());
+            return nullptr;
+        }
+    } else if (argsV.size() != calleeFn->arg_size()) {
         LOGE("function {} expects {} args, got {}", callee, calleeFn->arg_size(), argsV.size());
         return nullptr;
     }
@@ -206,6 +255,9 @@ llvm::Value* MethodCallExprAST::codegen(CodegenContext& ctx) {
     for (auto& arg : args) {
         llvm::Value* argVal = arg->codegen(ctx);
         if (!argVal) return nullptr;
+        if (arg->isLValue) {
+            argVal = emitLoad(ctx, argVal, arg->type);
+        }
         argsV.push_back(argVal);
     }
 
@@ -227,6 +279,10 @@ llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
 
     auto& builder = ctx.getBuilder();
     llvm::Value* result = emitLoad(ctx, rhsVal, rhs->type);
+
+    if (lhs->type) {
+        result = ctx.castValue(result, ctx.getLLVMType(lhs->type));
+    }
 
     if (op != AssignOp::Assign) {
         llvm::Value* loadedLhs = emitLoad(ctx, lhsVal, lhs->type);
@@ -287,34 +343,10 @@ llvm::Value* CastExprAST::codegen(CodegenContext& ctx) {
     llvm::Type* targetLLVMType = ctx.getLLVMType(castType);
     if (!targetLLVMType) return nullptr;
 
-    auto& builder = ctx.getBuilder();
-    llvm::Type* srcType = val->getType();
-
-    if (srcType == targetLLVMType) return val;
-
-    if (srcType->isIntegerTy() && targetLLVMType->isIntegerTy()) {
-        unsigned srcBits = srcType->getIntegerBitWidth();
-        unsigned dstBits = targetLLVMType->getIntegerBitWidth();
-        if (srcBits < dstBits) return builder.CreateSExt(val, targetLLVMType, "sexttmp");
-        if (srcBits > dstBits) return builder.CreateTrunc(val, targetLLVMType, "trunctmp");
-        return val;
+    if (expr->isLValue) {
+        val = emitLoad(ctx, val, expr->type);
     }
-
-    if (srcType->isIntegerTy() && targetLLVMType->isFloatingPointTy()) {
-        return builder.CreateSIToFP(val, targetLLVMType, "sitofptmp");
-    }
-    if (srcType->isFloatingPointTy() && targetLLVMType->isIntegerTy()) {
-        return builder.CreateFPToSI(val, targetLLVMType, "fptositmp");
-    }
-    if (srcType->isFloatingPointTy() && targetLLVMType->isFloatingPointTy()) {
-        unsigned srcWidth = srcType->getFPMantissaWidth();
-        unsigned dstWidth = targetLLVMType->getFPMantissaWidth();
-        if (srcWidth < dstWidth) return builder.CreateFPExt(val, targetLLVMType, "fpexttmp");
-        if (srcWidth > dstWidth) return builder.CreateFPTrunc(val, targetLLVMType, "fptrunctmp");
-        return val;
-    }
-
-    return val;
+    return ctx.castValue(val, targetLLVMType);
 }
 
 llvm::Value* CommaExprAST::codegen(CodegenContext& ctx) {
@@ -339,6 +371,11 @@ llvm::Value* ArrayAccessExprAST::codegen(CodegenContext& ctx) {
     llvm::Value* arrVal = array->codegen(ctx);
     llvm::Value* idxVal = index->codegen(ctx);
     if (!arrVal || !idxVal) return nullptr;
+
+    if (index->isLValue) {
+        llvm::Type* idxLLVMType = index->type ? ctx.getLLVMType(index->type) : llvm::Type::getInt32Ty(ctx.getContext());
+        idxVal = emitLoad(ctx, idxVal, index->type);
+    }
 
     auto& builder = ctx.getBuilder();
     return builder.CreateGEP(llvm::Type::getInt32Ty(ctx.getContext()), arrVal, idxVal, "arrayidx");

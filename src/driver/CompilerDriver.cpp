@@ -43,7 +43,7 @@ createTargetMachine(llvm::Module& module) {
 
     llvm::TargetOptions options;
     auto tm = target->createTargetMachine(
-        llvmTriple.str(), "generic", "", options, llvm::Reloc::Model());
+        llvmTriple.str(), "generic", "", options, llvm::Reloc::PIC_);
     if (!tm) {
         LOGE("Failed to create TargetMachine");
         return nullptr;

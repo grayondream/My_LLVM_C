@@ -285,13 +285,10 @@ Token Lexer::scanNumber(){
                 }
             }
             const auto lexName = lexeme();
-            // 移除下划线并转换为整数
             std::string binaryStr;
-            for(char c : lexName) {
-                if(c != '_') binaryStr += c;
+            for(size_t i = 2; i < lexName.size(); i++) {
+                if(lexName[i] != '_') binaryStr += lexName[i];
             }
-            // 跳过 "0b" 前缀
-            binaryStr = binaryStr.substr(2);
             int value = 0;
             for(char c : binaryStr) {
                 value = value * 2 + (c - '0');
@@ -310,20 +307,17 @@ Token Lexer::scanNumber(){
                 }
             }
             const auto lexName = lexeme();
-            // 移除下划线并转换为整数
             std::string octalStr;
-            for(char c : lexName) {
-                if(c != '_') octalStr += c;
+            for(size_t i = 2; i < lexName.size(); i++) {
+                if(lexName[i] != '_') octalStr += lexName[i];
             }
-            // 跳过 "0o" 前缀
-            octalStr = octalStr.substr(2);
             int value = 0;
             for(char c : octalStr) {
                 value = value * 8 + (c - '0');
             }
             return makeToken(TokenType::TOKEN_NUMBER, lexName, value);
         } else if(next == 'x' || next == 'X') {
-            // 十六进制字面量（已支持）
+            // 十六进制字面量
             advance(); // 消耗 '0'
             advance(); // 消耗 'x' 或 'X'
             while(true){
@@ -335,14 +329,16 @@ Token Lexer::scanNumber(){
                 }
             }
             const auto lexName = lexeme();
-            // 移除下划线并转换为整数
             std::string hexStr;
-            for(char c : lexName) {
-                if(c != '_') hexStr += c;
+            for(size_t i = 2; i < lexName.size(); i++) {
+                if(lexName[i] != '_') hexStr += lexName[i];
             }
-            // 跳过 "0x" 前缀
-            hexStr = hexStr.substr(2);
-            int value = std::stoi(hexStr, nullptr, 16);
+            int value = 0;
+            for(char c : hexStr) {
+                if(c >= '0' && c <= '9') value = value * 16 + (c - '0');
+                else if(c >= 'a' && c <= 'f') value = value * 16 + (c - 'a' + 10);
+                else if(c >= 'A' && c <= 'F') value = value * 16 + (c - 'A' + 10);
+            }
             return makeToken(TokenType::TOKEN_NUMBER, lexName, value);
         }
     }
@@ -371,30 +367,15 @@ Token Lexer::scanNumber(){
         }
     }
 
-    // 检查后缀
-    std::string suffix;
-    if(peek() == 'i' || peek() == 'u' || peek() == 'f') {
-        // 可能是后缀
-        size_t startPos = m_currentPos;
-        while(std::isalnum(peek()) || peek() == '_') {
-            advance();
-        }
-        suffix = lexeme().substr(startPos - m_startPos);
-        // 检查是否是有效的后缀
-        if(suffix != "i8" && suffix != "i16" && suffix != "i32" && suffix != "i64" && suffix != "i128" &&
-           suffix != "u8" && suffix != "u16" && suffix != "u32" && suffix != "u64" && suffix != "u128" &&
-           suffix != "f32" && suffix != "f64") {
-            // 不是有效后缀，回退
-            m_currentPos = startPos;
-            suffix.clear();
-        }
-    }
-
     const auto lexName = lexeme();
     if(isfloat) {
-        return makeToken(TokenType::TOKEN_FLOAT, lexName, std::stod(lexName));
+        std::string cleanStr;
+        for(char c : lexName) { if(c != '_') cleanStr += c; }
+        return makeToken(TokenType::TOKEN_FLOAT, lexName, std::stod(cleanStr));
     } else {
-        return makeToken(TokenType::TOKEN_NUMBER, lexName, std::stoi(lexName));
+        std::string cleanStr;
+        for(char c : lexName) { if(c != '_') cleanStr += c; }
+        return makeToken(TokenType::TOKEN_NUMBER, lexName, std::stoi(cleanStr));
     }
 }
 
@@ -485,20 +466,23 @@ Token Lexer::scanChar() {
         
 Token Lexer::scanToken() {
     const char ch = peek();
+    if(ch == 'r' && peekNext() == '"') {
+        return scanString();
+    }
     if(std::isalpha(ch) or ch == '_') {
         return scanIdentifier();
     }else if(std::isdigit(ch)) {
         return scanNumber();
+    }else if(ch == '"') {
+        // scanString consumes the closing quote itself; return directly so the
+        // trailing advance() below does not eat the following character.
+        return scanString();
+    }else if(ch == '\'') {
+        return scanChar();
     }
 
     Token token;
     switch(ch){
-    case '"':
-        token = scanString();
-        break;
-    case '\'':
-        token = scanChar();
-        break;
     case '+':
         {
             if(peekNext() == '+') {

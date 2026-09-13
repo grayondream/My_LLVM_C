@@ -219,6 +219,42 @@ llvm::Value* CodegenContext::coerceToBool(llvm::Value* val) {
     return val;
 }
 
+llvm::Value* CodegenContext::castValue(llvm::Value* val, llvm::Type* targetLLVMType) {
+    if (!val || !targetLLVMType) return val;
+    llvm::Type* srcType = val->getType();
+    if (srcType == targetLLVMType) return val;
+
+    if (srcType->isIntegerTy() && targetLLVMType->isIntegerTy()) {
+        unsigned srcBits = srcType->getIntegerBitWidth();
+        unsigned dstBits = targetLLVMType->getIntegerBitWidth();
+        // A 1-bit integer (bool) must be zero-extended so that `true` becomes 1.
+        if (srcBits == 1 && dstBits > 1) return builder.CreateZExt(val, targetLLVMType, "zexttmp");
+        if (srcBits < dstBits) return builder.CreateSExt(val, targetLLVMType, "sexttmp");
+        if (srcBits > dstBits) return builder.CreateTrunc(val, targetLLVMType, "trunctmp");
+        return val;
+    }
+
+    if (srcType->isIntegerTy() && targetLLVMType->isFloatingPointTy()) {
+        return builder.CreateSIToFP(val, targetLLVMType, "sitofptmp");
+    }
+    if (srcType->isFloatingPointTy() && targetLLVMType->isIntegerTy()) {
+        return builder.CreateFPToSI(val, targetLLVMType, "fptositmp");
+    }
+    if (srcType->isFloatingPointTy() && targetLLVMType->isFloatingPointTy()) {
+        unsigned srcWidth = srcType->getFPMantissaWidth();
+        unsigned dstWidth = targetLLVMType->getFPMantissaWidth();
+        if (srcWidth < dstWidth) return builder.CreateFPExt(val, targetLLVMType, "fpexttmp");
+        if (srcWidth > dstWidth) return builder.CreateFPTrunc(val, targetLLVMType, "fptrunctmp");
+        return val;
+    }
+
+    if (srcType->isPointerTy() && targetLLVMType->isPointerTy()) {
+        return builder.CreateBitCast(val, targetLLVMType, "bitcasttmp");
+    }
+
+    return val;
+}
+
 llvm::Type* CodegenContext::getLLVMType(Type* type) {
     if (!type) return llvm::Type::getVoidTy(*context);
 

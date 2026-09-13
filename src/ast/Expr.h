@@ -143,6 +143,9 @@ class CallExprAST : public ExprAST {
 public:
     std::string callee;
     std::vector<std::unique_ptr<ExprAST>> args;
+    // Parameter types of the overload chosen by semantic analysis. Empty when
+    // unresolved (e.g. codegen is run without semantic analysis).
+    std::vector<Type*> resolvedParamTypes;
 
     CallExprAST(const std::string& name, std::vector<std::unique_ptr<ExprAST>> arguments)
         : callee(name), args(std::move(arguments)) {}

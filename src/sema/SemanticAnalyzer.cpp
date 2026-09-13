@@ -5,6 +5,14 @@
 #include "ast/Type.h"
 #include "ast/Mangle.h"
 
+// Strip any number of typedef/alias layers, returning the underlying type.
+static Type* stripTypedef(Type* type) {
+    while (type && type->kind == TypeKind::Typedef) {
+        type = static_cast<TypedefType*>(type)->aliasedType;
+    }
+    return type;
+}
+
 SemanticAnalyzer::SemanticAnalyzer()
     : globalScope(std::make_unique<Scope>(nullptr)),
       currentScope(globalScope.get()),
@@ -49,13 +57,22 @@ Symbol* SemanticAnalyzer::lookup(const std::string& name) {
 }
 
 bool SemanticAnalyzer::isIntegerType(Type* type) const {
+    type = stripTypedef(type);
     if (!type) return false;
-    return type->kind == TypeKind::Int || type->kind == TypeKind::Char || type->kind == TypeKind::Enum;
+    return type->kind == TypeKind::Int || type->kind == TypeKind::Char || type->kind == TypeKind::Enum ||
+           type->kind == TypeKind::Bool ||
+           type->kind == TypeKind::Int8 || type->kind == TypeKind::Int16 ||
+           type->kind == TypeKind::Int32 || type->kind == TypeKind::Int64 || type->kind == TypeKind::Int128 ||
+           type->kind == TypeKind::UInt8 || type->kind == TypeKind::UInt16 ||
+           type->kind == TypeKind::UInt32 || type->kind == TypeKind::UInt64 || type->kind == TypeKind::UInt128 ||
+           type->kind == TypeKind::ISize || type->kind == TypeKind::USize;
 }
 
 bool SemanticAnalyzer::isFloatType(Type* type) const {
+    type = stripTypedef(type);
     if (!type) return false;
-    return type->kind == TypeKind::Float || type->kind == TypeKind::Double;
+    return type->kind == TypeKind::Float || type->kind == TypeKind::Double ||
+           type->kind == TypeKind::Float32 || type->kind == TypeKind::Float64;
 }
 
 bool SemanticAnalyzer::isArithmeticType(Type* type) const {
@@ -63,11 +80,14 @@ bool SemanticAnalyzer::isArithmeticType(Type* type) const {
 }
 
 bool SemanticAnalyzer::isPointerOrArray(Type* type) const {
+    type = stripTypedef(type);
     if (!type) return false;
     return type->kind == TypeKind::Pointer || type->kind == TypeKind::Array;
 }
 
 bool SemanticAnalyzer::typesCompatible(Type* left, Type* right) const {
+    left = stripTypedef(left);
+    right = stripTypedef(right);
     if (!left || !right) return false;
     if (left->kind == right->kind) return true;
     if (isArithmeticType(left) && isArithmeticType(right)) return true;
@@ -78,6 +98,8 @@ bool SemanticAnalyzer::typesCompatible(Type* left, Type* right) const {
 }
 
 Type* SemanticAnalyzer::getCommonType(Type* left, Type* right) const {
+    left = stripTypedef(left);
+    right = stripTypedef(right);
     if (!left) return right;
     if (!right) return left;
     if (left->kind == right->kind) return left;
@@ -96,6 +118,24 @@ std::string SemanticAnalyzer::typeToString(Type* type) const {
         case TypeKind::Float: return "float";
         case TypeKind::Double: return "double";
         case TypeKind::Char: return "char";
+        case TypeKind::Bool: return "bool";
+        case TypeKind::Int8: return "int8";
+        case TypeKind::Int16: return "int16";
+        case TypeKind::Int32: return "int32";
+        case TypeKind::Int64: return "int64";
+        case TypeKind::Int128: return "int128";
+        case TypeKind::UInt8: return "uint8";
+        case TypeKind::UInt16: return "uint16";
+        case TypeKind::UInt32: return "uint32";
+        case TypeKind::UInt64: return "uint64";
+        case TypeKind::UInt128: return "uint128";
+        case TypeKind::ISize: return "isize";
+        case TypeKind::USize: return "usize";
+        case TypeKind::Float32: return "float32";
+        case TypeKind::Float64: return "float64";
+        case TypeKind::Slice: return "slice";
+        case TypeKind::Optional: return "optional";
+        case TypeKind::Result: return "result";
         case TypeKind::Pointer: {
             std::string baseStr = typeToString(type->base);
             if (type->isConst) baseStr = "const " + baseStr;
@@ -246,7 +286,7 @@ Type* SemanticAnalyzer::checkAssignmentTypes(Type* lhs, Type* rhs, ExprAST& node
     return nullptr;
 }
 
-Type* SemanticAnalyzer::checkFunctionCall(const std::string& name, const std::vector<std::unique_ptr<ExprAST>>& args, ExprAST& node) {
+Type* SemanticAnalyzer::checkFunctionCall(const std::string& name, const std::vector<std::unique_ptr<ExprAST>>& args, ExprAST& node, FunctionType** outFuncType) {
     OverloadSet* overloadSet = currentScope->lookupOverload(name);
     if (!overloadSet || overloadSet->empty()) {
         emitError("use of undeclared function '" + name + "'", node);
@@ -263,21 +303,33 @@ Type* SemanticAnalyzer::checkFunctionCall(const std::string& name, const std::ve
     // Resolve overload
     Symbol* resolved = overloadSet->resolve(argTypes);
     if (!resolved) {
-        // Check if no candidates match at all
-        bool anyMatch = false;
+        // Distinguish "no viable candidate" from "ambiguous".
+        bool anyViable = false;
         for (auto* sym : overloadSet->getCandidates()) {
-            if (sym->type->kind == TypeKind::Function) {
-                auto* funcType = static_cast<FunctionType*>(sym->type);
-                if (funcType->paramTypes.size() == argTypes.size()) {
-                    anyMatch = true;
+            if (sym->type->kind != TypeKind::Function) continue;
+            auto* funcType = static_cast<FunctionType*>(sym->type);
+            size_t fixedCount = funcType->paramTypes.size();
+            if (funcType->isVarArg) {
+                if (argTypes.size() < fixedCount) continue;
+            } else if (funcType->paramTypes.size() != argTypes.size()) {
+                continue;
+            }
+            bool viable = true;
+            for (size_t i = 0; i < fixedCount; ++i) {
+                if (conversionRank(argTypes[i], funcType->paramTypes[i]) < 0) {
+                    viable = false;
                     break;
                 }
             }
+            if (viable) {
+                anyViable = true;
+                break;
+            }
         }
-        if (!anyMatch) {
-            emitError("no matching function for call to '" + name + "'", node);
-        } else {
+        if (anyViable) {
             emitError("ambiguous call to overloaded function '" + name + "'", node);
+        } else {
+            emitError("no matching function for call to '" + name + "'", node);
         }
         return nullptr;
     }
@@ -294,6 +346,7 @@ Type* SemanticAnalyzer::checkFunctionCall(const std::string& name, const std::ve
         return nullptr;
     }
 
+    if (outFuncType) *outFuncType = funcType;
     return funcType->returnType;
 }
 
@@ -552,7 +605,11 @@ void SemanticAnalyzer::visit(UnaryExprAST& node) {
 }
 
 void SemanticAnalyzer::visit(CallExprAST& node) {
-    node.type = checkFunctionCall(node.callee, node.args, node);
+    FunctionType* funcType = nullptr;
+    node.type = checkFunctionCall(node.callee, node.args, node, &funcType);
+    if (funcType) {
+        node.resolvedParamTypes = funcType->paramTypes;
+    }
     node.isLValue = false;
 }
 
@@ -1005,7 +1062,7 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
     for (auto& param : node.params) {
         paramTypes.push_back(param->type);
     }
-    auto* funcType = new FunctionType(node.returnType, std::move(paramTypes));
+    auto* funcType = new FunctionType(node.returnType, std::move(paramTypes), node.isVarArg);
     if (!declare(node.name, funcType)) {
         emitError("redeclaration of function '" + node.name + "' in the same scope", node);
     }

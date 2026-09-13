@@ -44,11 +44,14 @@ public:
     std::vector<std::unique_ptr<ParamDeclAST>> params;
     std::unique_ptr<CompoundStmtAST> body;
     bool isConstexpr = false;
+    bool isVarArg = false;
 
     FunctionDeclAST(const std::string& n, Type* ret,
                     std::vector<std::unique_ptr<ParamDeclAST>>& parameters,
-                    std::unique_ptr<CompoundStmtAST>& b, bool constexpr_ = false)
-        : name(n), returnType(ret), params(std::move(parameters)), body(std::move(b)), isConstexpr(constexpr_) {}
+                    std::unique_ptr<CompoundStmtAST>& b, bool constexpr_ = false,
+                    bool varArg = false)
+        : name(n), returnType(ret), params(std::move(parameters)), body(std::move(b)),
+          isConstexpr(constexpr_), isVarArg(varArg) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 

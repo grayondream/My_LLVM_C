@@ -38,6 +38,10 @@ llvm::Value* ReturnStmtAST::codegen(CodegenContext& ctx) {
             v = ctx.getBuilder().CreateLoad(ctx.getLLVMType(valType), v, "retval");
         }
     }
+    llvm::Function* func = ctx.getBuilder().GetInsertBlock()->getParent();
+    if (func) {
+        v = ctx.castValue(v, func->getReturnType());
+    }
     ctx.getBuilder().CreateRet(v);
     return v;
 }
