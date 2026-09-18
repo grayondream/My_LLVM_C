@@ -324,7 +324,7 @@ static UnaryOp tokenToUnaryOp(TokenType type) {
         case TokenType::TOKEN_MINUS:    return UnaryOp::Minus;
         case TokenType::TOKEN_PLUS:     return UnaryOp::Plus;
         case TokenType::TOKEN_NOT:      return UnaryOp::Not;
-        case TokenType::TOKEN_TILDE:    return UnaryOp::Not;  // TODO: add BitNot to UnaryOp
+        case TokenType::TOKEN_TILDE:    return UnaryOp::BitNot;
         case TokenType::TOKEN_STAR:     return UnaryOp::Deref;
         case TokenType::TOKEN_BIT_AND:  return UnaryOp::AddressOf;
         case TokenType::TOKEN_PLUS_PLUS: return UnaryOp::PreInc;

@@ -111,3 +111,13 @@ TEST_F(EndToEndTest, ControlFlowFromFile) {
     std::stringstream ss; ss << ifs.rdbuf();
     EXPECT_EQ(runSource(ss.str(), "control_flow.c"), 55);
 }
+
+TEST_F(EndToEndTest, BitwiseNot) {
+    EXPECT_EQ(runSource(
+        "int main() { int a = 5; return ~a; }", "bitnot.c"), -6);
+}
+
+TEST_F(EndToEndTest, ShiftOperators) {
+    EXPECT_EQ(runSource(
+        "int main() { int a = 1 << 4; int b = 32 >> 2; return a + b; }", "shift.c"), 24);
+}

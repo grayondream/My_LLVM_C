@@ -176,6 +176,7 @@ static std::string UnaryOpToString(UnaryOp op) {
         case UnaryOp::Plus:      return "+";
         case UnaryOp::Minus:     return "-";
         case UnaryOp::Not:       return "!";
+        case UnaryOp::BitNot:    return "~";
         case UnaryOp::Deref:     return "*";
         case UnaryOp::AddressOf: return "&";
         default:                 return "?";

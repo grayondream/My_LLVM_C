@@ -665,3 +665,44 @@ TEST(ClassSupport, SemanticAnalysisInheritedMethod) {
     analyzer.analyze(*ast);
     EXPECT_TRUE(analyzer.getErrors().empty());
 }
+
+TEST(ClassSupport, SemanticAnalysisInheritedFieldAccess) {
+    std::string source = R"(
+        class Base {
+            int x;
+        };
+        class Derived : public Base {
+            int y;
+        };
+        int main() {
+            Derived d;
+            d.x = 5;
+            return d.x + d.y;
+        }
+    )";
+    Lexer lexer("test.c", source);
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    EXPECT_TRUE(analyzer.getErrors().empty());
+}
+
+TEST(ClassSupport, SemanticAnalysisCircularInheritance) {
+    std::string source = R"(
+        class A : public B { int x; };
+        class B : public A { int y; };
+    )";
+    Lexer lexer("test.c", source);
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    EXPECT_FALSE(analyzer.getErrors().empty());
+}

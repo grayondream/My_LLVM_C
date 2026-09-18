@@ -289,24 +289,23 @@ TEST_F(ParserTest, BitwiseXor) {
     EXPECT_EQ(bin->op, BinaryOp::BitXor);
 }
 
-// ========== Shift Operators (need LShift/RShift BinaryOp) ==========
+// ========== Shift Operators ==========
 
-// TODO: Enable when LShift/RShift BinaryOp are added
-// TEST_F(ParserTest, LeftShift) {
-//     auto expr = parseExpr("1 << 2");
-//     ASSERT_NE(expr, nullptr);
-//     auto bin = dynamic_cast<BinaryExprAST*>(expr);
-//     ASSERT_NE(bin, nullptr);
-//     EXPECT_EQ(bin->op, BinaryOp::LShift);
-// }
+TEST_F(ParserTest, LeftShift) {
+    auto expr = parseExpr("1 << 2");
+    ASSERT_NE(expr, nullptr);
+    auto bin = dynamic_cast<BinaryExprAST*>(expr);
+    ASSERT_NE(bin, nullptr);
+    EXPECT_EQ(bin->op, BinaryOp::LShift);
+}
 
-// TEST_F(ParserTest, RightShift) {
-//     auto expr = parseExpr("4 >> 2");
-//     ASSERT_NE(expr, nullptr);
-//     auto bin = dynamic_cast<BinaryExprAST*>(expr);
-//     ASSERT_NE(bin, nullptr);
-//     EXPECT_EQ(bin->op, BinaryOp::RShift);
-// }
+TEST_F(ParserTest, RightShift) {
+    auto expr = parseExpr("4 >> 2");
+    ASSERT_NE(expr, nullptr);
+    auto bin = dynamic_cast<BinaryExprAST*>(expr);
+    ASSERT_NE(bin, nullptr);
+    EXPECT_EQ(bin->op, BinaryOp::RShift);
+}
 
 // ========== Unary Operators ==========
 
@@ -332,6 +331,14 @@ TEST_F(ParserTest, UnaryNot) {
     auto unary = dynamic_cast<UnaryExprAST*>(expr);
     ASSERT_NE(unary, nullptr);
     EXPECT_EQ(unary->op, UnaryOp::Not);
+}
+
+TEST_F(ParserTest, UnaryBitNot) {
+    auto expr = parseExpr("~1");
+    ASSERT_NE(expr, nullptr);
+    auto unary = dynamic_cast<UnaryExprAST*>(expr);
+    ASSERT_NE(unary, nullptr);
+    EXPECT_EQ(unary->op, UnaryOp::BitNot);
 }
 
 TEST_F(ParserTest, UnaryDeref) {

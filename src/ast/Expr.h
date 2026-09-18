@@ -34,6 +34,7 @@ enum class UnaryOp {
     Plus,
     Minus,
     Not,
+    BitNot,
     Deref,
     AddressOf,
     PreInc,

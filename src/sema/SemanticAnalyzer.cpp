@@ -4,6 +4,7 @@
 #include "ast/Decl.h"
 #include "ast/Type.h"
 #include "ast/Mangle.h"
+#include <algorithm>
 
 // Strip any number of typedef/alias layers, returning the underlying type.
 static Type* stripTypedef(Type* type) {
@@ -453,6 +454,7 @@ std::optional<SemanticAnalyzer::ConstValue> SemanticAnalyzer::evaluateConstexpr(
                 case UnaryOp::Plus: cv.intVal = operand->intVal; break;
                 case UnaryOp::Minus: cv.intVal = -operand->intVal; break;
                 case UnaryOp::Not: cv.intVal = !operand->intVal; break;
+                case UnaryOp::BitNot: cv.intVal = ~operand->intVal; break;
                 default: return std::nullopt;
             }
             return cv;
@@ -571,6 +573,14 @@ void SemanticAnalyzer::visit(UnaryExprAST& node) {
             break;
         case UnaryOp::Not:
             node.type = typeCtx->getInt();
+            break;
+        case UnaryOp::BitNot:
+            if (!isIntegerType(operandType)) {
+                emitError("invalid operand to unary '~': '" + typeToString(operandType) + "'", node);
+                node.type = nullptr;
+            } else {
+                node.type = operandType;
+            }
             break;
         case UnaryOp::Deref:
             if (operandType && operandType->kind == TypeKind::Pointer) {
@@ -728,14 +738,21 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
         emitError("no member named '" + node.memberName + "' in struct '" + structType->name + "'", node);
     } else if (memberBaseType->kind == TypeKind::Class) {
         auto* classType = static_cast<ClassType*>(memberBaseType);
-        for (auto& field : classType->fields) {
-            if (field.first == node.memberName) {
-                node.type = field.second;
-                node.isLValue = true;
-                return;
+        const std::string className = classType->name;
+        // Search this class and its base classes for the field.
+        while (classType) {
+            for (auto& field : classType->fields) {
+                if (field.first == node.memberName) {
+                    node.type = field.second;
+                    node.isLValue = true;
+                    return;
+                }
             }
+            Type* baseType = classType->base;
+            if (!baseType || baseType->kind != TypeKind::Class) break;
+            classType = static_cast<ClassType*>(baseType);
         }
-        emitError("no member named '" + node.memberName + "' in class '" + classType->name + "'", node);
+        emitError("no member named '" + node.memberName + "' in class '" + className + "'", node);
     }
     node.type = nullptr;
     node.isLValue = false;
@@ -953,8 +970,11 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
             auto* baseType = typeCtx->getClass(node.baseClass);
             if (!baseType) {
                 emitError("base class '" + node.baseClass + "' of class '" + node.name + "' not found", node);
+            } else if (hasCircularInheritance(node.name, node.baseClass)) {
+                emitError("circular inheritance detected involving class '" + node.name + "'", node);
             } else {
                 classType->baseClass = node.baseClass;
+                classType->base = baseType;
                 for (auto& method : baseType->methods) {
                     // Only add if not already present
                     if (!classType->getMethod(method.first)) {
@@ -1157,6 +1177,25 @@ void SemanticAnalyzer::visit(StmtAST& stmt) {
     if (auto* s = dynamic_cast<NullStmtAST*>(&stmt)) { visit(*s); return; }
     if (auto* s = dynamic_cast<DeclStmtAST*>(&stmt)) { visit(*s); return; }
     if (auto* s = dynamic_cast<DeferStmtAST*>(&stmt)) { visit(*s); return; }
+}
+
+bool SemanticAnalyzer::hasCircularInheritance(const std::string& className, const std::string& baseClass) const {
+    std::vector<std::string> chain;
+    chain.push_back(className);
+
+    std::string current = baseClass;
+    while (!current.empty()) {
+        if (std::find(chain.begin(), chain.end(), current) != chain.end()) {
+            return true;
+        }
+        chain.push_back(current);
+
+        auto* type = typeCtx->getClass(current);
+        if (!type) break;
+        current = type->baseClass;
+    }
+
+    return false;
 }
 
 Symbol* SemanticAnalyzer::resolveMethod(ClassType* classType, const std::string& methodName, const std::vector<Type*>& argTypes) {

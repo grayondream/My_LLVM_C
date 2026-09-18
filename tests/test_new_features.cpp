@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <spdlog/spdlog.h>
 #include "frontend/Lexer.h"
 #include "frontend/Parser.h"
 #include "sema/SemanticAnalyzer.h"

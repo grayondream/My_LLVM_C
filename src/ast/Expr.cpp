@@ -131,6 +131,7 @@ llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
         case UnaryOp::Plus:      return emitLoad(ctx, v, operand->type);
         case UnaryOp::Minus:     return builder.CreateNeg(emitLoad(ctx, v, operand->type), "negtmp");
         case UnaryOp::Not:       return builder.CreateNot(emitLoad(ctx, v, operand->type), "nottmp");
+        case UnaryOp::BitNot:    return builder.CreateNot(emitLoad(ctx, v, operand->type), "bitnottmp");
         case UnaryOp::Deref: {
             llvm::Type* pointeeType = ctx.getLLVMType(operand->type ? operand->type->base : nullptr);
             if (!pointeeType) pointeeType = llvm::Type::getInt8Ty(ctx.getContext());
@@ -381,6 +382,39 @@ llvm::Value* ArrayAccessExprAST::codegen(CodegenContext& ctx) {
     return builder.CreateGEP(llvm::Type::getInt32Ty(ctx.getContext()), arrVal, idxVal, "arrayidx");
 }
 
+// Emit a GEP for a class field, following the base-class chain if the member
+// is inherited. The LLVM layout of a derived class is { %Base, ownFields... }.
+static llvm::Value* emitClassFieldGEP(CodegenContext& ctx, ClassType* classType,
+                                      llvm::Value* objPtr, const std::string& memberName) {
+    auto& builder = ctx.getBuilder();
+    ClassType* cur = classType;
+    llvm::Value* curPtr = objPtr;
+
+    while (cur) {
+        for (size_t i = 0; i < cur->fields.size(); ++i) {
+            if (cur->fields[i].first == memberName) {
+                unsigned idx = static_cast<unsigned>(i);
+                // Base sub-object occupies field index 0.
+                if (!cur->baseClass.empty()) idx += 1;
+                llvm::Type* curLLVM = ctx.getLLVMType(cur);
+                if (!curLLVM) return nullptr;
+                return builder.CreateStructGEP(curLLVM, curPtr, idx, "member");
+            }
+        }
+
+        if (cur->baseClass.empty()) break;
+        Type* baseType = cur->base;
+        if (!baseType || baseType->kind != TypeKind::Class) break;
+        auto* base = static_cast<ClassType*>(baseType);
+        llvm::Type* curLLVM = ctx.getLLVMType(cur);
+        if (!curLLVM) break;
+        curPtr = builder.CreateStructGEP(curLLVM, curPtr, 0, "base");
+        cur = base;
+    }
+
+    return nullptr;
+}
+
 llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
     llvm::Value* objVal = object->codegen(ctx);
     if (!objVal) return nullptr;
@@ -400,15 +434,8 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
         objType = ctx.getLLVMType(object->type);
     } else if (object->type && object->type->kind == TypeKind::Class) {
         auto* classType = static_cast<ClassType*>(object->type);
-        for (size_t i = 0; i < classType->fields.size(); ++i) {
-            if (classType->fields[i].first == memberName) {
-                fieldIndex = i;
-                break;
-            }
-        }
-        // Offset field index by 1 if class has a base class (base struct occupies index 0)
-        if (!classType->baseClass.empty()) {
-            fieldIndex += 1;
+        if (auto* gep = emitClassFieldGEP(ctx, classType, objVal, memberName)) {
+            return gep;
         }
         objType = ctx.getLLVMType(object->type);
     } else if (object->type && object->type->kind == TypeKind::Pointer &&
@@ -426,19 +453,12 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
     } else if (object->type && object->type->kind == TypeKind::Pointer &&
                object->type->base && object->type->base->kind == TypeKind::Class) {
         auto* classType = static_cast<ClassType*>(object->type->base);
-        for (size_t i = 0; i < classType->fields.size(); ++i) {
-            if (classType->fields[i].first == memberName) {
-                fieldIndex = i;
-                break;
-            }
-        }
-        // Offset field index by 1 if class has a base class (base struct occupies index 0)
-        if (!classType->baseClass.empty()) {
-            fieldIndex += 1;
-        }
-        objType = ctx.getLLVMType(object->type->base);
         // Load the pointer from the alloca before doing GEP
         objVal = builder.CreateLoad(llvm::PointerType::get(ctx.getContext(), 0), objVal, "deref");
+        if (auto* gep = emitClassFieldGEP(ctx, classType, objVal, memberName)) {
+            return gep;
+        }
+        objType = ctx.getLLVMType(object->type->base);
     } else if (object->type && object->type->kind == TypeKind::Pointer) {
         objType = ctx.getLLVMType(object->type->base);
     }
