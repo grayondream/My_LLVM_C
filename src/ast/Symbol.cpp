@@ -83,6 +83,9 @@ int conversionRank(Type* from, Type* to) {
     if (!from || !to) return -1;
     if (typesEqual(from, to)) return 0;
 
+    // Arrays decay to a pointer to their first element.
+    if (from->kind == TypeKind::Array && to->kind == TypeKind::Pointer) return 1;
+
     int fw = integerWidth(from->kind);
     int tw = integerWidth(to->kind);
     int fb = floatWidth(from->kind);

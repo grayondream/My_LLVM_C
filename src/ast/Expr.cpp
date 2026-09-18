@@ -7,6 +7,20 @@
 static llvm::Value* emitLoad(CodegenContext& ctx, llvm::Value* ptr, Type* astType = nullptr) {
     if (!ptr) return nullptr;
     if (!ptr->getType()->isPointerTy()) return ptr;
+
+    // Arrays decay to a pointer to their first element in value contexts.
+    Type* t = astType;
+    while (t && t->kind == TypeKind::Typedef) t = static_cast<TypedefType*>(t)->aliasedType;
+    if (t && t->kind == TypeKind::Array) {
+        llvm::Type* arrTy = ctx.getLLVMType(t);
+        if (!arrTy) return ptr;
+        auto* i64 = llvm::Type::getInt64Ty(ctx.getContext());
+        return ctx.getBuilder().CreateInBoundsGEP(
+            arrTy, ptr,
+            {llvm::ConstantInt::get(i64, 0), llvm::ConstantInt::get(i64, 0)},
+            "decay");
+    }
+
     llvm::Type* loadType = astType ? ctx.getLLVMType(astType) : llvm::Type::getInt32Ty(ctx.getContext());
     return ctx.getBuilder().CreateLoad(loadType, ptr, "loadtmp");
 }
@@ -374,12 +388,23 @@ llvm::Value* ArrayAccessExprAST::codegen(CodegenContext& ctx) {
     if (!arrVal || !idxVal) return nullptr;
 
     if (index->isLValue) {
-        llvm::Type* idxLLVMType = index->type ? ctx.getLLVMType(index->type) : llvm::Type::getInt32Ty(ctx.getContext());
         idxVal = emitLoad(ctx, idxVal, index->type);
     }
 
+    // Determine the element type and, for a pointer operand, load the pointer
+    // value (an array operand is already the address of its first element).
+    Type* arrType = array->type;
+    llvm::Type* elemTy = llvm::Type::getInt32Ty(ctx.getContext());
+    if (arrType && arrType->kind == TypeKind::Array) {
+        auto* at = static_cast<ArrayType*>(arrType);
+        if (at->elementType) elemTy = ctx.getLLVMType(at->elementType);
+    } else if (arrType && arrType->kind == TypeKind::Pointer) {
+        if (arrType->base) elemTy = ctx.getLLVMType(arrType->base);
+        arrVal = emitLoad(ctx, arrVal, arrType);
+    }
+
     auto& builder = ctx.getBuilder();
-    return builder.CreateGEP(llvm::Type::getInt32Ty(ctx.getContext()), arrVal, idxVal, "arrayidx");
+    return builder.CreateGEP(elemTy, arrVal, idxVal, "arrayidx");
 }
 
 // Emit a GEP for a class field, following the base-class chain if the member

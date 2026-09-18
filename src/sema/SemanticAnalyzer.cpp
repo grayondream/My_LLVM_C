@@ -95,6 +95,9 @@ bool SemanticAnalyzer::typesCompatible(Type* left, Type* right) const {
     if (left->kind == TypeKind::Pointer && right->kind == TypeKind::Pointer) return true;
     if (left->kind == TypeKind::Pointer && right->kind == TypeKind::Int) return true;
     if (left->kind == TypeKind::Int && right->kind == TypeKind::Pointer) return true;
+    // Arrays decay to a pointer to their first element.
+    if (left->kind == TypeKind::Pointer && right->kind == TypeKind::Array) return true;
+    if (left->kind == TypeKind::Array && right->kind == TypeKind::Pointer) return true;
     return false;
 }
 

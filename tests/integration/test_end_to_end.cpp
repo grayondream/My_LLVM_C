@@ -167,6 +167,32 @@ TEST_F(EndToEndTest, DeferRunsOnContinue) {
     )", "defer_continue.c"), 3);
 }
 
+TEST_F(EndToEndTest, ArrayDecaysToPointer) {
+    EXPECT_EQ(runSource(R"(
+        int main() {
+            int arr[3];
+            arr[0] = 1; arr[1] = 2; arr[2] = 3;
+            int* p = arr;
+            return p[2] + arr[0];
+        }
+    )", "array_decay.c"), 4);
+}
+
+TEST_F(EndToEndTest, ArrayArgumentDecaysToPointer) {
+    EXPECT_EQ(runSource(R"(
+        int sum(int* p, int n) {
+            int s = 0;
+            for (int i = 0; i < n; i = i + 1) { s = s + p[i]; }
+            return s;
+        }
+        int main() {
+            int arr[3];
+            arr[0] = 1; arr[1] = 2; arr[2] = 3;
+            return sum(arr, 3);
+        }
+    )", "array_arg.c"), 6);
+}
+
 TEST_F(EndToEndTest, PrototypeThenDefinition) {
     EXPECT_EQ(runSource(R"(
         int add(int a, int b);
