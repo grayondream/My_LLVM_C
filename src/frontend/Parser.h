@@ -36,6 +36,10 @@ private:
 
     Type* parseBaseType();
 
+    // Turn `T name` into `T name[N]` when an array suffix follows a member
+    // declarator (used for struct/class/union members).
+    Type* parseMemberArraySuffix(Type* base);
+
     std::unique_ptr<DeclAST> parseDeclaration();
 
     std::unique_ptr<DeclAST> parseDeclarationAsType();

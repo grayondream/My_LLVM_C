@@ -1262,6 +1262,7 @@ Type* Parser::parseBaseType() {
                     if (!fieldType) break;
                     if (!check(TokenType::TOKEN_IDENTIFIER)) break;
                     std::string fieldName = advance()->lexeme;
+                    fieldType = parseMemberArraySuffix(fieldType);
                     structType->addField(fieldName, fieldType);
                     match(TokenType::TOKEN_SEMICOLON);
                 }
@@ -1295,6 +1296,7 @@ Type* Parser::parseBaseType() {
                     if (!memberType) break;
                     if (!check(TokenType::TOKEN_IDENTIFIER)) break;
                     std::string memberName = advance()->lexeme;
+                    memberType = parseMemberArraySuffix(memberType);
                     unionType->addMember(memberName, memberType);
                     match(TokenType::TOKEN_SEMICOLON);
                 }
@@ -1879,6 +1881,7 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
 
         if (!check(TokenType::TOKEN_IDENTIFIER)) break;
         std::string fieldName = advance()->lexeme;
+        fieldType = parseMemberArraySuffix(fieldType);
 
         fields.push_back({fieldName, fieldType});
 
@@ -1946,6 +1949,7 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                     }
                 } else {
                     // Field declaration
+                    declType = parseMemberArraySuffix(declType);
                     fields.push_back({memberName, declType});
                     match(TokenType::TOKEN_SEMICOLON);
                 }
@@ -1979,6 +1983,18 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
     return decl;
 }
 
+Type* Parser::parseMemberArraySuffix(Type* base) {
+    if (!base || !check(TokenType::TOKEN_LBRACKET)) return base;
+    advance(); // consume '['
+    int size = 1;
+    if (check(TokenType::TOKEN_NUMBER)) {
+        auto numTok = advance();
+        size = std::get<int>(numTok->value);
+    }
+    expect(TokenType::TOKEN_RBRACKET, "expected ']' after array size");
+    return new ArrayType(base, size);
+}
+
 std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
     if (!match(TokenType::TOKEN_UNION)) return nullptr;
 
@@ -2001,6 +2017,7 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
 
         if (!check(TokenType::TOKEN_IDENTIFIER)) break;
         std::string memberName = advance()->lexeme;
+        memberType = parseMemberArraySuffix(memberType);
 
         members.push_back({memberName, memberType});
 

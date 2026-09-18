@@ -712,16 +712,18 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
             node.isLValue = false;
             return;
         }
-        if (objType->base->kind != TypeKind::Struct && objType->base->kind != TypeKind::Class) {
-            emitError("member access with '->' requires pointer to struct/class, but '" + typeToString(objType) + "' points to '" + typeToString(objType->base) + "'", node);
+        if (objType->base->kind != TypeKind::Struct && objType->base->kind != TypeKind::Class &&
+            objType->base->kind != TypeKind::Union) {
+            emitError("member access with '->' requires pointer to struct/class/union, but '" + typeToString(objType) + "' points to '" + typeToString(objType->base) + "'", node);
             node.type = nullptr;
             node.isLValue = false;
             return;
         }
         memberBaseType = objType->base;
     } else {
-        if (objType->kind != TypeKind::Struct && objType->kind != TypeKind::Class) {
-            emitError("member access with '.' requires struct/class type, but got '" + typeToString(objType) + "'", node);
+        if (objType->kind != TypeKind::Struct && objType->kind != TypeKind::Class &&
+            objType->kind != TypeKind::Union) {
+            emitError("member access with '.' requires struct/class/union type, but got '" + typeToString(objType) + "'", node);
             node.type = nullptr;
             node.isLValue = false;
             return;
@@ -756,6 +758,16 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
             classType = static_cast<ClassType*>(baseType);
         }
         emitError("no member named '" + node.memberName + "' in class '" + className + "'", node);
+    } else if (memberBaseType->kind == TypeKind::Union) {
+        auto* unionType = static_cast<UnionType*>(memberBaseType);
+        for (auto& member : unionType->members) {
+            if (member.first == node.memberName) {
+                node.type = member.second;
+                node.isLValue = true;
+                return;
+            }
+        }
+        emitError("no member named '" + node.memberName + "' in union '" + unionType->name + "'", node);
     }
     node.type = nullptr;
     node.isLValue = false;

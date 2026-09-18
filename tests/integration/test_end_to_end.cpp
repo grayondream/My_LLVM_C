@@ -220,6 +220,65 @@ TEST_F(EndToEndTest, ArrayArgumentDecaysToPointer) {
     )", "array_arg.c"), 6);
 }
 
+TEST_F(EndToEndTest, VariableCopyInitializationLoadsValue) {
+    EXPECT_EQ(runSource(R"(
+        int main() {
+            int a = 5;
+            int b = a;
+            int c = b;
+            return a + b + c;
+        }
+    )", "copy_init.c"), 15);
+}
+
+TEST_F(EndToEndTest, UnionMemberAccess) {
+    EXPECT_EQ(runSource(R"(
+        union Data { int i; char str[20]; };
+        int main() {
+            union Data d;
+            d.i = 65;
+            int a = d.i;
+            char c = d.str[0];
+            int s = sizeof(union Data);
+            return a + c + s;
+        }
+    )", "union_access.c"), 150);
+}
+
+TEST_F(EndToEndTest, UnionSizeIsLargestMember) {
+    EXPECT_EQ(runSource(R"(
+        union Data { int i; float f; char str[20]; };
+        int main() { return sizeof(union Data); }
+    )", "union_size.c"), 20);
+}
+
+TEST_F(EndToEndTest, UnionPointerMemberAccess) {
+    EXPECT_EQ(runSource(R"(
+        union Data { int i; float f; };
+        int main() {
+            union Data d;
+            d.i = 3;
+            union Data* p = &d;
+            p->i = 7;
+            return p->i + d.i;
+        }
+    )", "union_ptr.c"), 14);
+}
+
+TEST_F(EndToEndTest, StructArrayMember) {
+    EXPECT_EQ(runSource(R"(
+        struct S { int n; char name[3]; };
+        int main() {
+            struct S s;
+            s.n = 5;
+            s.name[0] = 1;
+            s.name[1] = 2;
+            s.name[2] = 3;
+            return s.n + s.name[0] + s.name[1] + s.name[2];
+        }
+    )", "struct_array_member.c"), 11);
+}
+
 TEST_F(EndToEndTest, PrototypeThenDefinition) {
     EXPECT_EQ(runSource(R"(
         int add(int a, int b);

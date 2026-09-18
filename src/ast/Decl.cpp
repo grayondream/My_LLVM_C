@@ -52,6 +52,11 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
     } else if (initExpr) {
         llvm::Value* initVal = initExpr->codegen(ctx);
         if (initVal) {
+            // An lvalue initializer denotes a location; load its value (arrays
+            // decay to a pointer) before storing it.
+            if (initExpr->isLValue) {
+                initVal = ctx.loadValue(initVal, initExpr->type);
+            }
             initVal = ctx.castValue(initVal, llvmType);
             ctx.getBuilder().CreateStore(initVal, alloca);
         }
@@ -210,16 +215,9 @@ llvm::Value* StructDeclAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* UnionDeclAST::codegen(CodegenContext& ctx) {
-    // Reuse existing union type if one with this name already exists
-    if (auto* existing = llvm::StructType::getTypeByName(ctx.getContext(), name)) {
-        return nullptr;
-    }
-    std::vector<llvm::Type*> memberTypes;
-    for (auto& member : members) {
-        memberTypes.push_back(ctx.getLLVMType(member.second));
-    }
-
-    llvm::StructType* unionType = llvm::StructType::create(ctx.getContext(), memberTypes, name);
+    // The union's LLVM layout depends on its members and is created lazily by
+    // CodegenContext::getLLVMType(TypeKind::Union); nothing to emit here.
+    (void)ctx;
     return nullptr;
 }
 

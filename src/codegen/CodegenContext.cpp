@@ -159,6 +159,31 @@ llvm::Value* CodegenContext::lookupVariableAddr(const std::string& name) {
     return sym->value;
 }
 
+llvm::Value* CodegenContext::loadValue(llvm::Value* ptr, Type* type) {
+    if (!ptr) return nullptr;
+    if (!ptr->getType()->isPointerTy()) return ptr;
+
+    Type* t = type;
+    while (t && t->kind == TypeKind::Typedef) {
+        t = static_cast<TypedefType*>(t)->aliasedType;
+    }
+
+    // Arrays decay to a pointer to their first element in value contexts.
+    if (t && t->kind == TypeKind::Array) {
+        llvm::Type* arrTy = getLLVMType(t);
+        if (!arrTy) return ptr;
+        auto* i64 = llvm::Type::getInt64Ty(*context);
+        return builder.CreateInBoundsGEP(
+            arrTy, ptr,
+            {llvm::ConstantInt::get(i64, 0), llvm::ConstantInt::get(i64, 0)},
+            "decay");
+    }
+
+    llvm::Type* loadType = t ? getLLVMType(t) : llvm::Type::getInt32Ty(*context);
+    if (!loadType) return ptr;
+    return builder.CreateLoad(loadType, ptr, "loadtmp");
+}
+
 void CodegenContext::declareVariable(const std::string& name, llvm::Value* alloca, Type* type) {
     currentScope()->declare(name, new Symbol(name, type, alloca));
 }
@@ -350,6 +375,44 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
                 fieldTypes.push_back(getLLVMType(f.second));
             }
             return llvm::StructType::create(*context, fieldTypes, st->name);
+        }
+        case TypeKind::Union: {
+            // A union is laid out as a chunk at least as large as its largest
+            // member and aligned like its most-aligned member. All members
+            // start at offset 0, so member access is a GEP to field 0.
+            auto* ut = static_cast<UnionType*>(type);
+            if (auto* existing = llvm::StructType::getTypeByName(*context, ut->name)) {
+                return existing;
+            }
+            const llvm::DataLayout& dl = module->getDataLayout();
+            uint64_t maxSize = 0;
+            uint64_t maxAlign = 0;
+            llvm::Type* alignType = nullptr;
+            for (auto& m : ut->members) {
+                llvm::Type* mt = getLLVMType(m.second);
+                if (!mt) continue;
+                uint64_t sz = dl.getTypeAllocSize(mt);
+                uint64_t al = dl.getABITypeAlign(mt).value();
+                if (sz > maxSize) maxSize = sz;
+                if (al > maxAlign) {
+                    maxAlign = al;
+                    alignType = mt;
+                }
+            }
+            if (maxSize == 0) maxSize = 1;
+            std::vector<llvm::Type*> fields;
+            if (alignType) {
+                fields.push_back(alignType);
+                uint64_t alignSize = dl.getTypeAllocSize(alignType);
+                if (maxSize > alignSize) {
+                    fields.push_back(llvm::ArrayType::get(
+                        llvm::Type::getInt8Ty(*context), maxSize - alignSize));
+                }
+            } else {
+                fields.push_back(llvm::ArrayType::get(
+                    llvm::Type::getInt8Ty(*context), maxSize));
+            }
+            return llvm::StructType::create(*context, fields, ut->name);
         }
         case TypeKind::Class: {
             auto* ct = static_cast<ClassType*>(type);

@@ -33,6 +33,10 @@ public:
     llvm::Value* lookupVariableAddr(const std::string& name);
     void declareVariable(const std::string& name, llvm::Value* alloca, Type* type);
 
+    // Load the value denoted by an lvalue pointer. Arrays decay to a pointer to
+    // their first element instead of being loaded by value.
+    llvm::Value* loadValue(llvm::Value* ptr, Type* type);
+
     llvm::Type* getLLVMType(Type* type);
 
     void setSourceFile(const std::string& file);

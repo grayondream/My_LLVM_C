@@ -5,24 +5,7 @@
 #include "Mangle.h"
 
 static llvm::Value* emitLoad(CodegenContext& ctx, llvm::Value* ptr, Type* astType = nullptr) {
-    if (!ptr) return nullptr;
-    if (!ptr->getType()->isPointerTy()) return ptr;
-
-    // Arrays decay to a pointer to their first element in value contexts.
-    Type* t = astType;
-    while (t && t->kind == TypeKind::Typedef) t = static_cast<TypedefType*>(t)->aliasedType;
-    if (t && t->kind == TypeKind::Array) {
-        llvm::Type* arrTy = ctx.getLLVMType(t);
-        if (!arrTy) return ptr;
-        auto* i64 = llvm::Type::getInt64Ty(ctx.getContext());
-        return ctx.getBuilder().CreateInBoundsGEP(
-            arrTy, ptr,
-            {llvm::ConstantInt::get(i64, 0), llvm::ConstantInt::get(i64, 0)},
-            "decay");
-    }
-
-    llvm::Type* loadType = astType ? ctx.getLLVMType(astType) : llvm::Type::getInt32Ty(ctx.getContext());
-    return ctx.getBuilder().CreateLoad(loadType, ptr, "loadtmp");
+    return ctx.loadValue(ptr, astType);
 }
 
 llvm::Value* NumberExprAST::codegen(CodegenContext& ctx) {
@@ -447,6 +430,21 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
     auto& builder = ctx.getBuilder();
     llvm::Type* objType = nullptr;
     unsigned fieldIndex = 0;
+
+    // Union members all live at offset 0: GEP to field 0 gives the address of
+    // the requested member regardless of which member it is.
+    if (object->type && object->type->kind == TypeKind::Union) {
+        llvm::Type* unionLLVM = ctx.getLLVMType(object->type);
+        if (!unionLLVM) return nullptr;
+        return builder.CreateStructGEP(unionLLVM, objVal, 0, "unionmember");
+    }
+    if (object->type && object->type->kind == TypeKind::Pointer &&
+        object->type->base && object->type->base->kind == TypeKind::Union) {
+        objVal = builder.CreateLoad(llvm::PointerType::get(ctx.getContext(), 0), objVal, "deref");
+        llvm::Type* unionLLVM = ctx.getLLVMType(object->type->base);
+        if (!unionLLVM) return nullptr;
+        return builder.CreateStructGEP(unionLLVM, objVal, 0, "unionmember");
+    }
 
     if (object->type && object->type->kind == TypeKind::Struct) {
         auto* structType = static_cast<StructType*>(object->type);

@@ -1303,6 +1303,30 @@ TEST_F(ParserDeclTest, UnionVarDecl) {
     EXPECT_EQ(var->type->kind, TypeKind::Union);
 }
 
+TEST_F(ParserDeclTest, StructArrayMember) {
+    auto tu = parse("struct S { int n; char name[20]; };");
+    ASSERT_NE(tu, nullptr);
+    auto strct = dynamic_cast<StructDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(strct, nullptr);
+    ASSERT_EQ(strct->fields.size(), 2u);
+    ASSERT_EQ(strct->fields[1].second->kind, TypeKind::Array);
+    auto* arr = static_cast<ArrayType*>(strct->fields[1].second);
+    EXPECT_EQ(arr->size, 20);
+    EXPECT_EQ(arr->elementType->kind, TypeKind::Char);
+}
+
+TEST_F(ParserDeclTest, UnionArrayMember) {
+    auto tu = parse("union U { int i; char buf[8]; };");
+    ASSERT_NE(tu, nullptr);
+    auto un = dynamic_cast<UnionDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(un, nullptr);
+    ASSERT_EQ(un->members.size(), 2u);
+    ASSERT_EQ(un->members[1].second->kind, TypeKind::Array);
+    auto* arr = static_cast<ArrayType*>(un->members[1].second);
+    EXPECT_EQ(arr->size, 8);
+    EXPECT_EQ(arr->elementType->kind, TypeKind::Char);
+}
+
 // ========== Enum Declarations ==========
 
 TEST_F(ParserDeclTest, EnumDecl) {
