@@ -163,6 +163,14 @@ llvm::Value* ArrayDeclAST::codegen(CodegenContext& ctx) {
     return alloca;
 }
 
+llvm::Value* MultiVarDeclAST::codegen(CodegenContext& ctx) {
+    llvm::Value* last = nullptr;
+    for (auto& decl : decls) {
+        if (decl) last = decl->codegen(ctx);
+    }
+    return last;
+}
+
 llvm::Value* StructDeclAST::codegen(CodegenContext& ctx) {
     // Reuse existing struct type if one with this name already exists
     if (auto* existing = llvm::StructType::getTypeByName(ctx.getContext(), name)) {

@@ -1063,6 +1063,11 @@ void SemanticAnalyzer::visit(DeclStmtAST& node) {
             visit(*typedefDecl);
         } else if (auto* fwdDecl = dynamic_cast<ForwardDeclAST*>(node.decl.get())) {
             visit(*fwdDecl);
+        } else if (auto* multi = dynamic_cast<MultiVarDeclAST*>(node.decl.get())) {
+            for (auto& d : multi->decls) {
+                if (auto* v = dynamic_cast<VarDeclAST*>(d.get())) visit(*v);
+                else if (auto* a = dynamic_cast<ArrayDeclAST*>(d.get())) visit(*a);
+            }
         }
     }
 }
@@ -1151,6 +1156,11 @@ void SemanticAnalyzer::visit(TranslationUnitAST& node) {
                 visit(*typeDecl);
             } else if (auto* moduleDecl = dynamic_cast<ModuleDeclAST*>(decl.get())) {
                 visit(*moduleDecl);
+            } else if (auto* multi = dynamic_cast<MultiVarDeclAST*>(decl.get())) {
+                for (auto& d : multi->decls) {
+                    if (auto* v = dynamic_cast<VarDeclAST*>(d.get())) visit(*v);
+                    else if (auto* a = dynamic_cast<ArrayDeclAST*>(d.get())) visit(*a);
+                }
             }
         }
     }

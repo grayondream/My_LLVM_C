@@ -84,6 +84,17 @@ public:
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
+// A single declaration statement that declares several variables, e.g.
+// `int a = 1, b = 2;`. Each element is a VarDeclAST or ArrayDeclAST.
+class MultiVarDeclAST : public DeclAST {
+public:
+    std::vector<std::unique_ptr<DeclAST>> decls;
+
+    explicit MultiVarDeclAST(std::vector<std::unique_ptr<DeclAST>> d)
+        : decls(std::move(d)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
 class StructDeclAST : public DeclAST {
 public:
     std::string name;

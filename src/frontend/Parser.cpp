@@ -853,7 +853,7 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
                     return std::make_unique<DeclStmtAST>(std::move(decl));
                 }
             }
-            auto varDecl = parseVariableDecl(type, nameTok->lexeme);
+            auto varDecl = parseVariableDeclList(type, nameTok->lexeme);
             if (varDecl) {
                 return std::make_unique<DeclStmtAST>(std::move(varDecl));
             }
@@ -1637,6 +1637,30 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
     return parseDeclarationAsType();
 }
 
+// Strip the pointer/array/slice/optional layers introduced by the first
+// declarator so subsequent declarators in `int* a, b;` see the base type.
+static Type* stripDeclaratorType(Type* type) {
+    while (type) {
+        switch (type->kind) {
+            case TypeKind::Pointer:
+                type = type->base;
+                break;
+            case TypeKind::Array:
+                type = static_cast<ArrayType*>(type)->elementType;
+                break;
+            case TypeKind::Slice:
+                type = static_cast<SliceType*>(type)->elementType;
+                break;
+            case TypeKind::Optional:
+                type = static_cast<OptionalType*>(type)->elementType;
+                break;
+            default:
+                return type;
+        }
+    }
+    return type;
+}
+
 std::unique_ptr<DeclAST> Parser::parseDeclarationAsType() {
     // Handle constexpr declaration specifier
     bool isConstexpr = false;
@@ -1702,8 +1726,44 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationAsType() {
         return parseFunctionDecl(type, nameTok->lexeme, isConstexpr);
     }
 
-    // Variable declaration
-    return parseVariableDecl(type, nameTok->lexeme, isConstexpr);
+    // Variable declaration, possibly with several comma-separated declarators.
+    return parseVariableDeclList(type, nameTok->lexeme, isConstexpr);
+}
+
+std::unique_ptr<DeclAST> Parser::parseVariableDeclList(Type* type, const std::string& firstName, bool isConstexpr) {
+    auto first = parseVariableDecl(type, firstName, isConstexpr);
+    if (!check(TokenType::TOKEN_COMMA)) {
+        expect(TokenType::TOKEN_SEMICOLON, "expected ';' after variable declaration");
+        return first;
+    }
+
+    std::vector<std::unique_ptr<DeclAST>> vars;
+    vars.push_back(std::move(first));
+
+    // `int* a, b;` — the pointer belongs to the first declarator only, so
+    // subsequent declarators start from the unqualified base type.
+    Type* baseType = stripDeclaratorType(type);
+    while (match(TokenType::TOKEN_COMMA)) {
+        Type* varType = baseType;
+        while (check(TokenType::TOKEN_STAR)) {
+            advance();
+            varType = new Type(TypeKind::Pointer, varType);
+        }
+        while (check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE)) {
+            advance();
+        }
+        if (!check(TokenType::TOKEN_IDENTIFIER)) {
+            errorUnexpected("expected identifier after ',' in declaration");
+            break;
+        }
+        auto extraName = advance();
+        auto extra = parseVariableDecl(varType, extraName->lexeme, isConstexpr);
+        if (!extra) break;
+        vars.push_back(std::move(extra));
+    }
+
+    expect(TokenType::TOKEN_SEMICOLON, "expected ';' after variable declaration");
+    return std::make_unique<MultiVarDeclAST>(std::move(vars));
 }
 
 std::unique_ptr<FunctionDeclAST> Parser::parseFunctionDecl(Type* returnType, const std::string& name, bool isConstexpr) {
@@ -1765,23 +1825,23 @@ std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string
             return nullptr;
         }
 
-        // Check for initializer
+        // Check for initializer. Parse an assignment-expression (minPrec 2) so
+        // that a following `,` starts the next declarator instead of becoming
+        // part of a comma expression.
         if (check(TokenType::TOKEN_ASSIGN)) {
             advance();
-            init = parseExpr();
+            init = parseExpr(2);
         }
 
-        expect(TokenType::TOKEN_SEMICOLON, "expected ';' after array declaration");
         return std::make_unique<ArrayDeclAST>(name, type, size, std::move(init));
     }
 
     // Check for initializer: = expr
     if (check(TokenType::TOKEN_ASSIGN)) {
         advance();
-        init = parseExpr();
+        init = parseExpr(2);
     }
 
-    expect(TokenType::TOKEN_SEMICOLON, "expected ';' after variable declaration");
     return std::make_unique<VarDeclAST>(name, type, std::move(init), isConstexpr);
 }
 

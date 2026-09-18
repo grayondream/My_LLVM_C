@@ -563,6 +563,22 @@ TEST_F(ParserTest, CastToFloat) {
 
 // ========== Sizeof ==========
 
+TEST_F(ParserTest, MultipleDeclarators) {
+    auto tu = parse("int a = 1, b = 2, c = 3;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1);
+    auto* multi = dynamic_cast<MultiVarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(multi, nullptr);
+    EXPECT_EQ(multi->decls.size(), 3);
+}
+
+TEST_F(ParserTest, SingleDeclaratorIsNotWrapped) {
+    auto tu = parse("int a = 1;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1);
+    EXPECT_NE(dynamic_cast<VarDeclAST*>(tu->declarations[0].get()), nullptr);
+}
+
 TEST_F(ParserTest, SizeofType) {
     auto expr = parseExpr("sizeof(int)");
     ASSERT_NE(expr, nullptr);

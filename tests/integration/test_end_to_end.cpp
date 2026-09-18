@@ -167,6 +167,33 @@ TEST_F(EndToEndTest, DeferRunsOnContinue) {
     )", "defer_continue.c"), 3);
 }
 
+TEST_F(EndToEndTest, MultipleDeclarators) {
+    EXPECT_EQ(runSource(R"(
+        int main() {
+            int a = 5, b = 3;
+            int c = 1, d = 2, e = 4;
+            return a + b + c + d + e;
+        }
+    )", "multi_decl.c"), 15);
+}
+
+TEST_F(EndToEndTest, GlobalMultipleDeclarators) {
+    EXPECT_EQ(runSource(R"(
+        int g1 = 1, g2 = 2;
+        int main() { return g1 + g2; }
+    )", "multi_global.c"), 3);
+}
+
+TEST_F(EndToEndTest, PointerDeclaratorOnlyAppliesToFirst) {
+    EXPECT_EQ(runSource(R"(
+        int main() {
+            int x = 7;
+            int* a = &x, b = 3;
+            return *a + b;
+        }
+    )", "multi_ptr.c"), 10);
+}
+
 TEST_F(EndToEndTest, ArrayDecaysToPointer) {
     EXPECT_EQ(runSource(R"(
         int main() {

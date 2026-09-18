@@ -44,6 +44,8 @@ private:
 
     std::unique_ptr<DeclAST> parseVariableDecl(Type* type, const std::string& name, bool isConstexpr = false);
 
+    std::unique_ptr<DeclAST> parseVariableDeclList(Type* type, const std::string& firstName, bool isConstexpr = false);
+
     std::unique_ptr<ParamDeclAST> parseParamDecl();
 
     std::unique_ptr<StructDeclAST> parseStructDecl();
