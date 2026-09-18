@@ -843,6 +843,16 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
     if (isTypeStart() || check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE)) {
         size_t savedPos = m_currentTokenPos;
         Type* type = parseType();
+        // A function-pointer declarator starts with '(' after the type
+        // (e.g. `int (*fp)(int)`); let parseDeclaration handle it.
+        if (type && check(TokenType::TOKEN_LPAREN)) {
+            m_currentTokenPos = savedPos;
+            auto decl = parseDeclaration();
+            if (decl) {
+                return std::make_unique<DeclStmtAST>(std::move(decl));
+            }
+            m_currentTokenPos = savedPos;
+        }
         if (type && check(TokenType::TOKEN_IDENTIFIER)) {
             auto nameTok = advance();
             if (check(TokenType::TOKEN_LPAREN)) {
@@ -1720,6 +1730,27 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationAsType() {
         return parseFunctionDecl(type, opName, isConstexpr);
     }
 
+    // Function pointer declarator: returnType (*name)(paramTypes)
+    if (check(TokenType::TOKEN_LPAREN)) {
+        size_t saved = m_currentTokenPos;
+        advance(); // '('
+        while (check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE)) advance();
+        if (check(TokenType::TOKEN_STAR)) {
+            advance(); // '*'
+            while (check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE)) advance();
+            if (check(TokenType::TOKEN_IDENTIFIER)) {
+                std::string fpName = advance()->lexeme;
+                if (match(TokenType::TOKEN_RPAREN) && check(TokenType::TOKEN_LPAREN)) {
+                    if (Type* funcType = parseFunctionPointerType(type)) {
+                        Type* ptrType = new Type(TypeKind::Pointer, funcType);
+                        return parseVariableDeclList(ptrType, fpName, isConstexpr);
+                    }
+                }
+            }
+        }
+        m_currentTokenPos = saved;
+    }
+
     if (!check(TokenType::TOKEN_IDENTIFIER)) return nullptr;
     auto nameTok = advance();
 
@@ -1766,6 +1797,35 @@ std::unique_ptr<DeclAST> Parser::parseVariableDeclList(Type* type, const std::st
 
     expect(TokenType::TOKEN_SEMICOLON, "expected ';' after variable declaration");
     return std::make_unique<MultiVarDeclAST>(std::move(vars));
+}
+
+Type* Parser::parseFunctionPointerType(Type* returnType) {
+    if (!expect(TokenType::TOKEN_LPAREN, "expected '(' after function pointer name")) return nullptr;
+
+    std::vector<Type*> paramTypes;
+    bool isVarArg = false;
+
+    if (!check(TokenType::TOKEN_RPAREN)) {
+        while (true) {
+            if (check(TokenType::TOKEN_VOID)) {
+                advance();
+                break;
+            }
+            if (check(TokenType::TOKEN_ELLIPSIS)) {
+                isVarArg = true;
+                advance();
+                break;
+            }
+            Type* paramType = parseType();
+            if (!paramType) return nullptr;
+            if (check(TokenType::TOKEN_IDENTIFIER)) advance(); // optional name
+            paramTypes.push_back(paramType);
+            if (!match(TokenType::TOKEN_COMMA)) break;
+        }
+    }
+
+    if (!expect(TokenType::TOKEN_RPAREN, "expected ')' after function pointer parameters")) return nullptr;
+    return new FunctionType(returnType, paramTypes, isVarArg);
 }
 
 std::unique_ptr<FunctionDeclAST> Parser::parseFunctionDecl(Type* returnType, const std::string& name, bool isConstexpr) {

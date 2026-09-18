@@ -1327,6 +1327,18 @@ TEST_F(ParserDeclTest, UnionArrayMember) {
     EXPECT_EQ(arr->elementType->kind, TypeKind::Char);
 }
 
+TEST_F(ParserDeclTest, FunctionPointerDeclarator) {
+    auto tu = parse("int (*fp)(int, int);");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->name, "fp");
+    ASSERT_EQ(var->type->kind, TypeKind::Pointer);
+    ASSERT_NE(var->type->base, nullptr);
+    EXPECT_EQ(var->type->base->kind, TypeKind::Function);
+}
+
 // ========== Enum Declarations ==========
 
 TEST_F(ParserDeclTest, EnumDecl) {

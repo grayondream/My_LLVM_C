@@ -501,6 +501,14 @@ void SemanticAnalyzer::visit(VariableExprAST& node) {
     if (!sym) {
         emitError("use of undeclared identifier '" + node.name + "'", node);
         node.type = nullptr;
+    } else if (sym->type && sym->type->kind == TypeKind::Function) {
+        // A function used as a value decays to a function pointer.
+        auto* funcType = static_cast<FunctionType*>(sym->type);
+        node.isFunctionRef = true;
+        node.resolvedFunctionName = mangleFunction(node.name, funcType->paramTypes);
+        node.type = new Type(TypeKind::Pointer, funcType);
+        node.isLValue = false;
+        return;
     } else {
         node.type = sym->type;
     }
@@ -614,10 +622,26 @@ void SemanticAnalyzer::visit(UnaryExprAST& node) {
             node.type = typeCtx->getInt();
             break;
     }
-    node.isLValue = false;
+    // A dereference denotes the pointee and is therefore an lvalue.
+    node.isLValue = (node.op == UnaryOp::Deref);
 }
 
 void SemanticAnalyzer::visit(CallExprAST& node) {
+    // Indirect call through a function-pointer variable?
+    if (Symbol* sym = lookup(node.callee)) {
+        Type* st = sym->type;
+        if (st && st->kind == TypeKind::Pointer && st->base &&
+            st->base->kind == TypeKind::Function) {
+            auto* funcType = static_cast<FunctionType*>(st->base);
+            for (auto& arg : node.args) getExprType(*arg);
+            node.isIndirect = true;
+            node.resolvedParamTypes = funcType->paramTypes;
+            node.type = funcType->returnType;
+            node.isLValue = false;
+            return;
+        }
+    }
+
     FunctionType* funcType = nullptr;
     node.type = checkFunctionCall(node.callee, node.args, node, &funcType);
     if (funcType) {

@@ -25,6 +25,15 @@ llvm::Value* StringExprAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* VariableExprAST::codegen(CodegenContext& ctx) {
+    // A function name used as a value yields the function itself.
+    if (isFunctionRef) {
+        if (llvm::Function* fn = ctx.getModule().getFunction(resolvedFunctionName)) {
+            return fn;
+        }
+        LOGE("unknown function: {}", resolvedFunctionName);
+        return nullptr;
+    }
+
     Symbol* sym = ctx.currentScope()->lookup(name);
     if (!sym) {
         LOGE("unknown variable: {}", name);
@@ -130,9 +139,15 @@ llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
         case UnaryOp::Not:       return builder.CreateNot(emitLoad(ctx, v, operand->type), "nottmp");
         case UnaryOp::BitNot:    return builder.CreateNot(emitLoad(ctx, v, operand->type), "bitnottmp");
         case UnaryOp::Deref: {
+            // `*p` denotes the pointee as an lvalue: yield its address and let
+            // consumers load it, mirroring how variable references work.
+            llvm::Value* ptrVal = emitLoad(ctx, v, operand->type);
+            if (operand->type && operand->type->kind == TypeKind::Pointer) {
+                return ptrVal;
+            }
+            // Fallback when the operand type is unknown/lowering cannot tell.
             llvm::Type* pointeeType = ctx.getLLVMType(operand->type ? operand->type->base : nullptr);
             if (!pointeeType) pointeeType = llvm::Type::getInt8Ty(ctx.getContext());
-            llvm::Value* ptrVal = emitLoad(ctx, v, operand->type);
             return builder.CreateLoad(pointeeType, ptrVal, "dereftmp");
         }
         case UnaryOp::AddressOf: return v;
@@ -143,6 +158,38 @@ llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
+    // Indirect call through a function-pointer variable.
+    if (isIndirect) {
+        llvm::Value* fpAddr = ctx.lookupVariableAddr(callee);
+        if (!fpAddr) {
+            LOGE("unknown function pointer: {}", callee);
+            return nullptr;
+        }
+        llvm::Value* fnPtr = ctx.getBuilder().CreateLoad(
+            llvm::PointerType::get(ctx.getContext(), 0), fpAddr, "fnptr");
+
+        std::vector<llvm::Value*> argsV;
+        for (size_t i = 0; i < args.size(); ++i) {
+            llvm::Value* argVal = args[i]->codegen(ctx);
+            if (!argVal) return nullptr;
+            if (args[i]->isLValue) argVal = ctx.loadValue(argVal, args[i]->type);
+            if (i < resolvedParamTypes.size()) {
+                argVal = ctx.castValue(argVal, ctx.getLLVMType(resolvedParamTypes[i]));
+            }
+            argsV.push_back(argVal);
+        }
+
+        std::vector<llvm::Type*> paramLLVMTypes;
+        for (auto* t : resolvedParamTypes) paramLLVMTypes.push_back(ctx.getLLVMType(t));
+        llvm::Type* retLLVM = type ? ctx.getLLVMType(type)
+                                   : llvm::Type::getVoidTy(ctx.getContext());
+        auto* fnType = llvm::FunctionType::get(retLLVM, paramLLVMTypes, false);
+        if (retLLVM->isVoidTy()) {
+            return ctx.getBuilder().CreateCall(fnType, fnPtr, argsV);
+        }
+        return ctx.getBuilder().CreateCall(fnType, fnPtr, argsV, "icalltmp");
+    }
+
     // Prefer the overload chosen by semantic analysis so that implicit
     // conversions (e.g. int8 -> int) resolve to the right symbol.
     std::vector<Type*> argTypes;
@@ -276,7 +323,9 @@ llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
     if (!lhsVal || !rhsVal) return nullptr;
 
     auto& builder = ctx.getBuilder();
-    llvm::Value* result = emitLoad(ctx, rhsVal, rhs->type);
+    // Only load the RHS when it denotes a location; values such as function
+    // designators or '&x' are already the stored value.
+    llvm::Value* result = rhs->isLValue ? emitLoad(ctx, rhsVal, rhs->type) : rhsVal;
 
     if (lhs->type) {
         result = ctx.castValue(result, ctx.getLLVMType(lhs->type));

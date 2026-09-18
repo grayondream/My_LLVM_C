@@ -114,6 +114,10 @@ public:
 class VariableExprAST : public ExprAST {
 public:
     std::string name;
+    // Set by semantic analysis when the name refers to a function used as a
+    // value: codegen then yields the function instead of a variable address.
+    bool isFunctionRef = false;
+    std::string resolvedFunctionName;
     explicit VariableExprAST(const std::string& n) : name(n) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
@@ -147,6 +151,8 @@ public:
     // Parameter types of the overload chosen by semantic analysis. Empty when
     // unresolved (e.g. codegen is run without semantic analysis).
     std::vector<Type*> resolvedParamTypes;
+    // Set by semantic analysis for calls through a function-pointer variable.
+    bool isIndirect = false;
 
     CallExprAST(const std::string& name, std::vector<std::unique_ptr<ExprAST>> arguments)
         : callee(name), args(std::move(arguments)) {}

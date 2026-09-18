@@ -50,6 +50,10 @@ private:
 
     std::unique_ptr<DeclAST> parseVariableDeclList(Type* type, const std::string& firstName, bool isConstexpr = false);
 
+    // Parse the parameter list of a function-pointer declarator, after the
+    // closing ')' of "(*name)"; returns the pointed-to FunctionType.
+    Type* parseFunctionPointerType(Type* returnType);
+
     std::unique_ptr<ParamDeclAST> parseParamDecl();
 
     std::unique_ptr<StructDeclAST> parseStructDecl();

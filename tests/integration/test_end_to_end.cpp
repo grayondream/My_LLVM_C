@@ -220,6 +220,74 @@ TEST_F(EndToEndTest, ArrayArgumentDecaysToPointer) {
     )", "array_arg.c"), 6);
 }
 
+TEST_F(EndToEndTest, FunctionPointerCall) {
+    EXPECT_EQ(runSource(R"(
+        int mul(int a, int b) { return a * b; }
+        int main() {
+            int (*fp)(int, int) = mul;
+            return fp(2, 3);
+        }
+    )", "func_ptr.c"), 6);
+}
+
+TEST_F(EndToEndTest, FunctionPointerReassignment) {
+    EXPECT_EQ(runSource(R"(
+        int add(int a, int b) { return a + b; }
+        int mul(int a, int b) { return a * b; }
+        int main() {
+            int (*fp)(int, int) = add;
+            int x = fp(2, 3);
+            fp = mul;
+            return x + fp(2, 3);
+        }
+    )", "func_ptr_reassign.c"), 11);
+}
+
+TEST_F(EndToEndTest, DereferenceIsAssignable) {
+    EXPECT_EQ(runSource(R"(
+        int main() {
+            int y = 5;
+            int* p = &y;
+            *p = 9;
+            return y;
+        }
+    )", "deref_assign.c"), 9);
+}
+
+TEST_F(EndToEndTest, DereferenceInExpression) {
+    EXPECT_EQ(runSource(R"(
+        int main() {
+            int y = 5;
+            int* p = &y;
+            int a = *p;
+            return a + *p;
+        }
+    )", "deref_expr.c"), 10);
+}
+
+TEST_F(EndToEndTest, PointerToPointerDereference) {
+    EXPECT_EQ(runSource(R"(
+        int main() {
+            int y = 5;
+            int* p = &y;
+            int** pp = &p;
+            **pp = 11;
+            return y;
+        }
+    )", "deref_double.c"), 11);
+}
+
+TEST_F(EndToEndTest, AssignAddressOfToPointer) {
+    EXPECT_EQ(runSource(R"(
+        int main() {
+            int y = 5;
+            int* q;
+            q = &y;
+            return *q;
+        }
+    )", "addr_assign.c"), 5);
+}
+
 TEST_F(EndToEndTest, StructInitializerList) {
     EXPECT_EQ(runSource(R"(
         struct Point { int x; int y; };
