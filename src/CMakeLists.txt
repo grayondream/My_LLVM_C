@@ -5,11 +5,27 @@ add_library(my_llvm_c_lib ${SOURCES})
 
 target_include_directories(my_llvm_c_lib PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-find_package(spdlog CONFIG REQUIRED)
-target_link_libraries(my_llvm_c_lib PUBLIC spdlog::spdlog)
+find_package(spdlog CONFIG QUIET)
+if(spdlog_FOUND)
+    target_link_libraries(my_llvm_c_lib PUBLIC spdlog::spdlog)
+else()
+    include(FetchContent)
+    FetchContent_Declare(spdlog
+        URL https://github.com/gabime/spdlog/archive/refs/tags/v1.14.1.tar.gz)
+    FetchContent_MakeAvailable(spdlog)
+    target_link_libraries(my_llvm_c_lib PUBLIC spdlog::spdlog)
+endif()
 
-find_package(cxxopts CONFIG REQUIRED)
-target_link_libraries(my_llvm_c_lib PUBLIC cxxopts::cxxopts)
+find_package(cxxopts CONFIG QUIET)
+if(cxxopts_FOUND)
+    target_link_libraries(my_llvm_c_lib PUBLIC cxxopts::cxxopts)
+else()
+    include(FetchContent)
+    FetchContent_Declare(cxxopts
+        URL https://github.com/jarro2783/cxxopts/archive/refs/tags/v3.3.1.tar.gz)
+    FetchContent_MakeAvailable(cxxopts)
+    target_link_libraries(my_llvm_c_lib PUBLIC cxxopts::cxxopts)
+endif()
 
 if(LLVM_LINK_LLVM_DYLIB)
     target_link_libraries(my_llvm_c_lib PUBLIC LLVM)

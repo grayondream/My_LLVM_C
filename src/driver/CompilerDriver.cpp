@@ -23,6 +23,7 @@
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
+#include "llvm/Config/llvm-config.h"
 
 static std::string getHostTargetTriple() {
     return llvm::sys::getDefaultTargetTriple();
@@ -32,7 +33,13 @@ static std::unique_ptr<llvm::TargetMachine>
 createTargetMachine(llvm::Module& module) {
     std::string triple = getHostTargetTriple();
     llvm::Triple llvmTriple(triple);
+    // LLVM 19 changed Module::setTargetTriple/Target::createTargetMachine to
+    // take a llvm::Triple instead of its string form.
+#if LLVM_VERSION_MAJOR >= 19
+    module.setTargetTriple(llvmTriple);
+#else
     module.setTargetTriple(llvmTriple.str());
+#endif
 
     std::string error;
     const llvm::Target* target = llvm::TargetRegistry::lookupTarget(llvmTriple.str(), error);
@@ -42,8 +49,13 @@ createTargetMachine(llvm::Module& module) {
     }
 
     llvm::TargetOptions options;
+#if LLVM_VERSION_MAJOR >= 19
+    auto tm = target->createTargetMachine(
+        llvmTriple, "generic", "", options, llvm::Reloc::PIC_);
+#else
     auto tm = target->createTargetMachine(
         llvmTriple.str(), "generic", "", options, llvm::Reloc::PIC_);
+#endif
     if (!tm) {
         LOGE("Failed to create TargetMachine");
         return nullptr;

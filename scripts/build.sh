@@ -21,16 +21,33 @@ fi
 
 cd "${BUILD_DIR}"
 
-LLVM_DIR="${LLVM_DIR:-/opt/homebrew/Cellar/llvm@21/21.1.8/lib/cmake/llvm}"
+# Prefer an explicit LLVM_DIR, then llvm-config, then a couple of common paths.
+if [ -z "${LLVM_DIR}" ]; then
+    if command -v llvm-config >/dev/null 2>&1; then
+        LLVM_DIR="$(llvm-config --cmakedir)"
+    elif [ -d /usr/lib/cmake/llvm ]; then
+        LLVM_DIR="/usr/lib/cmake/llvm"
+    elif [ -d /opt/homebrew/opt/llvm/lib/cmake/llvm ]; then
+        LLVM_DIR="/opt/homebrew/opt/llvm/lib/cmake/llvm"
+    fi
+fi
 
-echo "Running CMake configuration..."
-cmake .. \
-    -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-    -DLLVM_DIR="${LLVM_DIR}" \
-    -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+CMAKE_ARGS=(
+    ".."
+    "-DCMAKE_BUILD_TYPE=${BUILD_TYPE}"
+    "-DLLVM_DIR=${LLVM_DIR}"
+)
 
-echo "Building project..."
-cmake --build . --config "${BUILD_TYPE}" -j$(sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
+if [ -n "${VCPKG_ROOT}" ] && [ -f "${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" ]; then
+    CMAKE_ARGS+=("-DCMAKE_TOOLCHAIN_FILE=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake")
+fi
+
+echo "Running CMake configuration (LLVM_DIR=${LLVM_DIR})..."
+cmake "${CMAKE_ARGS[@]}"
+
+JOBS="$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)"
+echo "Building project with ${JOBS} jobs..."
+cmake --build . --config "${BUILD_TYPE}" -j"${JOBS}"
 
 echo "Build completed successfully!"
 echo "Executable: ${BUILD_DIR}/bin/my_llvm_c"
