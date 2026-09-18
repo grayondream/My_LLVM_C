@@ -801,6 +801,14 @@ void SemanticAnalyzer::visit(MethodCallExprAST& node) {
 }
 
 void SemanticAnalyzer::visit(SizeofExprAST& node) {
+    // Resolve the type of a `sizeof(expr)` operand; the expression itself is
+    // not evaluated, but its type is needed by codegen.
+    if (!node.sizeofType && node.expr) {
+        node.sizeofType = getExprType(*node.expr);
+        if (!node.sizeofType) {
+            emitError("invalid operand to sizeof", node);
+        }
+    }
     node.type = typeCtx->getInt();
     node.isLValue = false;
 }

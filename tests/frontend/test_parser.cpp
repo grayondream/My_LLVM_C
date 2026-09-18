@@ -580,6 +580,24 @@ TEST_F(ParserTest, SizeofExpr) {
     EXPECT_NE(sz->expr, nullptr);
 }
 
+TEST_F(ParserTest, SizeofExprWithParens) {
+    auto expr = parseExpr("sizeof(x)");
+    ASSERT_NE(expr, nullptr);
+    auto sz = dynamic_cast<SizeofExprAST*>(expr);
+    ASSERT_NE(sz, nullptr);
+    EXPECT_EQ(sz->sizeofType, nullptr);
+    EXPECT_NE(sz->expr, nullptr);
+}
+
+TEST_F(ParserTest, SizeofArithmeticExprWithParens) {
+    auto expr = parseExpr("sizeof(1 + 2)");
+    ASSERT_NE(expr, nullptr);
+    auto sz = dynamic_cast<SizeofExprAST*>(expr);
+    ASSERT_NE(sz, nullptr);
+    EXPECT_EQ(sz->sizeofType, nullptr);
+    EXPECT_NE(sz->expr, nullptr);
+}
+
 // ========== Complex Expressions ==========
 
 TEST_F(ParserTest, ComplexExpr1) {

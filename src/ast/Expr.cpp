@@ -471,7 +471,11 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* SizeofExprAST::codegen(CodegenContext& ctx) {
-    llvm::Type* llvmType = ctx.getLLVMType(sizeofType);
+    Type* operandType = sizeofType;
+    if (!operandType && expr) operandType = expr->type;
+    if (!operandType) return nullptr;
+
+    llvm::Type* llvmType = ctx.getLLVMType(operandType);
     if (!llvmType) return nullptr;
 
     uint64_t size = ctx.getModule().getDataLayout().getTypeStoreSize(llvmType);

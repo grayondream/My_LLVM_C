@@ -167,6 +167,18 @@ TEST_F(EndToEndTest, DeferRunsOnContinue) {
     )", "defer_continue.c"), 3);
 }
 
+TEST_F(EndToEndTest, SizeofTypeAndExpr) {
+    EXPECT_EQ(runSource(R"(
+        int main() {
+            int x = 10;
+            int a = sizeof(int);
+            int b = sizeof(x);
+            int c = sizeof(x + 1);
+            return a + b + c;
+        }
+    )", "sizeof.c"), 12);
+}
+
 TEST_F(EndToEndTest, BitwiseNot) {
     EXPECT_EQ(runSource(
         "int main() { int a = 5; return ~a; }", "bitnot.c"), -6);

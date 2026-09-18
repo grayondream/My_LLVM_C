@@ -418,35 +418,27 @@ std::unique_ptr<ExprAST> Parser::parseUnary() {
     if (token->type == TokenType::TOKEN_SIZEOF) {
         advance(); // consume sizeof
 
-        // sizeof(type)
         if (match(TokenType::TOKEN_LPAREN)) {
-            Type* sizeofType = nullptr;
-            if (auto typeTok = peek()) {
-                switch (typeTok->type) {
-                    case TokenType::TOKEN_INT:
-                        sizeofType = TypeContext::instance().getInt();
-                        break;
-                    case TokenType::TOKEN_FLOAT:
-                        sizeofType = TypeContext::instance().getFloat();
-                        break;
-                    case TokenType::TOKEN_DOUBLE:
-                        sizeofType = TypeContext::instance().getDouble();
-                        break;
-                    case TokenType::TOKEN_CHAR_KW:
-                        sizeofType = TypeContext::instance().getChar();
-                        break;
-                    case TokenType::TOKEN_VOID:
-                        sizeofType = TypeContext::instance().getVoid();
-                        break;
-                    default:
-                        break;
+            // Try `sizeof(type)` first, then fall back to `sizeof(expr)`.
+            if (isTypeStart() || check(TokenType::TOKEN_CONST) ||
+                check(TokenType::TOKEN_VOLATILE)) {
+                size_t savedPos = m_currentTokenPos;
+                Type* sizeofType = parseType();
+                if (sizeofType && check(TokenType::TOKEN_RPAREN)) {
+                    advance(); // consume ')'
+                    return std::make_unique<SizeofExprAST>(sizeofType);
                 }
+                // Not actually a type (e.g. a variable sharing a type name);
+                // rewind and parse it as an expression instead.
+                m_currentTokenPos = savedPos;
             }
-            if (sizeofType) {
-                advance(); // consume type keyword
+
+            auto operand = parseExpr();
+            if (!operand) {
+                return nullptr;
             }
             expect(TokenType::TOKEN_RPAREN, "expected ')' after sizeof operand");
-            return std::make_unique<SizeofExprAST>(sizeofType);
+            return std::make_unique<SizeofExprAST>(nullptr, std::move(operand));
         }
 
         // sizeof expr
