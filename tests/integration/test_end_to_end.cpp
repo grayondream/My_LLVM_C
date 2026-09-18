@@ -167,6 +167,14 @@ TEST_F(EndToEndTest, DeferRunsOnContinue) {
     )", "defer_continue.c"), 3);
 }
 
+TEST_F(EndToEndTest, PrototypeThenDefinition) {
+    EXPECT_EQ(runSource(R"(
+        int add(int a, int b);
+        int add(int a, int b) { return a + b; }
+        int main() { return add(2, 3); }
+    )", "prototype.c"), 5);
+}
+
 TEST_F(EndToEndTest, SizeofTypeAndExpr) {
     EXPECT_EQ(runSource(R"(
         int main() {

@@ -1091,8 +1091,18 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
         paramTypes.push_back(param->type);
     }
     auto* funcType = new FunctionType(node.returnType, std::move(paramTypes), node.isVarArg);
+    std::string signature = mangleFunction(node.name, funcType->paramTypes);
     if (!declare(node.name, funcType)) {
-        emitError("redeclaration of function '" + node.name + "' in the same scope", node);
+        // A matching declaration already exists. That is legal for repeated
+        // prototypes or a prototype followed by its definition; only two
+        // definitions of the same signature are an error.
+        if (node.body && definedFunctions.count(signature)) {
+            emitError("redefinition of function '" + node.name + "'", node);
+        } else if (node.body) {
+            definedFunctions.insert(signature);
+        }
+    } else if (node.body) {
+        definedFunctions.insert(signature);
     }
 
     FunctionDeclAST* prevFunc = currentFunction;

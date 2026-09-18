@@ -691,6 +691,22 @@ TEST(ClassSupport, SemanticAnalysisInheritedFieldAccess) {
     EXPECT_TRUE(analyzer.getErrors().empty());
 }
 
+TEST(ClassSupport, DuplicateFunctionDefinitionIsAnError) {
+    std::string source = R"(
+        int f() { return 1; }
+        int f() { return 2; }
+    )";
+    Lexer lexer("test.c", source);
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    EXPECT_FALSE(analyzer.getErrors().empty());
+}
+
 TEST(ClassSupport, SemanticAnalysisCircularInheritance) {
     std::string source = R"(
         class A : public B { int x; };

@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include "sema/Diagnostic.h"
 #include "ast/Symbol.h"
 #include "ast/Type.h"
@@ -111,4 +112,5 @@ private:
     FunctionDeclAST* currentFunction;
     TypeContext* typeCtx;
     std::unordered_map<std::string, ConstValue> constexprValues;
+    std::unordered_set<std::string> definedFunctions;
 };
