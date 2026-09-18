@@ -9,6 +9,7 @@
 #include <map>
 
 class Type;
+class ExprAST;
 
 class CodegenContext {
 public:
@@ -53,6 +54,18 @@ public:
     void addLabel(const std::string& label, llvm::BasicBlock* bb);
     llvm::BasicBlock* getLabel(const std::string& label) const;
 
+    // Defer statement support. Deferred expressions are registered while a
+    // compound statement is generated and emitted when its scope exits, or
+    // before a return/break/continue that leaves the scope.
+    void pushDeferScope();
+    void popDeferScope();       // emit and drop the innermost scope
+    void discardDeferScope();   // drop the innermost scope without emitting
+    void addDefer(ExprAST* expr);
+    void emitDefersFrom(size_t depth);  // emit scopes [size-1 .. depth], innermost first
+    void emitAllDefers();
+    size_t getBreakDeferBoundary() const;
+    size_t getContinueDeferBoundary() const;
+
     llvm::Value* coerceToBool(llvm::Value* val);
 
     // Insert an implicit conversion of `val` to `targetLLVMType`, following the
@@ -75,4 +88,8 @@ private:
     std::vector<llvm::BasicBlock*> breakBlocks;
     std::vector<llvm::BasicBlock*> continueBlocks;
     std::map<std::string, llvm::BasicBlock*> labels;
+
+    std::vector<std::vector<ExprAST*>> deferScopes;
+    std::vector<size_t> breakDeferBoundaries;
+    std::vector<size_t> continueDeferBoundaries;
 };

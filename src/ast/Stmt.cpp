@@ -12,14 +12,30 @@ llvm::Value* ExprStmtAST::codegen(CodegenContext& ctx) {
 
 llvm::Value* CompoundStmtAST::codegen(CodegenContext& ctx) {
     llvm::Value* last = nullptr;
+    ctx.pushDeferScope();
     for (auto& stmt : stmts) {
+        // Stop generating the (unreachable) rest of the block once a
+        // statement terminated it, e.g. after a return or break.
+        if (ctx.getBuilder().GetInsertBlock()->getTerminator()) {
+            last = nullptr;
+            break;
+        }
         last = stmt->codegen(ctx);
+    }
+
+    if (ctx.getBuilder().GetInsertBlock()->getTerminator()) {
+        // A leaving statement (return/break/continue) already emitted the
+        // pending defers, so this scope must not emit them a second time.
+        ctx.discardDeferScope();
+    } else {
+        ctx.popDeferScope();
     }
     return last;
 }
 
 llvm::Value* ReturnStmtAST::codegen(CodegenContext& ctx) {
     if (!value) {
+        ctx.emitAllDefers();
         ctx.getBuilder().CreateRetVoid();
         return nullptr;
     }
@@ -42,6 +58,8 @@ llvm::Value* ReturnStmtAST::codegen(CodegenContext& ctx) {
     if (func) {
         v = ctx.castValue(v, func->getReturnType());
     }
+    // Run all deferred calls (innermost scope first) before leaving the function.
+    ctx.emitAllDefers();
     ctx.getBuilder().CreateRet(v);
     return v;
 }
@@ -213,6 +231,8 @@ llvm::Value* BreakStmtAST::codegen(CodegenContext& ctx) {
         LOGE("break statement outside of loop/switch");
         return ctx.getBuilder().CreateUnreachable();
     }
+    // Run defers registered inside the loop/switch body before leaving it.
+    ctx.emitDefersFrom(ctx.getBreakDeferBoundary());
     return ctx.getBuilder().CreateBr(breakBB);
 }
 
@@ -222,6 +242,8 @@ llvm::Value* ContinueStmtAST::codegen(CodegenContext& ctx) {
         LOGE("continue statement outside of loop");
         return ctx.getBuilder().CreateUnreachable();
     }
+    // Run defers registered inside the loop body before the next iteration.
+    ctx.emitDefersFrom(ctx.getContinueDeferBoundary());
     return ctx.getBuilder().CreateBr(continueBB);
 }
 

@@ -7,6 +7,7 @@
 
 #include "frontend/Lexer.h"
 #include "frontend/Parser.h"
+#include "sema/SemanticAnalyzer.h"
 #include "codegen/CodegenContext.h"
 #include "support/Log.h"
 #include "llvm/IR/Verifier.h"
@@ -40,6 +41,10 @@ static int runSource(const std::string& source, const std::string& filename) {
     Parser parser(tokens);
     auto ast = parser.parse();
     if (!ast) return -1;
+
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    if (!analyzer.getErrors().empty()) return -1;
 
     CodegenContext ctx;
     ctx.setSourceFile(filename);
@@ -110,6 +115,56 @@ TEST_F(EndToEndTest, ControlFlowFromFile) {
     ASSERT_TRUE(ifs.is_open());
     std::stringstream ss; ss << ifs.rdbuf();
     EXPECT_EQ(runSource(ss.str(), "control_flow.c"), 55);
+}
+
+TEST_F(EndToEndTest, DeferRunsAtScopeExitInReverseOrder) {
+    EXPECT_EQ(runSource(R"(
+        int g = 0;
+        int add(int v) { g = g * 10 + v; return 0; }
+        int main() {
+            { defer add(1); defer add(2); defer add(3); }
+            return g;
+        }
+    )", "defer_order.c"), 321);
+}
+
+TEST_F(EndToEndTest, DeferRunsOnReturn) {
+    EXPECT_EQ(runSource(R"(
+        int counter = 0;
+        int tick() { counter = counter + 1; return 0; }
+        int helper() { defer tick(); return 0; }
+        int main() { helper(); return counter; }
+    )", "defer_return.c"), 1);
+}
+
+TEST_F(EndToEndTest, DeferRunsOnBreak) {
+    EXPECT_EQ(runSource(R"(
+        int counter = 0;
+        int tick() { counter = counter + 1; return 0; }
+        int main() {
+            int i = 0;
+            while (i < 3) {
+                defer tick();
+                i = i + 1;
+                if (i == 2) break;
+            }
+            return counter;
+        }
+    )", "defer_break.c"), 2);
+}
+
+TEST_F(EndToEndTest, DeferRunsOnContinue) {
+    EXPECT_EQ(runSource(R"(
+        int counter = 0;
+        int tick() { counter = counter + 1; return 0; }
+        int main() {
+            for (int i = 0; i < 3; i = i + 1) {
+                defer tick();
+                continue;
+            }
+            return counter;
+        }
+    )", "defer_continue.c"), 3);
 }
 
 TEST_F(EndToEndTest, BitwiseNot) {

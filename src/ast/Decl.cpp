@@ -241,11 +241,10 @@ llvm::Value* TypeDeclAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* DeferStmtAST::codegen(CodegenContext& ctx) {
-    // defer 语句需要在代码生成阶段特殊处理
-    // 目前先简单实现：在作用域结束时执行表达式
-    // TODO: 实现完整的 defer 语义
+    // Register the deferred call; it is emitted by the enclosing compound
+    // statement when its scope exits (or before return/break/continue).
     if (callExpr) {
-        return callExpr->codegen(ctx);
+        ctx.addDefer(callExpr.get());
     }
     return nullptr;
 }

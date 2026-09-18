@@ -1,5 +1,6 @@
 #include "CodegenContext.h"
 #include "ast/Type.h"
+#include "ast/Expr.h"
 #include "support/Log.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Metadata.h"
@@ -164,11 +165,15 @@ void CodegenContext::declareVariable(const std::string& name, llvm::Value* alloc
 
 void CodegenContext::pushBreakBlock(llvm::BasicBlock* bb) {
     breakBlocks.push_back(bb);
+    breakDeferBoundaries.push_back(deferScopes.size());
 }
 
 void CodegenContext::popBreakBlock() {
     if (!breakBlocks.empty()) {
         breakBlocks.pop_back();
+    }
+    if (!breakDeferBoundaries.empty()) {
+        breakDeferBoundaries.pop_back();
     }
 }
 
@@ -179,11 +184,15 @@ llvm::BasicBlock* CodegenContext::getBreakBlock() const {
 
 void CodegenContext::pushContinueBlock(llvm::BasicBlock* bb) {
     continueBlocks.push_back(bb);
+    continueDeferBoundaries.push_back(deferScopes.size());
 }
 
 void CodegenContext::popContinueBlock() {
     if (!continueBlocks.empty()) {
         continueBlocks.pop_back();
+    }
+    if (!continueDeferBoundaries.empty()) {
+        continueDeferBoundaries.pop_back();
     }
 }
 
@@ -200,6 +209,52 @@ llvm::BasicBlock* CodegenContext::getLabel(const std::string& label) const {
     auto it = labels.find(label);
     if (it != labels.end()) return it->second;
     return nullptr;
+}
+
+void CodegenContext::pushDeferScope() {
+    deferScopes.emplace_back();
+}
+
+void CodegenContext::addDefer(ExprAST* expr) {
+    if (expr && !deferScopes.empty()) {
+        deferScopes.back().push_back(expr);
+    }
+}
+
+void CodegenContext::emitDefersFrom(size_t depth) {
+    if (depth > deferScopes.size()) return;
+    for (size_t i = deferScopes.size(); i > depth; --i) {
+        auto& scope = deferScopes[i - 1];
+        for (auto it = scope.rbegin(); it != scope.rend(); ++it) {
+            if (*it) (*it)->codegen(*this);
+        }
+    }
+}
+
+void CodegenContext::popDeferScope() {
+    if (deferScopes.empty()) return;
+    emitDefersFrom(deferScopes.size() - 1);
+    deferScopes.pop_back();
+}
+
+void CodegenContext::discardDeferScope() {
+    if (!deferScopes.empty()) {
+        deferScopes.pop_back();
+    }
+}
+
+void CodegenContext::emitAllDefers() {
+    emitDefersFrom(0);
+}
+
+size_t CodegenContext::getBreakDeferBoundary() const {
+    if (breakDeferBoundaries.empty()) return 0;
+    return breakDeferBoundaries.back();
+}
+
+size_t CodegenContext::getContinueDeferBoundary() const {
+    if (continueDeferBoundaries.empty()) return 0;
+    return continueDeferBoundaries.back();
 }
 
 llvm::Value* CodegenContext::coerceToBool(llvm::Value* val) {
