@@ -220,6 +220,65 @@ TEST_F(EndToEndTest, ArrayArgumentDecaysToPointer) {
     )", "array_arg.c"), 6);
 }
 
+TEST_F(EndToEndTest, StructInitializerList) {
+    EXPECT_EQ(runSource(R"(
+        struct Point { int x; int y; };
+        int main() {
+            struct Point p = {10, 20};
+            return p.x + p.y;
+        }
+    )", "struct_init.c"), 30);
+}
+
+TEST_F(EndToEndTest, ArrayInitializerList) {
+    EXPECT_EQ(runSource(R"(
+        int main() {
+            int arr[5] = {1, 2, 3, 4, 5};
+            int s = 0;
+            for (int i = 0; i < 5; i = i + 1) { s = s + arr[i]; }
+            return s;
+        }
+    )", "array_init.c"), 15);
+}
+
+TEST_F(EndToEndTest, UnsizedArrayInitializerList) {
+    EXPECT_EQ(runSource(R"(
+        int main() {
+            int arr[] = {1, 2, 3};
+            return arr[0] + arr[1] + arr[2];
+        }
+    )", "unsized_array_init.c"), 6);
+}
+
+TEST_F(EndToEndTest, NestedAggregateInitializer) {
+    EXPECT_EQ(runSource(R"(
+        struct P { int x; int y; };
+        struct R { struct P p; int z; };
+        int main() {
+            struct R r = {{1, 2}, 3};
+            return r.p.x + r.p.y + r.z;
+        }
+    )", "nested_init.c"), 6);
+}
+
+TEST_F(EndToEndTest, GlobalAggregateInitializer) {
+    EXPECT_EQ(runSource(R"(
+        struct P { int x; int y; };
+        struct P g = {4, 5};
+        int main() { return g.x + g.y; }
+    )", "global_init.c"), 9);
+}
+
+TEST_F(EndToEndTest, PartialAggregateInitializerZeroFills) {
+    EXPECT_EQ(runSource(R"(
+        struct P { int x; int y; };
+        int main() {
+            struct P p = {10};
+            return p.x + p.y;
+        }
+    )", "partial_init.c"), 10);
+}
+
 TEST_F(EndToEndTest, VariableCopyInitializationLoadsValue) {
     EXPECT_EQ(runSource(R"(
         int main() {

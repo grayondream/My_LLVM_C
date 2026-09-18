@@ -951,10 +951,16 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
     }
 
     if (node.initExpr) {
-        Type* initType = getExprType(*node.initExpr);
-        if (initType && !typesCompatible(node.type, initType)) {
-            emitError("type mismatch in initialization of '" + node.name + "': expected '" 
-                + typeToString(node.type) + "', got '" + typeToString(initType) + "'", node);
+        if (auto* initList = dynamic_cast<InitializerListExprAST*>(node.initExpr.get())) {
+            initList->type = node.type;
+            initList->isLValue = false;
+            for (auto& e : initList->initializers) getExprType(*e);
+        } else {
+            Type* initType = getExprType(*node.initExpr);
+            if (initType && !typesCompatible(node.type, initType)) {
+                emitError("type mismatch in initialization of '" + node.name + "': expected '" 
+                    + typeToString(node.type) + "', got '" + typeToString(initType) + "'", node);
+            }
         }
     }
     if (!declare(node.name, node.type)) {
@@ -963,12 +969,23 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
 }
 
 void SemanticAnalyzer::visit(ArrayDeclAST& node) {
+    if (auto* initList = dynamic_cast<InitializerListExprAST*>(node.initExpr.get())) {
+        if (node.size == 0) {
+            node.size = static_cast<int>(initList->initializers.size());
+        }
+    }
     Type* arrayType = new ArrayType(node.elementType, node.size);
     if (node.initExpr) {
-        Type* initType = getExprType(*node.initExpr);
-        if (initType && !typesCompatible(node.elementType, initType)) {
-            emitError("type mismatch in initialization of array '" + node.name + "': expected '" 
-                + typeToString(node.elementType) + "', got '" + typeToString(initType) + "'", node);
+        if (auto* initList = dynamic_cast<InitializerListExprAST*>(node.initExpr.get())) {
+            initList->type = arrayType;
+            initList->isLValue = false;
+            for (auto& e : initList->initializers) getExprType(*e);
+        } else {
+            Type* initType = getExprType(*node.initExpr);
+            if (initType && !typesCompatible(node.elementType, initType)) {
+                emitError("type mismatch in initialization of array '" + node.name + "': expected '" 
+                    + typeToString(node.elementType) + "', got '" + typeToString(initType) + "'", node);
+            }
         }
     }
     if (!declare(node.name, arrayType)) {
