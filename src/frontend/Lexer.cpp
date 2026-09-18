@@ -367,10 +367,22 @@ Token Lexer::scanNumber(){
         }
     }
 
+    // Floating-point literal suffix (e.g. 3.14f, 2.0F, 1.5L).
+    if(isfloat) {
+        const char suffix = peek();
+        if(suffix == 'f' || suffix == 'F' || suffix == 'l' || suffix == 'L') {
+            advance();
+        }
+    }
+
     const auto lexName = lexeme();
     if(isfloat) {
         std::string cleanStr;
-        for(char c : lexName) { if(c != '_') cleanStr += c; }
+        for(char c : lexName) {
+            if(c == '_') continue;
+            if(c == 'f' || c == 'F' || c == 'l' || c == 'L') break;
+            cleanStr += c;
+        }
         return makeToken(TokenType::TOKEN_FLOAT, lexName, std::stod(cleanStr));
     } else {
         std::string cleanStr;

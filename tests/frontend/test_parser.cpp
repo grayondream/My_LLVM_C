@@ -563,6 +563,15 @@ TEST_F(ParserTest, CastToFloat) {
 
 // ========== Sizeof ==========
 
+TEST_F(LexerTest, FloatSuffixIsPartOfTheLiteral) {
+    auto tokens = lex("3.14f 2.0F 1.5L");
+    ASSERT_EQ(tokens.size(), 3u);
+    EXPECT_EQ(tokens[0].type, TokenType::TOKEN_FLOAT);
+    EXPECT_EQ(tokens[1].type, TokenType::TOKEN_FLOAT);
+    EXPECT_EQ(tokens[2].type, TokenType::TOKEN_FLOAT);
+    EXPECT_NEAR(std::get<double>(tokens[0].value), 3.14, 1e-9);
+}
+
 TEST_F(ParserTest, MultipleDeclarators) {
     auto tu = parse("int a = 1, b = 2, c = 3;");
     ASSERT_NE(tu, nullptr);
