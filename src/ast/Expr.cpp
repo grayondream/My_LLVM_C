@@ -117,10 +117,35 @@ llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
     llvm::Value* rhs = right->codegen(ctx);
     if (!lhs || !rhs) return nullptr;
 
-    lhs = emitLoad(ctx, lhs, left->type);
-    rhs = emitLoad(ctx, rhs, right->type);
+    lhs = emitRValue(ctx, *left, lhs);
+    rhs = emitRValue(ctx, *right, rhs);
 
     auto& builder = ctx.getBuilder();
+
+    // Pointer arithmetic (ptr +/- int, int + ptr) must use GEP, not add/sub.
+    auto pointerLike = [](Type* t) {
+        return t && (t->kind == TypeKind::Pointer || t->kind == TypeKind::Array);
+    };
+    const bool leftPtr = pointerLike(left->type);
+    const bool rightPtr = pointerLike(right->type);
+    if ((op == BinaryOp::Add || op == BinaryOp::Sub) && (leftPtr != rightPtr)) {
+        llvm::Value* ptrVal = leftPtr ? lhs : rhs;
+        llvm::Value* idxVal = leftPtr ? rhs : lhs;
+        Type* ptrType = leftPtr ? left->type : right->type;
+        Type* pointee = nullptr;
+        if (ptrType->kind == TypeKind::Pointer) {
+            pointee = ptrType->base;
+        } else if (ptrType->kind == TypeKind::Array) {
+            pointee = static_cast<ArrayType*>(ptrType)->elementType;
+        }
+        llvm::Type* elemTy = pointee ? ctx.getLLVMType(pointee)
+                                     : llvm::Type::getInt8Ty(ctx.getContext());
+        if (!elemTy) elemTy = llvm::Type::getInt8Ty(ctx.getContext());
+        if (op == BinaryOp::Sub) {
+            idxVal = builder.CreateNeg(idxVal, "negidx");
+        }
+        return builder.CreateGEP(elemTy, ptrVal, idxVal, "ptradd");
+    }
 
     // Coerce both operands to a common arithmetic type. Floating-point
     // operations must use the FP opcodes (FAdd/FMul/FCmp...), not the integer
@@ -187,7 +212,15 @@ llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
 
     switch (op) {
         case UnaryOp::Plus:      return emitRValue(ctx, *operand, v);
-        case UnaryOp::Minus:     return builder.CreateNeg(emitRValue(ctx, *operand, v), "negtmp");
+        case UnaryOp::Minus: {
+            llvm::Value* operandVal = emitRValue(ctx, *operand, v);
+            // Floating-point negation must use fneg; integer CreateNeg would
+            // expand to `0 - x`, which is not selectable for constants here.
+            if (operandVal->getType()->isFloatingPointTy()) {
+                return builder.CreateFNeg(operandVal, "negtmp");
+            }
+            return builder.CreateNeg(operandVal, "negtmp");
+        }
         case UnaryOp::Not:       return builder.CreateNot(emitRValue(ctx, *operand, v), "nottmp");
         case UnaryOp::BitNot:    return builder.CreateNot(emitRValue(ctx, *operand, v), "bitnottmp");
         case UnaryOp::Deref: {

@@ -347,6 +347,38 @@ TEST_F(EndToEndTest, PartialAggregateInitializerZeroFills) {
     )", "partial_init.c"), 10);
 }
 
+TEST_F(EndToEndTest, PointerArithmeticInLoop) {
+    EXPECT_EQ(runSource(R"(
+        int main() {
+            int arr[5] = {1, 2, 3, 4, 5};
+            int* p = arr;
+            int s = 0;
+            for (int i = 0; i < 5; i = i + 1) { s = s + *(p + i); }
+            return s;
+        }
+    )", "ptr_arith.c"), 15);
+}
+
+TEST_F(EndToEndTest, PointerSubtraction) {
+    EXPECT_EQ(runSource(R"(
+        int main() {
+            int arr[5] = {1, 2, 3, 4, 5};
+            int* p = arr;
+            return *(p + 3) - *(p + 1);
+        }
+    )", "ptr_sub.c"), 2);
+}
+
+TEST_F(EndToEndTest, NegativeFloatLiteral) {
+    EXPECT_EQ(runSource(
+        "int main() { double d = -1.5; return (int)(d * 10.0); }", "negfloat.c"), -15);
+}
+
+TEST_F(EndToEndTest, NegativeFloatLiteralFloat) {
+    EXPECT_EQ(runSource(
+        "int main() { float f = -2.0f; return (int)f; }", "negfloatf.c"), -2);
+}
+
 TEST_F(EndToEndTest, PrefixIncrement) {
     EXPECT_EQ(runSource(
         "int main() { int a = 5; int k = ++a; return k * 10 + a; }", "preinc.c"), 66);
