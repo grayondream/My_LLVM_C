@@ -347,6 +347,22 @@ TEST_F(EndToEndTest, PartialAggregateInitializerZeroFills) {
     )", "partial_init.c"), 10);
 }
 
+TEST_F(EndToEndTest, PrefixIncrement) {
+    EXPECT_EQ(runSource(
+        "int main() { int a = 5; int k = ++a; return k * 10 + a; }", "preinc.c"), 66);
+}
+
+TEST_F(EndToEndTest, PrefixDecrement) {
+    EXPECT_EQ(runSource(
+        "int main() { int a = 5; int k = --a; return k * 10 + a; }", "predec.c"), 44);
+}
+
+TEST_F(EndToEndTest, PrefixIncrementThroughDeref) {
+    EXPECT_EQ(runSource(
+        "int main() { int y = 1; int* p = &y; int k = ++*p; return k + y; }",
+        "preinc_deref.c"), 4);
+}
+
 TEST_F(EndToEndTest, SwitchDispatch) {
     EXPECT_EQ(runSource(R"(
         int pick(int n) {

@@ -202,6 +202,35 @@ llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
             if (!pointeeType) pointeeType = llvm::Type::getInt8Ty(ctx.getContext());
             return builder.CreateLoad(pointeeType, ptrVal, "dereftmp");
         }
+        case UnaryOp::PreInc:
+        case UnaryOp::PreDec: {
+            // The operand is an lvalue; update it in place and yield the new
+            // value.
+            llvm::Type* loadType = operand->type
+                ? ctx.getLLVMType(operand->type)
+                : llvm::Type::getInt32Ty(ctx.getContext());
+            if (!loadType) loadType = llvm::Type::getInt32Ty(ctx.getContext());
+            llvm::Value* oldVal = builder.CreateLoad(loadType, v, "preold");
+
+            llvm::Value* newVal = nullptr;
+            if (loadType->isPointerTy()) {
+                llvm::Type* elemTy = (operand->type && operand->type->base)
+                    ? ctx.getLLVMType(operand->type->base)
+                    : llvm::Type::getInt8Ty(ctx.getContext());
+                if (!elemTy) elemTy = llvm::Type::getInt8Ty(ctx.getContext());
+                llvm::Value* step = llvm::ConstantInt::get(
+                    llvm::Type::getInt64Ty(ctx.getContext()),
+                    op == UnaryOp::PreInc ? 1 : -1);
+                newVal = builder.CreateGEP(elemTy, oldVal, step, "preptr");
+            } else {
+                llvm::Value* one = llvm::ConstantInt::get(loadType, 1);
+                newVal = (op == UnaryOp::PreInc)
+                    ? builder.CreateAdd(oldVal, one, "preinc")
+                    : builder.CreateSub(oldVal, one, "predec");
+            }
+            builder.CreateStore(newVal, v);
+            return newVal;
+        }
         case UnaryOp::AddressOf: return v;
         default:
             LOGE("invalid unary operator");
