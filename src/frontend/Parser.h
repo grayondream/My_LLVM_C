@@ -80,6 +80,8 @@ private:
 
     std::unique_ptr<StmtAST> parseForStmt();
 
+    std::unique_ptr<StmtAST> parseSwitchStmt();
+
     std::unique_ptr<StmtAST> parseBreakStmt();
 
     std::unique_ptr<StmtAST> parseContinueStmt();

@@ -86,7 +86,9 @@ class SwitchStmtAST : public StmtAST {
 public:
     std::unique_ptr<ExprAST> cond;
     std::vector<std::unique_ptr<StmtAST>> cases;
-    std::vector<llvm::Value*> caseValues;
+    // Parallel to `cases`: the integer constant expression for each case label,
+    // or nullptr for `default`.
+    std::vector<std::unique_ptr<ExprAST>> caseLabels;
 
     SwitchStmtAST(std::unique_ptr<ExprAST> condition, std::vector<std::unique_ptr<StmtAST>> caseStmts)
         : cond(std::move(condition)), cases(std::move(caseStmts)) {}

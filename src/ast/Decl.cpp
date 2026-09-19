@@ -333,9 +333,14 @@ llvm::Value* FunctionDeclAST::codegen(CodegenContext& ctx) {
         body->codegen(ctx);
     }
 
-    // Add implicit return for void functions if no terminator exists
-    if (returnType->kind == TypeKind::Void && !ctx.getBuilder().GetInsertBlock()->getTerminator()) {
-        ctx.getBuilder().CreateRetVoid();
+    // Ensure the body ends with a terminator. Void functions implicitly return;
+    // falling off the end of a non-void function is undefined behaviour.
+    if (!ctx.getBuilder().GetInsertBlock()->getTerminator()) {
+        if (returnType->kind == TypeKind::Void) {
+            ctx.getBuilder().CreateRetVoid();
+        } else {
+            ctx.getBuilder().CreateUnreachable();
+        }
     }
 
     ctx.popScope();

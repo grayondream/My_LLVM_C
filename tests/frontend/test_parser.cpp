@@ -931,6 +931,21 @@ TEST_F(ParserStmtTest, WhileStatement) {
     EXPECT_NE(whileStmt->body, nullptr);
 }
 
+TEST_F(ParserStmtTest, SwitchStatement) {
+    auto stmt = parseStmt(
+        "int f() { switch (x) { case 1: break; case 2: case 3: break; default: break; } }");
+    ASSERT_NE(stmt, nullptr);
+    auto sw = dynamic_cast<SwitchStmtAST*>(stmt);
+    ASSERT_NE(sw, nullptr);
+    EXPECT_NE(sw->cond, nullptr);
+    ASSERT_EQ(sw->cases.size(), 4u);
+    ASSERT_EQ(sw->caseLabels.size(), 4u);
+    EXPECT_NE(sw->caseLabels[0], nullptr);
+    EXPECT_NE(sw->caseLabels[1], nullptr);
+    EXPECT_NE(sw->caseLabels[2], nullptr);
+    EXPECT_EQ(sw->caseLabels[3], nullptr);  // default
+}
+
 TEST_F(ParserStmtTest, DoWhileStatement) {
     auto stmt = parseStmt("int f() { do { } while (1); }");
     ASSERT_NE(stmt, nullptr);

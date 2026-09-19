@@ -200,6 +200,9 @@ llvm::Value* ForStmtAST::codegen(CodegenContext& ctx) {
 llvm::Value* SwitchStmtAST::codegen(CodegenContext& ctx) {
     llvm::Value* condVal = cond->codegen(ctx);
     if (!condVal) return nullptr;
+    if (cond->isLValue) {
+        condVal = ctx.loadValue(condVal, cond->type);
+    }
 
     auto& builder = ctx.getBuilder();
     llvm::Function* func = builder.GetInsertBlock()->getParent();
@@ -207,18 +210,44 @@ llvm::Value* SwitchStmtAST::codegen(CodegenContext& ctx) {
 
     ctx.pushBreakBlock(endBB);
 
+    std::vector<llvm::BasicBlock*> caseBBs;
+    caseBBs.reserve(cases.size());
+    for (size_t i = 0; i < cases.size(); ++i) {
+        caseBBs.push_back(llvm::BasicBlock::Create(ctx.getContext(), "switch.case", func));
+    }
+
+    // Evaluate labels before creating the switch (they must be constants and
+    // must not be inserted after the terminator).
+    std::vector<llvm::ConstantInt*> caseConsts(cases.size(), nullptr);
+    for (size_t i = 0; i < cases.size(); ++i) {
+        if (i >= caseLabels.size() || !caseLabels[i]) continue;  // default
+        llvm::Value* labelVal = caseLabels[i]->codegen(ctx);
+        auto* constInt = llvm::dyn_cast_or_null<llvm::ConstantInt>(labelVal);
+        if (!constInt) continue;
+        if (constInt->getType() != condVal->getType()) {
+            constInt = llvm::dyn_cast<llvm::ConstantInt>(
+                llvm::ConstantInt::get(condVal->getType(), constInt->getValue()));
+        }
+        caseConsts[i] = constInt;
+    }
+
     llvm::SwitchInst* switchInst = builder.CreateSwitch(condVal, endBB, cases.size());
     for (size_t i = 0; i < cases.size(); ++i) {
-        llvm::BasicBlock* caseBB = llvm::BasicBlock::Create(ctx.getContext(), "switch.case", func);
-        builder.SetInsertPoint(caseBB);
+        if (caseConsts[i]) {
+            switchInst->addCase(caseConsts[i], caseBBs[i]);
+        } else {
+            switchInst->setDefaultDest(caseBBs[i]);
+        }
+    }
+
+    // Emit the bodies in source order, falling through to the next case (C
+    // semantics) unless the body already terminated.
+    for (size_t i = 0; i < cases.size(); ++i) {
+        builder.SetInsertPoint(caseBBs[i]);
         cases[i]->codegen(ctx);
         if (!builder.GetInsertBlock()->getTerminator()) {
-            builder.CreateBr(endBB);
-        }
-        if (i < caseValues.size() && caseValues[i]) {
-            if (auto* constInt = llvm::dyn_cast<llvm::ConstantInt>(caseValues[i])) {
-                switchInst->addCase(constInt, caseBB);
-            }
+            llvm::BasicBlock* next = (i + 1 < cases.size()) ? caseBBs[i + 1] : endBB;
+            builder.CreateBr(next);
         }
     }
 

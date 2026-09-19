@@ -793,6 +793,11 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
         return parseForStmt();
     }
 
+    // switch statement
+    if (peek() && peek()->type == TokenType::TOKEN_SWITCH) {
+        return parseSwitchStmt();
+    }
+
     // break statement
     if (peek() && peek()->type == TokenType::TOKEN_BREAK) {
         return parseBreakStmt();
@@ -1006,6 +1011,67 @@ std::unique_ptr<StmtAST> Parser::parseForStmt() {
 
     auto stmt = std::make_unique<ForStmtAST>(std::move(init), std::move(cond), std::move(inc), std::move(body));
     stmt->setLocation(forToken->filename, forToken->line, forToken->column);
+    return stmt;
+}
+
+std::unique_ptr<StmtAST> Parser::parseSwitchStmt() {
+    auto switchToken = match(TokenType::TOKEN_SWITCH);
+    if (!switchToken) {
+        return nullptr;
+    }
+
+    expect(TokenType::TOKEN_LPAREN, "expected '(' after 'switch'");
+    auto cond = parseExpr();
+    if (!cond) {
+        errorUnexpected("expected expression after 'switch ('");
+    }
+    expect(TokenType::TOKEN_RPAREN, "expected ')' after switch condition");
+    if (!expect(TokenType::TOKEN_LBRACE, "expected '{' after switch condition")) {
+        return nullptr;
+    }
+
+    std::vector<std::unique_ptr<StmtAST>> cases;
+    std::vector<std::unique_ptr<ExprAST>> labels;
+    std::vector<std::unique_ptr<StmtAST>> body;
+    bool haveGroup = false;
+
+    // Statements belong to the most recent label; push the previous group when
+    // a new label starts so `cases` and `caseLabels` stay index-aligned.
+    auto flushGroup = [&]() {
+        if (!haveGroup) return;
+        cases.push_back(std::make_unique<CompoundStmtAST>(std::move(body)));
+        body.clear();
+        haveGroup = false;
+    };
+
+    while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
+        if (match(TokenType::TOKEN_CASE)) {
+            flushGroup();
+            auto label = parseExpr();
+            if (!label) {
+                errorUnexpected("expected constant expression after 'case'");
+                break;
+            }
+            expect(TokenType::TOKEN_COLON, "expected ':' after case label");
+            labels.push_back(std::move(label));
+            haveGroup = true;
+        } else if (match(TokenType::TOKEN_DEFAULT)) {
+            flushGroup();
+            expect(TokenType::TOKEN_COLON, "expected ':' after 'default'");
+            labels.push_back(nullptr);
+            haveGroup = true;
+        } else {
+            auto inner = parseStmt();
+            if (!inner) break;
+            body.push_back(std::move(inner));
+        }
+    }
+    flushGroup();
+    expect(TokenType::TOKEN_RBRACE, "expected '}' to close switch");
+
+    auto stmt = std::make_unique<SwitchStmtAST>(std::move(cond), std::move(cases));
+    stmt->caseLabels = std::move(labels);
+    stmt->setLocation(switchToken->filename, switchToken->line, switchToken->column);
     return stmt;
 }
 

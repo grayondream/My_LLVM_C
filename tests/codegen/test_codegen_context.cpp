@@ -368,10 +368,8 @@ TEST_F(CodegenContextTest, SwitchStmt) {
 
     auto switchStmt = std::make_unique<SwitchStmtAST>(
         std::move(cond), std::move(cases));
-    switchStmt->caseValues.push_back(
-        llvm::ConstantInt::get(ctx->getContext(), llvm::APInt(32, 0)));
-    switchStmt->caseValues.push_back(
-        llvm::ConstantInt::get(ctx->getContext(), llvm::APInt(32, 1)));
+    switchStmt->caseLabels.push_back(std::make_unique<NumberExprAST>(0));
+    switchStmt->caseLabels.push_back(std::make_unique<NumberExprAST>(1));
     switchStmt->codegen(*ctx);
     ctx->getBuilder().CreateRetVoid();
     EXPECT_TRUE(verifyModule());

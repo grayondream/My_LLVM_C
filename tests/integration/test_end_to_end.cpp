@@ -347,6 +347,33 @@ TEST_F(EndToEndTest, PartialAggregateInitializerZeroFills) {
     )", "partial_init.c"), 10);
 }
 
+TEST_F(EndToEndTest, SwitchDispatch) {
+    EXPECT_EQ(runSource(R"(
+        int pick(int n) {
+            switch (n) {
+                case 1: return 10;
+                case 2:
+                case 3: return 20;
+                default: return 30;
+            }
+        }
+        int main() { return pick(2) + pick(9); }
+    )", "switch.c"), 50);
+}
+
+TEST_F(EndToEndTest, SwitchBreakStopsFallthrough) {
+    EXPECT_EQ(runSource(R"(
+        int main() {
+            int r = 0;
+            switch (1) {
+                case 1: r = r + 1; break;
+                case 2: r = r + 100; break;
+            }
+            return r;
+        }
+    )", "switch_break.c"), 1);
+}
+
 TEST_F(EndToEndTest, PrintFormatsIntegers) {
     testing::internal::CaptureStdout();
     EXPECT_EQ(runSource(
