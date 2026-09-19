@@ -41,7 +41,9 @@ llvm::Value* ReturnStmtAST::codegen(CodegenContext& ctx) {
     }
     llvm::Value* v = value->codegen(ctx);
     if (!v) return nullptr;
-    if (v->getType()->isPointerTy()) {
+    // An lvalue return operand denotes a location; load its value (a pointer
+    // rvalue such as `"str"` or a call result is already the value).
+    if (value->isLValue) {
         Type* valType = value->type;
         if (!valType) {
             auto* varExpr = dynamic_cast<VariableExprAST*>(value.get());
@@ -51,7 +53,7 @@ llvm::Value* ReturnStmtAST::codegen(CodegenContext& ctx) {
             }
         }
         if (valType) {
-            v = ctx.getBuilder().CreateLoad(ctx.getLLVMType(valType), v, "retval");
+            v = ctx.loadValue(v, valType);
         }
     }
     llvm::Function* func = ctx.getBuilder().GetInsertBlock()->getParent();

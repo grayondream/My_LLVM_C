@@ -50,11 +50,11 @@ void pointer_demo(int* p) {
 // ===== 控制流 =====
 void control_flow(int n) {
     if (n > 0) {
-        printf("positive\n");
+        println("positive");
     } else if (n == 0) {
-        printf("zero\n");
+        println("zero");
     } else {
-        printf("negative\n");
+        println("negative");
     }
 
     switch (n) {
@@ -88,7 +88,7 @@ void array_demo() {
     int* p = arr;
 
     for (int i = 0; i < 5; i++) {
-        printf("%d\n", *(p + i));
+        println("{}", *(p + i));
     }
 }
 
@@ -136,8 +136,8 @@ void operator_demo() {
 // ===== sizeof / 类型 =====
 void sizeof_demo() {
     int x = 10;
-    printf("%zu\n", sizeof(x));
-    printf("%zu\n", sizeof(int));
+    println("{}", sizeof(x));
+    println("{}", sizeof(int));
 }
 
 // ===== 主函数 =====
@@ -160,7 +160,7 @@ int main() {
     operator_demo();
     sizeof_demo();
 
-    printf("Done: %d %d\n", result, fact);
+    println("Done: {} {}", result, fact);
 
     return 0;
 }

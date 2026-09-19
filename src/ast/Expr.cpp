@@ -8,6 +8,58 @@ static llvm::Value* emitLoad(CodegenContext& ctx, llvm::Value* ptr, Type* astTyp
     return ctx.loadValue(ptr, astType);
 }
 
+// Evaluate an expression node as a value: lvalues are dereferenced, rvalues are
+// used as-is. A pointer-typed rvalue (string literal, call result, function
+// designator) is already a value and must not be loaded from.
+static llvm::Value* emitRValue(CodegenContext& ctx, ExprAST& expr, llvm::Value* v) {
+    if (!v) return nullptr;
+    return expr.isLValue ? emitLoad(ctx, v, expr.type) : v;
+}
+
+// Apply C's default argument promotions so a print argument matches its
+// compile-time chosen printf conversion.
+static llvm::Value* promotePrintArg(CodegenContext& ctx, llvm::Value* v, PrintArgKind kind) {
+    if (!v) return nullptr;
+    auto& builder = ctx.getBuilder();
+    llvm::LLVMContext& c = ctx.getContext();
+    llvm::Type* ty = v->getType();
+
+    switch (kind) {
+        case PrintArgKind::Bool: {
+            llvm::Value* cond = v;
+            if (ty->isIntegerTy() && ty->getIntegerBitWidth() != 1) {
+                cond = builder.CreateICmpNE(v, llvm::ConstantInt::get(ty, 0), "boolcond");
+            }
+            llvm::Value* yes = builder.CreateGlobalString("true", ".boolstr");
+            llvm::Value* no = builder.CreateGlobalString("false", ".boolstr");
+            return builder.CreateSelect(cond, yes, no, "boolstr");
+        }
+        case PrintArgKind::Char:
+        case PrintArgKind::Int32:
+            if (ty->isIntegerTy(32)) return v;
+            if (ty->isIntegerTy(1)) return builder.CreateZExt(v, llvm::Type::getInt32Ty(c), "promo");
+            return builder.CreateSExtOrTrunc(v, llvm::Type::getInt32Ty(c), "promo");
+        case PrintArgKind::UInt32:
+            if (ty->isIntegerTy(32)) return v;
+            return builder.CreateZExtOrTrunc(v, llvm::Type::getInt32Ty(c), "promo");
+        case PrintArgKind::Int64:
+            if (ty->isIntegerTy(64)) return v;
+            return builder.CreateSExtOrTrunc(v, llvm::Type::getInt64Ty(c), "promo");
+        case PrintArgKind::UInt64:
+            if (ty->isIntegerTy(64)) return v;
+            return builder.CreateZExtOrTrunc(v, llvm::Type::getInt64Ty(c), "promo");
+        case PrintArgKind::Float:
+            if (ty->isDoubleTy()) return v;
+            if (ty->isFloatTy()) return builder.CreateFPExt(v, llvm::Type::getDoubleTy(c), "promo");
+            return v;
+        case PrintArgKind::CString:
+        case PrintArgKind::Pointer:
+        case PrintArgKind::ToString:
+        default:
+            return v;
+    }
+}
+
 llvm::Value* NumberExprAST::codegen(CodegenContext& ctx) {
     return llvm::ConstantInt::get(ctx.getContext(), llvm::APInt(32, value, true));
 }
@@ -55,8 +107,8 @@ llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
         llvm::Value* rhs = right->codegen(ctx);
         if (!lhs || !rhs) return nullptr;
         
-        lhs = emitLoad(ctx, lhs, left->type);
-        rhs = emitLoad(ctx, rhs, right->type);
+        lhs = emitRValue(ctx, *left, lhs);
+        rhs = emitRValue(ctx, *right, rhs);
         
         return ctx.getBuilder().CreateCall(calleeFn, {lhs, rhs}, "opcalltmp");
     }
@@ -134,14 +186,14 @@ llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
     auto& builder = ctx.getBuilder();
 
     switch (op) {
-        case UnaryOp::Plus:      return emitLoad(ctx, v, operand->type);
-        case UnaryOp::Minus:     return builder.CreateNeg(emitLoad(ctx, v, operand->type), "negtmp");
-        case UnaryOp::Not:       return builder.CreateNot(emitLoad(ctx, v, operand->type), "nottmp");
-        case UnaryOp::BitNot:    return builder.CreateNot(emitLoad(ctx, v, operand->type), "bitnottmp");
+        case UnaryOp::Plus:      return emitRValue(ctx, *operand, v);
+        case UnaryOp::Minus:     return builder.CreateNeg(emitRValue(ctx, *operand, v), "negtmp");
+        case UnaryOp::Not:       return builder.CreateNot(emitRValue(ctx, *operand, v), "nottmp");
+        case UnaryOp::BitNot:    return builder.CreateNot(emitRValue(ctx, *operand, v), "bitnottmp");
         case UnaryOp::Deref: {
             // `*p` denotes the pointee as an lvalue: yield its address and let
             // consumers load it, mirroring how variable references work.
-            llvm::Value* ptrVal = emitLoad(ctx, v, operand->type);
+            llvm::Value* ptrVal = emitRValue(ctx, *operand, v);
             if (operand->type && operand->type->kind == TypeKind::Pointer) {
                 return ptrVal;
             }
@@ -158,6 +210,32 @@ llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
+    // Builtin `print`/`println`: emit a call to the C library's printf with a
+    // compile-time-built conversion string.
+    if (isPrint) {
+        llvm::LLVMContext& c = ctx.getContext();
+        auto& builder = ctx.getBuilder();
+
+        llvm::Value* format = builder.CreateGlobalString(printCFormat, ".printfmt");
+        llvm::FunctionType* printfTy = llvm::FunctionType::get(
+            llvm::Type::getInt32Ty(c), {llvm::PointerType::get(c, 0)}, true);
+        llvm::FunctionCallee printfFn = ctx.getModule().getOrInsertFunction("printf", printfTy);
+
+        std::vector<llvm::Value*> callArgs;
+        callArgs.push_back(format);
+        for (size_t k = 1; k < args.size(); ++k) {
+            llvm::Value* v = args[k]->codegen(ctx);
+            if (!v) return nullptr;
+            if (args[k]->isLValue) v = ctx.loadValue(v, args[k]->type);
+            if (k - 1 < printArgKinds.size()) {
+                v = promotePrintArg(ctx, v, printArgKinds[k - 1]);
+            }
+            if (!v) return nullptr;
+            callArgs.push_back(v);
+        }
+        return builder.CreateCall(printfTy, printfFn.getCallee(), callArgs);
+    }
+
     // Indirect call through a function-pointer variable.
     if (isIndirect) {
         llvm::Value* fpAddr = ctx.lookupVariableAddr(callee);
@@ -432,7 +510,7 @@ llvm::Value* ArrayAccessExprAST::codegen(CodegenContext& ctx) {
         if (at->elementType) elemTy = ctx.getLLVMType(at->elementType);
     } else if (arrType && arrType->kind == TypeKind::Pointer) {
         if (arrType->base) elemTy = ctx.getLLVMType(arrType->base);
-        arrVal = emitLoad(ctx, arrVal, arrType);
+        arrVal = emitRValue(ctx, *array, arrVal);
     }
 
     auto& builder = ctx.getBuilder();

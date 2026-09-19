@@ -2,7 +2,9 @@
 
 #include <string>
 #include <memory>
+#include <vector>
 #include "Type.h"
+#include "PrintFormat.h"
 
 #include "llvm/IR/Value.h"
 
@@ -153,6 +155,11 @@ public:
     std::vector<Type*> resolvedParamTypes;
     // Set by semantic analysis for calls through a function-pointer variable.
     bool isIndirect = false;
+    // Set by semantic analysis when this is the builtin `print`/`println`.
+    bool isPrint = false;
+    bool printNewline = false;
+    std::string printCFormat;                 // final printf format string
+    std::vector<PrintArgKind> printArgKinds;  // one per `{}` slot
 
     CallExprAST(const std::string& name, std::vector<std::unique_ptr<ExprAST>> arguments)
         : callee(name), args(std::move(arguments)) {}

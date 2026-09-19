@@ -626,7 +626,125 @@ void SemanticAnalyzer::visit(UnaryExprAST& node) {
     node.isLValue = (node.op == UnaryOp::Deref);
 }
 
+bool SemanticAnalyzer::lowerToString(CallExprAST& node, size_t argIndex, Type* argType) {
+    Type* t = argType;
+    while (t && t->kind == TypeKind::Typedef) {
+        t = static_cast<TypedefType*>(t)->aliasedType;
+    }
+
+    auto returnsCString = [](FunctionType* ft) {
+        return ft->returnType && ft->returnType->kind == TypeKind::Pointer &&
+               ft->returnType->base && ft->returnType->base->kind == TypeKind::Char;
+    };
+
+    // Preferred: a `to_string()` method on the class.
+    ClassType* classType = nullptr;
+    if (t && t->kind == TypeKind::Class) {
+        classType = static_cast<ClassType*>(t);
+    } else if (t && t->kind == TypeKind::Pointer && t->base &&
+               t->base->kind == TypeKind::Class) {
+        classType = static_cast<ClassType*>(t->base);
+    }
+    if (classType) {
+        Symbol* method = resolveMethod(classType, "to_string", {});
+        if (method) {
+            bool usable = method->type && method->type->kind == TypeKind::Function &&
+                          returnsCString(static_cast<FunctionType*>(method->type));
+            delete method;
+            if (usable) {
+                node.args[argIndex] = std::make_unique<MethodCallExprAST>(
+                    std::move(node.args[argIndex]), "to_string",
+                    std::vector<std::unique_ptr<ExprAST>>{});
+                getExprType(*node.args[argIndex]);
+                return true;
+            }
+        }
+    }
+
+    // Otherwise a free function `to_string(T)`.
+    OverloadSet* overloadSet = currentScope->lookupOverload("to_string");
+    if (overloadSet && !overloadSet->empty()) {
+        std::vector<Type*> argTypes{argType};
+        Symbol* resolved = overloadSet->resolve(argTypes);
+        if (resolved && resolved->type && resolved->type->kind == TypeKind::Function &&
+            returnsCString(static_cast<FunctionType*>(resolved->type))) {
+            auto call = std::make_unique<CallExprAST>(
+                "to_string", std::vector<std::unique_ptr<ExprAST>>{});
+            call->args.push_back(std::move(node.args[argIndex]));
+            node.args[argIndex] = std::move(call);
+            getExprType(*node.args[argIndex]);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool SemanticAnalyzer::tryAnalyzePrintCall(CallExprAST& node) {
+    node.type = nullptr;
+    node.isLValue = false;
+
+    if (node.args.empty()) {
+        emitError("'" + node.callee + "' requires a format string argument", node);
+        return true;
+    }
+
+    auto* literal = dynamic_cast<StringExprAST*>(node.args[0].get());
+    if (!literal) {
+        emitError("the format argument to '" + node.callee + "' must be a string literal", node);
+        return true;
+    }
+
+    const bool newline = node.callee == "println";
+    std::vector<PrintArgKind> kinds;
+    kinds.reserve(node.args.size() - 1);
+
+    for (size_t k = 1; k < node.args.size(); ++k) {
+        Type* argType = getExprType(*node.args[k]);
+        if (!argType) {
+            return true; // already reported
+        }
+
+        PrintArgKind kind;
+        if (builtinPrintKind(argType, kind)) {
+            kinds.push_back(kind);
+            continue;
+        }
+        if (lowerToString(node, k, argType)) {
+            kinds.push_back(PrintArgKind::ToString);
+            continue;
+        }
+
+        emitError("cannot format value of type '" + typeToString(argType) + "' with '{}' in '" +
+                  node.callee + "'; define a to_string for it", node);
+        return true;
+    }
+
+    std::string format, error;
+    if (!buildPrintFormat(literal->value, kinds, newline, format, error)) {
+        emitError(error, node);
+        return true;
+    }
+
+    node.isPrint = true;
+    node.printNewline = newline;
+    node.printCFormat = std::move(format);
+    node.printArgKinds = std::move(kinds);
+    node.type = typeCtx->getVoid();
+    node.isLValue = false;
+    return true;
+}
+
 void SemanticAnalyzer::visit(CallExprAST& node) {
+    // Builtin `print`/`println` (only when the user has not declared them).
+    if (node.callee == "print" || node.callee == "println") {
+        OverloadSet* userDefined = currentScope->lookupOverload(node.callee);
+        if (!userDefined || userDefined->empty()) {
+            tryAnalyzePrintCall(node);
+            return;
+        }
+    }
+
     // Indirect call through a function-pointer variable?
     if (Symbol* sym = lookup(node.callee)) {
         Type* st = sym->type;

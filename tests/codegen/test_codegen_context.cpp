@@ -504,9 +504,10 @@ TEST_F(CodegenContextTest, FunctionDecl) {
     std::vector<std::unique_ptr<ParamDeclAST>> params;
     params.push_back(std::make_unique<ParamDeclAST>("a", typeCtx->getInt()));
 
+    auto returnValue = std::make_unique<VariableExprAST>("a");
+    returnValue->isLValue = true;  // sema normally sets this
     std::vector<std::unique_ptr<StmtAST>> bodyStmts;
-    bodyStmts.push_back(std::make_unique<ReturnStmtAST>(
-        std::make_unique<VariableExprAST>("a")));
+    bodyStmts.push_back(std::make_unique<ReturnStmtAST>(std::move(returnValue)));
     auto body = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
 
     auto funcDecl = std::make_unique<FunctionDeclAST>(

@@ -54,6 +54,8 @@ private:
     std::string getOperatorMangledName(BinaryOp op, Type* left, Type* right);
     Symbol* resolveMethod(ClassType* classType, const std::string& methodName, const std::vector<Type*>& argTypes);
     bool isMethodCall(ExprAST& expr);
+    bool tryAnalyzePrintCall(CallExprAST& node);
+    bool lowerToString(CallExprAST& node, size_t argIndex, Type* argType);
     bool hasCircularInheritance(const std::string& className, const std::string& baseClass) const;
 
     void visit(TranslationUnitAST& node);

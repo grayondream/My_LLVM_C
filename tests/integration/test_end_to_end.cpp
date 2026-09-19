@@ -347,6 +347,60 @@ TEST_F(EndToEndTest, PartialAggregateInitializerZeroFills) {
     )", "partial_init.c"), 10);
 }
 
+TEST_F(EndToEndTest, PrintFormatsIntegers) {
+    testing::internal::CaptureStdout();
+    EXPECT_EQ(runSource(
+        "int main() { print(\"{} + {} = {}\", 1, 2, 3); return 0; }", "print_ints.c"), 0);
+    EXPECT_EQ(testing::internal::GetCapturedStdout(), "1 + 2 = 3");
+}
+
+TEST_F(EndToEndTest, PrintlnAppendsNewline) {
+    testing::internal::CaptureStdout();
+    EXPECT_EQ(runSource("int main() { println(\"hi\"); return 0; }", "println.c"), 0);
+    EXPECT_EQ(testing::internal::GetCapturedStdout(), "hi\n");
+}
+
+TEST_F(EndToEndTest, PrintFormatsMixedTypes) {
+    testing::internal::CaptureStdout();
+    EXPECT_EQ(runSource(
+        "int main() { print(\"{} {} {} {} {}\", 42, 1.5, 'A', \"str\", 7); return 0; }",
+        "print_mixed.c"), 0);
+    EXPECT_EQ(testing::internal::GetCapturedStdout(), "42 1.5 A str 7");
+}
+
+TEST_F(EndToEndTest, PrintFormatsBool) {
+    testing::internal::CaptureStdout();
+    EXPECT_EQ(runSource(
+        "int main() { bool t = 1; bool f = 0; print(\"{} {}\", t, f); return 0; }",
+        "print_bool.c"), 0);
+    EXPECT_EQ(testing::internal::GetCapturedStdout(), "true false");
+}
+
+TEST_F(EndToEndTest, PrintEscapesLiteralPercent) {
+    testing::internal::CaptureStdout();
+    EXPECT_EQ(runSource("int main() { print(\"{}%\", 50); return 0; }", "print_pct.c"), 0);
+    EXPECT_EQ(testing::internal::GetCapturedStdout(), "50%");
+}
+
+TEST_F(EndToEndTest, PrintUsesFreeFunctionToString) {
+    testing::internal::CaptureStdout();
+    EXPECT_EQ(runSource(
+        "struct P { int x; int y; };"
+        "char* to_string(struct P p) { return \"Point\"; }"
+        "int main() { struct P p; print(\"<{}>\", p); return 0; }",
+        "print_to_string.c"), 0);
+    EXPECT_EQ(testing::internal::GetCapturedStdout(), "<Point>");
+}
+
+TEST_F(EndToEndTest, PrintUsesMethodToString) {
+    testing::internal::CaptureStdout();
+    EXPECT_EQ(runSource(
+        "class C { int x; char* to_string() { return \"C!\"; } };"
+        "int main() { C c; print(\"{}\", c); return 0; }",
+        "print_method_to_string.c"), 0);
+    EXPECT_EQ(testing::internal::GetCapturedStdout(), "C!");
+}
+
 TEST_F(EndToEndTest, VariableCopyInitializationLoadsValue) {
     EXPECT_EQ(runSource(R"(
         int main() {

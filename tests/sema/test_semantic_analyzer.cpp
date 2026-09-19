@@ -722,3 +722,83 @@ TEST(ClassSupport, SemanticAnalysisCircularInheritance) {
     analyzer.analyze(*ast);
     EXPECT_FALSE(analyzer.getErrors().empty());
 }
+
+// ========== print / println builtin ==========
+
+namespace {
+bool analyzeOk(const std::string& source) {
+    Lexer lexer("test.c", source);
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    if (!ast) return false;
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    return analyzer.getErrors().empty();
+}
+} // namespace
+
+TEST(PrintBuiltin, BuildsTypeDirectedFormat) {
+    std::string source = R"(
+        int main() {
+            print("aa {}", 1);
+            return 0;
+        }
+    )";
+    Lexer lexer("test.c", source);
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_TRUE(analyzer.getErrors().empty());
+
+    auto* fn = dynamic_cast<FunctionDeclAST*>(ast->declarations[0].get());
+    ASSERT_NE(fn, nullptr);
+    ASSERT_NE(fn->body, nullptr);
+    ASSERT_GE(fn->body->stmts.size(), 1u);
+    auto* stmt = dynamic_cast<ExprStmtAST*>(fn->body->stmts[0].get());
+    ASSERT_NE(stmt, nullptr);
+    auto* call = dynamic_cast<CallExprAST*>(stmt->expr.get());
+    ASSERT_NE(call, nullptr);
+    EXPECT_TRUE(call->isPrint);
+    EXPECT_FALSE(call->printNewline);
+    EXPECT_EQ(call->printCFormat, "aa %d");
+}
+
+TEST(PrintBuiltin, PrintlnAppendsNewline) {
+    EXPECT_TRUE(analyzeOk("int main() { println(\"x={}\", 1); return 0; }"));
+}
+
+TEST(PrintBuiltin, SupportsScalarTypes) {
+    EXPECT_TRUE(analyzeOk(
+        "int main() { print(\"{} {} {} {}\", 1, 1.5, 'a', \"s\"); return 0; }"));
+}
+
+TEST(PrintBuiltin, RejectsPercentStyle) {
+    // `%d` has no {} placeholder, so the extra argument is reported.
+    EXPECT_FALSE(analyzeOk("int main() { int x = 1; print(\"%d\", x); return 0; }"));
+}
+
+TEST(PrintBuiltin, ReportsMissingArgument) {
+    EXPECT_FALSE(analyzeOk("int main() { print(\"{} {}\", 1); return 0; }"));
+}
+
+TEST(PrintBuiltin, UnsupportedTypeNeedsToString) {
+    EXPECT_FALSE(analyzeOk(
+        "struct P { int x; }; int main() { struct P p; print(\"{}\", p); return 0; }"));
+}
+
+TEST(PrintBuiltin, UsesFreeFunctionToString) {
+    EXPECT_TRUE(analyzeOk(
+        "struct P { int x; }; char* to_string(struct P p) { return \"P\"; } "
+        "int main() { struct P p; print(\"{}\", p); return 0; }"));
+}
+
+TEST(PrintBuiltin, UsesMethodToString) {
+    EXPECT_TRUE(analyzeOk(
+        "class C { int x; char* to_string() { return \"C\"; } }; "
+        "int main() { C c; print(\"{}\", c); return 0; }"));
+}
