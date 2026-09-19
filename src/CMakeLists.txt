@@ -1,7 +1,17 @@
 file(GLOB_RECURSE SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 list(FILTER SOURCES EXCLUDE REGEX ".*main\\.cpp$")
+list(FILTER SOURCES EXCLUDE REGEX ".*/libsafec/.*")
 
 add_library(my_llvm_c_lib ${SOURCES})
+
+# libsafec: the bundled standard-library implementation (namespace `safec`),
+# built as its own archive (libsafec.a) independent of the compiler.
+add_library(safec
+    ${CMAKE_CURRENT_SOURCE_DIR}/libsafec/printf.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/libsafec/malloc.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/libsafec/string.cpp
+)
+target_include_directories(safec PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_include_directories(my_llvm_c_lib PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 

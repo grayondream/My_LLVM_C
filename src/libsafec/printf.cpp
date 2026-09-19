@@ -1,7 +1,7 @@
-#include "libc.h"
+#include "safec.h"
 #include <cstdio>
 
-namespace mylibc {
+namespace safec {
 
 static int int_to_string(char* buf, int value) {
     char tmp[12];
@@ -110,7 +110,7 @@ static int format_output(char* dest, const char* format, va_list args) {
     return written;
 }
 
-int my_printf(const char* format, ...) {
+int printf(const char* format, ...) {
     va_list args;
     va_start(args, format);
     int len = format_output(nullptr, format, args);
@@ -127,7 +127,7 @@ int my_printf(const char* format, ...) {
     return (ret >= 0) ? len : -1;
 }
 
-int my_sprintf(char* str, const char* format, ...) {
+int sprintf(char* str, const char* format, ...) {
     va_list args;
     va_start(args, format);
     int len = format_output(str, format, args);
@@ -135,4 +135,4 @@ int my_sprintf(char* str, const char* format, ...) {
     return len;
 }
 
-} // namespace mylibc
+} // namespace safec
