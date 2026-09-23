@@ -185,3 +185,17 @@ public:
         : name(n), imports(std::move(imp)), exports(std::move(exp)) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
+
+// namespace Name { ... } (TODO PAR-22 / MOD-12). Members are code-generated as
+// part of the enclosing translation unit; the semantic analyzer qualifies their
+// names so they do not collide with the global namespace.
+class NamespaceDeclAST : public DeclAST {
+public:
+    // Dotted/`::`-joined namespace name, e.g. "geometry.ops" or "geometry::ops".
+    std::string name;
+    std::vector<std::unique_ptr<DeclAST>> declarations;
+
+    NamespaceDeclAST(const std::string& n, std::vector<std::unique_ptr<DeclAST>> decls)
+        : name(n), declarations(std::move(decls)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};

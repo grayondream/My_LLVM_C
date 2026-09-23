@@ -66,6 +66,8 @@ private:
 
     std::unique_ptr<TypedefDeclAST> parseTypedefDecl();
 
+    std::unique_ptr<DeclAST> parseNamespaceDecl();
+
     std::unique_ptr<ReturnStmtAST> parseReturnStmt();
 
     std::unique_ptr<CompoundStmtAST> parseCompoundStmt();

@@ -76,7 +76,7 @@
 | `public` | `[impl]` | |
 | `private` | `[impl]` | |
 | `protected` | `[plan]` | 目前为上下文关键字；继承访问控制 INH-01 / PAR-04 |
-| `namespace` | `[plan]` | **缺失**；`src/libsafec` 已使用，见 PAR-22 / MOD-12 |
+| `namespace` | `[impl]` | 已实现（函数/变量；限定类型名待补）；见 PAR-22 / MOD-12 |
 
 ## 6. 编译期 / 反射
 
@@ -115,7 +115,7 @@
 | `&= \|= ^= <<= >>=` | 复合赋值 | `[impl]` |
 | `++ --` | 自增自减 | `[impl]` |
 | `? :` | 条件运算符 | `[impl]` |
-| `::` | 限定名 | `[plan]` 待补 token（PAR-22 / BASE-02） |
+| `::` | 限定名 | `[impl]` token `TOKEN_COLON_COLON`（PAR-22） |
 | `. ->` | 成员访问 | `[impl]` |
 | `( ) [ ] { }` | 分组 / 下标 / 初始化 | `[impl]` |
 | `, ;` | 分隔 | `[impl]` |

@@ -60,6 +60,7 @@ static const std::unordered_map<std::string, TokenType> keywordMap = {
     {"true", TokenType::TOKEN_TRUE},
     {"false", TokenType::TOKEN_FALSE},
     {"null", TokenType::TOKEN_NULL},
+    {"namespace", TokenType::TOKEN_NAMESPACE},
     {"module", TokenType::TOKEN_MODULE},
     {"import", TokenType::TOKEN_IMPORT},
     {"export", TokenType::TOKEN_EXPORT},
@@ -636,7 +637,12 @@ Token Lexer::scanToken() {
         token = makeToken(TokenType::TOKEN_QUESTION, lexeme());
         break;
     case ':':
-        token = makeToken(TokenType::TOKEN_COLON, lexeme());
+        if (peekNext() == ':') {
+            advance();
+            token = makeToken(TokenType::TOKEN_COLON_COLON, lexeme());
+        } else {
+            token = makeToken(TokenType::TOKEN_COLON, lexeme());
+        }
         break;
     case '(':
         token = makeToken(TokenType::TOKEN_LPAREN, lexeme());

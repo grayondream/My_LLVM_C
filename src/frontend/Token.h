@@ -49,6 +49,7 @@ enum class TokenType : int32_t {
     TOKEN_TRUE,
     TOKEN_FALSE,
     TOKEN_NULL,
+    TOKEN_NAMESPACE,
     TOKEN_MODULE,
     TOKEN_IMPORT,
     TOKEN_EXPORT,
@@ -102,6 +103,7 @@ enum class TokenType : int32_t {
     TOKEN_MINUS_MINUS,  // --
     TOKEN_QUESTION,     // ?
     TOKEN_COLON,        // :
+    TOKEN_COLON_COLON,  // ::
     TOKEN_AMP_EQ,       // &=
     TOKEN_PIPE_EQ,      // |=
     TOKEN_CARET_EQ,     // ^=

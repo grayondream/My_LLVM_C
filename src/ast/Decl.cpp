@@ -484,3 +484,15 @@ llvm::Value* ModuleDeclAST::codegen(CodegenContext& ctx) {
     // 模块系统已经在语义分析阶段处理
     return nullptr;
 }
+
+llvm::Value* NamespaceDeclAST::codegen(CodegenContext& ctx) {
+    // Namespace members are emitted into the same module; semantic analysis
+    // has already qualified their names (see SemanticAnalyzer::visit).
+    llvm::Value* last = nullptr;
+    for (auto& decl : declarations) {
+        if (decl) {
+            last = decl->codegen(ctx);
+        }
+    }
+    return last;
+}

@@ -84,9 +84,9 @@ import-decl         = 'import' , qualified-name , ';' ;
 (* [plan] 导入符号访问语法/别名未定，见 DEC-02 / MOD-11 *)
 export-decl         = 'export' , declaration ;
 namespace-decl      = 'namespace' , qualified-name , '{' , { top-level-declaration } , '}' ;
-(* [plan] PAR-22 / MOD-12：[impl] 缺失；src/libsafec 已使用 namespace safec *)
+(* [impl] PAR-22 / MOD-12：函数/变量成员；限定类型名待补 *)
 
-qualified-name      = identifier , { '::' , identifier } ;          (* [plan] PAR-22：'::' token 待补 *)
+qualified-name      = identifier , { '::' , identifier } ;          (* [impl] '::' token = TOKEN_COLON_COLON *)
 
 
 (* =========================================================================

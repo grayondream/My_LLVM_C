@@ -62,7 +62,66 @@ bool SemanticAnalyzer::declare(const std::string& name, Type* type) {
 }
 
 Symbol* SemanticAnalyzer::lookup(const std::string& name) {
-    return currentScope->lookup(name);
+    for (const auto& candidate : namespaceCandidates(name)) {
+        if (Symbol* sym = currentScope->lookup(candidate)) {
+            return sym;
+        }
+    }
+    return nullptr;
+}
+
+// Namespace helpers ---------------------------------------------------------
+
+std::string SemanticAnalyzer::mangleNamespaceName(const std::string& name) {
+    std::string out;
+    out.reserve(name.size());
+    for (size_t i = 0; i < name.size(); ++i) {
+        if (name[i] == ':' && i + 1 < name.size() && name[i + 1] == ':') {
+            out.push_back('_');
+            ++i;
+        } else if (name[i] == '.') {
+            out.push_back('_');
+        } else {
+            out.push_back(name[i]);
+        }
+    }
+    return out;
+}
+
+// Candidate symbol-table keys for `name`, innermost namespace first.
+std::vector<std::string> SemanticAnalyzer::namespaceCandidates(const std::string& name) const {
+    std::vector<std::string> candidates;
+    if (name.find("::") != std::string::npos || name.find('.') != std::string::npos) {
+        candidates.push_back(mangleNamespaceName(name));
+        return candidates;
+    }
+    std::string prefix = namespacePrefix; // e.g. "A_B_"
+    while (!prefix.empty()) {
+        candidates.push_back(prefix + name);
+        if (prefix.back() == '_') prefix.pop_back();
+        size_t pos = prefix.rfind('_');
+        prefix = (pos == std::string::npos) ? std::string() : prefix.substr(0, pos + 1);
+    }
+    candidates.push_back(name);
+    return candidates;
+}
+
+std::string SemanticAnalyzer::scopedName(const std::string& name) const {
+    if (currentScope == globalScope.get() && !namespacePrefix.empty()) {
+        return namespacePrefix + name;
+    }
+    return name;
+}
+
+std::string SemanticAnalyzer::resolveNamespaceName(const std::string& name) const {
+    for (const auto& candidate : namespaceCandidates(name)) {
+        if (OverloadSet* set = currentScope->lookupOverload(candidate)) {
+            if (!set->empty()) {
+                return candidate;
+            }
+        }
+    }
+    return name;
 }
 
 bool SemanticAnalyzer::isIntegerType(Type* type) const {
@@ -614,19 +673,26 @@ void SemanticAnalyzer::visit(StringExprAST& node) {
 }
 
 void SemanticAnalyzer::visit(VariableExprAST& node) {
-    Symbol* sym = lookup(node.name);
+    const std::string originalName = node.name;
+    const std::string key = resolveNamespaceName(node.name);
+    Symbol* sym = currentScope->lookup(key);
+    if (!sym && key != originalName) {
+        sym = lookup(originalName);
+    }
     if (!sym) {
-        emitError(DiagnosticCode::SemUndeclaredIdentifier, "use of undeclared identifier '" + node.name + "'", node);
+        emitError(DiagnosticCode::SemUndeclaredIdentifier, "use of undeclared identifier '" + originalName + "'", node);
         node.type = nullptr;
     } else if (sym->type && sym->type->kind == TypeKind::Function) {
         // A function used as a value decays to a function pointer.
         auto* funcType = static_cast<FunctionType*>(sym->type);
+        node.name = key;
         node.isFunctionRef = true;
         node.resolvedFunctionName = mangleFunction(node.name, funcType->paramTypes);
         node.type = new Type(TypeKind::Pointer, funcType);
         node.isLValue = false;
         return;
     } else {
+        node.name = key;
         node.type = sym->type;
     }
     node.isLValue = true;
@@ -853,6 +919,9 @@ bool SemanticAnalyzer::tryAnalyzePrintCall(CallExprAST& node) {
 }
 
 void SemanticAnalyzer::visit(CallExprAST& node) {
+    // Resolve a namespace-qualified or namespace-local callee to its mangled key.
+    node.callee = resolveNamespaceName(node.callee);
+
     // Builtin `print`/`println` (only when the user has not declared them).
     if (node.callee == "print" || node.callee == "println") {
         OverloadSet* userDefined = currentScope->lookupOverload(node.callee);
@@ -1190,6 +1259,7 @@ void SemanticAnalyzer::visit(LabelStmtAST& node) {
 void SemanticAnalyzer::visit(NullStmtAST& node) {}
 
 void SemanticAnalyzer::visit(VarDeclAST& node) {
+    node.name = scopedName(node.name);
     if (node.isConstexpr) {
         if (!node.initExpr) {
             emitError("constexpr variable '" + node.name + "' must have initializer", node);
@@ -1230,6 +1300,7 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
 }
 
 void SemanticAnalyzer::visit(ArrayDeclAST& node) {
+    node.name = scopedName(node.name);
     if (auto* initList = dynamic_cast<InitializerListExprAST*>(node.initExpr.get())) {
         if (node.size == 0) {
             node.size = static_cast<int>(initList->initializers.size());
@@ -1363,6 +1434,9 @@ void SemanticAnalyzer::visit(DeclStmtAST& node) {
 }
 
 void SemanticAnalyzer::visit(FunctionDeclAST& node) {
+    // Namespace members are registered/emitted under a mangled key.
+    node.name = scopedName(node.name);
+
     // Validate constexpr function constraints
     if (node.isConstexpr) {
         // Return type must be arithmetic (literal type)
@@ -1426,39 +1500,59 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
     currentFunction = prevFunc;
 }
 
+void SemanticAnalyzer::analyzeTopLevelDecl(DeclAST& decl) {
+    if (auto* funcDecl = dynamic_cast<FunctionDeclAST*>(&decl)) {
+        visit(*funcDecl);
+    } else if (auto* varDecl = dynamic_cast<VarDeclAST*>(&decl)) {
+        visit(*varDecl);
+    } else if (auto* arrDecl = dynamic_cast<ArrayDeclAST*>(&decl)) {
+        visit(*arrDecl);
+    } else if (auto* structDecl = dynamic_cast<StructDeclAST*>(&decl)) {
+        visit(*structDecl);
+    } else if (auto* unionDecl = dynamic_cast<UnionDeclAST*>(&decl)) {
+        visit(*unionDecl);
+    } else if (auto* enumDecl = dynamic_cast<EnumDeclAST*>(&decl)) {
+        visit(*enumDecl);
+    } else if (auto* typedefDecl = dynamic_cast<TypedefDeclAST*>(&decl)) {
+        visit(*typedefDecl);
+    } else if (auto* fwdDecl = dynamic_cast<ForwardDeclAST*>(&decl)) {
+        visit(*fwdDecl);
+    } else if (auto* usingDecl = dynamic_cast<UsingDeclAST*>(&decl)) {
+        visit(*usingDecl);
+    } else if (auto* typeDecl = dynamic_cast<TypeDeclAST*>(&decl)) {
+        visit(*typeDecl);
+    } else if (auto* moduleDecl = dynamic_cast<ModuleDeclAST*>(&decl)) {
+        visit(*moduleDecl);
+    } else if (auto* nsDecl = dynamic_cast<NamespaceDeclAST*>(&decl)) {
+        visit(*nsDecl);
+    } else if (auto* multi = dynamic_cast<MultiVarDeclAST*>(&decl)) {
+        for (auto& d : multi->decls) {
+            if (auto* v = dynamic_cast<VarDeclAST*>(d.get())) visit(*v);
+            else if (auto* a = dynamic_cast<ArrayDeclAST*>(d.get())) visit(*a);
+        }
+    }
+}
+
 void SemanticAnalyzer::visit(TranslationUnitAST& node) {
     for (auto& decl : node.declarations) {
         if (decl) {
-            if (auto* funcDecl = dynamic_cast<FunctionDeclAST*>(decl.get())) {
-                visit(*funcDecl);
-            } else if (auto* varDecl = dynamic_cast<VarDeclAST*>(decl.get())) {
-                visit(*varDecl);
-            } else if (auto* arrDecl = dynamic_cast<ArrayDeclAST*>(decl.get())) {
-                visit(*arrDecl);
-            } else if (auto* structDecl = dynamic_cast<StructDeclAST*>(decl.get())) {
-                visit(*structDecl);
-            } else if (auto* unionDecl = dynamic_cast<UnionDeclAST*>(decl.get())) {
-                visit(*unionDecl);
-            } else if (auto* enumDecl = dynamic_cast<EnumDeclAST*>(decl.get())) {
-                visit(*enumDecl);
-            } else if (auto* typedefDecl = dynamic_cast<TypedefDeclAST*>(decl.get())) {
-                visit(*typedefDecl);
-            } else if (auto* fwdDecl = dynamic_cast<ForwardDeclAST*>(decl.get())) {
-                visit(*fwdDecl);
-            } else if (auto* usingDecl = dynamic_cast<UsingDeclAST*>(decl.get())) {
-                visit(*usingDecl);
-            } else if (auto* typeDecl = dynamic_cast<TypeDeclAST*>(decl.get())) {
-                visit(*typeDecl);
-            } else if (auto* moduleDecl = dynamic_cast<ModuleDeclAST*>(decl.get())) {
-                visit(*moduleDecl);
-            } else if (auto* multi = dynamic_cast<MultiVarDeclAST*>(decl.get())) {
-                for (auto& d : multi->decls) {
-                    if (auto* v = dynamic_cast<VarDeclAST*>(d.get())) visit(*v);
-                    else if (auto* a = dynamic_cast<ArrayDeclAST*>(d.get())) visit(*a);
-                }
-            }
+            analyzeTopLevelDecl(*decl);
         }
     }
+}
+
+void SemanticAnalyzer::visit(NamespaceDeclAST& node) {
+    std::string saved = namespacePrefix;
+    std::string segment = mangleNamespaceName(node.name);
+    if (!segment.empty()) {
+        namespacePrefix += segment + "_";
+    }
+    for (auto& decl : node.declarations) {
+        if (decl) {
+            analyzeTopLevelDecl(*decl);
+        }
+    }
+    namespacePrefix = saved;
 }
 
 void SemanticAnalyzer::analyze(TranslationUnitAST& ast) {

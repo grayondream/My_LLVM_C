@@ -485,6 +485,17 @@ std::unique_ptr<ExprAST> Parser::parsePrimary() {
         std::string name = token->lexeme;
         advance();
 
+        // Qualified name: A::B::name (namespace member access).
+        while (check(TokenType::TOKEN_COLON_COLON)) {
+            advance(); // consume '::'
+            auto part = match(TokenType::TOKEN_IDENTIFIER);
+            if (!part) {
+                errorUnexpected("expected identifier after '::'");
+                break;
+            }
+            name += "::" + part->lexeme;
+        }
+
         // Function call: identifier(args)
         if (peek() && peek()->type == TokenType::TOKEN_LPAREN) {
             advance(); // consume '('
@@ -1114,6 +1125,17 @@ std::unique_ptr<TranslationUnitAST> Parser::parse() {
     std::vector<std::string> exports;
     
     while (!eof()) {
+        // namespace declaration
+        if (check(TokenType::TOKEN_NAMESPACE)) {
+            auto decl = parseNamespaceDecl();
+            if (decl) {
+                decls.push_back(std::move(decl));
+            } else {
+                advance();
+            }
+            continue;
+        }
+
         // 检查模块声明
         if (check(TokenType::TOKEN_MODULE)) {
             advance(); // 消耗 "module"
@@ -2196,4 +2218,45 @@ std::unique_ptr<TypedefDeclAST> Parser::parseTypedefDecl() {
 
     TypeContext::instance().addTypedef(name, type);
     return std::make_unique<TypedefDeclAST>(name, type);
+}
+
+// namespace A { ... } / namespace A::B { ... } (PAR-22)
+std::unique_ptr<DeclAST> Parser::parseNamespaceDecl() {
+    if (!match(TokenType::TOKEN_NAMESPACE)) return nullptr;
+
+    std::string name;
+    if (check(TokenType::TOKEN_IDENTIFIER)) {
+        name = advance()->lexeme;
+        // Allow both `A.B` and `A::B` nesting in the declaration name.
+        while (check(TokenType::TOKEN_COLON_COLON) || check(TokenType::TOKEN_DOT)) {
+            advance();
+            auto part = match(TokenType::TOKEN_IDENTIFIER);
+            if (!part) break;
+            name += "." + part->lexeme;
+        }
+    }
+
+    if (!expect(TokenType::TOKEN_LBRACE, "expected '{' after namespace name")) {
+        return nullptr;
+    }
+
+    std::vector<std::unique_ptr<DeclAST>> decls;
+    while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
+        if (check(TokenType::TOKEN_NAMESPACE)) {
+            auto nested = parseNamespaceDecl();
+            if (nested) decls.push_back(std::move(nested));
+            else advance();
+            continue;
+        }
+        auto decl = parseDeclaration();
+        if (decl) {
+            decls.push_back(std::move(decl));
+        } else {
+            advance();
+        }
+    }
+    expect(TokenType::TOKEN_RBRACE, "expected '}' to close namespace");
+    match(TokenType::TOKEN_SEMICOLON);
+
+    return std::make_unique<NamespaceDeclAST>(name, std::move(decls));
 }

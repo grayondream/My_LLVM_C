@@ -45,6 +45,7 @@ static std::string TokenTypeToString(TokenType type) {
         case TokenType::TOKEN_TRUE:       return "true";
         case TokenType::TOKEN_FALSE:      return "false";
         case TokenType::TOKEN_NULL:       return "null";
+        case TokenType::TOKEN_NAMESPACE:  return "namespace";
         case TokenType::TOKEN_MODULE:     return "module";
         case TokenType::TOKEN_IMPORT:     return "import";
         case TokenType::TOKEN_EXPORT:     return "export";
@@ -96,6 +97,7 @@ static std::string TokenTypeToString(TokenType type) {
         case TokenType::TOKEN_MINUS_MINUS: return "--";
         case TokenType::TOKEN_QUESTION:   return "?";
         case TokenType::TOKEN_COLON:      return ":";
+        case TokenType::TOKEN_COLON_COLON:return "::";
         case TokenType::TOKEN_AMP_EQ:     return "&=";
         case TokenType::TOKEN_PIPE_EQ:    return "|=";
         case TokenType::TOKEN_CARET_EQ:   return "^=";

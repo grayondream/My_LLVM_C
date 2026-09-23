@@ -65,6 +65,14 @@ private:
 
     // constexpr function interpretation (CT-06 seed): evaluate a call and walk
     // the function body's statements (return / if / block / local decl).
+    // Namespace support (PAR-22 / MOD-12). Declarations at namespace scope are
+    // registered under a mangled key ("A_B_name") and lookups try the enclosing
+    // namespace prefixes before the global name.
+    static std::string mangleNamespaceName(const std::string& name);
+    std::vector<std::string> namespaceCandidates(const std::string& name) const;
+    std::string scopedName(const std::string& name) const;
+    std::string resolveNamespaceName(const std::string& name) const;
+
     std::optional<ConstValue> evalConstexprCall(CallExprAST& call, int depth);
     std::optional<ConstValue> evalConstexprStmt(StmtAST* stmt, ConstEnv& env, int depth);
     static bool constValueTruthy(const ConstValue& v);
@@ -81,6 +89,10 @@ private:
     void visit(UsingDeclAST& node);
     void visit(TypeDeclAST& node);
     void visit(ModuleDeclAST& node);
+    void visit(NamespaceDeclAST& node);
+
+    // Shared top-level dispatcher (translation unit and namespace bodies).
+    void analyzeTopLevelDecl(DeclAST& decl);
     void visit(DeclStmtAST& node);
     void visit(CompoundStmtAST& node);
     void visit(ExprStmtAST& node);
@@ -130,4 +142,5 @@ private:
     ConstEnv* activeEnv = nullptr; // innermost constexpr call environment
     int constexprCallDepth = 0;    // guards runaway constexpr recursion
     static constexpr int kConstexprMaxDepth = 128;
+    std::string namespacePrefix;   // e.g. "A_B_" while analyzing namespace A::B
 };
