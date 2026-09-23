@@ -526,7 +526,7 @@ std::unique_ptr<ExprAST> Parser::parsePrimary() {
 
         if (!check(TokenType::TOKEN_RBRACE)) {
             while (true) {
-                auto expr = parseExpr();
+                auto expr = parseExpr(2); // minPrec=2: ',' separates elements
                 if (expr) {
                     initList.push_back(std::move(expr));
                 }
@@ -561,7 +561,7 @@ std::unique_ptr<ExprAST> Parser::parsePostfix(std::unique_ptr<ExprAST> lhs) {
                 std::vector<std::unique_ptr<ExprAST>> args;
                 if (!peek() || peek()->type != TokenType::TOKEN_RPAREN) {
                     while (true) {
-                        auto arg = parseExpr();
+                        auto arg = parseExpr(2); // minPrec=2: ',' separates args
                         if (!arg) return nullptr;
                         args.push_back(std::move(arg));
                         if (!match(TokenType::TOKEN_COMMA)) break;
@@ -636,13 +636,23 @@ std::unique_ptr<ExprAST> Parser::parseExpr(int minPrec) {
         int prec = getPrecedence(opToken->type);
         if (prec < minPrec) break;
 
+        // Comma operator: lowest precedence, left-associative, represented by
+        // its own AST node (CommaExprAST).
+        if (opToken->type == TokenType::TOKEN_COMMA) {
+            advance(); // consume ','
+            auto rhs = parseExpr(prec + 1); // left-associative
+            if (!rhs) return nullptr;
+            lhs = std::make_unique<CommaExprAST>(std::move(lhs), std::move(rhs));
+            continue;
+        }
+
         // Handle ternary operator specially (right-to-left, needs ? and :)
         if (opToken->type == TokenType::TOKEN_QUESTION) {
             advance(); // consume '?'
-            auto thenExpr = parseExpr(); // parse then-branch (full expression)
+            auto thenExpr = parseExpr(); // then-branch is a full expression (may contain ',')
             if (!thenExpr) return nullptr;
             match(TokenType::TOKEN_COLON);
-            auto elseExpr = parseExpr(); // parse else-branch
+            auto elseExpr = parseExpr(2); // else-branch: ',' separates, not an operator
             if (!elseExpr) return nullptr;
             lhs = std::make_unique<TernaryExprAST>(std::move(lhs), std::move(thenExpr), std::move(elseExpr));
             continue;
@@ -1361,7 +1371,7 @@ Type* Parser::parseBaseType() {
                     int val = currentVal;
                     if (check(TokenType::TOKEN_ASSIGN)) {
                         advance();
-                        auto expr = parseExpr();
+                        auto expr = parseExpr(2); // ',' separates enumerators
                         if (auto num = dynamic_cast<NumberExprAST*>(expr.get())) {
                             val = num->value;
                         }
@@ -2136,7 +2146,7 @@ std::unique_ptr<EnumDeclAST> Parser::parseEnumDecl() {
         int val = currentVal;
         if (check(TokenType::TOKEN_ASSIGN)) {
             advance();
-            auto expr = parseExpr();
+            auto expr = parseExpr(2); // ',' separates enumerators
             if (auto num = dynamic_cast<NumberExprAST*>(expr.get())) {
                 val = num->value;
             }

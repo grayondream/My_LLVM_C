@@ -3,11 +3,12 @@
 namespace smc {
 
 // Precedence levels (higher binds tighter), matching Parser::parseExpr and
-// docs/spec/grammar.ebnf §9. Level 1 is intentionally unused (`,` is a
-// separator, not an infix operator); level 3 (?:) is parsed specially but
-// carries its level here so the table stays complete.
+// docs/spec/grammar.ebnf §9. Level 3 (?:) and the comma are parsed specially
+// but carry their level here so the table stays complete.
 OperatorInfo getOperatorInfo(TokenType op) {
     switch (op) {
+        case TokenType::TOKEN_COMMA:        return {1, false};
+
         case TokenType::TOKEN_ASSIGN:
         case TokenType::TOKEN_PLUS_EQ:
         case TokenType::TOKEN_MINUS_EQ:

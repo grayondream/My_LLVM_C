@@ -49,6 +49,7 @@ struct OpCase {
 
 const std::vector<OpCase>& normativeTable() {
     static const std::vector<OpCase> table = {
+        {TokenType::TOKEN_COMMA,      1, false, ","},
         {TokenType::TOKEN_ASSIGN,     2, true,  "="},
         {TokenType::TOKEN_PLUS_EQ,    2, true,  "+="},
         {TokenType::TOKEN_MINUS_EQ,   2, true,  "-="},
@@ -98,11 +99,31 @@ TEST_F(OperatorPrecedenceTest, TableMatchesNormativeSpec) {
 }
 
 TEST_F(OperatorPrecedenceTest, NonInfixTokensHaveZeroPrecedence) {
-    // `,` is a separator, not an infix operator (grammar.ebnf §9 level 1 retired).
-    EXPECT_EQ(smc::getOperatorInfo(TokenType::TOKEN_COMMA).precedence, 0);
     EXPECT_EQ(smc::getOperatorInfo(TokenType::TOKEN_PLUS_PLUS).precedence, 0);
     EXPECT_EQ(smc::getOperatorInfo(TokenType::TOKEN_LPAREN).precedence, 0);
     EXPECT_EQ(smc::getOperatorInfo(TokenType::TOKEN_IDENTIFIER).precedence, 0);
+}
+
+TEST_F(OperatorPrecedenceTest, CommaIsLowestPrecedenceAndLeftAssociative) {
+    // `a = b, c = d` groups as `(a = b), (c = d)`.
+    auto* comma = dynamic_cast<CommaExprAST*>(parseExpr("a = b, c = d"));
+    ASSERT_NE(comma, nullptr);
+    EXPECT_NE(asAssign(comma->left.get()), nullptr);
+    EXPECT_NE(asAssign(comma->right.get()), nullptr);
+
+    // `a, b, c` groups as `(a, b), c`.
+    auto* outer = dynamic_cast<CommaExprAST*>(parseExpr("a, b, c"));
+    ASSERT_NE(outer, nullptr);
+    EXPECT_NE(dynamic_cast<CommaExprAST*>(outer->left.get()), nullptr);
+}
+
+TEST_F(OperatorPrecedenceTest, CommaServesAsSeparatorInCallArguments) {
+    // Inside `f(...)`, `,` separates arguments rather than forming a comma expr.
+    auto* call = dynamic_cast<CallExprAST*>(parseExpr("f(a, b)"));
+    ASSERT_NE(call, nullptr);
+    ASSERT_EQ(call->args.size(), 2u);
+    EXPECT_EQ(dynamic_cast<CommaExprAST*>(call->args[0].get()), nullptr);
+    EXPECT_EQ(dynamic_cast<CommaExprAST*>(call->args[1].get()), nullptr);
 }
 
 // ---------------------------------------------------------------------------
