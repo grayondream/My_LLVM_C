@@ -6,9 +6,11 @@
 |---|---|---|
 | [`grammar.ebnf`](./grammar.ebnf) | 规范性 EBNF 文法 + 运算符优先级/结合性表 | INF-06 / INF-09 / INF-10 |
 | [`keywords.md`](./keywords.md) | 关键字 / 保留字 / 运算符总表 | INF-11 / LEX-14 |
-| `abi.md` | 类型布局、调用约定、名称修饰 | 待补：TYP-27 / MEM-14~16 / MOD-15 |
-| `conversions.md` | 隐式/显式转换矩阵、整数提升 | 待补：TYP-22~24 |
-| `semantics.md` | 求值顺序、`defer`、重载解析、求值模型 | 待补：SEM-15~18 |
+| [`abi.md`](./abi.md) | 类型布局、传参/返回 ABI、名称修饰、端序对齐 | TYP-27 / MEM-14~16 / MOD-15 |
+| [`conversions.md`](./conversions.md) | 隐式/显式转换矩阵、整数提升、重载转换等级 | TYP-19 ~ TYP-24 |
+| [`semantics.md`](./semantics.md) | 求值顺序、`defer`、重载解析、静态检查清单 | SEM-13 ~ SEM-18 |
+
+> 各分册均为**草案**：`[impl]` 部分已与实现对齐，`[plan]` 部分待对应 DEC 裁决后冻结。
 
 ## 状态标记
 
