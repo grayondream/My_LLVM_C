@@ -1,0 +1,353 @@
+(* =========================================================================
+   SafeModern C 1.0 — 规范性文法（EBNF skeleton）
+   对应 TODO: INF-06 / INF-09 / INF-10 / INF-11
+
+   约定 / Notation
+     - 终结符使用单引号：'if'、'+'、';'
+     - { X }   重复 0 次或多次
+     - [ X ]   可选
+     - X | Y   择一
+     - (* … *) 注释（非文法）
+     - 优先级未在产生式中重复的二元运算符，统一见 §6.2 优先级/结合性表
+
+   状态标记（置于产生式旁）
+     [impl] 当前实现已支持（以 src/frontend 为准）
+     [plan] TODO 规划，尚未实现
+     [ng]   明确不做（Non-goals），列出仅为消歧
+
+   本文件是规范的骨架：目标是完整覆盖语言；带 [plan] 的条目在实现前
+   可能随对应 DEC 决策调整。
+   ========================================================================= *)
+
+
+(* =========================================================================
+   §1 词法（Lexical，信息性；规范性以 INF-11 + LEX-* 为准）
+   ========================================================================= *)
+
+translation-unit    = { top-level-declaration } , EOF ;
+
+(* --- 注释 --- *)
+line-comment        = '//' , { any-char - newline } , newline ;
+block-comment       = '/*' , { any-char } , '*/' ;                  (* 不嵌套 *)
+
+(* --- 标识符 --- *)
+identifier          = identifier-start , { identifier-continue } ;
+identifier-start    = letter | '_' ;
+identifier-continue = letter | digit | '_' ;
+(* [plan] LEX-18: 允许的 Unicode 范围、NFC 规范化、与关键字冲突处理 *)
+
+(* --- 整型字面量 LEX-04 / LEX-15 / LEX-17 --- *)
+integer-literal     = decimal-literal
+                    | hex-literal
+                    | binary-literal
+                    | octal-literal ;
+decimal-literal     = digit , { digit | '_' } ;
+hex-literal         = '0x' , hex-digit , { hex-digit | '_' } ;
+binary-literal      = '0b' , bin-digit , { bin-digit | '_' } ;
+octal-literal       = '0o' , oct-digit , { oct-digit | '_' } ;      (* [plan] 前缀/分隔符规则见 LEX-17 *)
+integer-suffix      = [ 'u' | 'l' | 'ul' | 'lu' ] ;                 (* [plan] 后缀 → 类型映射见 LEX-15 *)
+
+(* --- 浮点字面量 LEX-05 / TYP-04 --- *)
+float-literal       = decimal-literal , '.' , [ decimal-literal ] , [ exponent ] , [ float-suffix ]
+                    | decimal-literal , exponent , [ float-suffix ] ;
+exponent            = ( 'e' | 'E' ) , [ '+' | '-' ] , decimal-literal ;
+float-suffix        = 'f16' | 'f32' | 'f64' | 'f128' ;
+(* [plan] f16/f32/f64/f128 为后缀；目标类型 f16/f32/f64/f128，见 LEX-15/TYP-04 *)
+
+(* --- 字符/字符串字面量 LEX-06 / LEX-16 --- *)
+char-literal        = "'" , ( char-char | escape-sequence ) , "'" ;
+string-literal      = '"' , { string-char | escape-sequence } , '"'
+                    | 'r"' , { any-char - '"' } , '"'               (* [impl] 原始字符串 *)
+                    | multiline-string ;                            (* [plan] 多行字符串 LEX-16 *)
+escape-sequence     = '\' , ( "'" | '"' | '\' | 'n' | 't' | 'r' | '0'
+                            | 'x' , hex-digit , hex-digit
+                            | 'u' , hex-digit , hex-digit , hex-digit , hex-digit
+                            | 'U' , hex-digit , hex-digit , hex-digit , hex-digit
+                                  , hex-digit , hex-digit , hex-digit , hex-digit ) ;
+(* [plan] 转义字符全集在 LEX-16 冻结 *)
+
+(* --- 布尔/空字面量 --- *)
+boolean-literal     = 'true' | 'false' ;
+null-literal        = 'null' ;                                      (* 目标: nullptr 决策见 DEC/DEC-16 邻近项 *)
+
+
+(* =========================================================================
+   §2 顶层声明 / 模块 / 命名空间（MOD / PAR-01 / PAR-22）
+   ========================================================================= *)
+
+top-level-declaration
+    = { annotation } , ( module-decl | import-decl | export-decl
+                       | namespace-decl | declaration ) ;
+
+module-decl         = 'module' , qualified-name , ';' ;
+import-decl         = 'import' , qualified-name , ';' ;
+(* [plan] 导入符号访问语法/别名未定，见 DEC-02 / MOD-11 *)
+export-decl         = 'export' , declaration ;
+namespace-decl      = 'namespace' , qualified-name , '{' , { top-level-declaration } , '}' ;
+(* [plan] PAR-22 / MOD-12：[impl] 缺失；src/libsafec 已使用 namespace safec *)
+
+qualified-name      = identifier , { '::' , identifier } ;          (* [plan] PAR-22：'::' token 待补 *)
+
+
+(* =========================================================================
+   §3 声明（PAR-01 / PAR-02 / PAR-21 / GEN / INH）
+   ========================================================================= *)
+
+declaration         = [ storage-class ] , decl-core ;
+storage-class       = 'extern' | 'static' | 'inline' | 'thread_local' ;   (* [plan] thread_local CON-04 *)
+
+decl-core           = type-alias
+                    | record-decl
+                    | enum-decl
+                    | template-decl
+                    | function-decl
+                    | variable-decl-list ;
+
+(* --- 类型别名（DEC-16：typedef/using/type 规范形式待定） --- *)
+type-alias          = 'typedef' , type , identifier , ';'
+                    | 'using' , identifier , '=' , type , ';'      (* [impl] 上下文关键字 *)
+                    | 'type' , identifier , '=' , type , ';' ;     (* [impl] 上下文关键字 *)
+
+(* --- 记录类型 --- *)
+record-decl         = struct-decl | class-decl | union-decl ;
+
+struct-decl         = 'struct' , identifier , [ '{' , { field-decl } , '}' ] , ';' ;
+
+class-decl          = 'class' , identifier
+                      [ ':' , [ access-specifier ] , qualified-name ]   (* [impl] 仅记录 baseClass; 继承语义 INH-01 [plan] *)
+                      [ '{' , { class-member } , '}' ] , ';' ;
+class-member        = access-section
+                    | field-decl , ';'
+                    | function-decl ;
+access-section      = ( 'public' | 'private' | 'protected' ) , ':' ;  (* [plan] protected 见 PAR-04；默认级别 DEC-01 *)
+
+union-decl          = 'union' , identifier , [ '{' , { field-decl } , '}' ] , ';' ;
+
+field-decl          = type , identifier , [ '[' , const-expr , ']' ]
+                    | bit-field-decl ;                              (* [plan] AGG-06 / PAR-10 *)
+bit-field-decl      = type , identifier , ':' , const-expr ;
+
+(* --- 枚举（AGG-14 / TYP-09 / TYP-25） --- *)
+enum-decl           = 'enum' , identifier , [ ':' , type ]
+                      [ '{' , enumerator , { ',' , enumerator } , [ ',' ] , '}' ] , ';' ;
+(* [plan] 底层类型 ':u8' 尚未实现（当前值恒为 int） *)
+enumerator          = identifier , [ '=' , const-expr ] ;
+
+(* --- 模板（GEN-01 / GEN-02 / PAR-21） --- *)
+template-decl       = 'template' , '<' , template-parameter , { ',' , template-parameter } , '>'
+                      ( function-decl | class-decl | type-alias ) ;
+template-parameter  = 'typename' , identifier                           (* 类型参数 *)
+                    | type , identifier ;                               (* 非类型/常量参数 *)
+template-instance   = qualified-name , '<' , template-argument , { ',' , template-argument } , '>' ;
+template-argument   = type | const-expr ;
+(* [plan] 解析歧义（'<' '>' '>>'）见 GEN-04 / LEX-08 *)
+
+(* --- 函数 --- *)
+function-decl       = type , identifier , '(' , [ parameter-list ] , ')' , ( block | ';' ) ;
+parameter-list      = parameter , { ',' , parameter } , [ ',' , '...' ] ;
+parameter           = type , [ identifier ] ;
+
+(* --- 变量 --- *)
+variable-decl-list  = variable-decl , { ',' , variable-decl } , ';' ;
+variable-decl       = type , identifier , [ '[' , const-expr , ']' ] , [ '=' , initializer ] ;
+
+(* --- 函数指针 --- *)
+function-pointer-type = type , '(' , '*' , identifier , ')'
+                        '(' , [ type , { ',' , type } ] , ')' ;     (* [impl] 简化形式 *)
+
+
+(* =========================================================================
+   §4 类型（TYP / PAR-05 / PAR-06 / MEM-04/09）
+   ========================================================================= *)
+
+type                = [ 'const' | 'volatile' | 'restrict' | 'atomic' ] , base-type
+                      , { pointer-suffix }
+                      , [ slice-suffix | optional-suffix ] ;
+pointer-suffix      = '*' , { 'const' | 'volatile' | 'restrict' } ;
+slice-suffix        = '[' , ']' ;                                   (* [impl] SliceType *)
+optional-suffix     = '?' ;                                         (* [impl] OptionalType *)
+
+base-type           = primitive-type | named-type | record-body | enum-body
+                    | template-instance ;
+(* [plan] restrict/atomic 语义见 MEM-04 / CON-01 / DEC-11 *)
+
+primitive-type      = 'void' | 'bool' | 'char'
+                    | 'int' | 'float' | 'double'
+                    | 'int8' | 'int16' | 'int32' | 'int64' | 'int128'
+                    | 'uint8' | 'uint16' | 'uint32' | 'uint64' | 'uint128'
+                    | 'isize' | 'usize'
+                    | 'float32' | 'float64'
+                    | 'f16' | 'f32' | 'f64' | 'f128' ;             (* [plan] f16/f128 TYP-04 *)
+
+named-type          = qualified-name ;
+record-body         = struct-decl | union-decl ;                    (* 内联定义 *)
+enum-body           = enum-decl ;
+
+
+(* =========================================================================
+   §5 语句（PAR-09；不含 goto/label，见 NG-01）
+   ========================================================================= *)
+
+block               = '{' , { statement } , '}' ;
+
+statement           = declaration-statement
+                    | expression-statement
+                    | block
+                    | if-statement
+                    | while-statement
+                    | do-while-statement
+                    | for-statement
+                    | switch-statement
+                    | break-statement
+                    | continue-statement
+                    | return-statement
+                    | defer-statement
+                    | compile-time-if
+                    | asm-statement ;                               (* [plan] asm PAR-16/CG-10 *)
+
+declaration-statement = declaration ;
+expression-statement  = expr , ';' ;
+
+if-statement        = 'if' , '(' , expr , ')' , statement , [ 'else' , statement ] ;
+while-statement     = 'while' , '(' , expr , ')' , statement ;
+do-while-statement  = 'do' , statement , 'while' , '(' , expr , ')' , ';' ;
+for-statement       = 'for' , '(' , [ for-init ] , ';' , [ expr ] , ';' , [ expr ] , ')' , statement ;
+for-init            = declaration-statement | expression-statement ;
+
+switch-statement    = 'switch' , '(' , expr , ')' , '{' , { switch-item } , '}' ;
+switch-item         = switch-label | statement ;                    (* 贯穿由语句顺序决定 *)
+switch-label        = 'case' , const-expr , ':' | 'default' , ':' ;
+
+break-statement     = 'break' , ';' ;
+continue-statement  = 'continue' , ';' ;
+return-statement    = 'return' , [ expr ] , ';' ;
+defer-statement     = 'defer' , expr , ';' ;
+(* [plan] defer 精确语义见 SEM-18 / FUN-10 *)
+
+compile-time-if     = 'compile_time' , '.' , 'if' , '(' , const-expr , ')' , block , [ 'else' , block ] ;
+(* [plan] CT-03 *)
+
+asm-statement       = 'asm' , [ 'volatile' ] , '(' , string-literal
+                      , [ ':' , asm-operands ] , ')' , ';' ;
+(* [plan] asm 约束模型见 DEC-09 *)
+
+
+(* =========================================================================
+   §6 表达式（PAR-08 / PAR-17/18）
+   ========================================================================= *)
+
+(* comma 表达式为最低优先级 *)
+expr                = assignment-expr , { ',' , assignment-expr } ;
+
+assignment-expr     = conditional-expr
+                    | unary-expr , assign-op , assignment-expr ;    (* 右结合 *)
+
+conditional-expr    = logical-or-expr , [ '?' , expr , ':' , assignment-expr ] ;
+(* 注：条件运算符中段为完整 expr（与当前解析器一致） *)
+
+logical-or-expr     = logical-and-expr , { '||' , logical-and-expr } ;
+logical-and-expr    = bit-or-expr , { '&&' , bit-or-expr } ;
+bit-or-expr         = bit-xor-expr , { '|' , bit-xor-expr } ;
+bit-xor-expr        = bit-and-expr , { '^' , bit-and-expr } ;
+bit-and-expr        = equality-expr , { '&' , equality-expr } ;
+equality-expr       = relational-expr , { ( '==' | '!=' ) , relational-expr } ;
+relational-expr     = shift-expr , { ( '<' | '>' | '<=' | '>=' ) , shift-expr } ;
+shift-expr          = additive-expr , { ( '<<' | '>>' ) , additive-expr } ;
+additive-expr       = multiplicative-expr , { ( '+' | '-' ) , multiplicative-expr } ;
+multiplicative-expr = unary-expr , { ( '*' | '/' | '%' ) , unary-expr } ;
+
+unary-expr          = prefix-expr
+                    | postfix-expr ;
+prefix-expr         = prefix-op , unary-expr
+                    | 'sizeof' , unary-expr
+                    | 'sizeof' , '(' , type , ')'
+                    | 'alignof' , '(' , type , ')'                 (* [plan] PAR-14 *)
+                    | cast-expr ;
+prefix-op           = '+' | '-' | '!' | '~' | '*' | '&' | '++' | '--' ;
+
+cast-expr           = '(' , type , ')' , unary-expr
+                    | 'static_cast' , '<' , type , '>' , '(' , unary-expr , ')'      (* [plan] PAR-18 *)
+                    | 'reinterpret_cast' , '<' , type , '>' , '(' , unary-expr , ')' ; (* [plan] LEX-11 *)
+
+postfix-expr        = primary-expr , { postfix-op } ;
+postfix-op          = '[' , expr , ']'
+                    | '(' , [ argument-list ] , ')'
+                    | '.' , identifier
+                    | '->' , identifier
+                    | '++' | '--' ;
+argument-list       = expr , { ',' , expr } ;
+
+primary-expr        = literal
+                    | 'this'                                        (* [plan] PAR-17 *)
+                    | 'offsetof' , '(' , type , ',' , identifier , ')'  (* [plan] PAR-14 *)
+                    | 'compile_time' , '.' , compile-time-member    (* [plan] CT-01/06/07 *)
+                    | qualified-name
+                    | '(' , expr , ')'
+                    | initializer-list
+                    | lambda-expr ;                                 (* [plan] PAR-11 *)
+
+literal             = integer-literal | float-literal | char-literal
+                    | string-literal | boolean-literal | null-literal ;
+
+initializer-list    = '{' , [ initializer , { ',' , initializer } , [ ',' ] ] , '}' ;
+initializer          = expr
+                    | designated-initializer                        (* [plan] PAR-13 *)
+                    | initializer-list ;
+designated-initializer = '.' , identifier , '=' , initializer ;
+
+lambda-expr         = '[' , [ lambda-capture ] , ']'
+                      '(' , [ parameter-list ] , ')'
+                      [ '->' , type ] , block ;                     (* [plan] PAR-11 / DEC-10 *)
+lambda-capture      = capture-item , { ',' , capture-item } ;
+capture-item        = '&' , [ identifier ] | [ identifier ] ;
+
+
+(* =========================================================================
+   §7 注解（ANN-01）
+   ========================================================================= *)
+
+annotation          = '[[' , annotation-body , ']]' ;
+annotation-body     = annotation-name , [ '(' , [ annotation-arg , { ',' , annotation-arg } ] , ')' ] ;
+annotation-name     = identifier
+                    | 'repr'                                  (* [[repr(C)]] *)
+                    | 'packed' | 'align' | 'inline' | 'cold'
+                    | 'nonnull' | 'deprecated' ;
+annotation-arg      = const-expr | type | identifier | string-literal ;
+(* [plan] 各注解语义与默认行为见 ANN-09/ANN-10；目标校验 ANN-06 *)
+
+
+(* =========================================================================
+   §8 编译期（CT / PAR-15；取代 type_info 与独立 static_assert，见 NG-12）
+   ========================================================================= *)
+
+static-assert       = 'compile_time' , '.' , 'static_assert'
+                      '(' , const-expr , [ ',' , string-literal ] , ')' , ';' ;   (* [plan] CT-02 *)
+
+compile-time-member = 'target' | 'build'                          (* [plan] CT-04/CT-05 *)
+                    | reflection-function ;                       (* [plan] CT-07 *)
+reflection-function = 'name_of' | 'size_of' | 'align_of'
+                    | 'fields_of' | 'offset_of' | 'attributes_of' ;
+
+
+(* =========================================================================
+   §9 运算符优先级 / 结合性（INF-10，与 Parser::getPrecedence 对齐）
+   =========================================================================
+    优先级  运算符                              结合性
+   ---------------------------------------------------------------------------
+      1     ,                                    左
+      2     = += -= *= /= %= &= |= ^= <<= >>=    右
+      3     ?:                                   右
+      4     ||                                   左
+      5     &&                                   左
+      6     |                                    左
+      7     ^                                    左
+      8     &                                    左
+      9     == !=                                左
+     10     < > <= >=                            左
+     11     << >>                                左
+     12     + -                                  左
+     13     * / %                                左
+     14     prefix + - ! ~ * & ++ -- sizeof      右（前缀一元）
+     15     postfix ++ -- () [] . ->             左
+     16     primary / literal / (expr) / {}       —
+   ========================================================================= *)
