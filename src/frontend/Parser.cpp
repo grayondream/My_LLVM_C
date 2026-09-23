@@ -1838,9 +1838,14 @@ Type* Parser::parseFunctionPointerType(Type* returnType) {
 
     if (!check(TokenType::TOKEN_RPAREN)) {
         while (true) {
+            // See parseFunctionDecl: `void)` means no parameters, `void*` does not.
             if (check(TokenType::TOKEN_VOID)) {
+                size_t saved = m_currentTokenPos;
                 advance();
-                break;
+                if (check(TokenType::TOKEN_RPAREN)) {
+                    break;
+                }
+                m_currentTokenPos = saved;
             }
             if (check(TokenType::TOKEN_ELLIPSIS)) {
                 isVarArg = true;
@@ -1867,9 +1872,15 @@ std::unique_ptr<FunctionDeclAST> Parser::parseFunctionDecl(Type* returnType, con
 
     if (!check(TokenType::TOKEN_RPAREN)) {
         while (true) {
+            // `void` denotes an empty parameter list only when followed by ')'.
+            // `void*` is an ordinary parameter whose type starts with void.
             if (check(TokenType::TOKEN_VOID)) {
+                size_t saved = m_currentTokenPos;
                 advance();
-                break;
+                if (check(TokenType::TOKEN_RPAREN)) {
+                    break;
+                }
+                m_currentTokenPos = saved;
             }
 
             auto param = parseParamDecl();

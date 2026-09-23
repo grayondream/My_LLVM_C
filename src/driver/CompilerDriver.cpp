@@ -1,5 +1,6 @@
 #include "CompilerDriver.h"
 #include "Linker.h"
+#include "StdPrelude.h"
 #include "frontend/Lexer.h"
 #include "frontend/Parser.h"
 #include "sema/SemanticAnalyzer.h"
@@ -102,6 +103,7 @@ bool CompilerDriver::parseArguments(int argc, const char* argv[]) {
     preprocessOnly = false;
     syntaxOnly = false;
     jitMode = false;
+    usePrelude = true;
     verbose = false;
     wall = false;
     werror = false;
@@ -147,6 +149,7 @@ bool CompilerDriver::parseArguments(int argc, const char* argv[]) {
         ("O", "Optimization level (0-3)", cxxopts::value<int>())
         ("g", "Include debug information")
         ("v,verbose", "Verbose output")
+        ("no-prelude", "Do not inject the built-in std.c libc binding layer")
         ("l", "Link library", cxxopts::value<std::vector<std::string>>())
         ("L", "Library search path", cxxopts::value<std::vector<std::string>>())
         ("h,help", "Show this help message")
@@ -168,6 +171,7 @@ bool CompilerDriver::parseArguments(int argc, const char* argv[]) {
         if (result.count("E")) preprocessOnly = true;
         if (result.count("g")) includeDebug = true;
         if (result.count("v")) verbose = true;
+        if (result.count("no-prelude")) usePrelude = false;
 
         if (result.count("o")) outputFile = result["o"].as<std::string>();
         if (result.count("O")) optLevel = result["O"].as<int>();
@@ -254,6 +258,14 @@ int CompilerDriver::compileFile(const std::string& inputFile) {
         return 0;
     }
 
+    // Inject the built-in std.c libc binding layer (MOD-09 / STD-23) before
+    // semantic analysis so its declarations precede user code.
+    if (usePrelude) {
+        if (auto prelude = smc::parseStdCPrelude(smc::builtinStdCPrelude(), "<std.c>")) {
+            smc::prependDeclarations(*ast, *prelude);
+        }
+    }
+
     SemanticAnalyzer analyzer;
     analyzer.analyze(*ast);
     if (!analyzer.getErrors().empty()) {
@@ -338,6 +350,7 @@ void CompilerDriver::printHelp() const {
               << "  -O <level>      Optimization level (0-3)\n"
               << "  -g              Include debug information\n"
               << "  -v              Verbose output\n"
+              << "  --no-prelude    Do not inject the built-in std.c binding layer\n"
               << "  -Wall           Enable all warnings\n"
               << "  -Werror         Treat warnings as errors\n"
               << "  -std <standard> C standard (c99, c11, c17)\n"

@@ -22,6 +22,7 @@ public:
     bool getPreprocessOnly() const { return preprocessOnly; }
     bool getSyntaxOnly() const { return syntaxOnly; }
     bool getJitMode() const { return jitMode; }
+    bool getUsePrelude() const { return usePrelude; }
     bool getVerbose() const { return verbose; }
     bool getWall() const { return wall; }
     bool getWerror() const { return werror; }
@@ -46,6 +47,7 @@ private:
     bool preprocessOnly = false;
     bool syntaxOnly = false;
     bool jitMode = false;
+    bool usePrelude = true;
     bool verbose = false;
     bool wall = false;
     bool werror = false;

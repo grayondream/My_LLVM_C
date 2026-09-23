@@ -104,7 +104,7 @@
 - `[ ]` **MOD-06** 模块可见性与 `public/private`。
 - `[ ]` **MOD-07** 模块循环依赖检测。
 - `[ ]` **MOD-08** 名称修饰：C ABI 符号、class 方法、**模板单态化符号**、`static` 成员。
-- `[ ]` **MOD-09** `(改)` **C 互操作（无预处理器方案）**：不解析真实 C 头文件，改用 `extern` 声明 + 内置 `std.c` 绑定层（**关键缺口**，见 INF/NOTES）。
+- `[~]` **MOD-09** `(改)` **C 互操作（无预处理器方案）**：不解析真实 C 头文件，改用 `extern` 声明 + 内置 `std.c` 绑定层（**关键缺口**，见 INF/NOTES）。已实现内嵌 prelude（`src/driver/StdPrelude.*`，`--no-prelude` 关闭）+ 修复 `void*` 形参解析；文件化 `std.c` 模块待做。
 - `[ ]` **MOD-10** 增量编译：模块/AST/类型/IR 缓存与失效策略（内容哈希）。
 - `[ ]` **MOD-11** 导入符号访问语法待定并实现（`math.add` 还是直接 `add`）。
 - `[~]` **MOD-12** `(新)` `namespace` 语义：嵌套/开放命名空间、限定查找、与模块的关系（见 DEC-17）。（草案见 `docs/spec/modules.md`）
@@ -385,7 +385,7 @@
 - `[ ]` **STD-20** `std.time`。
 - `[ ]` **STD-21** `std.os`（进程/env/args/syscall 封装）。
 - `[ ]` **STD-22** `std.testing`（语言内断言/测试；runner 由 `smc test` 提供）。
-- `[ ]` **STD-23** `std.c`：手写 libc 绑定层（配合 MOD-09）。
+- `[~]` **STD-23** `std.c`：手写 libc 绑定层（配合 MOD-09）。内嵌最小绑定已就绪，待扩展并迁到模块文件。
 
 ### std.atomic / std.thread
 - `[ ]` **STD-24** 原子类型封装、load/store/CAS/fence、内存序常量。
@@ -497,7 +497,7 @@
 
 ### P0：最小可用编译器（已有大量基础，补齐缺口）
 - `[ ]` **P0-01** 清理与决策一致的冲突：移除预处理器、goto/label、`-E/-I/-D`（NG-01/02/TOOL-02）。
-- `[ ]` **P0-02** C 互操作绑定层（MOD-09/STD-23）——无预处理器后的刚需。
+- `[~]` **P0-02** C 互操作绑定层（MOD-09/STD-23）——无预处理器后的刚需。内嵌 prelude + `extern` 已可用。
 - `[ ]` **P0-03** 变量初始化检查（SEM-01/02）。
 - `[ ]` **P0-04** module/import/export（MOD-04~07）。
 - `[ ]` **P0-05** 最小 `std.core` / `std.io`（STD-01/12）。
