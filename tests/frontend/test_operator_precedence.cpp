@@ -151,7 +151,10 @@ TEST_F(OperatorPrecedenceTest, ArithmeticIsLeftAssociative) {
     auto* inner = asBinary(outer->left.get());
     ASSERT_NE(inner, nullptr);
     EXPECT_EQ(inner->op, BinaryOp::Sub);
-    EXPECT_NE(asBinary(outer->right.get()), nullptr);
+    // Right operand is the plain identifier `c`; if it were a nested Sub the
+    // expression would be right-associative instead.
+    ASSERT_NE(outer->right.get(), nullptr);
+    EXPECT_EQ(asBinary(outer->right.get()), nullptr);
 }
 
 TEST_F(OperatorPrecedenceTest, AssignmentIsRightAssociative) {

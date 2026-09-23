@@ -33,7 +33,7 @@
 - `[ ]` **INF-05** CI：Linux/macOS/Windows 矩阵、交叉编译、ABI 测试、性能基准。（外围仅限构建/测试，不含 LSP/包管理）
 - `[~]` **INF-06** 文档系统：语言规范（EBNF 语法）、类型/ABI 文档、`compile_time` API 文档。（**提前到 P0**，见 P0-07；骨架已建 `docs/spec/`）
 - `[~]` **INF-09** `(新)` **规范性文法（EBNF）**：完整产生式覆盖声明/类型/表达式/语句/注解/模块/`namespace`；作为规范唯一权威来源。（skeleton 见 `docs/spec/grammar.ebnf`；ABI/转换/语义分册待补）
-- `[~]` **INF-10** `(新)` **运算符优先级/结合性总表**：表驱动，并与解析器实现绑定一致性测试。（表已入 `docs/spec/grammar.ebnf` §9，实现于 `smc::getOperatorInfo`，测试 `tests/frontend/test_operator_precedence.cpp`；待 CI 执行确认）
+- `[x]` **INF-10** `(新)` **运算符优先级/结合性总表**：表驱动，并与解析器实现绑定一致性测试。（表在 `docs/spec/grammar.ebnf` §9，实现于 `smc::getOperatorInfo`；`tests/frontend/test_operator_precedence.cpp` 10 项，全量 538 测试通过）
 - `[~]` **INF-11** `(新)` **关键字与保留字总表**：数据类型/存储类/控制流/模块/注解/限定符；区分已用与保留未用。（见 `docs/spec/keywords.md`；`[decide]` 项待 DEC-18 裁决）
 - `[ ]` **INF-12** `(新)` **语言版本标识**：`-std=` 取值、默认版本、特性门控（不含 edition，见 NG-06）。
 - `[ ]` **INF-13** `(新)` **诊断格式规范**：错误码命名、位置格式、严重级别、稳定输出（配合 INF-03、TOOL-09）。
