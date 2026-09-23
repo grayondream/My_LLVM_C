@@ -57,3 +57,47 @@ TEST(DiagnosticTest, FormatMatchesStandardCompilerFormat) {
     std::string expected = "error: undeclared identifier 'x'\n  --> src/main.c:42:8";
     EXPECT_EQ(formatted, expected);
 }
+
+// ===== INF-13: code registry and code-tagged formatting =====
+
+TEST(DiagnosticTest, CodeRegistryLookup) {
+    EXPECT_EQ(diagnosticId(DiagnosticCode::SemUndeclaredIdentifier), "E2001");
+    EXPECT_EQ(diagnosticId(DiagnosticCode::SemIncompatibleAssignment), "E2003");
+    EXPECT_EQ(diagnosticId(DiagnosticCode::WarnUnusedVariable), "W3002");
+    EXPECT_EQ(diagnosticId(DiagnosticCode::None), "");
+    EXPECT_EQ(std::string(diagnosticInfo(DiagnosticCode::SemAmbiguousCall).description),
+              "ambiguous call");
+}
+
+TEST(DiagnosticTest, FormatWithSeverityIncludesCode) {
+    Diagnostic diag(Diagnostic::Level::Error, DiagnosticCode::SemTypeMismatch,
+                    "type mismatch", "main.c", 10, 5);
+    std::string formatted = diag.formatWithSeverity();
+    EXPECT_NE(formatted.find("main.c:10:5:"), std::string::npos);
+    EXPECT_NE(formatted.find("error[E2002]"), std::string::npos);
+    EXPECT_NE(formatted.find("type mismatch"), std::string::npos);
+}
+
+TEST(DiagnosticTest, FormatWithSeverityOmitsUnknownCode) {
+    Diagnostic diag(Diagnostic::Level::Warning, "plain warning", "test.c", 1, 1);
+    std::string formatted = diag.formatWithSeverity();
+    EXPECT_NE(formatted.find("warning:"), std::string::npos);
+    EXPECT_EQ(formatted.find("[]"), std::string::npos);
+}
+
+TEST(DiagnosticTest, FixSuggestionsAreRendered) {
+    Diagnostic diag(Diagnostic::Level::Error, DiagnosticCode::SemUndeclaredIdentifier,
+                    "use of undeclared identifier 'coun'", "test.c", 3, 12);
+    diag.addFix("did you mean 'count'?");
+    std::string formatted = diag.formatWithSeverity();
+    EXPECT_NE(formatted.find("fix: did you mean 'count'?"), std::string::npos);
+}
+
+TEST(DiagnosticTest, SeverityHelpers) {
+    Diagnostic err(Diagnostic::Level::Error, "e", "f", 1, 1);
+    Diagnostic warn(Diagnostic::Level::Warning, "w", "f", 1, 1);
+    EXPECT_TRUE(err.isError());
+    EXPECT_FALSE(err.isWarning());
+    EXPECT_TRUE(warn.isWarning());
+    EXPECT_FALSE(warn.isError());
+}

@@ -32,6 +32,14 @@ void SemanticAnalyzer::emitWarning(const std::string& msg, const ASTNode& node) 
     errors.emplace_back(Diagnostic::Level::Warning, msg, node.sourceFile, node.sourceLine, node.sourceColumn);
 }
 
+void SemanticAnalyzer::emitError(DiagnosticCode code, const std::string& msg, const ASTNode& node) {
+    errors.emplace_back(Diagnostic::Level::Error, code, msg, node.sourceFile, node.sourceLine, node.sourceColumn);
+}
+
+void SemanticAnalyzer::emitWarning(DiagnosticCode code, const std::string& msg, const ASTNode& node) {
+    errors.emplace_back(Diagnostic::Level::Warning, code, msg, node.sourceFile, node.sourceLine, node.sourceColumn);
+}
+
 void SemanticAnalyzer::enterScope() {
     currentScope = new Scope(currentScope);
 }
@@ -286,14 +294,16 @@ Type* SemanticAnalyzer::checkAssignmentTypes(Type* lhs, Type* rhs, ExprAST& node
     if (isPointerOrArray(lhs) && isPointerOrArray(rhs)) return lhs;
     if (isPointerOrArray(lhs) && isIntegerType(rhs)) return lhs;
 
-    emitError("incompatible types in assignment: cannot assign '" + typeToString(rhs) + "' to '" + typeToString(lhs) + "'", node);
+    emitError(DiagnosticCode::SemIncompatibleAssignment,
+              "incompatible types in assignment: cannot assign '" + typeToString(rhs) +
+                  "' to '" + typeToString(lhs) + "'", node);
     return nullptr;
 }
 
 Type* SemanticAnalyzer::checkFunctionCall(const std::string& name, const std::vector<std::unique_ptr<ExprAST>>& args, ExprAST& node, FunctionType** outFuncType) {
     OverloadSet* overloadSet = currentScope->lookupOverload(name);
     if (!overloadSet || overloadSet->empty()) {
-        emitError("use of undeclared function '" + name + "'", node);
+        emitError(DiagnosticCode::SemUnresolvedCall, "use of undeclared function '" + name + "'", node);
         return nullptr;
     }
 
@@ -331,9 +341,9 @@ Type* SemanticAnalyzer::checkFunctionCall(const std::string& name, const std::ve
             }
         }
         if (anyViable) {
-            emitError("ambiguous call to overloaded function '" + name + "'", node);
+            emitError(DiagnosticCode::SemAmbiguousCall, "ambiguous call to overloaded function '" + name + "'", node);
         } else {
-            emitError("no matching function for call to '" + name + "'", node);
+            emitError(DiagnosticCode::SemUnresolvedCall, "no matching function for call to '" + name + "'", node);
         }
         return nullptr;
     }
@@ -466,10 +476,117 @@ std::optional<SemanticAnalyzer::ConstValue> SemanticAnalyzer::evaluateConstexpr(
     }
 
     if (auto* var = dynamic_cast<VariableExprAST*>(expr)) {
+        // A parameter/local of the constexpr function being interpreted shadows
+        // any module-level constexpr variable.
+        if (activeEnv) {
+            auto envIt = activeEnv->find(var->name);
+            if (envIt != activeEnv->end()) {
+                return envIt->second;
+            }
+        }
         auto it = constexprValues.find(var->name);
         if (it != constexprValues.end()) {
             return it->second;
         }
+        return std::nullopt;
+    }
+
+    if (auto* call = dynamic_cast<CallExprAST*>(expr)) {
+        return evalConstexprCall(*call, 0);
+    }
+
+    return std::nullopt;
+}
+
+bool SemanticAnalyzer::constValueTruthy(const ConstValue& v) {
+    switch (v.type) {
+        case ConstValue::INT:    return v.intVal != 0;
+        case ConstValue::CHAR:   return v.charVal != 0;
+        case ConstValue::DOUBLE: return v.doubleVal != 0.0;
+    }
+    return false;
+}
+
+std::optional<SemanticAnalyzer::ConstValue>
+SemanticAnalyzer::evalConstexprCall(CallExprAST& call, int depth) {
+    if (depth > kConstexprMaxDepth || constexprCallDepth >= kConstexprMaxDepth) {
+        return std::nullopt; // runaway recursion: fall back to runtime evaluation
+    }
+    auto it = constexprFunctions.find(call.callee);
+    if (it == constexprFunctions.end()) {
+        return std::nullopt; // not a constexpr function (e.g. a libc call)
+    }
+    FunctionDeclAST* fn = it->second;
+    if (!fn->body || call.args.size() != fn->params.size()) {
+        return std::nullopt;
+    }
+
+    // Evaluate arguments in the caller's environment, then bind parameters.
+    ConstEnv env = activeEnv ? *activeEnv : ConstEnv{};
+    for (size_t i = 0; i < fn->params.size(); ++i) {
+        auto arg = evaluateConstexpr(call.args[i].get());
+        if (!arg) {
+            return std::nullopt;
+        }
+        env[fn->params[i]->name] = *arg;
+    }
+
+    ConstEnv* saved = activeEnv;
+    activeEnv = &env;
+    constexprCallDepth++;
+    auto result = evalConstexprStmt(fn->body.get(), env, depth + 1);
+    constexprCallDepth--;
+    activeEnv = saved;
+    return result;
+}
+
+std::optional<SemanticAnalyzer::ConstValue>
+SemanticAnalyzer::evalConstexprStmt(StmtAST* stmt, ConstEnv& env, int depth) {
+    if (!stmt || depth > kConstexprMaxDepth) {
+        return std::nullopt;
+    }
+    (void)env;
+
+    if (auto* ret = dynamic_cast<ReturnStmtAST*>(stmt)) {
+        ConstValue zero;
+        zero.type = ConstValue::INT;
+        zero.intVal = 0;
+        return ret->value ? evaluateConstexpr(ret->value.get()) : std::optional<ConstValue>(zero);
+    }
+
+    if (auto* block = dynamic_cast<CompoundStmtAST*>(stmt)) {
+        for (auto& inner : block->stmts) {
+            if (auto result = evalConstexprStmt(inner.get(), env, depth + 1)) {
+                return result;
+            }
+        }
+        return std::nullopt;
+    }
+
+    if (auto* ifs = dynamic_cast<IfStmtAST*>(stmt)) {
+        auto cond = evaluateConstexpr(ifs->cond.get());
+        if (!cond) {
+            return std::nullopt;
+        }
+        if (constValueTruthy(*cond)) {
+            return evalConstexprStmt(ifs->thenStmt.get(), env, depth + 1);
+        }
+        return evalConstexprStmt(ifs->elseStmt.get(), env, depth + 1);
+    }
+
+    if (auto* ds = dynamic_cast<DeclStmtAST*>(stmt)) {
+        if (auto* vd = dynamic_cast<VarDeclAST*>(ds->decl.get())) {
+            if (vd->initExpr) {
+                if (auto value = evaluateConstexpr(vd->initExpr.get())) {
+                    env[vd->name] = *value;
+                }
+            }
+        }
+        return std::nullopt;
+    }
+
+    if (auto* es = dynamic_cast<ExprStmtAST*>(stmt)) {
+        evaluateConstexpr(es->expr.get());
         return std::nullopt;
     }
 
@@ -499,7 +616,7 @@ void SemanticAnalyzer::visit(StringExprAST& node) {
 void SemanticAnalyzer::visit(VariableExprAST& node) {
     Symbol* sym = lookup(node.name);
     if (!sym) {
-        emitError("use of undeclared identifier '" + node.name + "'", node);
+        emitError(DiagnosticCode::SemUndeclaredIdentifier, "use of undeclared identifier '" + node.name + "'", node);
         node.type = nullptr;
     } else if (sym->type && sym->type->kind == TypeKind::Function) {
         // A function used as a value decays to a function pointer.
@@ -795,7 +912,9 @@ void SemanticAnalyzer::visit(TernaryExprAST& node) {
 void SemanticAnalyzer::visit(CastExprAST& node) {
     Type* exprType = getExprType(*node.expr);
     if (exprType && node.castType && !typesCompatible(exprType, node.castType)) {
-        emitWarning("incompatible cast from '" + typeToString(exprType) + "' to '" + typeToString(node.castType) + "'", node);
+        emitWarning(DiagnosticCode::SemIncompatibleCast,
+                    "incompatible cast from '" + typeToString(exprType) +
+                        "' to '" + typeToString(node.castType) + "'", node);
     }
     node.type = node.castType;
     node.isLValue = false;
@@ -1106,7 +1225,7 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
         }
     }
     if (!declare(node.name, node.type)) {
-        emitError("redeclaration of variable '" + node.name + "' in the same scope", node);
+        emitError(DiagnosticCode::SemRedefinition, "redeclaration of variable '" + node.name + "' in the same scope", node);
     }
 }
 
@@ -1265,6 +1384,11 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
         }
     }
 
+    if (node.isConstexpr) {
+        // Available to the compile-time evaluator (evaluateConstexpr).
+        constexprFunctions[node.name] = &node;
+    }
+
     std::vector<Type*> paramTypes;
     for (auto& param : node.params) {
         paramTypes.push_back(param->type);
@@ -1276,7 +1400,7 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
         // prototypes or a prototype followed by its definition; only two
         // definitions of the same signature are an error.
         if (node.body && definedFunctions.count(signature)) {
-            emitError("redefinition of function '" + node.name + "'", node);
+            emitError(DiagnosticCode::SemRedefinition, "redefinition of function '" + node.name + "'", node);
         } else if (node.body) {
             definedFunctions.insert(signature);
         }

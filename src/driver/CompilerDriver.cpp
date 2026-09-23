@@ -248,6 +248,12 @@ int CompilerDriver::compileFile(const std::string& inputFile) {
         LOGE("parse ast failed");
         return 1;
     }
+    if (!parser.getErrors().empty()) {
+        for (const auto& diag : parser.getErrors()) {
+            std::cerr << diag.formatWithSeverity() << "\n";
+        }
+        return 1;
+    }
 
     if (syntaxOnly) {
         return 0;
@@ -269,8 +275,8 @@ int CompilerDriver::compileFile(const std::string& inputFile) {
     SemanticAnalyzer analyzer;
     analyzer.analyze(*ast);
     if (!analyzer.getErrors().empty()) {
-        for (const auto& err : analyzer.getErrors()) {
-            LOGE("semantic error: {}", err.message);
+        for (const auto& diag : analyzer.getErrors()) {
+            std::cerr << diag.formatWithSeverity() << "\n";
         }
         return 1;
     }

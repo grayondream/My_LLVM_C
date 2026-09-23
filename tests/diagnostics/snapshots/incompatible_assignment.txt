@@ -1,0 +1,1 @@
+error[E2003]: incompatible types in assignment: cannot assign 'struct S' to 'int'

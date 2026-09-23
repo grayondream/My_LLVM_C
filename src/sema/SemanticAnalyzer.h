@@ -38,9 +38,14 @@ public:
     std::optional<ConstValue> evaluateConstexpr(ExprAST* expr);
     const std::unordered_map<std::string, ConstValue>& getConstexprValues() const { return constexprValues; }
 
+    // Compile-time environment used while interpreting a constexpr function.
+    using ConstEnv = std::unordered_map<std::string, ConstValue>;
+
 private:
     void emitError(const std::string& msg, const ASTNode& node);
     void emitWarning(const std::string& msg, const ASTNode& node);
+    void emitError(DiagnosticCode code, const std::string& msg, const ASTNode& node);
+    void emitWarning(DiagnosticCode code, const std::string& msg, const ASTNode& node);
     bool isIntegerType(Type* type) const;
     bool isFloatType(Type* type) const;
     bool isArithmeticType(Type* type) const;
@@ -57,6 +62,12 @@ private:
     bool tryAnalyzePrintCall(CallExprAST& node);
     bool lowerToString(CallExprAST& node, size_t argIndex, Type* argType);
     bool hasCircularInheritance(const std::string& className, const std::string& baseClass) const;
+
+    // constexpr function interpretation (CT-06 seed): evaluate a call and walk
+    // the function body's statements (return / if / block / local decl).
+    std::optional<ConstValue> evalConstexprCall(CallExprAST& call, int depth);
+    std::optional<ConstValue> evalConstexprStmt(StmtAST* stmt, ConstEnv& env, int depth);
+    static bool constValueTruthy(const ConstValue& v);
 
     void visit(TranslationUnitAST& node);
     void visit(FunctionDeclAST& node);
@@ -115,4 +126,8 @@ private:
     TypeContext* typeCtx;
     std::unordered_map<std::string, ConstValue> constexprValues;
     std::unordered_set<std::string> definedFunctions;
+    std::unordered_map<std::string, FunctionDeclAST*> constexprFunctions;
+    ConstEnv* activeEnv = nullptr; // innermost constexpr call environment
+    int constexprCallDepth = 0;    // guards runaway constexpr recursion
+    static constexpr int kConstexprMaxDepth = 128;
 };

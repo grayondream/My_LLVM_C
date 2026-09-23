@@ -809,6 +809,14 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
         return parseCompoundStmt();
     }
 
+    // local constexpr declaration: `constexpr T name = ...;`
+    if (check(TokenType::TOKEN_CONSTEXPR)) {
+        auto decl = parseDeclaration();
+        if (decl) {
+            return std::make_unique<DeclStmtAST>(std::move(decl));
+        }
+    }
+
     // local declaration (type keyword or typedef name)
     if (isTypeStart() || check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE)) {
         size_t savedPos = m_currentTokenPos;

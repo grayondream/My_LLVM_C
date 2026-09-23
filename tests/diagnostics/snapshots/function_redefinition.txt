@@ -1,0 +1,1 @@
+error[E2004]: redefinition of function 'f'

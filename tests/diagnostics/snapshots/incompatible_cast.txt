@@ -1,0 +1,1 @@
+warning[E2006]: incompatible cast from 'struct S' to 'float'
