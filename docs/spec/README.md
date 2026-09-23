@@ -9,6 +9,8 @@
 | [`abi.md`](./abi.md) | 类型布局、传参/返回 ABI、名称修饰、端序对齐 | TYP-27 / MEM-14~16 / MOD-15 |
 | [`conversions.md`](./conversions.md) | 隐式/显式转换矩阵、整数提升、重载转换等级 | TYP-19 ~ TYP-24 |
 | [`semantics.md`](./semantics.md) | 求值顺序、`defer`、重载解析、静态检查清单 | SEM-13 ~ SEM-18 |
+| [`modules.md`](./modules.md) | 模块/文件映射、`namespace`、导入可见性、名称解析 | MOD-01 ~ MOD-15 |
+| [`compile_time.md`](./compile_time.md) | `compile_time` 语法、求值器、反射 API、沙箱 | CT-01 ~ CT-14 |
 
 > 各分册均为**草案**：`[impl]` 部分已与实现对齐，`[plan]` 部分待对应 DEC 裁决后冻结。
 

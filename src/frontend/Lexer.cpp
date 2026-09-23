@@ -40,7 +40,6 @@ static const std::unordered_map<std::string, TokenType> keywordMap = {
     {"static", TokenType::TOKEN_STATIC},
     {"extern", TokenType::TOKEN_EXTERN},
     {"volatile", TokenType::TOKEN_VOLATILE},
-    {"register", TokenType::TOKEN_REGISTER},
 
     // ===== sizeof / 类型 =====
     {"sizeof", TokenType::TOKEN_SIZEOF},
@@ -66,11 +65,7 @@ static const std::unordered_map<std::string, TokenType> keywordMap = {
     {"export", TokenType::TOKEN_EXPORT},
     {"public", TokenType::TOKEN_PUBLIC},
     {"private", TokenType::TOKEN_PRIVATE},
-    {"comptime", TokenType::TOKEN_COMPTIME},
     {"defer", TokenType::TOKEN_DEFER},
-    {"generic", TokenType::TOKEN_GENERIC},
-    {"cast", TokenType::TOKEN_CAST},
-    {"typeof", TokenType::TOKEN_TYPEOF},
     {"alignof", TokenType::TOKEN_ALIGNOF},
     {"offsetof", TokenType::TOKEN_OFFSETOF},
 

@@ -2,6 +2,7 @@
 #include <memory>
 #include "ast/Decl.h"
 #include "ast/Mangle.h"
+#include "frontend/OperatorPrecedence.h"
 #include "frontend/Token.h"
 
 namespace {
@@ -201,60 +202,14 @@ std::optional<Token> Parser::match(TokenType type) {
 
 // ========== Precedence & Associativity ==========
 
+// Precedence/associativity live in the normative table (smc::getOperatorInfo),
+// which mirrors docs/spec/grammar.ebnf §9 and is pinned by unit tests.
 int Parser::getPrecedence(TokenType op) const {
-    switch (op) {
-        case TokenType::TOKEN_COMMA:        return 1;   // ,
-        case TokenType::TOKEN_ASSIGN:
-        case TokenType::TOKEN_PLUS_EQ:
-        case TokenType::TOKEN_MINUS_EQ:
-        case TokenType::TOKEN_STAR_EQ:
-        case TokenType::TOKEN_SLASH_EQ:
-        case TokenType::TOKEN_PERCENT_EQ:
-        case TokenType::TOKEN_AMP_EQ:
-        case TokenType::TOKEN_PIPE_EQ:
-        case TokenType::TOKEN_CARET_EQ:
-        case TokenType::TOKEN_LSHIFT_EQ:
-        case TokenType::TOKEN_RSHIFT_EQ:    return 2;   // = += -= *= /= %= &= |= ^= <<= >>=
-        case TokenType::TOKEN_QUESTION:     return 3;   // ?:
-        case TokenType::TOKEN_OR:           return 4;   // ||
-        case TokenType::TOKEN_AND:          return 5;   // &&
-        case TokenType::TOKEN_BIT_OR:       return 6;   // |
-        case TokenType::TOKEN_CARET:        return 7;   // ^
-        case TokenType::TOKEN_BIT_AND:      return 8;   // &
-        case TokenType::TOKEN_EQ:
-        case TokenType::TOKEN_NOT_EQ:       return 9;   // == !=
-        case TokenType::TOKEN_LT:
-        case TokenType::TOKEN_GT:
-        case TokenType::TOKEN_LE:
-        case TokenType::TOKEN_GE:           return 10;  // < > <= >=
-        case TokenType::TOKEN_LSHIFT:
-        case TokenType::TOKEN_RSHIFT:       return 11;  // << >>
-        case TokenType::TOKEN_PLUS:
-        case TokenType::TOKEN_MINUS:        return 12;  // + -
-        case TokenType::TOKEN_STAR:
-        case TokenType::TOKEN_SLASH:
-        case TokenType::TOKEN_PERCENT:      return 13;  // * / %
-        default:                            return 0;   // not an infix operator
-    }
+    return smc::getOperatorInfo(op).precedence;
 }
 
 bool Parser::isRightAssociative(TokenType op) const {
-    switch (op) {
-        case TokenType::TOKEN_ASSIGN:
-        case TokenType::TOKEN_PLUS_EQ:
-        case TokenType::TOKEN_MINUS_EQ:
-        case TokenType::TOKEN_STAR_EQ:
-        case TokenType::TOKEN_SLASH_EQ:
-        case TokenType::TOKEN_PERCENT_EQ:
-        case TokenType::TOKEN_AMP_EQ:
-        case TokenType::TOKEN_PIPE_EQ:
-        case TokenType::TOKEN_CARET_EQ:
-        case TokenType::TOKEN_LSHIFT_EQ:
-        case TokenType::TOKEN_RSHIFT_EQ:
-            return true;
-        default:
-            return false;
-    }
+    return smc::getOperatorInfo(op).rightAssociative;
 }
 
 // ========== Token to Operator Conversion ==========

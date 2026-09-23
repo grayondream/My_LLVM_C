@@ -31,7 +31,6 @@ static std::string TokenTypeToString(TokenType type) {
         case TokenType::TOKEN_STATIC:     return "static";
         case TokenType::TOKEN_EXTERN:     return "extern";
         case TokenType::TOKEN_VOLATILE:   return "volatile";
-        case TokenType::TOKEN_REGISTER:   return "register";
         case TokenType::TOKEN_SIZEOF:     return "sizeof";
         case TokenType::TOKEN_TYPEDEF:    return "typedef";
         case TokenType::TOKEN_INLINE:     return "inline";
@@ -51,11 +50,7 @@ static std::string TokenTypeToString(TokenType type) {
         case TokenType::TOKEN_EXPORT:     return "export";
         case TokenType::TOKEN_PUBLIC:     return "public";
         case TokenType::TOKEN_PRIVATE:    return "private";
-        case TokenType::TOKEN_COMPTIME:   return "comptime";
         case TokenType::TOKEN_DEFER:      return "defer";
-        case TokenType::TOKEN_GENERIC:    return "generic";
-        case TokenType::TOKEN_CAST:       return "cast";
-        case TokenType::TOKEN_TYPEOF:     return "typeof";
         case TokenType::TOKEN_ALIGNOF:    return "alignof";
         case TokenType::TOKEN_OFFSETOF:   return "offsetof";
         case TokenType::TOKEN_INT8:       return "int8";

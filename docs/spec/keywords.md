@@ -36,7 +36,7 @@
 | `volatile` | `[impl]` | |
 | `restrict` | `[impl]` | 语义见 MEM-04 |
 | `inline` | `[impl]` | |
-| `register` | `[remove]` | 无实际语义，建议废弃，见 DEC-18 |
+| `register` | `[remove]` | 无实际语义；DEC-18 已裁决移除 token |
 | `thread_local` | `[plan]` | 存储类，见 CON-04 / DEC-12 |
 | `atomic` | `[decide]` | 限定符还是类型构造器见 DEC-11 |
 
@@ -64,7 +64,7 @@
 | `this` | `[plan]` | CRTP 必需，PAR-17 / INH-05 |
 | `using` | `[impl]` 上下文 | 类型别名 `using X = T;` |
 | `type` | `[impl]` 上下文 | distinct 别名 `type X = T;` |
-| `generic` | `[remove]` | 未使用的旧泛型关键字，弃用（LEX-02） |
+| `generic` | `[remove]` | 未使用的旧泛型关键字；token 已移除（LEX-02 / DEC-18） |
 
 ## 5. 模块 / 可见性
 
@@ -85,13 +85,13 @@
 | `constexpr` | `[impl]` | 见 §2 |
 | `true` / `false` | `[impl]` | 布尔字面量 |
 | `null` | `[impl]` | 空字面量 |
-| `comptime` | `[remove]` | 统一并入 `compile_time`，弃用旧名（CT-01 / NG-12） |
+| `comptime` | `[remove]` | 统一并入 `compile_time`；token 已移除（CT-01 / NG-12 / DEC-18） |
 | `compile_time` | `[plan]` | 编译期命名空间（非保留字，按标识符处理即可） |
 | `static_assert` | `[plan]` | 作为 `compile_time.static_assert`，**不设独立关键字**（NG-12） |
 | `sizeof` | `[impl]` | 一元运算符 |
 | `alignof` / `offsetof` | `[impl]` token | 语义/语法完善见 PAR-14 |
-| `typeof` | `[decide]` | 既有 token，去留见 DEC-18 |
-| `cast` | `[decide]` | 既有 token，去留见 DEC-18 |
+| `typeof` | `[remove]` | DEC-18 裁决移除；类型查询改由 `compile_time` 反射（CT-07）承担 |
+| `cast` | `[remove]` | DEC-18 裁决移除；显式转换用 `static_cast`/`reinterpret_cast`（LEX-11） |
 | `type_info` | `[remove]` | 由 `compile_time` 反射取代（NG-12） |
 
 ## 7. 泛型 / 转换 / 汇编
@@ -128,4 +128,4 @@
 1. 本表为**唯一权威**；新增关键字需同步更新 `Lexer.cpp`、`Token.h` 与本文件。
 2. 不以关键字形式复用的标识符：`str`、`String`、`Array` 等标准库类型名保持普通标识符。
 3. 上下文关键字（`using`/`type`/`protected`/`compile_time`）在引入二义性前不改为一等关键字，见 DEC-16。
-4. `[decide]` 项（`register`/`cast`/`typeof`）由 DEC-18 统一裁决并回填本表状态。
+4. **DEC-18 已裁决**：移除 `register`/`cast`/`typeof`/`comptime`/`generic` 的 token（已从 `Token.h`、`Lexer.cpp`、`Utils.cpp` 删除）。显式转换改用 `static_cast`/`reinterpret_cast`（LEX-11），类型查询改用 `compile_time` 反射（CT-07）。

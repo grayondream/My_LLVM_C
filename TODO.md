@@ -33,7 +33,7 @@
 - `[ ]` **INF-05** CI：Linux/macOS/Windows 矩阵、交叉编译、ABI 测试、性能基准。（外围仅限构建/测试，不含 LSP/包管理）
 - `[~]` **INF-06** 文档系统：语言规范（EBNF 语法）、类型/ABI 文档、`compile_time` API 文档。（**提前到 P0**，见 P0-07；骨架已建 `docs/spec/`）
 - `[~]` **INF-09** `(新)` **规范性文法（EBNF）**：完整产生式覆盖声明/类型/表达式/语句/注解/模块/`namespace`；作为规范唯一权威来源。（skeleton 见 `docs/spec/grammar.ebnf`；ABI/转换/语义分册待补）
-- `[~]` **INF-10** `(新)` **运算符优先级/结合性总表**：表驱动，并与解析器实现绑定一致性测试。（表已入 `docs/spec/grammar.ebnf` §9；一致性测试待补）
+- `[~]` **INF-10** `(新)` **运算符优先级/结合性总表**：表驱动，并与解析器实现绑定一致性测试。（表已入 `docs/spec/grammar.ebnf` §9，实现于 `smc::getOperatorInfo`，测试 `tests/frontend/test_operator_precedence.cpp`；待 CI 执行确认）
 - `[~]` **INF-11** `(新)` **关键字与保留字总表**：数据类型/存储类/控制流/模块/注解/限定符；区分已用与保留未用。（见 `docs/spec/keywords.md`；`[decide]` 项待 DEC-18 裁决）
 - `[ ]` **INF-12** `(新)` **语言版本标识**：`-std=` 取值、默认版本、特性门控（不含 edition，见 NG-06）。
 - `[ ]` **INF-13** `(新)` **诊断格式规范**：错误码命名、位置格式、严重级别、稳定输出（配合 INF-03、TOOL-09）。
@@ -45,7 +45,7 @@
 ## 2. 词法分析（LEX）
 
 - `[ ]` **LEX-01** `(已实现)` 关键字与基础类型关键字词法；核对与规范一致。
-- `[ ]` **LEX-02** `(新)` 新增关键字 token：`template`、`typename`、`this`；弃用未使用的 `generic`。
+- `[~]` **LEX-02** `(新)` 新增关键字 token：`template`、`typename`、`this`；弃用未使用的 `generic`。（`generic`/`comptime` token 已按 DEC-18 移除；`template`/`typename`/`this` 待补）
 - `[ ]` **LEX-03** `(改)` 移除/废弃：C 预处理器与宏相关 token（`#include/#define/#if`）与 `-E/-I/-D`（见 Non-goals）。
 - `[ ]` **LEX-04** `(已实现)` 整型字面量：十进制/十六进制/二进制/八进制/分隔符/后缀；补全测试。
 - `[ ]` **LEX-05** `(已实现)` 浮点字面量：小数/指数/`f16/f32/f64/f128` 后缀；补全测试。
@@ -57,7 +57,7 @@
 - `[ ]` **LEX-11** `static_cast<T>(x)` / `reinterpret_cast<T>(x)` 等转换关键字（为 INH/CRTP 铺路）。
 - `[ ]` **LEX-12** 内联汇编 `asm` token。
 - `[ ]` **LEX-13** 错误恢复与词法诊断（非法字符、未闭合字面量、整型溢出）。
-- `[ ]` **LEX-14** `(新)` **关键字/保留字总表落地**（配合 INF-11）：`register`/`cast`/`typeof` 处置（见 DEC-18）；新增 `namespace` 关键字（见 PAR-22/MOD-12）。
+- `[~]` **LEX-14** `(新)` **关键字/保留字总表落地**（配合 INF-11）：`register`/`cast`/`typeof` 已按 DEC-18 移除 token；新增 `namespace` 关键字待补（见 PAR-22/MOD-12）。
 - `[ ]` **LEX-15** `(新)` **字面量默认类型与后缀映射**：无后缀整型/浮点的默认类型，`u`/`l`/`f16`…后缀 → 底层类型表。
 - `[ ]` **LEX-16** `(新)` **转义字符全集、原始字符串与多行字符串**的精确词法规则（细化 LEX-06）。
 - `[ ]` **LEX-17** `(新)` **数字分隔符位置规则、进制前缀、整型字面量溢出诊断**（细化 LEX-04/13）。
@@ -107,9 +107,9 @@
 - `[ ]` **MOD-09** `(改)` **C 互操作（无预处理器方案）**：不解析真实 C 头文件，改用 `extern` 声明 + 内置 `std.c` 绑定层（**关键缺口**，见 INF/NOTES）。
 - `[ ]` **MOD-10** 增量编译：模块/AST/类型/IR 缓存与失效策略（内容哈希）。
 - `[ ]` **MOD-11** 导入符号访问语法待定并实现（`math.add` 还是直接 `add`）。
-- `[ ]` **MOD-12** `(新)` `namespace` 语义：嵌套/开放命名空间、限定查找、与模块的关系（见 DEC-17）。
-- `[ ]` **MOD-13** `(新)` 模块/编译单元文件布局：文件 ↔ 模块映射、导出单元、单文件多模块规则。
-- `[ ]` **MOD-14** `(新)` `import` 搜索路径与名称解析顺序、循环导入诊断细化（细化 MOD-07）。
+- `[~]` **MOD-12** `(新)` `namespace` 语义：嵌套/开放命名空间、限定查找、与模块的关系（见 DEC-17）。（草案见 `docs/spec/modules.md`）
+- `[~]` **MOD-13** `(新)` 模块/编译单元文件布局：文件 ↔ 模块映射、导出单元、单文件多模块规则。（草案见 `docs/spec/modules.md`）
+- `[~]` **MOD-14** `(新)` `import` 搜索路径与名称解析顺序、循环导入诊断细化（细化 MOD-07）。（草案见 `docs/spec/modules.md`）
 - `[~]` **MOD-15** `(新)` **名称修饰方案（规范性）**：C ABI、方法、模板单态化、`static` 成员、namespace 的完整规则（细化 MOD-08）。（现状+目标见 `docs/spec/abi.md`）
 
 ---
@@ -275,20 +275,20 @@
 
 > 以 `compile_time` 命名空间统一承载；**不再使用 `type_info(T)` 与独立 `static_assert` 关键字**。
 
-- `[ ]` **CT-01** `compile_time` 语法入口：`comptime` 关键字统一并入 `compile_time`（弃用旧名）。
-- `[ ]` **CT-02** `compile_time.static_assert(cond, msg)`：编译期断言，失败带源码位置诊断。
-- `[ ]` **CT-03** `compile_time.if(cond) { ... }`：条件编译与死代码消除。
-- `[ ]` **CT-04** 目标查询：`compile_time.target.os/arch/cpu`。
-- `[ ]` **CT-05** 构建查询：`compile_time.build.debug` 等。
-- `[ ]` **CT-06** 编译期求值器：解释 AST、常量折叠、字符串比较/整数运算/布尔逻辑。
-- `[ ]` **CT-07** 反射 API（取代 `type_info`）：类型名、大小、对齐、字段、偏移、属性。
-- `[ ]` **CT-08** 类型作为值：编译期与类型系统交互。
-- `[ ]` **CT-09** 编译期缓存：求值结果缓存、增量编译。
-- `[ ]` **CT-10** 编译期错误诊断：位置、求值栈、原因。
-- `[ ]` **CT-11** 编译期沙箱：限制文件/网络/系统访问。
-- `[ ]` **CT-12** 与 LLVM 常量集成。
-- `[ ]` **CT-13** `(新)` `compile_time` 反射 API 的精确签名与返回类型（取代 `type_info`，细化 CT-07）。
-- `[ ]` **CT-14** `(新)` `constexpr` 与 `compile_time` 的边界与互操作（落实 DEC-05）。
+- `[~]` **CT-01** `compile_time` 语法入口：`comptime` 关键字统一并入 `compile_time`（旧名 token 已移除）。（草案见 `docs/spec/compile_time.md`）
+- `[~]` **CT-02** `compile_time.static_assert(cond, msg)`：编译期断言，失败带源码位置诊断。（草案见 `docs/spec/compile_time.md`）
+- `[~]` **CT-03** `compile_time.if(cond) { ... }`：条件编译与死代码消除。（草案见 `docs/spec/compile_time.md`）
+- `[~]` **CT-04** 目标查询：`compile_time.target.os/arch/cpu`。（草案见 `docs/spec/compile_time.md`）
+- `[~]` **CT-05** 构建查询：`compile_time.build.debug` 等。（草案见 `docs/spec/compile_time.md`）
+- `[~]` **CT-06** 编译期求值器：解释 AST、常量折叠、字符串比较/整数运算/布尔逻辑。（草案见 `docs/spec/compile_time.md`）
+- `[~]` **CT-07** 反射 API（取代 `type_info`）：类型名、大小、对齐、字段、偏移、属性。（草案见 `docs/spec/compile_time.md`）
+- `[~]` **CT-08** 类型作为值：编译期与类型系统交互。（草案见 `docs/spec/compile_time.md`）
+- `[~]` **CT-09** 编译期缓存：求值结果缓存、增量编译。（草案见 `docs/spec/compile_time.md`）
+- `[~]` **CT-10** 编译期错误诊断：位置、求值栈、原因。（草案见 `docs/spec/compile_time.md`）
+- `[~]` **CT-11** 编译期沙箱：限制文件/网络/系统访问。（草案见 `docs/spec/compile_time.md`）
+- `[~]` **CT-12** 与 LLVM 常量集成。（草案见 `docs/spec/compile_time.md`）
+- `[~]` **CT-13** `(新)` `compile_time` 反射 API 的精确签名与返回类型（取代 `type_info`，细化 CT-07）。（草案见 `docs/spec/compile_time.md`）
+- `[~]` **CT-14** `(新)` `constexpr` 与 `compile_time` 的边界与互操作（落实 DEC-05）。（草案见 `docs/spec/compile_time.md`）
 
 ---
 
@@ -468,7 +468,7 @@
 - `[ ]` **DEC-15** 是否默认链接 libc（当前 `print` 依赖系统 `printf`）。
 - `[ ]` **DEC-16** `(新)` 类型别名规范形式：`typedef`/`using`/`type` 何者为准、是否全部保留。
 - `[ ]` **DEC-17** `(新)` `namespace` 与模块（`module`/`import`）的关系与共存方式。
-- `[ ]` **DEC-18** `(新)` `register`/`cast`/`typeof` 等既有 token 的废弃或保留。
+- `[x]` **DEC-18** `(新)` `register`/`cast`/`typeof` 等既有 token 的废弃或保留。→ **决定移除**（一并移除 `comptime`/`generic`）；显式转换改用 `static_cast`/`reinterpret_cast`（LEX-11），类型查询改用 `compile_time` 反射（CT-07）。已同步 `Token.h`/`Lexer.cpp`/`Utils.cpp`/`keywords.md`。
 - `[ ]` **DEC-19** `(新)` `main` 入口签名与返回值约定。
 - `[ ]` **DEC-20** `(新)` 字符串字面量所有权/生命周期与 `str`/`String` 边界。
 - `[ ]` **DEC-21** `(新)` `panic` 默认可否被捕获、是否直接 `abort`。
