@@ -20,7 +20,7 @@
 - `[x]` **BASE-07** 驱动：`-c/-o/-S/-E/-I/-D/-O/-g/-v/-Wall/-Werror/-std/-fsyntax-only/-l/-L`、JIT、`cc` 链接系统 libc。
 - `[x]` **BASE-08** 自带标准库 **libsafec**（`src/libsafec/`，`namespace safec`，独立目标 `safec` → `build/lib/libsafec.a`）：`printf/sprintf`、`malloc/free/calloc/realloc`、`strlen/strcmp/strcpy/memcpy/memset/memcmp`。
 - `[x]` **BASE-09** `resources/main.c` 可完整编译运行。全量 **528** 测试通过。
-- `[ ]` **BASE-10** `(新)` 既有实现已在 `src/libsafec/` 使用 `namespace safec`，但语言层未定义 `namespace`（规范缺口，见 PAR-22/MOD-12）。
+- `[x]` **BASE-10** `(新)` 既有实现已在 `src/libsafec/` 使用 `namespace safec`，但语言层未定义 `namespace`（规范缺口，见 PAR-22/MOD-12）。现已实现 `namespace`（值 + 类型）。
 
 ---
 
@@ -88,7 +88,7 @@
 - `[ ]` **PAR-19** AST 节点带源码位置/属性/注释/文档；AST 序列化（增量编译缓存）。
 - `[ ]` **PAR-20** 语法错误恢复与高质量诊断。
 - `[ ]` **PAR-21** `(新)` 模板声明语法 `template<typename T>` / `template<typename T, usize N>`（函数/类/别名，见 GEN）。
-- `[~]` **PAR-22** `(新)` `namespace` 声明与限定名 `ns::name` 语法（现缺失；`src/libsafec` 已使用 `namespace safec`）。函数/变量成员与嵌套命名空间已实现；限定类型名待补。
+- `[x]` **PAR-22** `(新)` `namespace` 声明与限定名 `ns::name` 语法（现缺失；`src/libsafec` 已使用 `namespace safec`）。函数/变量成员、嵌套命名空间、限定类型名（struct/class/union/enum/typedef）均已实现。
 - `[ ]` **PAR-23** `(新)` 运算符优先级/结合性在解析器中的显式实现与表驱动测试（配合 INF-10）。
 - `[ ]` **PAR-24** `(新)` 别名声明规范形式收敛：`typedef`/`using`/`type` 的取舍与统一 AST（见 DEC-16）。
 
@@ -503,7 +503,7 @@
 - `[ ]` **P0-05** 最小 `std.core` / `std.io`（STD-01/12）。
 - `[~]` **P0-06** 诊断系统与测试设施（INF-03/04）。诊断核心 + 快照设施已就绪。
 - `[ ]` **P0-07** `(新)` **语言规范骨架**：EBNF + 关键字表 + 优先级表 + 转换矩阵（INF-06/09~11、PAR-23、TYP-22/23）。
-- `[~]` **P0-08** `(新)` **namespace 支持**（PAR-22、MOD-12、DEC-17）——现有 `libsafec` 已依赖，属刚需。核心已实现（函数/变量、嵌套、限定访问）。
+- `[x]` **P0-08** `(新)` **namespace 支持**（PAR-22、MOD-12、DEC-17）——现有 `libsafec` 已依赖，属刚需。函数/变量、嵌套、限定访问、限定类型名均已实现。
 
 ### P1：核心现代能力
 - `[ ]` **P1-01** class / enum / union / 数组 / Slice（AGG、TYP-11/12）。

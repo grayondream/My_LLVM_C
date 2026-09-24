@@ -109,3 +109,39 @@ namespace A.B { int f() { return 9; } }
 int main() { return A::B::f() - 9; }
 )", "ns_nested.c"), 0);
 }
+
+TEST_F(NamespaceE2E, QualifiedStructType) {
+    EXPECT_EQ(runSource(R"(
+namespace A {
+    struct Point { int x; int y; };
+    int sum(Point* p) { return p->x + p->y; }
+}
+int main() {
+    A::Point p;
+    p.x = 3;
+    p.y = 4;
+    return A::sum(&p) - 7;
+}
+)", "ns_type_struct.c"), 0);
+}
+
+TEST_F(NamespaceE2E, QualifiedTypedefType) {
+    EXPECT_EQ(runSource(R"(
+namespace A { typedef int Handle; }
+int main() {
+    A::Handle h = 5;
+    return h - 5;
+}
+)", "ns_type_typedef.c"), 0);
+}
+
+TEST_F(NamespaceE2E, NestedQualifiedStructType) {
+    EXPECT_EQ(runSource(R"(
+namespace A.B { struct P { int v; }; }
+int main() {
+    A::B::P p;
+    p.v = 9;
+    return p.v - 9;
+}
+)", "ns_type_nested.c"), 0);
+}

@@ -7,6 +7,24 @@
 
 namespace {
 
+// Mangle a (possibly qualified) type name to a symbol-table key:
+// `A::B::T` / `A.B.T` -> `A_B_T`.
+std::string mangleQualifiedTypeName(const std::string& name) {
+    std::string out;
+    out.reserve(name.size());
+    for (size_t i = 0; i < name.size(); ++i) {
+        if (name[i] == ':' && i + 1 < name.size() && name[i + 1] == ':') {
+            out.push_back('_');
+            ++i;
+        } else if (name[i] == '.') {
+            out.push_back('_');
+        } else {
+            out.push_back(name[i]);
+        }
+    }
+    return out;
+}
+
 int hexDigit(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -1237,17 +1255,70 @@ bool Parser::isTypeStart() const {
         case TokenType::TOKEN_FLOAT64:
             return true;
         case TokenType::TOKEN_IDENTIFIER: {
-            // Check if identifier is a typedef name, class type, or struct type
-            Type* t = TypeContext::instance().getTypedef(peek()->lexeme);
-            if (t) return true;
-            ClassType* ct = TypeContext::instance().getClass(peek()->lexeme);
-            if (ct) return true;
-            StructType* st = TypeContext::instance().getStruct(peek()->lexeme);
-            return st != nullptr;
+            // A possibly `::`-qualified typedef/class/struct name (lookahead so
+            // the cursor is not disturbed).
+            size_t i = m_currentTokenPos;
+            if (i >= m_tokens.size()) return false;
+            std::string name = m_tokens[i].lexeme;
+            while (i + 2 < m_tokens.size() &&
+                   m_tokens[i + 1].type == TokenType::TOKEN_COLON_COLON &&
+                   m_tokens[i + 2].type == TokenType::TOKEN_IDENTIFIER) {
+                name += "::" + m_tokens[i + 2].lexeme;
+                i += 2;
+            }
+            return lookupNamedType(name) != nullptr;
         }
         default:
             return false;
     }
+}
+
+std::string Parser::parseQualifiedTypeName() {
+    std::string name;
+    if (!check(TokenType::TOKEN_IDENTIFIER)) {
+        return name;
+    }
+    name = advance()->lexeme;
+    while (check(TokenType::TOKEN_COLON_COLON)) {
+        size_t saved = m_currentTokenPos;
+        advance(); // consume '::'
+        if (!check(TokenType::TOKEN_IDENTIFIER)) {
+            m_currentTokenPos = saved;
+            break;
+        }
+        name += "::" + advance()->lexeme;
+    }
+    return name;
+}
+
+std::string Parser::qualifyTypeDeclName(const std::string& name) const {
+    if (name.empty()) return name;
+    if (name.find("::") != std::string::npos || name.find('.') != std::string::npos) {
+        return mangleQualifiedTypeName(name);
+    }
+    if (!m_typeNamespacePrefix.empty()) {
+        return m_typeNamespacePrefix + name;
+    }
+    return name;
+}
+
+Type* Parser::lookupNamedType(const std::string& name) const {
+    if (name.empty()) return nullptr;
+    auto& tc = TypeContext::instance();
+    auto tryKey = [&tc](const std::string& key) -> Type* {
+        if (Type* t = tc.getTypedef(key)) return t;
+        if (ClassType* c = tc.getClass(key)) return c;
+        if (StructType* s = tc.getStruct(key)) return s;
+        return nullptr;
+    };
+    if (name.find("::") != std::string::npos || name.find('.') != std::string::npos) {
+        return tryKey(mangleQualifiedTypeName(name));
+    }
+    // Unqualified: prefer the enclosing namespace, then the global name.
+    if (!m_typeNamespacePrefix.empty()) {
+        if (Type* t = tryKey(m_typeNamespacePrefix + name)) return t;
+    }
+    return tryKey(name);
 }
 
 Type* Parser::parseBaseType() {
@@ -1337,15 +1408,13 @@ Type* Parser::parseBaseType() {
         }
         case TokenType::TOKEN_STRUCT: {
             advance(); // consume 'struct'
-            std::string name;
-            if (check(TokenType::TOKEN_IDENTIFIER)) {
-                name = advance()->lexeme;
-            }
+            std::string name = parseQualifiedTypeName();
+            std::string key = qualifyTypeDeclName(name);
 
             // Check if this is a definition or just a reference
             if (check(TokenType::TOKEN_LBRACE)) {
                 advance(); // consume '{'
-                auto* structType = new StructType(name);
+                auto* structType = new StructType(key);
                 while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
                     Type* fieldType = parseType();
                     if (!fieldType) break;
@@ -1357,29 +1426,32 @@ Type* Parser::parseBaseType() {
                 }
                 match(TokenType::TOKEN_RBRACE);
                 match(TokenType::TOKEN_SEMICOLON);
-                TypeContext::instance().addStruct(name, structType);
+                TypeContext::instance().addStruct(key, structType);
                 return structType;
             }
 
-            // Just a reference to existing struct type
-            auto existing = TypeContext::instance().getStruct(name);
-            if (existing) return existing;
+            // Reference to an existing struct (qualified or, inside a
+            // namespace, the global name).
+            if (!name.empty()) {
+                if (auto* existing = TypeContext::instance().getStruct(key)) return existing;
+                if (key != name) {
+                    if (auto* existing = TypeContext::instance().getStruct(name)) return existing;
+                }
+            }
 
-            // Forward reference - create placeholder
-            auto* structType = new StructType(name);
-            TypeContext::instance().addStruct(name, structType);
+            // Forward reference - create placeholder under the qualified key
+            auto* structType = new StructType(key);
+            TypeContext::instance().addStruct(key, structType);
             return structType;
         }
         case TokenType::TOKEN_UNION: {
             advance(); // consume 'union'
-            std::string name;
-            if (check(TokenType::TOKEN_IDENTIFIER)) {
-                name = advance()->lexeme;
-            }
+            std::string name = parseQualifiedTypeName();
+            std::string key = qualifyTypeDeclName(name);
 
             if (check(TokenType::TOKEN_LBRACE)) {
                 advance(); // consume '{'
-                auto* unionType = new UnionType(name);
+                auto* unionType = new UnionType(key);
                 while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
                     Type* memberType = parseType();
                     if (!memberType) break;
@@ -1391,27 +1463,29 @@ Type* Parser::parseBaseType() {
                 }
                 match(TokenType::TOKEN_RBRACE);
                 match(TokenType::TOKEN_SEMICOLON);
-                TypeContext::instance().addUnion(name, unionType);
+                TypeContext::instance().addUnion(key, unionType);
                 return unionType;
             }
 
-            auto existing = TypeContext::instance().getUnion(name);
-            if (existing) return existing;
+            if (!name.empty()) {
+                if (auto* existing = TypeContext::instance().getUnion(key)) return existing;
+                if (key != name) {
+                    if (auto* existing = TypeContext::instance().getUnion(name)) return existing;
+                }
+            }
 
-            auto* unionType = new UnionType(name);
-            TypeContext::instance().addUnion(name, unionType);
+            auto* unionType = new UnionType(key);
+            TypeContext::instance().addUnion(key, unionType);
             return unionType;
         }
         case TokenType::TOKEN_ENUM: {
             advance(); // consume 'enum'
-            std::string name;
-            if (check(TokenType::TOKEN_IDENTIFIER)) {
-                name = advance()->lexeme;
-            }
+            std::string name = parseQualifiedTypeName();
+            std::string key = qualifyTypeDeclName(name);
 
             if (check(TokenType::TOKEN_LBRACE)) {
                 advance(); // consume '{'
-                auto* enumType = new EnumType(name);
+                auto* enumType = new EnumType(key);
                 int currentVal = 0;
                 while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
                     if (!check(TokenType::TOKEN_IDENTIFIER)) break;
@@ -1430,36 +1504,31 @@ Type* Parser::parseBaseType() {
                     advance(); // consume ','
                 }
                 match(TokenType::TOKEN_RBRACE);
-                TypeContext::instance().addEnum(name, enumType);
+                TypeContext::instance().addEnum(key, enumType);
                 return enumType;
             }
 
-            auto existing = TypeContext::instance().getEnum(name);
-            if (existing) return existing;
+            if (!name.empty()) {
+                if (auto* existing = TypeContext::instance().getEnum(key)) return existing;
+                if (key != name) {
+                    if (auto* existing = TypeContext::instance().getEnum(name)) return existing;
+                }
+            }
 
-            auto* enumType = new EnumType(name);
-            TypeContext::instance().addEnum(name, enumType);
+            auto* enumType = new EnumType(key);
+            TypeContext::instance().addEnum(key, enumType);
             return enumType;
         }
         case TokenType::TOKEN_IDENTIFIER: {
-            // Check if it's a typedef name
-            Type* typedefType = TypeContext::instance().getTypedef(tok->lexeme);
-            if (typedefType) {
-                advance();
-                return typedefType;
+            // A (possibly namespace-qualified) named type: typedef/class/struct.
+            // Look ahead without consuming so a non-type identifier leaves the
+            // cursor untouched for callers that probe.
+            size_t saved = m_currentTokenPos;
+            std::string name = parseQualifiedTypeName();
+            if (Type* named = lookupNamedType(name)) {
+                return named;
             }
-            // Check if it's a class type
-            ClassType* classType = TypeContext::instance().getClass(tok->lexeme);
-            if (classType) {
-                advance();
-                return classType;
-            }
-            // Check if it's a struct type
-            StructType* structType = TypeContext::instance().getStruct(tok->lexeme);
-            if (structType) {
-                advance();
-                return structType;
-            }
+            m_currentTokenPos = saved;
             return nullptr;
         }
         default:
@@ -1552,7 +1621,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
             advance(); // 消耗 "using"
             // 解析: using Name = Type;
             if (check(TokenType::TOKEN_IDENTIFIER)) {
-                std::string aliasName = advance()->lexeme;
+                std::string aliasName = qualifyTypeDeclName(advance()->lexeme);
                 if (match(TokenType::TOKEN_ASSIGN)) {
                     Type* aliasedType = parseType();
                     if (aliasedType) {
@@ -1575,7 +1644,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
             advance(); // 消耗 "type"
             // 解析: type Name = Type;
             if (check(TokenType::TOKEN_IDENTIFIER)) {
-                std::string typeName = advance()->lexeme;
+                std::string typeName = qualifyTypeDeclName(advance()->lexeme);
                 if (match(TokenType::TOKEN_ASSIGN)) {
                     Type* aliasedType = parseType();
                     if (aliasedType) {
@@ -2012,10 +2081,7 @@ std::unique_ptr<ParamDeclAST> Parser::parseParamDecl() {
 std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
     if (!match(TokenType::TOKEN_STRUCT)) return nullptr;
 
-    std::string name;
-    if (check(TokenType::TOKEN_IDENTIFIER)) {
-        name = advance()->lexeme;
-    }
+    std::string name = qualifyTypeDeclName(parseQualifiedTypeName());
 
     if (!check(TokenType::TOKEN_LBRACE)) {
         // Forward declaration
@@ -2047,10 +2113,7 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
 std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
     if (!match(TokenType::TOKEN_CLASS)) return nullptr;
 
-    std::string name;
-    if (check(TokenType::TOKEN_IDENTIFIER)) {
-        name = advance()->lexeme;
-    }
+    std::string name = qualifyTypeDeclName(parseQualifiedTypeName());
 
     // Parse optional inheritance: : public BaseName
     std::string baseClass;
@@ -2062,9 +2125,7 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                 advance();
             }
         }
-        if (check(TokenType::TOKEN_IDENTIFIER)) {
-            baseClass = advance()->lexeme;
-        }
+        baseClass = qualifyTypeDeclName(parseQualifiedTypeName());
     }
 
     if (!check(TokenType::TOKEN_LBRACE)) {
@@ -2148,10 +2209,7 @@ Type* Parser::parseMemberArraySuffix(Type* base) {
 std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
     if (!match(TokenType::TOKEN_UNION)) return nullptr;
 
-    std::string name;
-    if (check(TokenType::TOKEN_IDENTIFIER)) {
-        name = advance()->lexeme;
-    }
+    std::string name = qualifyTypeDeclName(parseQualifiedTypeName());
 
     if (!check(TokenType::TOKEN_LBRACE)) {
         // Forward declaration
@@ -2183,10 +2241,7 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
 std::unique_ptr<EnumDeclAST> Parser::parseEnumDecl() {
     if (!match(TokenType::TOKEN_ENUM)) return nullptr;
 
-    std::string name;
-    if (check(TokenType::TOKEN_IDENTIFIER)) {
-        name = advance()->lexeme;
-    }
+    std::string name = qualifyTypeDeclName(parseQualifiedTypeName());
 
     if (!check(TokenType::TOKEN_LBRACE)) {
         // Forward declaration
@@ -2229,8 +2284,8 @@ std::unique_ptr<TypedefDeclAST> Parser::parseTypedefDecl() {
     Type* type = parseType();
     if (!type) return nullptr;
 
-    if (!check(TokenType::TOKEN_IDENTIFIER)) return nullptr;
-    std::string name = advance()->lexeme;
+    std::string name = qualifyTypeDeclName(parseQualifiedTypeName());
+    if (name.empty()) return nullptr;
 
     match(TokenType::TOKEN_SEMICOLON);
 
@@ -2258,6 +2313,12 @@ std::unique_ptr<DeclAST> Parser::parseNamespaceDecl() {
         return nullptr;
     }
 
+    // Qualify type declarations/references inside this namespace body.
+    std::string savedPrefix = m_typeNamespacePrefix;
+    if (!name.empty()) {
+        m_typeNamespacePrefix += mangleQualifiedTypeName(name) + "_";
+    }
+
     std::vector<std::unique_ptr<DeclAST>> decls;
     while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
         if (check(TokenType::TOKEN_NAMESPACE)) {
@@ -2275,6 +2336,8 @@ std::unique_ptr<DeclAST> Parser::parseNamespaceDecl() {
     }
     expect(TokenType::TOKEN_RBRACE, "expected '}' to close namespace");
     match(TokenType::TOKEN_SEMICOLON);
+
+    m_typeNamespacePrefix = savedPrefix;
 
     return std::make_unique<NamespaceDeclAST>(name, std::move(decls));
 }

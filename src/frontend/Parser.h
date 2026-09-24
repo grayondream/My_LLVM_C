@@ -36,6 +36,17 @@ private:
 
     Type* parseBaseType();
 
+    // Namespace-qualified type names (PAR-22): consume `A::B::name`, returning
+    // the joined name ("" when no identifier is present).
+    std::string parseQualifiedTypeName();
+
+    // Symbol-table key for a type declared at the current namespace scope.
+    std::string qualifyTypeDeclName(const std::string& name) const;
+
+    // Resolve a (possibly qualified) type name, trying the enclosing namespace
+    // prefix before the global name. nullptr when not a known named type.
+    Type* lookupNamedType(const std::string& name) const;
+
     // Turn `T name` into `T name[N]` when an array suffix follows a member
     // declarator (used for struct/class/union members).
     Type* parseMemberArraySuffix(Type* base);
@@ -114,4 +125,7 @@ private:
     std::vector<Token> m_tokens;
     size_t m_currentTokenPos{0};
     std::vector<Diagnostic> m_errors;
+    // Mangled prefix (trailing '_') active while parsing a namespace body, e.g.
+    // "A_" inside `namespace A { ... }`.
+    std::string m_typeNamespacePrefix;
 };
