@@ -1,2 +1,2 @@
-error[E2003]: incompatible types in assignment: cannot assign 'struct S' to 'int'
-warning[W3001]: variable 's' may be used before it is initialized
+snapshot.c:6:5: error[E2003]: incompatible types in assignment: cannot assign 'struct S' to 'int'
+snapshot.c:6:9: warning[W3001]: variable 's' may be used before it is initialized

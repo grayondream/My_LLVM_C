@@ -1,1 +1,1 @@
-error[E2004]: redefinition of function 'f'
+snapshot.c:3:1: error[E2004]: redefinition of function 'f'

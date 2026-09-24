@@ -32,6 +32,11 @@ private:
 
     bool isTypeStart() const;
 
+    // INF-03 / P0-06: stamp an AST node with the source position of the token it
+    // originates from, so semantic diagnostics carry file:line:col. A null
+    // `node`/`tok` is ignored.
+    void applyLocation(ASTNode* node, const Token* tok);
+
     Type* parseType();
 
     Type* parseBaseType();
@@ -52,6 +57,10 @@ private:
     Type* parseMemberArraySuffix(Type* base);
 
     std::unique_ptr<DeclAST> parseDeclaration();
+
+    // The raw declaration parser; `parseDeclaration` wraps it to stamp source
+    // locations on the result (INF-03 / P0-06).
+    std::unique_ptr<DeclAST> parseDeclarationImpl();
 
     std::unique_ptr<DeclAST> parseDeclarationAsType();
 
@@ -78,6 +87,10 @@ private:
     std::unique_ptr<TypedefDeclAST> parseTypedefDecl();
 
     std::unique_ptr<DeclAST> parseNamespaceDecl();
+
+    // The raw namespace parser; `parseNamespaceDecl` wraps it to stamp source
+    // locations on the result (INF-03 / P0-06).
+    std::unique_ptr<DeclAST> parseNamespaceDeclImpl();
 
     std::unique_ptr<ReturnStmtAST> parseReturnStmt();
 
@@ -108,6 +121,11 @@ private:
     std::unique_ptr<ExprAST> parseExpr(int minPrec = 0);
 
     std::unique_ptr<ExprAST> parsePrimary();
+
+    // Raw parsers wrapped by `parsePrimary`/`parseUnary` to stamp source
+    // locations on every expression node (INF-03 / P0-06).
+    std::unique_ptr<ExprAST> parsePrimaryImpl();
+    std::unique_ptr<ExprAST> parseUnaryImpl();
 
     std::unique_ptr<ExprAST> parseUnary();
 

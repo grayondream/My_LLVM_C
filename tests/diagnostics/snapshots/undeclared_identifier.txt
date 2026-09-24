@@ -1,1 +1,1 @@
-error[E2001]: use of undeclared identifier 'missing'
+snapshot.c:3:12: error[E2001]: use of undeclared identifier 'missing'

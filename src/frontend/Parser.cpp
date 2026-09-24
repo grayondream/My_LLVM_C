@@ -324,7 +324,22 @@ static bool isPostfixOp(TokenType type) {
 
 // ========== Parsing ==========
 
+void Parser::applyLocation(ASTNode* node, const Token* tok) {
+    if (node && tok) {
+        node->setLocation(tok->filename, tok->line, tok->column);
+    }
+}
+
 std::unique_ptr<ExprAST> Parser::parseUnary() {
+    auto startTok = peek();
+    auto expr = parseUnaryImpl();
+    if (expr) {
+        applyLocation(expr.get(), startTok ? &*startTok : nullptr);
+    }
+    return expr;
+}
+
+std::unique_ptr<ExprAST> Parser::parseUnaryImpl() {
     auto token = peek();
     if (!token) {
         return nullptr;
@@ -438,6 +453,15 @@ std::unique_ptr<ExprAST> Parser::parseUnary() {
 }
 
 std::unique_ptr<ExprAST> Parser::parsePrimary() {
+    auto startTok = peek();
+    auto expr = parsePrimaryImpl();
+    if (expr) {
+        applyLocation(expr.get(), startTok ? &*startTok : nullptr);
+    }
+    return expr;
+}
+
+std::unique_ptr<ExprAST> Parser::parsePrimaryImpl() {
     auto token = peek();
     if (!token) {
         return nullptr;
@@ -646,6 +670,10 @@ std::unique_ptr<ExprAST> Parser::parseExpr(int minPrec) {
     if (!token) {
         return nullptr;
     }
+    // The first token of this expression; every node built at this precedence
+    // level is stamped with it so diagnostics can point at the expression
+    // (INF-03 / P0-06). Sub-expressions are stamped by their own recursive call.
+    const Token* startTok = &*token;
 
     std::unique_ptr<ExprAST> lhs;
 
@@ -654,8 +682,10 @@ std::unique_ptr<ExprAST> Parser::parseExpr(int minPrec) {
     if (!lhs) {
         return nullptr;
     }
+    applyLocation(lhs.get(), startTok);
 
     lhs = parsePostfix(std::move(lhs));
+    applyLocation(lhs.get(), startTok);
 
     // Pratt climbing loop
     while (!eof()) {
@@ -672,6 +702,7 @@ std::unique_ptr<ExprAST> Parser::parseExpr(int minPrec) {
             auto rhs = parseExpr(prec + 1); // left-associative
             if (!rhs) return nullptr;
             lhs = std::make_unique<CommaExprAST>(std::move(lhs), std::move(rhs));
+            applyLocation(lhs.get(), startTok);
             continue;
         }
 
@@ -684,6 +715,7 @@ std::unique_ptr<ExprAST> Parser::parseExpr(int minPrec) {
             auto elseExpr = parseExpr(2); // else-branch: ',' separates, not an operator
             if (!elseExpr) return nullptr;
             lhs = std::make_unique<TernaryExprAST>(std::move(lhs), std::move(thenExpr), std::move(elseExpr));
+            applyLocation(lhs.get(), startTok);
             continue;
         }
 
@@ -704,6 +736,7 @@ std::unique_ptr<ExprAST> Parser::parseExpr(int minPrec) {
             auto rhs = parseExpr(prec); // right-to-left: use same prec
             if (!rhs) return nullptr;
             lhs = std::make_unique<AssignmentExprAST>(assignOp, std::move(lhs), std::move(rhs));
+            applyLocation(lhs.get(), startTok);
             continue;
         }
 
@@ -718,6 +751,7 @@ std::unique_ptr<ExprAST> Parser::parseExpr(int minPrec) {
             auto rhs = parseExpr(nextPrec);
             if (!rhs) return nullptr;
             lhs = std::make_unique<BinaryExprAST>(binOp, std::move(lhs), std::move(rhs));
+            applyLocation(lhs.get(), startTok);
             continue;
         }
 
@@ -778,6 +812,7 @@ bool Parser::rejectPreprocessorDirective() {
 }
 
 std::unique_ptr<StmtAST> Parser::parseStmt() {
+    auto stmtStart = peek();
     if (rejectPreprocessorDirective()) {
         return std::make_unique<NullStmtAST>();
     }
@@ -882,6 +917,7 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
             }
             auto varDecl = parseVariableDeclList(type, nameTok->lexeme);
             if (varDecl) {
+                applyLocation(varDecl.get(), stmtStart ? &*stmtStart : nullptr);
                 return std::make_unique<DeclStmtAST>(std::move(varDecl));
             }
         }
@@ -1609,6 +1645,15 @@ Type* Parser::parseType() {
 }
 
 std::unique_ptr<DeclAST> Parser::parseDeclaration() {
+    auto startTok = peek();
+    auto decl = parseDeclarationImpl();
+    if (decl) {
+        applyLocation(decl.get(), startTok ? &*startTok : nullptr);
+    }
+    return decl;
+}
+
+std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
     // C linkage: `extern` declarations keep their plain, unmangled symbol name.
     if (check(TokenType::TOKEN_EXTERN)) {
         advance();
@@ -2305,6 +2350,15 @@ std::unique_ptr<TypedefDeclAST> Parser::parseTypedefDecl() {
 
 // namespace A { ... } / namespace A::B { ... } (PAR-22)
 std::unique_ptr<DeclAST> Parser::parseNamespaceDecl() {
+    auto startTok = peek();
+    auto decl = parseNamespaceDeclImpl();
+    if (decl) {
+        applyLocation(decl.get(), startTok ? &*startTok : nullptr);
+    }
+    return decl;
+}
+
+std::unique_ptr<DeclAST> Parser::parseNamespaceDeclImpl() {
     if (!match(TokenType::TOKEN_NAMESPACE)) return nullptr;
 
     std::string name;

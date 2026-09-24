@@ -41,4 +41,9 @@ private:
     size_t m_currentPos{};
     size_t m_lineNum{1};
     size_t m_colNum{};
+    // Start position of the token currently being scanned (INF-03): recorded at
+    // the beginning of scanToken so diagnostics point at the token's first
+    // character rather than its last.
+    size_t m_tokenStartLine{1};
+    size_t m_tokenStartCol{1};
 };

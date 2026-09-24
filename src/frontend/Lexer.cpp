@@ -146,7 +146,7 @@ std::string Lexer::lexname() {
 }
 
 Token Lexer::makeToken(const TokenType type, const std::string& lexeme, const TokenValue value) {
-    auto token = Token{type, lexeme, value, m_filename, (int)m_lineNum, (int)m_colNum};
+    auto token = Token{type, lexeme, value, m_filename, (int)m_tokenStartLine, (int)m_tokenStartCol};
     LOGI("makeToken: {}", to_string(token));
     return token;
 }
@@ -189,6 +189,8 @@ Token Lexer::nextToken() {
         }
     }
 
+    m_tokenStartLine = m_lineNum;
+    m_tokenStartCol = m_colNum + 1;
     return makeToken(TokenType::TOKEN_EOS, "");
 }
 
@@ -470,6 +472,10 @@ Token Lexer::scanChar() {
 }
         
 Token Lexer::scanToken() {
+    // Record the token's start position before consuming any character.
+    m_tokenStartLine = m_lineNum;
+    m_tokenStartCol = m_colNum + 1;
+
     const char ch = peek();
     if(ch == 'r' && peekNext() == '"') {
         return scanString();

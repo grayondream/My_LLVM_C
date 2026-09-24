@@ -1,1 +1,1 @@
-warning[W3001]: variable 'b' may be used before it is initialized
+snapshot.c:7:16: warning[W3001]: variable 'b' may be used before it is initialized

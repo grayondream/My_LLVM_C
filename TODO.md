@@ -28,7 +28,7 @@
 
 - `[ ]` **INF-01** 锁定 LLVM 版本与集成层：CMake `find_package(LLVM)`、最低版本断言、版本不匹配诊断。
 - `[ ]` **INF-02** 构建系统：Debug/Release、跨平台（Linux/macOS/Windows）、交叉编译目标配置。
-- `[~]` **INF-03** **诊断系统**：统一 `Diagnostic`（源码位置/错误码/严重级别/修复建议）、诊断快照测试设施。已实现错误码注册表 + `formatWithSeverity` + fix-it + 快照设施（`tests/diagnostics/snapshots/`）+ 警告独立通道（`getWarnings`，`-Werror` 可控）；表达式节点位置信息待补。
+- `[x]` **INF-03** **诊断系统**：统一 `Diagnostic`（源码位置/错误码/严重级别/修复建议）、诊断快照测试设施。已实现错误码注册表 + `formatWithSeverity` + fix-it + 快照设施（`tests/diagnostics/snapshots/`）+ 警告独立通道（`getWarnings`，`-Werror` 可控）；词法器记录记号**起始**位置，表达式/声明节点由解析器打点，`file:line:col` 对解析与语义诊断均可用（`tests/frontend/test_source_location.cpp`）。
 - `[ ]` **INF-04** 测试框架完善：单元、集成、黄金文件（IR/输出）、诊断快照；CTest 分组与标签。
 - `[ ]` **INF-05** CI：Linux/macOS/Windows 矩阵、交叉编译、ABI 测试、性能基准。（外围仅限构建/测试，不含 LSP/包管理）
 - `[x]` **INF-06** 文档系统：语言规范（EBNF 语法）、类型/ABI 文档、`compile_time` API 文档。（**提前到 P0**，见 P0-07；`docs/spec/` 六分册 + 一致性测试已建）
@@ -501,7 +501,7 @@
 - `[x]` **P0-03** 变量初始化检查（SEM-01/02）。已实现（W3001，含分支合并/循环；`-Werror` 可将警告变失败）。
 - `[x]` **P0-04** module/import/export（MOD-04~07）。源文件 `import`（搜索路径/点分名/循环报错）、`module` 文件绑定与校验、`export` 可见性、每模块私有作用域均已实现。
 - `[~]` **P0-05** 最小 `std.core` / `std.io`（STD-01/12）。`libs/std/{core,io}.smc` 已可通过 `import std.core;` 使用。
-- `[~]` **P0-06** 诊断系统与测试设施（INF-03/04）。诊断核心 + 快照设施已就绪。
+- `[x]` **P0-06** 诊断系统与测试设施（INF-03/04）。诊断核心 + 快照设施 + 词法/语法/声明源码位置均已完成；INF-04 的其余测试框架项（黄金 IR/输出、CTest 分组标签）由 INF-04 单独跟踪。
 - `[x]` **P0-07** `(新)` **语言规范骨架**：EBNF + 关键字表 + 优先级表 + 转换矩阵（INF-06/09~11、PAR-23、TYP-22/23）。四件套位于 `docs/spec/`，并由 `tests/spec/test_spec_conformance.cpp` 绑定实现；各 `[plan]` 细节仍由对应条目跟踪。
 - `[x]` **P0-08** `(新)` **namespace 支持**（PAR-22、MOD-12、DEC-17）——现有 `libsafec` 已依赖，属刚需。函数/变量、嵌套、限定访问、限定类型名均已实现。
 
