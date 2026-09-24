@@ -147,6 +147,28 @@ llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
         return builder.CreateGEP(elemTy, ptrVal, idxVal, "ptradd");
     }
 
+    // Pointer vs integer comparison (e.g. `p == null`, `0 != p`): compare as
+    // integers of pointer width. `opType` below would otherwise be the pointer
+    // type and leave the integer operand unconverted (ICmp type assert), while
+    // converting to the integer's own width could truncate the address.
+    if (leftPtr != rightPtr) {
+        llvm::Value* intVal = leftPtr ? rhs : lhs;
+        llvm::Value* ptrVal = leftPtr ? lhs : rhs;
+        if (intVal->getType()->isIntegerTy()) {
+            llvm::Type* ptrIntTy =
+                ctx.getModule().getDataLayout().getIntPtrType(ctx.getContext());
+            llvm::Value* ptrAsInt = builder.CreatePtrToInt(ptrVal, ptrIntTy, "ptrtoint");
+            llvm::Value* intWide = ctx.castValue(intVal, ptrIntTy);
+            if (leftPtr) {
+                lhs = ptrAsInt;
+                rhs = intWide;
+            } else {
+                lhs = intWide;
+                rhs = ptrAsInt;
+            }
+        }
+    }
+
     // Coerce both operands to a common arithmetic type. Floating-point
     // operations must use the FP opcodes (FAdd/FMul/FCmp...), not the integer
     // ones.
@@ -221,7 +243,12 @@ llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
             }
             return builder.CreateNeg(operandVal, "negtmp");
         }
-        case UnaryOp::Not:       return builder.CreateNot(emitRValue(ctx, *operand, v), "nottmp");
+        case UnaryOp::Not: {
+            // Logical negation: normalize to i1 first, so `!x` is not bitwise
+            // complement and `!p` (pointer) is well-typed.
+            llvm::Value* operandVal = emitRValue(ctx, *operand, v);
+            return builder.CreateNot(ctx.coerceToBool(operandVal), "nottmp");
+        }
         case UnaryOp::BitNot:    return builder.CreateNot(emitRValue(ctx, *operand, v), "bitnottmp");
         case UnaryOp::Deref: {
             // `*p` denotes the pointee as an lvalue: yield its address and let
@@ -495,6 +522,9 @@ llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
 llvm::Value* TernaryExprAST::codegen(CodegenContext& ctx) {
     llvm::Value* condVal = cond->codegen(ctx);
     if (!condVal) return nullptr;
+    if (cond->isLValue && cond->type && cond->type->kind != TypeKind::Array) {
+        condVal = ctx.loadValue(condVal, cond->type);
+    }
     condVal = ctx.coerceToBool(condVal);
 
     auto& builder = ctx.getBuilder();

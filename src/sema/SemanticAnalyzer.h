@@ -50,6 +50,8 @@ private:
     bool isFloatType(Type* type) const;
     bool isArithmeticType(Type* type) const;
     bool isPointerOrArray(Type* type) const;
+    // Scalar = arithmetic or pointer/array; the valid type for a condition.
+    bool isScalarType(Type* type) const;
     bool typesCompatible(Type* left, Type* right) const;
     Type* getCommonType(Type* left, Type* right) const;
     std::string typeToString(Type* type) const;

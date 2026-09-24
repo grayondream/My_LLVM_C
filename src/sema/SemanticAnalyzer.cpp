@@ -153,6 +153,10 @@ bool SemanticAnalyzer::isPointerOrArray(Type* type) const {
     return type->kind == TypeKind::Pointer || type->kind == TypeKind::Array;
 }
 
+bool SemanticAnalyzer::isScalarType(Type* type) const {
+    return isArithmeticType(type) || isPointerOrArray(type);
+}
+
 bool SemanticAnalyzer::typesCompatible(Type* left, Type* right) const {
     left = stripTypedef(left);
     right = stripTypedef(right);
@@ -970,8 +974,8 @@ void SemanticAnalyzer::visit(TernaryExprAST& node) {
     Type* thenType = getExprType(*node.then);
     Type* elseType = getExprType(*node.elseExpr);
 
-    if (condType && !isArithmeticType(condType)) {
-        emitError("ternary condition must be arithmetic type, but got '" + typeToString(condType) + "'", node);
+    if (condType && !isScalarType(condType)) {
+        emitError("ternary condition must be scalar type, but got '" + typeToString(condType) + "'", node);
     }
 
     node.type = getCommonType(thenType, elseType);
@@ -1199,8 +1203,8 @@ void SemanticAnalyzer::visit(ReturnStmtAST& node) {
 
 void SemanticAnalyzer::visit(IfStmtAST& node) {
     Type* condType = getExprType(*node.cond);
-    if (condType && !isArithmeticType(condType)) {
-        emitError("if condition must be arithmetic type, but got '" + typeToString(condType) + "'", node);
+    if (condType && !isScalarType(condType)) {
+        emitError("if condition must be scalar type, but got '" + typeToString(condType) + "'", node);
     }
     if (node.thenStmt) visit(*node.thenStmt);
     if (node.elseStmt) visit(*node.elseStmt);
@@ -1208,16 +1212,16 @@ void SemanticAnalyzer::visit(IfStmtAST& node) {
 
 void SemanticAnalyzer::visit(WhileStmtAST& node) {
     Type* condType = getExprType(*node.cond);
-    if (condType && !isArithmeticType(condType)) {
-        emitError("while condition must be arithmetic type, but got '" + typeToString(condType) + "'", node);
+    if (condType && !isScalarType(condType)) {
+        emitError("while condition must be scalar type, but got '" + typeToString(condType) + "'", node);
     }
     if (node.body) visit(*node.body);
 }
 
 void SemanticAnalyzer::visit(DoWhileStmtAST& node) {
     Type* condType = getExprType(*node.cond);
-    if (condType && !isArithmeticType(condType)) {
-        emitError("do-while condition must be arithmetic type, but got '" + typeToString(condType) + "'", node);
+    if (condType && !isScalarType(condType)) {
+        emitError("do-while condition must be scalar type, but got '" + typeToString(condType) + "'", node);
     }
     if (node.body) visit(*node.body);
 }
@@ -1227,8 +1231,8 @@ void SemanticAnalyzer::visit(ForStmtAST& node) {
     if (node.init) visit(*node.init);
     if (node.cond) {
         Type* condType = getExprType(*node.cond);
-        if (condType && !isArithmeticType(condType)) {
-            emitError("for condition must be arithmetic type, but got '" + typeToString(condType) + "'", node);
+        if (condType && !isScalarType(condType)) {
+            emitError("for condition must be scalar type, but got '" + typeToString(condType) + "'", node);
         }
     }
     if (node.inc) getExprType(*node.inc);

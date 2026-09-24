@@ -294,7 +294,10 @@ llvm::Value* CodegenContext::coerceToBool(llvm::Value* val) {
             llvm::ConstantFP::get(val->getType(), 0.0), "tobool");
     }
     if (val->getType()->isPointerTy()) {
-        return builder.CreatePtrToInt(val, llvm::Type::getInt1Ty(*context), "ptrtobool");
+        // Compare against the null pointer. (ptrtoint to i1 would test only the
+        // low address bit, so any aligned non-null pointer would look false.)
+        auto* ptrTy = llvm::cast<llvm::PointerType>(val->getType());
+        return builder.CreateICmpNE(val, llvm::ConstantPointerNull::get(ptrTy), "tobool");
     }
     return val;
 }
@@ -330,6 +333,15 @@ llvm::Value* CodegenContext::castValue(llvm::Value* val, llvm::Type* targetLLVMT
 
     if (srcType->isPointerTy() && targetLLVMType->isPointerTy()) {
         return builder.CreateBitCast(val, targetLLVMType, "bitcasttmp");
+    }
+
+    // Null-pointer constant / address conversions (TYP-24). Without these a
+    // `T* p = null;` or pointer/integer comparison produced mismatched types.
+    if (srcType->isIntegerTy() && targetLLVMType->isPointerTy()) {
+        return builder.CreateIntToPtr(val, targetLLVMType, "inttoptr");
+    }
+    if (srcType->isPointerTy() && targetLLVMType->isIntegerTy()) {
+        return builder.CreatePtrToInt(val, targetLLVMType, "ptrtoint");
     }
 
     return val;

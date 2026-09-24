@@ -3,6 +3,21 @@
 #include "codegen/CodegenContext.h"
 #include "support/Log.h"
 
+namespace {
+
+// Evaluate a controlling expression. Variable references codegen to their
+// address, so load lvalues before turning the value into an i1 condition.
+llvm::Value* evalCondition(CodegenContext& ctx, ExprAST& expr) {
+    llvm::Value* v = expr.codegen(ctx);
+    if (!v) return nullptr;
+    if (expr.isLValue && expr.type && expr.type->kind != TypeKind::Array) {
+        v = ctx.loadValue(v, expr.type);
+    }
+    return ctx.coerceToBool(v);
+}
+
+} // namespace
+
 llvm::Value* ExprStmtAST::codegen(CodegenContext& ctx) {
     if (expr) {
         expr->codegen(ctx);
@@ -67,9 +82,8 @@ llvm::Value* ReturnStmtAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* IfStmtAST::codegen(CodegenContext& ctx) {
-    llvm::Value* condVal = cond->codegen(ctx);
+    llvm::Value* condVal = evalCondition(ctx, *cond);
     if (!condVal) return nullptr;
-    condVal = ctx.coerceToBool(condVal);
 
     auto& builder = ctx.getBuilder();
     llvm::Function* func = builder.GetInsertBlock()->getParent();
@@ -110,9 +124,8 @@ llvm::Value* WhileStmtAST::codegen(CodegenContext& ctx) {
     ctx.getBuilder().CreateBr(condBB);
     ctx.getBuilder().SetInsertPoint(condBB);
 
-    llvm::Value* condVal = cond->codegen(ctx);
+    llvm::Value* condVal = evalCondition(ctx, *cond);
     if (!condVal) return nullptr;
-    condVal = ctx.coerceToBool(condVal);
     ctx.getBuilder().CreateCondBr(condVal, bodyBB, endBB);
 
     ctx.getBuilder().SetInsertPoint(bodyBB);
@@ -145,9 +158,8 @@ llvm::Value* DoWhileStmtAST::codegen(CodegenContext& ctx) {
     }
 
     ctx.getBuilder().SetInsertPoint(condBB);
-    llvm::Value* condVal = cond->codegen(ctx);
+    llvm::Value* condVal = evalCondition(ctx, *cond);
     if (!condVal) return nullptr;
-    condVal = ctx.coerceToBool(condVal);
     ctx.getBuilder().CreateCondBr(condVal, bodyBB, endBB);
 
     ctx.popContinueBlock();
@@ -172,9 +184,8 @@ llvm::Value* ForStmtAST::codegen(CodegenContext& ctx) {
 
     ctx.getBuilder().SetInsertPoint(condBB);
     if (cond) {
-        llvm::Value* condVal = cond->codegen(ctx);
+        llvm::Value* condVal = evalCondition(ctx, *cond);
         if (!condVal) return nullptr;
-        condVal = ctx.coerceToBool(condVal);
         ctx.getBuilder().CreateCondBr(condVal, bodyBB, endBB);
     } else {
         ctx.getBuilder().CreateBr(bodyBB);
