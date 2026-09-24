@@ -99,17 +99,17 @@
 - `[ ]` **MOD-01** 符号表：全局/模块/类型/函数/变量/字段/方法。
 - `[ ]` **MOD-02** 作用域规则：块/函数/类型/模块。
 - `[ ]` **MOD-03** 前向声明：函数/struct/class/enum/union/类型别名。
-- `[~]` **MOD-04** `module` 声明与文件映射。已实现源文件 `import`（点分名 `a.b`→`a/b.smc`、路径形式、搜索路径+循环去重）；`module` 声明仍为 no-op。
-- `[~]` **MOD-05** `export` 导出规则；`import` 导入规则与访问语法（决策见 DEC-02）。`import` 已可用（声明前插）；`export` 仍为修饰符 no-op，可见性待定。
-- `[ ]` **MOD-06** 模块可见性与 `public/private`。
-- `[ ]` **MOD-07** 模块循环依赖检测。
+- `[x]` **MOD-04** `module` 声明与文件映射。点分/`::` 模块名 → `TranslationUnitAST::moduleName`；`import` 点分名解析 + 文件↔模块名校验（MOD-13）。
+- `[x]` **MOD-05** `export` 导出规则；`import` 导入规则与访问语法（DEC-02 已冻结：直接非限定访问）。参与模块默认私有，`export`/`public` 后可见。
+- `[x]` **MOD-06** 模块可见性与 `public/private`。每模块私有作用域 + `export` 提升到全局；顶层 `public` 与 `export` 同义（类成员访问级别仍待 PAR-04）。类型名可见性见 `docs/spec/modules.md` §11 限制。
+- `[x]` **MOD-07** 模块循环依赖检测。`ModuleLoader` DFS `active` 栈检出导入环并报错（列出环路径）；`loaded` 去重支持菱形依赖。
 - `[ ]` **MOD-08** 名称修饰：C ABI 符号、class 方法、**模板单态化符号**、`static` 成员。
 - `[~]` **MOD-09** `(改)` **C 互操作（无预处理器方案）**：不解析真实 C 头文件，改用 `extern` 声明 + `std.c` 绑定层。绑定层已文件化到 `libs/std/c.smc`（`src/driver/StdPrelude.*` 优先读文件、内嵌兜底；`--no-prelude` 关闭）+ 修复 `void*` 形参解析。
 - `[ ]` **MOD-10** 增量编译：模块/AST/类型/IR 缓存与失效策略（内容哈希）。
-- `[ ]` **MOD-11** 导入符号访问语法待定并实现（`math.add` 还是直接 `add`）。
-- `[~]` **MOD-12** `(新)` `namespace` 语义：嵌套/开放命名空间、限定查找、与模块的关系（见 DEC-17）。（草案见 `docs/spec/modules.md`；嵌套查找 + 名称隔离已实现）
-- `[~]` **MOD-13** `(新)` 模块/编译单元文件布局：文件 ↔ 模块映射、导出单元、单文件多模块规则。（草案见 `docs/spec/modules.md`；点分名↔目录文件映射已实现）
-- `[~]` **MOD-14** `(新)` `import` 搜索路径与名称解析顺序、循环导入诊断细化（细化 MOD-07）。（搜索顺序：导入者目录 → `-M/--module-path` → `STD_DIR`；循环用规范化路径集合去重/终止；草案见 `docs/spec/modules.md`）
+- `[x]` **MOD-11** 导入符号访问语法待定并实现：**直接非限定访问**（DEC-02 冻结）；限定名由模块内 `namespace` 提供。
+- `[x]` **MOD-12** `(新)` `namespace` 语义：嵌套/开放命名空间、限定查找、与模块的关系（DEC-17 已冻结：正交）。（嵌套查找 + 名称隔离 + 限定类型名已实现；规范见 `docs/spec/modules.md`）
+- `[x]` **MOD-13** `(新)` 模块/编译单元文件布局：文件 ↔ 模块映射、导出单元、单文件多模块规则。点分名↔目录文件映射 + 声明名与导入说明符一致性校验已实现（`module` 首部/重复声明约束待补）。
+- `[x]` **MOD-14** `(新)` `import` 搜索路径与名称解析顺序、循环导入诊断（细化 MOD-07）。（搜索顺序：导入者目录 → `-M/--module-path` → `STD_DIR`；循环报错并列出环路径；规范见 `docs/spec/modules.md`）
 - `[~]` **MOD-15** `(新)` **名称修饰方案（规范性）**：C ABI、方法、模板单态化、`static` 成员、namespace 的完整规则（细化 MOD-08）。（现状+目标见 `docs/spec/abi.md`）
 
 ---
@@ -452,7 +452,7 @@
 ## 20. 待定决策（DEC）
 
 - `[ ]` **DEC-01** class 默认访问级别：默认 `public` 还是 `private`。
-- `[ ]` **DEC-02** `import math;` 后符号访问语法：`math.add` 还是直接 `add`。
+- `[x]` **DEC-02** `import math;` 后符号访问语法：**直接非限定访问**（`add`）。模块是物理边界，不引入 `math.add` 式运算符；限定名由模块内 `namespace` 提供。
 - `[ ]` **DEC-03** `Result<T,E>` 精确布局与 `.error`/`.value` 语义（显式访问，无 `?`）。
 - `[ ]` **DEC-04** 默认参数范围；**确认不做**命名参数。
 - `[ ]` **DEC-05** `constexpr` 与 `compile_time` 的关系（是否合并）。
@@ -467,7 +467,7 @@
 - `[ ]` **DEC-14** 模块缓存格式与稳定性。
 - `[ ]` **DEC-15** 是否默认链接 libc（当前 `print` 依赖系统 `printf`）。
 - `[ ]` **DEC-16** `(新)` 类型别名规范形式：`typedef`/`using`/`type` 何者为准、是否全部保留。
-- `[ ]` **DEC-17** `(新)` `namespace` 与模块（`module`/`import`）的关系与共存方式。
+- `[x]` **DEC-17** `(新)` `namespace` 与模块（`module`/`import`）的关系与共存方式：**模块=物理边界，namespace=逻辑边界，二者正交**；同一模块可含多个 namespace，同一 namespace 可跨模块。
 - `[x]` **DEC-18** `(新)` `register`/`cast`/`typeof` 等既有 token 的废弃或保留。→ **决定移除**（一并移除 `comptime`/`generic`）；显式转换改用 `static_cast`/`reinterpret_cast`（LEX-11），类型查询改用 `compile_time` 反射（CT-07）。已同步 `Token.h`/`Lexer.cpp`/`Utils.cpp`/`keywords.md`。
 - `[ ]` **DEC-19** `(新)` `main` 入口签名与返回值约定。
 - `[ ]` **DEC-20** `(新)` 字符串字面量所有权/生命周期与 `str`/`String` 边界。
@@ -499,7 +499,7 @@
 - `[x]` **P0-01** 清理与决策一致的冲突：移除预处理器、goto/label、`-E/-I/-D`（NG-01/02/TOOL-02）。已完成；`-I` 由 `-M/--module-path` 取代。
 - `[~]` **P0-02** C 互操作绑定层（MOD-09/STD-23）——无预处理器后的刚需。文件化 `libs/std/c.smc` + `extern` 已可用。
 - `[x]` **P0-03** 变量初始化检查（SEM-01/02）。已实现（W3001，含分支合并/循环；`-Werror` 可将警告变失败）。
-- `[~]` **P0-04** module/import/export（MOD-04~07）。源文件 `import` 已实现（搜索路径/点分名/循环）；`module`/`export`/可见性待补。
+- `[x]` **P0-04** module/import/export（MOD-04~07）。源文件 `import`（搜索路径/点分名/循环报错）、`module` 文件绑定与校验、`export` 可见性、每模块私有作用域均已实现。
 - `[~]` **P0-05** 最小 `std.core` / `std.io`（STD-01/12）。`libs/std/{core,io}.smc` 已可通过 `import std.core;` 使用。
 - `[~]` **P0-06** 诊断系统与测试设施（INF-03/04）。诊断核心 + 快照设施已就绪。
 - `[x]` **P0-07** `(新)` **语言规范骨架**：EBNF + 关键字表 + 优先级表 + 转换矩阵（INF-06/09~11、PAR-23、TYP-22/23）。四件套位于 `docs/spec/`，并由 `tests/spec/test_spec_conformance.cpp` 绑定实现；各 `[plan]` 细节仍由对应条目跟踪。

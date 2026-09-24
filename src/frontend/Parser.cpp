@@ -1128,13 +1128,19 @@ std::unique_ptr<TranslationUnitAST> Parser::parse() {
             continue;
         }
 
-        // 检查模块声明
+        // 检查模块声明：`module a.b.c;`（点分或 `::` 连接）
         if (check(TokenType::TOKEN_MODULE)) {
             advance(); // 消耗 "module"
             if (check(TokenType::TOKEN_IDENTIFIER)) {
                 moduleName = advance()->lexeme;
-                match(TokenType::TOKEN_SEMICOLON);
+                while (check(TokenType::TOKEN_DOT) || check(TokenType::TOKEN_COLON_COLON)) {
+                    advance();
+                    auto part = match(TokenType::TOKEN_IDENTIFIER);
+                    if (!part) break;
+                    moduleName += "." + part->lexeme;
+                }
             }
+            match(TokenType::TOKEN_SEMICOLON);
             continue;
         }
         
@@ -1163,11 +1169,24 @@ std::unique_ptr<TranslationUnitAST> Parser::parse() {
             continue;
         }
         
-        // 检查导出声明：export 只是修饰符，后面仍是一个完整声明
-        if (check(TokenType::TOKEN_EXPORT)) {
-            advance(); // 消耗 "export"
+        // 检查导出声明：`export`/`public` 是可见性修饰符，后接一个完整声明
+        // （P0-04 / MOD-05）。`export namespace A { ... }` 会导出 A 的全部成员。
+        if (check(TokenType::TOKEN_EXPORT) || check(TokenType::TOKEN_PUBLIC)) {
+            advance(); // 消耗 "export"/"public"
+            // `export namespace A { ... }` exports the whole namespace.
+            if (check(TokenType::TOKEN_NAMESPACE)) {
+                auto nsDecl = parseNamespaceDecl();
+                if (nsDecl) {
+                    nsDecl->isExported = true;
+                    decls.push_back(std::move(nsDecl));
+                } else {
+                    advance();
+                }
+                continue;
+            }
             auto decl = parseDeclaration();
             if (decl) {
+                decl->isExported = true;
                 decls.push_back(std::move(decl));
             } else {
                 advance();
@@ -1190,11 +1209,23 @@ std::unique_ptr<TranslationUnitAST> Parser::parse() {
     
     auto tu = std::make_unique<TranslationUnitAST>(std::move(decls));
     tu->imports = imports;
+    tu->moduleName = moduleName;
 
     // 如果有模块声明，创建模块声明节点（imports 已记录在 TU 上）
     if (!moduleName.empty()) {
         tu->declarations.push_back(
             std::make_unique<ModuleDeclAST>(moduleName, imports, std::move(exports)));
+    }
+
+    // Tag this unit's own declarations with the owning module so the semantic
+    // analyzer can apply module visibility (P0-04 / MOD-05/06). Imported
+    // modules are tagged separately by the ModuleLoader.
+    if (!moduleName.empty()) {
+        for (auto& decl : tu->declarations) {
+            if (decl && decl->moduleName.empty()) {
+                decl->moduleName = moduleName;
+            }
+        }
     }
 
     return tu;

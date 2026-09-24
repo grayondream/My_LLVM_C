@@ -23,11 +23,15 @@ std::string resolveImport(const std::string& specifier, const ModuleSearchPaths&
 
 // Load `path` and, recursively, its imports. Declarations are appended to `out`
 // in dependency order (imports before importers). `loaded` holds canonical
-// paths already processed, which both deduplicates and breaks cycles.
-// Diagnostics are appended to `errors`.
+// paths already processed (deduplication for diamond imports); `active` is the
+// current DFS stack, used to detect import cycles (MOD-07). `specifier` is the
+// import specifier that named this file, used to validate `module NAME;`
+// bindings (MOD-13); pass "" for the entry file. Diagnostics append to `errors`.
 void loadModuleFile(const std::string& path,
+                    const std::string& specifier,
                     const ModuleSearchPaths& paths,
                     std::set<std::string>& loaded,
+                    std::vector<std::string>& active,
                     std::vector<std::unique_ptr<DeclAST>>& out,
                     std::vector<std::string>& errors);
 

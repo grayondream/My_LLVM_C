@@ -132,7 +132,7 @@ TEST_F(ModuleLoaderTest, ProcessImportsSplicesDeclarations) {
     fs::remove_all(dir);
 }
 
-TEST_F(ModuleLoaderTest, CyclicImportsTerminate) {
+TEST_F(ModuleLoaderTest, CyclicImportsReported) {
     const fs::path dir = fs::temp_directory_path() / "smc_module_cycle_test";
     fs::remove_all(dir);
     fs::create_directories(dir);
@@ -152,11 +152,15 @@ TEST_F(ModuleLoaderTest, CyclicImportsTerminate) {
     std::set<std::string> loaded;
     std::vector<std::string> errors;
     smc::processImports(*ast, dir.string(), {}, loaded, errors);
-    ASSERT_TRUE(errors.empty());
 
-    SemanticAnalyzer analyzer;
-    analyzer.analyze(*ast);
-    EXPECT_TRUE(analyzer.getErrors().empty());
-    EXPECT_EQ(jitRun(*ast), 0);
+    // MOD-07: an import cycle is reported (and loading terminates).
+    bool reported = false;
+    for (const auto& e : errors) {
+        if (e.find("circular import detected") != std::string::npos) {
+            reported = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(reported) << "expected a circular-import diagnostic";
     fs::remove_all(dir);
 }

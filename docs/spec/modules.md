@@ -8,14 +8,14 @@
 
 | 语法 | 解析结果 | 状态 |
 |---|---|---|
-| `module NAME;` | `ModuleDeclAST(name, imports, exports)` | 记录；无文件映射/编译单元绑定 |
+| `module a.b;` | `TranslationUnitAST::moduleName`（+ `ModuleDeclAST`） | `[impl]` 点分/`::` 名；驱动校验文件↔模块名（MOD-04/13） |
 | `import a.b;` / `import "dir/f.smc";` | 记入 `TranslationUnitAST::imports` | 驱动 `ModuleLoader` 解析并**前插**声明（MOD-04/14） |
-| `export decl` | 解析 `decl`，丢弃标记 | 无可见性语义 |
+| `export decl` / `export namespace A { … }` | 置 `DeclAST::isExported` | `[impl]` 参与模块的默认私有，导出者进全局（MOD-05/06） |
 | `namespace A { ... }` | `NamespaceDeclAST` | 名称修饰 + 限定/非限定查找（PAR-22/MOD-12） |
 
-导入解析（`src/driver/ModuleLoader.*`）：搜索顺序为**导入者目录 → `-M/--module-path` → `STD_DIR`**；点分名映射为目录（`a.b` → `a/b.smc`）；以规范化路径集合去重并打破环。被导入的声明**前插**到导入单元之前，因此对其全部可见（单遍语义分析需要）。`std.c` 绑定层即 `libs/std/c.smc`（内嵌兜底）。
+导入解析（`src/driver/ModuleLoader.*`）：搜索顺序为**导入者目录 → `-M/--module-path` → `STD_DIR`**；点分名映射为目录（`a.b` → `a/b.smc`）；`loaded` 规范化路径去重、`active` DFS 栈检测**导入环并报错**（MOD-07）。被导入的声明**前插**到导入单元之前，因此对其全部可见（单遍语义分析需要）。`std.c` 绑定层即 `libs/std/c.smc`（内嵌兜底）。
 
-其余：符号表为 `Scope` 重载集链，namespace 成员以修饰键（`A_f`）注册；跨模块**可见性/导出**语义尚未实现。
+可见性（`src/sema/SemanticAnalyzer.cpp`）：符号表仍为 `Scope` 重载集链。声明 `module NAME;` 的单元为**参与模块**，其声明注册在**每模块私有作用域**（`moduleScopes`）中；只有 `export`/`public` 的声明才同时注册到全局作用域。因此导入者只能看到导出接口，而模块内部仍可使用私有成员。未声明 `module` 的**遗留/匿名单元**（如预置 `std.c` 与既有测试）保持全部全局可见，向后兼容。`main` 始终视为导出（程序入口）。
 
 ## 2. 命名空间（MOD-12，DEC-17）`[plan]`
 
@@ -35,7 +35,7 @@ namespace geometry {        // 开放命名空间：可再次进入
 }
 ```
 
-- 限定名 `A::B::name`（`::` token 待补，LEX-14/PAR-22）。
+- 限定名 `A::B::name`（`::` token 已实现，LEX-14/PAR-22）。
 - 命名空间是**编译期名字分组**，与模块（文件/编译单元）**正交**：
   - 模块决定“哪些文件一起编译/如何导入”；
   - namespace 决定“符号的限定名与查找路径”。
@@ -47,36 +47,45 @@ namespace geometry {        // 开放命名空间：可再次进入
 2. 限定名 `A::x`：从全局根按名逐级进入 namespace/module。
 3. ADL（实参依赖查找）**不引入**（保持 C 风格可预测，见 NG-03）。
 
-## 3. 模块与文件（MOD-04/13）`[plan]`
+## 3. 模块与文件（MOD-04/13）`[impl]`
 
-- **一文件一模块**：每个 `.smc` 源文件最多一条 `module` 声明，且必须位于文件首部。
-- 文件↔模块映射：`module a.b.c;` ↔ 路径 `a/b/c.smc`；缺省模块名为文件名（去扩展名）。
+- **一文件一模块**：每个 `.smc` 源文件最多一条 `module` 声明；解析器接受点分/`::` 模块名，并记入 `TranslationUnitAST::moduleName`。
+- 文件↔模块映射：`module a.b.c;` ↔ 路径 `a/b/c.smc`；缺省模块名为文件名（去扩展名）。`import a.b;` 解析到该文件后，若文件声明了模块名，则**必须与导入说明符一致**，否则报错（`ModuleLoader`，MOD-13）。
 - 编译单元 = 一个模块文件（或显式引入的一组）。
 - 导入搜索路径由驱动提供（`-M`/`--module-path`，见 TOOL-04/TOOL-08），默认搜索当前目录与标准库根。
 
 > 待定：`module` 是否存在子模块/分区（partial）语义——归入 DEC-17 一并裁定。
+> 现状限制：未强制 `module` 必须位于文件首部、未拒绝重复 `module`；类型名可见性尚未纳入模块作用域（`typeCtx` 仍全局），详见 §11。
 
 ## 4. 导入与可见性（MOD-05/06/11，DEC-02）
 
-### 4.1 导入 `[plan]`
+### 4.1 导入 `[impl]`
 
 ```smc
-import math;            // 形式 1：引入候选符号
+import math;            // 形式 1：引入模块的导出符号
 import math::{add, sub};// 形式 2（提案）：选择性导入
 import math as m;       // 形式 3（提案）：别名
 ```
 
-- 被导入模块内**未标记 `export`/`public`** 的符号不可见。
-- 访问语法（`math.add` 还是直接 `add`）由 **DEC-02** 裁定；本文件建议默认**限定访问** `math.add`，选择性导入后可直接用名，避免全局污染。
+- 被导入模块内**未标记 `export`/`public`** 的符号不可见（`[impl]`）。
+- 访问语法由 **DEC-02** 裁定：**直接非限定访问**（`import math;` 后可直接用 `add`）。
+  模块是物理边界，不引入名字前缀；若需要限定名，由模块作者用 `namespace`
+  包裹（如 `libs/std/core.smc` 的 `std::min`），见 DEC-17。
+- 形式 2/3（选择性导入、别名）仍为提案，未实现。
 
-### 4.2 可见性
+### 4.2 可见性 `[impl]`
 
 | 标记 | 作用域 | 状态 |
 |---|---|---|
-| `export` | 模块外可见 | `[impl]` 仅记录，语义待实现 |
-| `public` | 类型成员 / namespace 成员公开 | `[impl]` 成员段待补（PAR-04） |
-| `private` | 仅本模块/本类型可见 | `[impl]` 同上 |
-| 无标记 | 默认**模块内私有**（提案） | `[plan]` |
+| `export` | 模块外可见（其后声明，或整个 namespace） | `[impl]` |
+| `public` | 顶层与 `export` 同义；类成员访问级别待补（PAR-04） | `[impl]`（顶层） |
+| `private` | 仅本模块/本类型可见 | `[plan]`（类成员） |
+| 无标记 | 参与模块：默认**模块内私有**；遗留/匿名单元：全局可见 | `[impl]` |
+| `main` | 始终导出（程序入口） | `[impl]` |
+
+参与模块的私有声明存放在该模块的私有作用域中，既对导入者不可见、又不与其
+他模块的同名私有声明在**名字解析**阶段冲突；但注意代码生成仍共用同一 LLVM
+模块符号空间（同名私有函数需靠 MOD-08 名称修饰进一步隔离，见 §11）。
 
 ## 5. 名称解析与作用域（MOD-01/02/03）`[impl → 待扩展]`
 
@@ -85,9 +94,11 @@ import math as m;       // 形式 3（提案）：别名
 - 前向声明：函数/struct/class/enum/union 已有占位类型 `[impl]`。
 - **目标**：在全局之上增加 模块层 → namespace 层，查找顺序见 §2.2。
 
-## 6. 循环依赖（MOD-07）`[plan]`
+## 6. 循环依赖（MOD-07）`[impl]`
 
-- 构建模块依赖图，DFS 检出环并报错，诊断列出环路径。
+- `ModuleLoader` 用 DFS 的 `active` 栈检出导入环，报错并列出环路径，例如
+  `circular import detected: …/a.smc -> …/b.smc -> …/a.smc`；加载随后终止。
+- 菱形依赖（多条无环路径到同一模块）由 `loaded` 集合去重，不报错。
 - 类型级前向引用通过占位类型允许，但**导入环**禁止（与 Rust 类似）。
 - 纯类型循环（`struct A { B* b; }` / `struct B { A* a; }`）允许，参照 C。
 
@@ -107,10 +118,19 @@ import math as m;       // 形式 3（提案）：别名
 - `extern` 符号保持未修饰 C 名（`isCName`，见 abi.md §4）。
 - 关键缺口，列为 P0-02。
 
-## 10. 未决项
+## 10. 已裁定项（DEC-02 / DEC-17）`[frozen]`
 
-| 决策 | 内容 |
+| 决策 | 结论 |
 |---|---|
-| DEC-02 | 导入后符号访问语法（`math.add` vs `add`） |
-| DEC-14 | 模块缓存格式与稳定性 |
-| DEC-17 | `namespace` 与 `module` 的关系与共存方式 |
+| DEC-02 | 导入后**直接非限定访问**；不引入 `math.add` 式模块成员运算符。需要限定名时用模块内的 `namespace`。 |
+| DEC-17 | 模块 = **物理边界**（文件/编译单元/导入），namespace = **逻辑边界**（名字分组）；二者正交：同一模块可含多个 namespace，同一 namespace 可跨模块（由 `module` 决定可见性）。 |
+
+其余未决：DEC-14（模块缓存格式，见 §8）。
+
+## 11. 现状限制（`[plan]` 待补）
+
+- **类型可见性**：`typeCtx` 仍是全局表，参与模块的私有类型名对导入者暂不可隐藏；
+  纳入模块作用域归入 MOD-06/08 后续。
+- **私有同名符号**：名字解析阶段已按模块作用域隔离，但代码生成共用单一 LLVM
+  符号空间；跨模块同名私有函数/全局变量仍需 MOD-08/MOD-15 的名称修饰。
+- **模块声明位置**：未强制位于文件首部，也未拒绝重复声明。

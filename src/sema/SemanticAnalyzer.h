@@ -91,6 +91,20 @@ private:
     std::string scopedName(const std::string& name) const;
     std::string resolveNamespaceName(const std::string& name) const;
 
+    // Module visibility (P0-04 / MOD-05/06). Declarations of a participating
+    // module (one that declares `module NAME;`) are registered in a per-module
+    // scope; only `export`/`public` ones are additionally registered in the
+    // global scope, so importers see exactly the public interface. Declarations
+    // of legacy/anonymous units (moduleName empty) remain global.
+    bool atGlobalLevel() const;
+    Scope* moduleScopeFor(const std::string& moduleName);
+    void enterModuleContext(const std::string& moduleName);
+    std::unordered_map<std::string, std::unique_ptr<Scope>> moduleScopes;
+    Scope* activeModuleScope = nullptr;
+    std::string currentModule;
+    bool currentDeclExported = false;
+    bool namespaceExported = false;
+
     std::optional<ConstValue> evalConstexprCall(CallExprAST& call, int depth);
     std::optional<ConstValue> evalConstexprStmt(StmtAST* stmt, ConstEnv& env, int depth);
     static bool constValueTruthy(const ConstValue& v);

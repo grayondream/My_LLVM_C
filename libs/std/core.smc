@@ -1,6 +1,9 @@
 // ===== std.core — minimal core utilities (P0-05 / STD-01) =====
 // Import with `import std.core;` and use as `std::min(...)` etc.
-namespace std {
+// The module's public interface is marked `export` (P0-04 / MOD-05).
+module std.core;
+
+export namespace std {
 
 constexpr int min(int a, int b) {
     if (a < b) return a;

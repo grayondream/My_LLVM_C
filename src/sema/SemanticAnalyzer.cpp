@@ -57,8 +57,15 @@ void SemanticAnalyzer::exitScope() {
 }
 
 bool SemanticAnalyzer::declare(const std::string& name, Type* type) {
+    // An exported declaration of a participating module is also visible to
+    // importers, so it is registered in the global scope; everything else at
+    // module top level stays in the module's private scope (MOD-05/06).
+    Scope* target = currentScope;
+    if (activeModuleScope != nullptr && currentScope == activeModuleScope && currentDeclExported) {
+        target = globalScope.get();
+    }
     Symbol* sym = new Symbol(name, type);
-    if (!currentScope->declare(name, sym)) {
+    if (!target->declare(name, sym)) {
         delete sym;
         return false;
     }
@@ -111,10 +118,36 @@ std::vector<std::string> SemanticAnalyzer::namespaceCandidates(const std::string
 }
 
 std::string SemanticAnalyzer::scopedName(const std::string& name) const {
-    if (currentScope == globalScope.get() && !namespacePrefix.empty()) {
+    if (atGlobalLevel() && !namespacePrefix.empty()) {
         return namespacePrefix + name;
     }
     return name;
+}
+
+bool SemanticAnalyzer::atGlobalLevel() const {
+    return currentScope == globalScope.get() || currentScope == activeModuleScope;
+}
+
+Scope* SemanticAnalyzer::moduleScopeFor(const std::string& moduleName) {
+    auto it = moduleScopes.find(moduleName);
+    if (it != moduleScopes.end()) {
+        return it->second.get();
+    }
+    auto scope = std::make_unique<Scope>(globalScope.get());
+    Scope* raw = scope.get();
+    moduleScopes[moduleName] = std::move(scope);
+    return raw;
+}
+
+void SemanticAnalyzer::enterModuleContext(const std::string& moduleName) {
+    currentModule = moduleName;
+    if (moduleName.empty()) {
+        activeModuleScope = nullptr;
+        currentScope = globalScope.get();
+    } else {
+        activeModuleScope = moduleScopeFor(moduleName);
+        currentScope = activeModuleScope;
+    }
 }
 
 std::string SemanticAnalyzer::resolveNamespaceName(const std::string& name) const {
@@ -1543,6 +1576,16 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
 }
 
 void SemanticAnalyzer::analyzeTopLevelDecl(DeclAST& decl) {
+    // Visibility applies per declaration (MOD-05/06). `main` is always
+    // externally visible (program entry point); an exported namespace makes
+    // all of its members exported.
+    bool savedExported = currentDeclExported;
+    bool isEntry = false;
+    if (auto* fn = dynamic_cast<FunctionDeclAST*>(&decl)) {
+        if (fn->name == "main") isEntry = true;
+    }
+    currentDeclExported = decl.isExported || namespaceExported || isEntry;
+
     if (auto* funcDecl = dynamic_cast<FunctionDeclAST*>(&decl)) {
         visit(*funcDecl);
     } else if (auto* varDecl = dynamic_cast<VarDeclAST*>(&decl)) {
@@ -1573,18 +1616,33 @@ void SemanticAnalyzer::analyzeTopLevelDecl(DeclAST& decl) {
             else if (auto* a = dynamic_cast<ArrayDeclAST*>(d.get())) visit(*a);
         }
     }
+
+    currentDeclExported = savedExported;
 }
 
 void SemanticAnalyzer::visit(TranslationUnitAST& node) {
+    Scope* savedScope = currentScope;
+    std::string savedModule = currentModule;
+    Scope* savedActive = activeModuleScope;
+
     for (auto& decl : node.declarations) {
-        if (decl) {
-            analyzeTopLevelDecl(*decl);
-        }
+        if (!decl) continue;
+        // Switch to the owning module's scope for this declaration group.
+        enterModuleContext(decl->moduleName);
+        analyzeTopLevelDecl(*decl);
     }
+
+    currentScope = savedScope;
+    currentModule = savedModule;
+    activeModuleScope = savedActive;
 }
 
 void SemanticAnalyzer::visit(NamespaceDeclAST& node) {
     std::string saved = namespacePrefix;
+    bool savedExported = namespaceExported;
+    if (node.isExported) {
+        namespaceExported = true;
+    }
     std::string segment = mangleNamespaceName(node.name);
     if (!segment.empty()) {
         namespacePrefix += segment + "_";
@@ -1595,6 +1653,7 @@ void SemanticAnalyzer::visit(NamespaceDeclAST& node) {
         }
     }
     namespacePrefix = saved;
+    namespaceExported = savedExported;
 }
 
 void SemanticAnalyzer::analyze(TranslationUnitAST& ast) {

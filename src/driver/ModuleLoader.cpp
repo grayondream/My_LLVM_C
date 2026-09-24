@@ -4,6 +4,7 @@
 #include "frontend/Lexer.h"
 #include "frontend/Parser.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -55,6 +56,31 @@ std::vector<std::string> importCandidates(const std::string& specifier) {
     return candidates;
 }
 
+// `std.c` / `std/c.smc` / `std/c` -> `std.c` (MOD-13 file <-> module mapping).
+std::string specifierToModuleName(const std::string& specifier) {
+    std::string name = specifier;
+    if (endsWith(name, ".smc")) name = name.substr(0, name.size() - 4);
+    for (char& c : name) {
+        if (c == '/' || c == '\\') c = '.';
+    }
+    return name;
+}
+
+// Only dotted module specifiers carry an implicit module name; explicit file
+// paths (`import "dir/f.smc";`) are not name-checked.
+bool isDottedSpecifier(const std::string& specifier) {
+    return specifier.find('/') == std::string::npos &&
+           specifier.find('\\') == std::string::npos &&
+           !endsWith(specifier, ".smc");
+}
+
+void tagModuleDecls(std::vector<std::unique_ptr<DeclAST>>& decls,
+                    const std::string& moduleName) {
+    for (auto& d : decls) {
+        if (d && d->moduleName.empty()) d->moduleName = moduleName;
+    }
+}
+
 } // namespace
 
 std::string resolveImport(const std::string& specifier, const ModuleSearchPaths& paths) {
@@ -72,13 +98,28 @@ std::string resolveImport(const std::string& specifier, const ModuleSearchPaths&
 }
 
 void loadModuleFile(const std::string& path,
+                    const std::string& specifier,
                     const ModuleSearchPaths& paths,
                     std::set<std::string>& loaded,
+                    std::vector<std::string>& active,
                     std::vector<std::unique_ptr<DeclAST>>& out,
                     std::vector<std::string>& errors) {
     const std::string canonical = canonicalPath(path);
+
+    // Cycle detection (MOD-07). Checked before `loaded` so a back-edge to a
+    // module still on the DFS stack is reported instead of silently deduped.
+    auto onStack = std::find(active.begin(), active.end(), canonical);
+    if (onStack != active.end()) {
+        std::string cycle;
+        for (auto it = onStack; it != active.end(); ++it) {
+            cycle += *it + " -> ";
+        }
+        cycle += canonical;
+        errors.push_back("circular import detected: " + cycle);
+        return;
+    }
     if (loaded.count(canonical)) {
-        return; // already loaded (also breaks import cycles)
+        return; // already loaded through another (acyclic) path
     }
     loaded.insert(canonical);
 
@@ -103,17 +144,37 @@ void loadModuleFile(const std::string& path,
         return;
     }
 
+    // Module/file binding (MOD-13): a declared `module NAME;` must match the
+    // dotted import specifier used to reach this file.
+    if (!ast->moduleName.empty() && isDottedSpecifier(specifier)) {
+        std::string expected = specifierToModuleName(specifier);
+        if (expected != ast->moduleName) {
+            errors.push_back(canonical + ": module declares name '" + ast->moduleName +
+                             "' but was imported as '" + expected + "'");
+            return;
+        }
+    }
+
+    // Tag declarations of a participating module (has `module NAME;`) so the
+    // semantic analyzer can enforce export-based visibility (MOD-05/06).
+    if (!ast->moduleName.empty()) {
+        tagModuleDecls(ast->declarations, ast->moduleName);
+    }
+
     // Resolve this module's imports first (imported declarations before ours).
+    active.push_back(canonical);
     ModuleSearchPaths childPaths = paths;
-    childPaths.dirs.insert(childPaths.dirs.begin(), canonicalPath(fs::path(canonical).parent_path().string()));
+    childPaths.dirs.insert(childPaths.dirs.begin(),
+                           canonicalPath(fs::path(canonical).parent_path().string()));
     for (const std::string& spec : ast->imports) {
         std::string resolved = resolveImport(spec, childPaths);
         if (resolved.empty()) {
             errors.push_back(canonical + ": cannot resolve import '" + spec + "'");
             continue;
         }
-        loadModuleFile(resolved, childPaths, loaded, out, errors);
+        loadModuleFile(resolved, spec, childPaths, loaded, active, out, errors);
     }
+    active.pop_back();
 
     for (auto& decl : ast->declarations) {
         out.push_back(std::move(decl));
@@ -133,13 +194,14 @@ void processImports(TranslationUnitAST& tu,
     }
 
     std::vector<std::unique_ptr<DeclAST>> imported;
+    std::vector<std::string> active;
     for (const std::string& spec : tu.imports) {
         std::string resolved = resolveImport(spec, localPaths);
         if (resolved.empty()) {
             errors.push_back("cannot resolve import '" + spec + "'");
             continue;
         }
-        loadModuleFile(resolved, localPaths, loaded, imported, errors);
+        loadModuleFile(resolved, spec, localPaths, loaded, active, imported, errors);
     }
 
     if (!imported.empty()) {

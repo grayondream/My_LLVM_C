@@ -1,0 +1,203 @@
+// P0-04 / MOD-05/06/07/13: module declaration/file binding, export-based
+// visibility, and import cycle diagnostics.
+#include <gtest/gtest.h>
+
+#include <filesystem>
+#include <fstream>
+#include <set>
+#include <string>
+#include <vector>
+
+#include "ast/Decl.h"
+#include "codegen/CodegenContext.h"
+#include "driver/ModuleLoader.h"
+#include "driver/StdPrelude.h"
+#include "frontend/Lexer.h"
+#include "frontend/Parser.h"
+#include "sema/SemanticAnalyzer.h"
+#include "support/Log.h"
+
+#include "llvm/ExecutionEngine/Orc/LLJIT.h"
+#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
+#include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
+#include "llvm/IR/Verifier.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/TargetSelect.h"
+
+#include <spdlog/spdlog.h>
+
+namespace fs = std::filesystem;
+
+namespace {
+
+class ModuleVisibilityTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        spdlog::set_level(spdlog::level::off);
+        static bool init = false;
+        if (!init) {
+            llvm::InitializeAllTargetInfos();
+            llvm::InitializeAllTargets();
+            llvm::InitializeAllTargetMCs();
+            llvm::InitializeAllAsmParsers();
+            llvm::InitializeAllAsmPrinters();
+            init = true;
+        }
+        dir = fs::temp_directory_path() / "smc_module_visibility_test";
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+    }
+
+    void TearDown() override { fs::remove_all(dir); }
+
+    void write(const fs::path& rel, const std::string& text) {
+        fs::create_directories(rel.parent_path());
+        std::ofstream out(rel);
+        out << text;
+    }
+
+    // Parses `mainSource` as the entry unit, resolves its imports, and returns
+    // the spliced translation unit plus any loader errors.
+    std::unique_ptr<TranslationUnitAST> loadMain(const std::string& mainSource,
+                                                 std::vector<std::string>& errors) {
+        auto ast = smc::parseStdCPrelude(mainSource, (dir / "main.smc").string());
+        std::set<std::string> loaded;
+        smc::processImports(*ast, dir.string(), {}, loaded, errors);
+        return ast;
+    }
+
+    // Runs sema + codegen + JIT for a unit whose `main` returns an int.
+    int jitRun(TranslationUnitAST& ast) {
+        CodegenContext ctx;
+        ctx.setSourceFile("module_visibility_test.c");
+        ast.codegen(ctx);
+        ctx.finalizeDebugInfo();
+
+        std::string ve;
+        llvm::raw_string_ostream vs(ve);
+        if (llvm::verifyModule(ctx.getModule(), &vs)) return -1;
+
+        auto jtmb = llvm::orc::JITTargetMachineBuilder::detectHost();
+        if (!jtmb) return -1;
+        auto jit = llvm::orc::LLJITBuilder().setJITTargetMachineBuilder(std::move(*jtmb)).create();
+        if (!jit) return -1;
+
+        auto ts = llvm::orc::ThreadSafeModule(ctx.takeModule(), ctx.takeContext());
+        if (auto e = (*jit)->addIRModule(std::move(ts))) return -1;
+
+        auto sym = (*jit)->lookup("main");
+        if (!sym) return -1;
+        return ((int (*)())(intptr_t)sym->getValue())();
+    }
+
+    fs::path dir;
+};
+
+bool hasErrorContaining(const std::vector<Diagnostic>& errors, const std::string& needle) {
+    for (const auto& d : errors) {
+        if (d.message.find(needle) != std::string::npos) return true;
+    }
+    return false;
+}
+
+bool hasStringContaining(const std::vector<std::string>& errors, const std::string& needle) {
+    for (const auto& e : errors) {
+        if (e.find(needle) != std::string::npos) return true;
+    }
+    return false;
+}
+
+} // namespace
+
+TEST_F(ModuleVisibilityTest, ExportedFunctionIsVisible) {
+    write(dir / "util.smc", "module util;\nexport int helper() { return 5; }\n");
+
+    std::vector<std::string> errors;
+    auto ast = loadMain("import util;\nint main() { return helper() - 5; }\n", errors);
+    ASSERT_TRUE(errors.empty()) << (errors.empty() ? "" : errors[0]);
+
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    EXPECT_TRUE(analyzer.getErrors().empty());
+    EXPECT_EQ(jitRun(*ast), 0);
+}
+
+TEST_F(ModuleVisibilityTest, NonExportedFunctionIsHidden) {
+    write(dir / "util.smc", "module util;\nint helper() { return 5; }\n");
+
+    std::vector<std::string> errors;
+    auto ast = loadMain("import util;\nint main() { return helper(); }\n", errors);
+    ASSERT_TRUE(errors.empty());
+
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    // The importer must not see util's module-private helper (MOD-05/06).
+    EXPECT_TRUE(hasErrorContaining(analyzer.getErrors(), "helper"));
+    EXPECT_TRUE(hasErrorContaining(analyzer.getErrors(), "undeclared"));
+}
+
+TEST_F(ModuleVisibilityTest, PrivateHelperUsableInsideModule) {
+    write(dir / "util.smc",
+          "module util;\n"
+          "int helper() { return 7; }\n"
+          "export int compute() { return helper() + 1; }\n");
+
+    std::vector<std::string> errors;
+    auto ast = loadMain("import util;\nint main() { return compute() - 8; }\n", errors);
+    ASSERT_TRUE(errors.empty()) << (errors.empty() ? "" : errors[0]);
+
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    EXPECT_TRUE(analyzer.getErrors().empty());
+    EXPECT_EQ(jitRun(*ast), 0);
+}
+
+TEST_F(ModuleVisibilityTest, LegacyUnitWithoutModuleDeclIsFullyVisible) {
+    write(dir / "util.smc", "int helper() { return 3; }\n");
+
+    std::vector<std::string> errors;
+    auto ast = loadMain("import util;\nint main() { return helper() - 3; }\n", errors);
+    ASSERT_TRUE(errors.empty());
+
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    EXPECT_TRUE(analyzer.getErrors().empty());
+    EXPECT_EQ(jitRun(*ast), 0);
+}
+
+TEST_F(ModuleVisibilityTest, ExportedNamespaceMembersAreVisible) {
+    write(dir / "geom.smc",
+          "module geom;\n"
+          "export namespace g { int add(int a, int b) { return a + b; } }\n");
+
+    std::vector<std::string> errors;
+    auto ast = loadMain("import geom;\nint main() { return g::add(2, 3) - 5; }\n", errors);
+    ASSERT_TRUE(errors.empty()) << (errors.empty() ? "" : errors[0]);
+
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    EXPECT_TRUE(analyzer.getErrors().empty());
+    EXPECT_EQ(jitRun(*ast), 0);
+}
+
+TEST_F(ModuleVisibilityTest, DottedModuleNameMustMatchPath) {
+    write(dir / "lib" / "util.smc",
+          "module lib.util;\nexport int f() { return 9; }\n");
+
+    std::vector<std::string> errors;
+    auto ast = loadMain("import lib.util;\nint main() { return f() - 9; }\n", errors);
+    ASSERT_TRUE(errors.empty()) << (errors.empty() ? "" : errors[0]);
+
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    EXPECT_TRUE(analyzer.getErrors().empty());
+    EXPECT_EQ(jitRun(*ast), 0);
+}
+
+TEST_F(ModuleVisibilityTest, ModuleNameMismatchIsReported) {
+    write(dir / "util.smc", "module other;\nexport int helper() { return 1; }\n");
+
+    std::vector<std::string> errors;
+    auto ast = loadMain("import util;\nint main() { return helper(); }\n", errors);
+    EXPECT_TRUE(hasStringContaining(errors, "declares name 'other'"));
+}

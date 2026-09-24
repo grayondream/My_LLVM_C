@@ -12,6 +12,13 @@ struct FoldedValue {
 
 class DeclAST : public ASTNode {
 public:
+    // Module visibility (P0-04 / MOD-05/06). `moduleName` is the owning module
+    // (empty for legacy/anonymous units whose declarations are always visible).
+    // A declaration of a participating module is visible outside it only when
+    // marked `export`/`public` (`isExported`). See docs/spec/modules.md §4.
+    bool isExported = false;
+    std::string moduleName;
+
     virtual llvm::Value* codegen(CodegenContext& ctx) = 0;
 };
 
@@ -69,6 +76,9 @@ public:
     // Module/file names named by `import` at the top level. The driver resolves
     // and loads them, splicing their declarations in front of this unit's.
     std::vector<std::string> imports;
+    // The module declared by `module NAME;` at the head of this unit, or empty
+    // for a legacy/anonymous unit (MOD-04). Dotted, e.g. "std.core".
+    std::string moduleName;
 
     explicit TranslationUnitAST(std::vector<std::unique_ptr<DeclAST>> decls)
         : declarations(std::move(decls)) {}
