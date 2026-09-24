@@ -135,6 +135,13 @@ int main() {
 )", "ns_type_typedef.c"), 0);
 }
 
+TEST_F(NamespaceE2E, QualifiedEnumConstant) {
+    EXPECT_EQ(runSource(R"(
+namespace A { enum Color { Red, Green }; }
+int main() { return A::Green - 1; }
+)", "ns_type_enum.c"), 0);
+}
+
 TEST_F(NamespaceE2E, NestedQualifiedStructType) {
     EXPECT_EQ(runSource(R"(
 namespace A.B { struct P { int v; }; }

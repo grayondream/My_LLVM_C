@@ -555,6 +555,16 @@ std::optional<SemanticAnalyzer::ConstValue> SemanticAnalyzer::evaluateConstexpr(
         if (it != constexprValues.end()) {
             return it->second;
         }
+        // Enumerator constant.
+        for (const auto& candidate : namespaceCandidates(var->name)) {
+            auto eit = enumConstants.find(candidate);
+            if (eit != enumConstants.end()) {
+                ConstValue cv;
+                cv.type = ConstValue::INT;
+                cv.intVal = eit->second.second;
+                return cv;
+            }
+        }
         return std::nullopt;
     }
 
@@ -689,6 +699,19 @@ void SemanticAnalyzer::visit(StringExprAST& node) {
 }
 
 void SemanticAnalyzer::visit(VariableExprAST& node) {
+    // Enumerator (possibly namespace-qualified, e.g. `A::Red`)?
+    for (const auto& candidate : namespaceCandidates(node.name)) {
+        auto it = enumConstants.find(candidate);
+        if (it != enumConstants.end()) {
+            node.name = candidate;
+            node.isEnumConstant = true;
+            node.enumValue = it->second.second;
+            node.type = it->second.first;
+            node.isLValue = false;
+            return;
+        }
+    }
+
     const std::string originalName = node.name;
     const std::string key = resolveNamespaceName(node.name);
     Symbol* sym = currentScope->lookup(key);
@@ -1257,6 +1280,11 @@ void SemanticAnalyzer::visit(SwitchStmtAST& node) {
     if (condType && !isIntegerType(condType)) {
         emitError("switch expression must be integer type, but got '" + typeToString(condType) + "'", node);
     }
+    // Type the case labels so enumerator constants and constexpr values are
+    // resolved (codegen then folds them to integer constants).
+    for (auto& label : node.caseLabels) {
+        if (label) getExprType(*label);
+    }
     for (auto& c : node.cases) {
         if (c) visit(*c);
     }
@@ -1414,6 +1442,9 @@ void SemanticAnalyzer::visit(EnumDeclAST& node) {
     auto* enumType = new EnumType(node.name);
     for (auto& val : node.values) {
         enumType->addValue(val.first, val.second);
+        // Enumerators live in the enclosing (namespace) scope, so `A::Red`
+        // resolves to the same key as `Red` used inside namespace A.
+        enumConstants[scopedName(val.first)] = {enumType, val.second};
     }
     typeCtx->addEnum(node.name, enumType);
 }

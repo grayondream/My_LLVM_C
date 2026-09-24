@@ -120,6 +120,10 @@ public:
     // value: codegen then yields the function instead of a variable address.
     bool isFunctionRef = false;
     std::string resolvedFunctionName;
+    // Set by semantic analysis when the name is an enumerator: codegen then
+    // yields the integer constant instead of a variable address.
+    bool isEnumConstant = false;
+    int enumValue = 0;
     explicit VariableExprAST(const std::string& n) : name(n) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };

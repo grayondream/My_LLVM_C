@@ -78,6 +78,9 @@ private:
     std::unordered_set<std::string>* initLocals = nullptr;
     std::unordered_set<std::string> initWarned;
 
+    // Enumerators by scoped key (e.g. "RED", "A_Red"): type + integer value.
+    std::unordered_map<std::string, std::pair<Type*, int>> enumConstants;
+
     // constexpr function interpretation (CT-06 seed): evaluate a call and walk
     // the function body's statements (return / if / block / local decl).
     // Namespace support (PAR-22 / MOD-12). Declarations at namespace scope are

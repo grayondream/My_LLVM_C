@@ -77,6 +77,13 @@ llvm::Value* StringExprAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* VariableExprAST::codegen(CodegenContext& ctx) {
+    // Enumerator: materialize the compile-time integer constant.
+    if (isEnumConstant) {
+        llvm::Type* ty = type ? ctx.getLLVMType(type)
+                              : llvm::Type::getInt32Ty(ctx.getContext());
+        return llvm::ConstantInt::get(ty, static_cast<uint64_t>(enumValue), /*isSigned=*/true);
+    }
+
     // A function name used as a value yields the function itself.
     if (isFunctionRef) {
         if (llvm::Function* fn = ctx.getModule().getFunction(resolvedFunctionName)) {

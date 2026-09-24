@@ -140,7 +140,7 @@
 - `[~]` **TYP-22** `(新)` **整数提升与常规算术转换**：转换等级、signed×unsigned 混合规则（细化 TYP-19）。（草案见 `docs/spec/conversions.md`）
 - `[~]` **TYP-23** `(新)` **隐式/显式转换矩阵**：标量、指针、数组、struct/class、enum、Optional/Result 的完整转换表。（草案见 `docs/spec/conversions.md`）
 - `[~]` **TYP-24** `(新)` **空指针常量语义**：`nullptr`/`NULL`/`0` 与指针/bool 的转换规则。（草案见 `docs/spec/conversions.md`；`null`/`0` 的 int↔ptr 转换、指针比较、指针真值判断已实现；`nullptr` token 待补）
-- `[~]` **TYP-25** `(新)` enum 默认底层类型、枚举常量作用域与限定访问（细化 TYP-09）。（布局草案见 `docs/spec/abi.md`）
+- `[~]` **TYP-25** `(新)` enum 默认底层类型、枚举常量作用域与限定访问（细化 TYP-09）。枚举常量已可作为值/常量表达式参与运算，支持限定访问 `A::Red`；显式底层类型 `:u8` 待补。
 - `[ ]` **TYP-26** `(新)` 字符串字面量类型、`str`/`String` 生命周期与所有权（细化 FMT-01/02）。
 - `[~]` **TYP-27** `(新)` 聚合类型 ABI：按值传参/返回（byval/sret）、端序、默认对齐与成员内边距（细化 MEM-09）。（草案见 `docs/spec/abi.md`）
 
