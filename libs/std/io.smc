@@ -1,0 +1,22 @@
+// ===== std.io — minimal I/O helpers (P0-05 / STD-12) =====
+// Import with `import std.io;` and use as `std::print_int(...)` etc.
+// The libc declarations are repeated here so the module is self-contained even
+// when the compiler prelude is disabled (`--no-prelude`).
+extern int  printf(char* format, ...);
+extern int  putchar(int c);
+
+namespace std {
+
+void print_int(int v) {
+    printf("%d", v);
+}
+
+void print_char(char c) {
+    putchar(c);
+}
+
+void print_str(char* s) {
+    printf("%s", s);
+}
+
+} // namespace std

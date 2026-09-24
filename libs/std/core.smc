@@ -1,0 +1,21 @@
+// ===== std.core — minimal core utilities (P0-05 / STD-01) =====
+// Import with `import std.core;` and use as `std::min(...)` etc.
+namespace std {
+
+constexpr int min(int a, int b) {
+    if (a < b) return a;
+    return b;
+}
+
+constexpr int max(int a, int b) {
+    if (a > b) return a;
+    return b;
+}
+
+int clamp(int v, int lo, int hi) {
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
+}
+
+} // namespace std

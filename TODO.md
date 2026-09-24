@@ -349,7 +349,7 @@
 > 容器采用 **C 语义**：显式 `new/destroy`，不自动释放元素；泛型容器通过扩展点 `to_hash`/`equals`/`to_string` 适配用户类型（无 trait）。
 
 ### std.core
-- `[ ]` **STD-01** 基础类型导出；`panic/assert/abort`。
+- `[~]` **STD-01** 基础类型导出；`panic/assert/abort`。已建 `libs/std/core.smc`（`min/max/clamp`）；`panic/assert/abort` 待补。
 - `[ ]` **STD-02** `Optional<T>`、`Result<T,E>`（显式访问访问器）。
 - `[ ]` **STD-03** 内存操作：`memcpy/memset/memmove/memcmp`。
 - `[ ]` **STD-04** 整数运算与溢出辅助。
@@ -370,7 +370,7 @@
 - `[ ]` **STD-11** `format`、`print`、格式说明解析、编译期检查接口、自定义格式化。
 
 ### std.io
-- `[ ]` **STD-12** `print`、`read`、stdout/stderr、文件读写、缓冲 I/O。
+- `[~]` **STD-12** `print`、`read`、stdout/stderr、文件读写、缓冲 I/O。已建 `libs/std/io.smc`（`print_int/print_char/print_str`，基于 libc）；`read`/文件 I/O 待补。
 
 ### std.math / std.bit
 - `[ ]` **STD-13** `sqrt` 等基础数学；浮点分类/舍入/常量；整数数学工具。
@@ -500,7 +500,7 @@
 - `[~]` **P0-02** C 互操作绑定层（MOD-09/STD-23）——无预处理器后的刚需。文件化 `libs/std/c.smc` + `extern` 已可用。
 - `[x]` **P0-03** 变量初始化检查（SEM-01/02）。已实现（W3001，含分支合并/循环；`-Werror` 可将警告变失败）。
 - `[~]` **P0-04** module/import/export（MOD-04~07）。源文件 `import` 已实现（搜索路径/点分名/循环）；`module`/`export`/可见性待补。
-- `[ ]` **P0-05** 最小 `std.core` / `std.io`（STD-01/12）。
+- `[~]` **P0-05** 最小 `std.core` / `std.io`（STD-01/12）。`libs/std/{core,io}.smc` 已可通过 `import std.core;` 使用。
 - `[~]` **P0-06** 诊断系统与测试设施（INF-03/04）。诊断核心 + 快照设施已就绪。
 - `[ ]` **P0-07** `(新)` **语言规范骨架**：EBNF + 关键字表 + 优先级表 + 转换矩阵（INF-06/09~11、PAR-23、TYP-22/23）。
 - `[x]` **P0-08** `(新)` **namespace 支持**（PAR-22、MOD-12、DEC-17）——现有 `libsafec` 已依赖，属刚需。函数/变量、嵌套、限定访问、限定类型名均已实现。

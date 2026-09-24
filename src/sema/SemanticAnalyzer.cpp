@@ -579,7 +579,15 @@ SemanticAnalyzer::evalConstexprCall(CallExprAST& call, int depth) {
     if (depth > kConstexprMaxDepth || constexprCallDepth >= kConstexprMaxDepth) {
         return std::nullopt; // runaway recursion: fall back to runtime evaluation
     }
-    auto it = constexprFunctions.find(call.callee);
+    // The call may not have been through visit(CallExprAST) yet (e.g. a
+    // `constexpr` initializer is folded before its subexpressions are typed),
+    // so resolve a namespace-qualified callee here as well.
+    std::string calleeName = call.callee;
+    auto it = constexprFunctions.find(calleeName);
+    if (it == constexprFunctions.end()) {
+        calleeName = resolveNamespaceName(calleeName);
+        it = constexprFunctions.find(calleeName);
+    }
     if (it == constexprFunctions.end()) {
         return std::nullopt; // not a constexpr function (e.g. a libc call)
     }
