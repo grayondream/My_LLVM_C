@@ -24,6 +24,7 @@ public:
 
     void analyze(TranslationUnitAST& ast);
     const std::vector<Diagnostic>& getErrors() const;
+    const std::vector<Diagnostic>& getWarnings() const;
 
     void enterScope();
     void exitScope();
@@ -64,6 +65,18 @@ private:
     bool tryAnalyzePrintCall(CallExprAST& node);
     bool lowerToString(CallExprAST& node, size_t argIndex, Type* argType);
     bool hasCircularInheritance(const std::string& className, const std::string& baseClass) const;
+
+    // SEM-01/02: definite-assignment analysis. Warns when a local variable or
+    // pointer may be read before being assigned. Path-sensitive through
+    // if/else (intersection at the join) and conservative for loops.
+    void checkInitialization(FunctionDeclAST& node);
+    void collectLocalNames(StmtAST* stmt, std::unordered_set<std::string>& out);
+    void initWalkStmt(StmtAST* stmt, std::unordered_set<std::string>& state);
+    void initWalkExpr(ExprAST* expr, std::unordered_set<std::string>& state);
+    void initRead(const std::string& name, const ASTNode& node,
+                  std::unordered_set<std::string>& state);
+    std::unordered_set<std::string>* initLocals = nullptr;
+    std::unordered_set<std::string> initWarned;
 
     // constexpr function interpretation (CT-06 seed): evaluate a call and walk
     // the function body's statements (return / if / block / local decl).
@@ -134,6 +147,7 @@ private:
     void visit(StmtAST& stmt);
 
     std::vector<Diagnostic> errors;
+    std::vector<Diagnostic> warnings;
     std::unique_ptr<Scope> globalScope;
     Scope* currentScope;
     FunctionDeclAST* currentFunction;

@@ -312,10 +312,14 @@ int CompilerDriver::compileFile(const std::string& inputFile) {
 
     SemanticAnalyzer analyzer;
     analyzer.analyze(*ast);
-    if (!analyzer.getErrors().empty()) {
-        for (const auto& diag : analyzer.getErrors()) {
-            std::cerr << diag.formatWithSeverity() << "\n";
-        }
+    for (const auto& diag : analyzer.getErrors()) {
+        std::cerr << diag.formatWithSeverity() << "\n";
+    }
+    for (const auto& diag : analyzer.getWarnings()) {
+        std::cerr << diag.formatWithSeverity() << "\n";
+    }
+    if (!analyzer.getErrors().empty() ||
+        (werror && !analyzer.getWarnings().empty())) {
         return 1;
     }
 

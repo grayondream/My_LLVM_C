@@ -45,6 +45,9 @@ std::string analyzeDiagnostics(const std::string& source) {
     for (const auto& d : analyzer.getErrors()) {
         out << d.formatWithSeverity() << "\n";
     }
+    for (const auto& d : analyzer.getWarnings()) {
+        out << d.formatWithSeverity() << "\n";
+    }
     return out.str();
 }
 
@@ -102,6 +105,29 @@ int main() {
     struct S s;
     float f = (float)s;
     return 0;
+}
+)"));
+}
+
+TEST_F(DiagnosticSnapshotTest, UninitializedVariableWarning) {
+    // SEM-01: `y` is read before any assignment along every path.
+    expectSnapshot("uninitialized_variable", analyzeDiagnostics(R"(
+int main() {
+    int y;
+    return y;
+}
+)"));
+}
+
+TEST_F(DiagnosticSnapshotTest, BranchInitializationIsPathSensitive) {
+    // Assigned on both branches -> no warning; only one branch -> join loses it.
+    expectSnapshot("uninitialized_branch", analyzeDiagnostics(R"(
+int main() {
+    int a;
+    int b;
+    int c = 1;
+    if (c) { a = 1; b = 1; } else { a = 2; }
+    return a + b;
 }
 )"));
 }

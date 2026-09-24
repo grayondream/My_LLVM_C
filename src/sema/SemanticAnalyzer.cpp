@@ -24,12 +24,16 @@ const std::vector<Diagnostic>& SemanticAnalyzer::getErrors() const {
     return errors;
 }
 
+const std::vector<Diagnostic>& SemanticAnalyzer::getWarnings() const {
+    return warnings;
+}
+
 void SemanticAnalyzer::emitError(const std::string& msg, const ASTNode& node) {
     errors.emplace_back(Diagnostic::Level::Error, msg, node.sourceFile, node.sourceLine, node.sourceColumn);
 }
 
 void SemanticAnalyzer::emitWarning(const std::string& msg, const ASTNode& node) {
-    errors.emplace_back(Diagnostic::Level::Warning, msg, node.sourceFile, node.sourceLine, node.sourceColumn);
+    warnings.emplace_back(Diagnostic::Level::Warning, msg, node.sourceFile, node.sourceLine, node.sourceColumn);
 }
 
 void SemanticAnalyzer::emitError(DiagnosticCode code, const std::string& msg, const ASTNode& node) {
@@ -37,7 +41,7 @@ void SemanticAnalyzer::emitError(DiagnosticCode code, const std::string& msg, co
 }
 
 void SemanticAnalyzer::emitWarning(DiagnosticCode code, const std::string& msg, const ASTNode& node) {
-    errors.emplace_back(Diagnostic::Level::Warning, code, msg, node.sourceFile, node.sourceLine, node.sourceColumn);
+    warnings.emplace_back(Diagnostic::Level::Warning, code, msg, node.sourceFile, node.sourceLine, node.sourceColumn);
 }
 
 void SemanticAnalyzer::enterScope() {
@@ -1498,6 +1502,7 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
 
     if (node.body) {
         visit(*node.body);
+        checkInitialization(node);
     }
 
     exitScope();
@@ -1697,4 +1702,278 @@ void SemanticAnalyzer::visit(DeferStmtAST& node) {
     if (node.callExpr) {
         visit(*node.callExpr);
     }
+}
+
+// ===== SEM-01/02: definite-assignment analysis =====
+
+void SemanticAnalyzer::initRead(const std::string& name, const ASTNode& node,
+                                std::unordered_set<std::string>& state) {
+    if (!initLocals || !initLocals->count(name)) return;   // not a local of this function
+    if (state.count(name)) return;                         // definitely assigned
+    if (initWarned.count(name)) return;                    // warn once per variable
+    initWarned.insert(name);
+    emitWarning(DiagnosticCode::WarnUninitializedVariable,
+                "variable '" + name + "' may be used before it is initialized", node);
+}
+
+void SemanticAnalyzer::collectLocalNames(StmtAST* stmt, std::unordered_set<std::string>& out) {
+    if (!stmt) return;
+    if (auto* block = dynamic_cast<CompoundStmtAST*>(stmt)) {
+        for (auto& s : block->stmts) collectLocalNames(s.get(), out);
+        return;
+    }
+    if (auto* ds = dynamic_cast<DeclStmtAST*>(stmt)) {
+        if (auto* v = dynamic_cast<VarDeclAST*>(ds->decl.get())) {
+            out.insert(v->name);
+        } else if (auto* a = dynamic_cast<ArrayDeclAST*>(ds->decl.get())) {
+            out.insert(a->name);
+        } else if (auto* m = dynamic_cast<MultiVarDeclAST*>(ds->decl.get())) {
+            for (auto& d : m->decls) {
+                if (auto* v = dynamic_cast<VarDeclAST*>(d.get())) out.insert(v->name);
+                else if (auto* a = dynamic_cast<ArrayDeclAST*>(d.get())) out.insert(a->name);
+            }
+        }
+        return;
+    }
+    if (auto* ifs = dynamic_cast<IfStmtAST*>(stmt)) {
+        collectLocalNames(ifs->thenStmt.get(), out);
+        collectLocalNames(ifs->elseStmt.get(), out);
+        return;
+    }
+    if (auto* w = dynamic_cast<WhileStmtAST*>(stmt)) { collectLocalNames(w->body.get(), out); return; }
+    if (auto* d = dynamic_cast<DoWhileStmtAST*>(stmt)) { collectLocalNames(d->body.get(), out); return; }
+    if (auto* f = dynamic_cast<ForStmtAST*>(stmt)) {
+        collectLocalNames(f->init.get(), out);
+        collectLocalNames(f->body.get(), out);
+        return;
+    }
+    if (auto* sw = dynamic_cast<SwitchStmtAST*>(stmt)) {
+        for (auto& c : sw->cases) collectLocalNames(c.get(), out);
+        return;
+    }
+    if (auto* lbl = dynamic_cast<LabelStmtAST*>(stmt)) {
+        collectLocalNames(lbl->stmt.get(), out);
+    }
+}
+
+void SemanticAnalyzer::initWalkExpr(ExprAST* expr, std::unordered_set<std::string>& state) {
+    if (!expr) return;
+
+    if (auto* var = dynamic_cast<VariableExprAST*>(expr)) {
+        initRead(var->name, *var, state);
+        return;
+    }
+    if (auto* bin = dynamic_cast<BinaryExprAST*>(expr)) {
+        initWalkExpr(bin->left.get(), state);
+        initWalkExpr(bin->right.get(), state);
+        return;
+    }
+    if (auto* un = dynamic_cast<UnaryExprAST*>(expr)) {
+        if (un->op == UnaryOp::AddressOf) {
+            // Taking an address does not read the object; the pointee may be
+            // written through it, so treat it as initialized from here on.
+            if (auto* v = dynamic_cast<VariableExprAST*>(un->operand.get())) {
+                state.insert(v->name);
+            } else {
+                initWalkExpr(un->operand.get(), state);
+            }
+            return;
+        }
+        if ((un->op == UnaryOp::PreInc || un->op == UnaryOp::PreDec)) {
+            if (auto* v = dynamic_cast<VariableExprAST*>(un->operand.get())) {
+                initRead(v->name, *v, state);
+                state.insert(v->name);
+                return;
+            }
+        }
+        initWalkExpr(un->operand.get(), state);
+        return;
+    }
+    if (auto* asn = dynamic_cast<AssignmentExprAST*>(expr)) {
+        initWalkExpr(asn->rhs.get(), state);
+        ExprAST* target = asn->lhs.get();
+        if (asn->op != AssignOp::Assign && target) {
+            // Compound assignment reads the target first.
+            if (auto* v = dynamic_cast<VariableExprAST*>(target)) {
+                initRead(v->name, *v, state);
+            } else {
+                initWalkExpr(target, state);
+            }
+        }
+        // Record the write. For member/index targets, mark the base variable.
+        ExprAST* base = target;
+        while (auto* ma = dynamic_cast<MemberAccessExprAST*>(base)) base = ma->object.get();
+        while (auto* aa = dynamic_cast<ArrayAccessExprAST*>(base)) base = aa->array.get();
+        if (auto* v = dynamic_cast<VariableExprAST*>(base)) {
+            state.insert(v->name);
+        } else if (target && asn->op == AssignOp::Assign) {
+            initWalkExpr(target, state);
+        }
+        return;
+    }
+    if (auto* post = dynamic_cast<PostfixIncDecExprAST*>(expr)) {
+        if (auto* v = dynamic_cast<VariableExprAST*>(post->operand.get())) {
+            initRead(v->name, *v, state);
+            state.insert(v->name);
+            return;
+        }
+        initWalkExpr(post->operand.get(), state);
+        return;
+    }
+    if (auto* tern = dynamic_cast<TernaryExprAST*>(expr)) {
+        initWalkExpr(tern->cond.get(), state);
+        auto thenState = state;
+        auto elseState = state;
+        initWalkExpr(tern->then.get(), thenState);
+        initWalkExpr(tern->elseExpr.get(), elseState);
+        std::unordered_set<std::string> merged;
+        for (const auto& n : thenState) {
+            if (elseState.count(n)) merged.insert(n);
+        }
+        state = std::move(merged);
+        return;
+    }
+    if (auto* cast = dynamic_cast<CastExprAST*>(expr)) {
+        initWalkExpr(cast->expr.get(), state);
+        return;
+    }
+    if (auto* comma = dynamic_cast<CommaExprAST*>(expr)) {
+        initWalkExpr(comma->left.get(), state);
+        initWalkExpr(comma->right.get(), state);
+        return;
+    }
+    if (auto* arr = dynamic_cast<ArrayAccessExprAST*>(expr)) {
+        initWalkExpr(arr->array.get(), state);
+        initWalkExpr(arr->index.get(), state);
+        return;
+    }
+    if (auto* mem = dynamic_cast<MemberAccessExprAST*>(expr)) {
+        initWalkExpr(mem->object.get(), state);
+        return;
+    }
+    if (auto* call = dynamic_cast<CallExprAST*>(expr)) {
+        if (call->isIndirect) {
+            initRead(call->callee, *call, state);  // function-pointer value
+        }
+        for (auto& a : call->args) initWalkExpr(a.get(), state);
+        return;
+    }
+    if (auto* mc = dynamic_cast<MethodCallExprAST*>(expr)) {
+        initWalkExpr(mc->object.get(), state);
+        for (auto& a : mc->args) initWalkExpr(a.get(), state);
+        return;
+    }
+    if (auto* il = dynamic_cast<InitializerListExprAST*>(expr)) {
+        for (auto& e : il->initializers) initWalkExpr(e.get(), state);
+        return;
+    }
+    // SizeofExprAST is unevaluated; number/string/char literals have no effect.
+}
+
+void SemanticAnalyzer::initWalkStmt(StmtAST* stmt, std::unordered_set<std::string>& state) {
+    if (!stmt) return;
+
+    if (auto* block = dynamic_cast<CompoundStmtAST*>(stmt)) {
+        for (auto& s : block->stmts) initWalkStmt(s.get(), state);
+        return;
+    }
+    if (auto* es = dynamic_cast<ExprStmtAST*>(stmt)) {
+        initWalkExpr(es->expr.get(), state);
+        return;
+    }
+    if (auto* ds = dynamic_cast<DeclStmtAST*>(stmt)) {
+        auto handle = [&](DeclAST* d) {
+            // Only an initializer makes a local definitely assigned; a bare
+            // declaration leaves it may-be-uninitialized.
+            if (auto* v = dynamic_cast<VarDeclAST*>(d)) {
+                if (v->initExpr) {
+                    initWalkExpr(v->initExpr.get(), state);
+                    state.insert(v->name);
+                }
+            } else if (auto* a = dynamic_cast<ArrayDeclAST*>(d)) {
+                if (a->initExpr) {
+                    initWalkExpr(a->initExpr.get(), state);
+                    state.insert(a->name);
+                }
+            }
+        };
+        if (auto* m = dynamic_cast<MultiVarDeclAST*>(ds->decl.get())) {
+            for (auto& d : m->decls) handle(d.get());
+        } else {
+            handle(ds->decl.get());
+        }
+        return;
+    }
+    if (auto* ifs = dynamic_cast<IfStmtAST*>(stmt)) {
+        initWalkExpr(ifs->cond.get(), state);
+        auto thenState = state;
+        auto elseState = state;
+        initWalkStmt(ifs->thenStmt.get(), thenState);
+        initWalkStmt(ifs->elseStmt.get(), elseState);
+        // Join: keep only variables assigned on both paths (a variable first
+        // assigned on both branches becomes definitely assigned).
+        std::unordered_set<std::string> merged;
+        for (const auto& n : thenState) {
+            if (elseState.count(n)) merged.insert(n);
+        }
+        state = std::move(merged);
+        return;
+    }
+    if (auto* w = dynamic_cast<WhileStmtAST*>(stmt)) {
+        initWalkExpr(w->cond.get(), state);
+        auto bodyState = state;                 // loop may run zero times
+        initWalkStmt(w->body.get(), bodyState);
+        return;
+    }
+    if (auto* d = dynamic_cast<DoWhileStmtAST*>(stmt)) {
+        auto bodyState = state;                 // body runs at least once
+        initWalkStmt(d->body.get(), bodyState);
+        initWalkExpr(d->cond.get(), bodyState);
+        state = bodyState;
+        return;
+    }
+    if (auto* f = dynamic_cast<ForStmtAST*>(stmt)) {
+        if (f->init) initWalkStmt(f->init.get(), state);
+        if (f->cond) initWalkExpr(f->cond.get(), state);
+        auto loopState = state;
+        initWalkStmt(f->body.get(), loopState);
+        if (f->inc) initWalkExpr(f->inc.get(), loopState);
+        return;                                 // exiting the loop is possible with 0 iterations
+    }
+    if (auto* sw = dynamic_cast<SwitchStmtAST*>(stmt)) {
+        initWalkExpr(sw->cond.get(), state);
+        for (auto& c : sw->cases) {
+            auto caseState = state;
+            initWalkStmt(c.get(), caseState);
+        }
+        return;                                 // conservative: no case may run
+    }
+    if (auto* ret = dynamic_cast<ReturnStmtAST*>(stmt)) {
+        initWalkExpr(ret->value.get(), state);
+        return;
+    }
+    if (auto* lbl = dynamic_cast<LabelStmtAST*>(stmt)) {
+        initWalkStmt(lbl->stmt.get(), state);
+        return;
+    }
+    // Break/continue/goto/null: no effect on initialization state.
+}
+
+void SemanticAnalyzer::checkInitialization(FunctionDeclAST& node) {
+    if (!node.body) return;
+
+    std::unordered_set<std::string> locals;
+    collectLocalNames(node.body.get(), locals);
+    for (auto& p : node.params) locals.insert(p->name);
+    if (locals.empty()) return;
+
+    initLocals = &locals;
+    initWarned.clear();
+
+    std::unordered_set<std::string> state;
+    for (auto& p : node.params) state.insert(p->name);   // parameters are initialized
+
+    initWalkStmt(node.body.get(), state);
+
+    initLocals = nullptr;
 }
