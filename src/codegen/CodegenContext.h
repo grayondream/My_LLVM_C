@@ -55,8 +55,6 @@ public:
     void popContinueBlock();
     llvm::BasicBlock* getContinueBlock() const;
 
-    void addLabel(const std::string& label, llvm::BasicBlock* bb);
-    llvm::BasicBlock* getLabel(const std::string& label) const;
 
     // Defer statement support. Deferred expressions are registered while a
     // compound statement is generated and emitted when its scope exits, or
@@ -91,7 +89,6 @@ private:
 
     std::vector<llvm::BasicBlock*> breakBlocks;
     std::vector<llvm::BasicBlock*> continueBlocks;
-    std::map<std::string, llvm::BasicBlock*> labels;
 
     std::vector<std::vector<ExprAST*>> deferScopes;
     std::vector<size_t> breakDeferBoundaries;

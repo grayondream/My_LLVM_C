@@ -53,9 +53,6 @@ static const std::unordered_map<std::string, TokenType> keywordMap = {
     // ===== 布尔（如果你支持）=====
     {"bool", TokenType::TOKEN_BOOL},
 
-    // ===== 空语句 / goto（可选）=====
-    {"goto", TokenType::TOKEN_GOTO},
-
     // ===== 新增关键字 =====
     {"true", TokenType::TOKEN_TRUE},
     {"false", TokenType::TOKEN_FALSE},
@@ -678,6 +675,8 @@ Token Lexer::scanToken() {
         }
         break;
     case '#':
+        // Legal to lex, but the parser rejects it: SafeModern C has no
+        // preprocessor (NG-02).
         token = makeToken(TokenType::TOKEN_HASH, lexeme());
         break;
     default:

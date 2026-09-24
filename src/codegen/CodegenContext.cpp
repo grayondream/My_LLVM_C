@@ -226,16 +226,6 @@ llvm::BasicBlock* CodegenContext::getContinueBlock() const {
     return continueBlocks.back();
 }
 
-void CodegenContext::addLabel(const std::string& label, llvm::BasicBlock* bb) {
-    labels[label] = bb;
-}
-
-llvm::BasicBlock* CodegenContext::getLabel(const std::string& label) const {
-    auto it = labels.find(label);
-    if (it != labels.end()) return it->second;
-    return nullptr;
-}
-
 void CodegenContext::pushDeferScope() {
     deferScopes.emplace_back();
 }

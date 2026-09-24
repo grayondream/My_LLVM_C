@@ -387,24 +387,6 @@ TEST_F(CodegenContextTest, ContinueStmtNoContext) {
     ASSERT_NE(val, nullptr);
 }
 
-TEST_F(CodegenContextTest, LabelAndGoto) {
-    llvm::FunctionType* fnType = llvm::FunctionType::get(
-        llvm::Type::getVoidTy(ctx->getContext()), false);
-    llvm::Function* fn = llvm::Function::Create(
-        fnType, llvm::Function::ExternalLinkage, "test_goto", ctx->getModule());
-    llvm::BasicBlock* bb = llvm::BasicBlock::Create(ctx->getContext(), "entry", fn);
-    ctx->getBuilder().SetInsertPoint(bb);
-
-    auto gotoStmt = std::make_unique<GotoStmtAST>("target");
-    gotoStmt->codegen(*ctx);
-
-    auto labelStmt = std::make_unique<LabelStmtAST>(
-        "target", std::make_unique<NullStmtAST>());
-    labelStmt->codegen(*ctx);
-    ctx->getBuilder().CreateRetVoid();
-    EXPECT_TRUE(verifyModule());
-}
-
 TEST_F(CodegenContextTest, ReturnStmt) {
     llvm::FunctionType* fnType = llvm::FunctionType::get(
         llvm::Type::getInt32Ty(ctx->getContext()), false);

@@ -122,8 +122,6 @@ private:
     void visit(SwitchStmtAST& node);
     void visit(BreakStmtAST& node);
     void visit(ContinueStmtAST& node);
-    void visit(GotoStmtAST& node);
-    void visit(LabelStmtAST& node);
     void visit(NullStmtAST& node);
     void visit(DeferStmtAST& node);
 

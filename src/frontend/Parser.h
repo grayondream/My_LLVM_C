@@ -99,9 +99,9 @@ private:
 
     std::unique_ptr<StmtAST> parseContinueStmt();
 
-    std::unique_ptr<StmtAST> parseGotoStmt();
-
-    std::unique_ptr<StmtAST> parseLabelStmt(const std::string& label);
+    // If the current token is '#', report that preprocessor directives are
+    // unsupported (NG-02) and skip the rest of the line. Returns true if it did.
+    bool rejectPreprocessorDirective();
 
     std::unique_ptr<StmtAST> parseExprStmt();
 

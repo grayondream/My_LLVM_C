@@ -766,7 +766,22 @@ std::unique_ptr<CompoundStmtAST> Parser::parseCompoundStmt() {
     return std::make_unique<CompoundStmtAST>(std::move(stmts));
 }
 
+bool Parser::rejectPreprocessorDirective() {
+    if (!check(TokenType::TOKEN_HASH)) return false;
+    auto hash = advance();
+    error("preprocessor directives are not supported (SafeModern C has no preprocessor)", *hash);
+    // Skip the remainder of the directive line to avoid cascading errors.
+    while (peek() && peek()->type != TokenType::TOKEN_EOS && peek()->line == hash->line) {
+        advance();
+    }
+    return true;
+}
+
 std::unique_ptr<StmtAST> Parser::parseStmt() {
+    if (rejectPreprocessorDirective()) {
+        return std::make_unique<NullStmtAST>();
+    }
+
     // if statement
     if (peek() && peek()->type == TokenType::TOKEN_IF) {
         return parseIfStmt();
@@ -800,11 +815,6 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
     // continue statement
     if (peek() && peek()->type == TokenType::TOKEN_CONTINUE) {
         return parseContinueStmt();
-    }
-
-    // goto statement
-    if (peek() && peek()->type == TokenType::TOKEN_GOTO) {
-        return parseGotoStmt();
     }
 
     // return statement
@@ -876,20 +886,6 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
             }
         }
         // Not a declaration, restore position
-        m_currentTokenPos = savedPos;
-    }
-
-    // label statement: identifier ':'
-    if (peek() && peek()->type == TokenType::TOKEN_IDENTIFIER) {
-        // Look ahead to see if this is a label
-        size_t savedPos = m_currentTokenPos;
-        auto id = advance();
-        if (peek() && peek()->type == TokenType::TOKEN_COLON) {
-            advance(); // consume ':'
-            auto stmt = parseStmt();
-            return std::make_unique<LabelStmtAST>(id->lexeme, std::move(stmt));
-        }
-        // Not a label, restore position
         m_currentTokenPos = savedPos;
     }
 
@@ -1103,28 +1099,6 @@ std::unique_ptr<StmtAST> Parser::parseContinueStmt() {
     return stmt;
 }
 
-std::unique_ptr<StmtAST> Parser::parseGotoStmt() {
-    auto gotoToken = match(TokenType::TOKEN_GOTO);
-    if (!gotoToken) {
-        return nullptr;
-    }
-
-    auto label = match(TokenType::TOKEN_IDENTIFIER);
-    if (!label) {
-        errorUnexpected("expected label name after 'goto'");
-    }
-    expect(TokenType::TOKEN_SEMICOLON, "expected ';' after 'goto' statement");
-
-    auto stmt = std::make_unique<GotoStmtAST>(label ? label->lexeme : "");
-    stmt->setLocation(gotoToken->filename, gotoToken->line, gotoToken->column);
-    return stmt;
-}
-
-std::unique_ptr<StmtAST> Parser::parseLabelStmt(const std::string& label) {
-    auto stmt = parseStmt();
-    return std::make_unique<LabelStmtAST>(label, std::move(stmt));
-}
-
 std::unique_ptr<StmtAST> Parser::parseExprStmt() {
     auto expr = parseExpr();
     if (!expr) {
@@ -1200,7 +1174,12 @@ std::unique_ptr<TranslationUnitAST> Parser::parse() {
             }
             continue;
         }
-        
+
+        // Reject C preprocessor directives at the top level (NG-02).
+        if (rejectPreprocessorDirective()) {
+            continue;
+        }
+
         auto decl = parseDeclaration();
         if (decl) {
             decls.push_back(std::move(decl));

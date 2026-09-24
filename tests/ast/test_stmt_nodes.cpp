@@ -96,19 +96,6 @@ TEST_F(StmtNodeTest, ContinueStmtAST) {
     EXPECT_NE(continueStmt, nullptr);
 }
 
-TEST_F(StmtNodeTest, GotoStmtAST) {
-    auto gotoStmt = std::make_unique<GotoStmtAST>("label1");
-    EXPECT_EQ(gotoStmt->label, "label1");
-}
-
-TEST_F(StmtNodeTest, LabelStmtAST) {
-    auto stmt = std::make_unique<ExprStmtAST>(std::make_unique<NumberExprAST>(1));
-    auto labelStmt = std::make_unique<LabelStmtAST>("myLabel", std::move(stmt));
-
-    EXPECT_EQ(labelStmt->label, "myLabel");
-    EXPECT_NE(labelStmt->stmt, nullptr);
-}
-
 TEST_F(StmtNodeTest, NullStmtAST) {
     auto nullStmt = std::make_unique<NullStmtAST>();
     EXPECT_NE(nullStmt, nullptr);

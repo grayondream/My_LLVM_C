@@ -1294,12 +1294,6 @@ void SemanticAnalyzer::visit(BreakStmtAST& node) {}
 
 void SemanticAnalyzer::visit(ContinueStmtAST& node) {}
 
-void SemanticAnalyzer::visit(GotoStmtAST& node) {}
-
-void SemanticAnalyzer::visit(LabelStmtAST& node) {
-    if (node.stmt) visit(*node.stmt);
-}
-
 void SemanticAnalyzer::visit(NullStmtAST& node) {}
 
 void SemanticAnalyzer::visit(VarDeclAST& node) {
@@ -1640,8 +1634,6 @@ void SemanticAnalyzer::visit(StmtAST& stmt) {
     if (auto* s = dynamic_cast<SwitchStmtAST*>(&stmt)) { visit(*s); return; }
     if (auto* s = dynamic_cast<BreakStmtAST*>(&stmt)) { visit(*s); return; }
     if (auto* s = dynamic_cast<ContinueStmtAST*>(&stmt)) { visit(*s); return; }
-    if (auto* s = dynamic_cast<GotoStmtAST*>(&stmt)) { visit(*s); return; }
-    if (auto* s = dynamic_cast<LabelStmtAST*>(&stmt)) { visit(*s); return; }
     if (auto* s = dynamic_cast<NullStmtAST*>(&stmt)) { visit(*s); return; }
     if (auto* s = dynamic_cast<DeclStmtAST*>(&stmt)) { visit(*s); return; }
     if (auto* s = dynamic_cast<DeferStmtAST*>(&stmt)) { visit(*s); return; }
@@ -1789,9 +1781,6 @@ void SemanticAnalyzer::collectLocalNames(StmtAST* stmt, std::unordered_set<std::
     if (auto* sw = dynamic_cast<SwitchStmtAST*>(stmt)) {
         for (auto& c : sw->cases) collectLocalNames(c.get(), out);
         return;
-    }
-    if (auto* lbl = dynamic_cast<LabelStmtAST*>(stmt)) {
-        collectLocalNames(lbl->stmt.get(), out);
     }
 }
 
@@ -1989,10 +1978,6 @@ void SemanticAnalyzer::initWalkStmt(StmtAST* stmt, std::unordered_set<std::strin
     }
     if (auto* ret = dynamic_cast<ReturnStmtAST*>(stmt)) {
         initWalkExpr(ret->value.get(), state);
-        return;
-    }
-    if (auto* lbl = dynamic_cast<LabelStmtAST*>(stmt)) {
-        initWalkStmt(lbl->stmt.get(), state);
         return;
     }
     // Break/continue/goto/null: no effect on initialization state.

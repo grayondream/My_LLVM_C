@@ -40,7 +40,6 @@ enum class TokenType : int32_t {
     TOKEN_INLINE,
     TOKEN_RESTRICT,
     TOKEN_BOOL,
-    TOKEN_GOTO,
     TOKEN_SWITCH,
     TOKEN_CASE,
     TOKEN_DEFAULT,
@@ -123,7 +122,7 @@ enum class TokenType : int32_t {
     TOKEN_LBRACKET,     // [
     TOKEN_RBRACKET,     // ]
     TOKEN_ELLIPSIS,     // ...
-    TOKEN_HASH,         // #
+    TOKEN_HASH,         // '#' — recognized only to reject C preprocessor directives
 
     // 文件结尾
     TOKEN_EOS

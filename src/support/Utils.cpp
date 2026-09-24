@@ -36,7 +36,7 @@ static std::string TokenTypeToString(TokenType type) {
         case TokenType::TOKEN_INLINE:     return "inline";
         case TokenType::TOKEN_RESTRICT:   return "restrict";
         case TokenType::TOKEN_BOOL:       return "bool";
-        case TokenType::TOKEN_GOTO:       return "goto";
+
         case TokenType::TOKEN_SWITCH:     return "switch";
         case TokenType::TOKEN_CASE:       return "case";
         case TokenType::TOKEN_DEFAULT:    return "default";

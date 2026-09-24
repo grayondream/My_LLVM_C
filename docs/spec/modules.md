@@ -13,7 +13,7 @@
 | `export decl` | 解析 `decl`，丢弃标记 | 无可见性语义 |
 | `namespace A { ... }` | `NamespaceDeclAST` | 名称修饰 + 限定/非限定查找（PAR-22/MOD-12） |
 
-导入解析（`src/driver/ModuleLoader.*`）：搜索顺序为**导入者目录 → `-I` → `STD_DIR`**；点分名映射为目录（`a.b` → `a/b.smc`）；以规范化路径集合去重并打破环。被导入的声明**前插**到导入单元之前，因此对其全部可见（单遍语义分析需要）。`std.c` 绑定层即 `libs/std/c.smc`（内嵌兜底）。
+导入解析（`src/driver/ModuleLoader.*`）：搜索顺序为**导入者目录 → `-M/--module-path` → `STD_DIR`**；点分名映射为目录（`a.b` → `a/b.smc`）；以规范化路径集合去重并打破环。被导入的声明**前插**到导入单元之前，因此对其全部可见（单遍语义分析需要）。`std.c` 绑定层即 `libs/std/c.smc`（内嵌兜底）。
 
 其余：符号表为 `Scope` 重载集链，namespace 成员以修饰键（`A_f`）注册；跨模块**可见性/导出**语义尚未实现。
 

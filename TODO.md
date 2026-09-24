@@ -14,10 +14,10 @@
 - `[x]` **BASE-01** 基于 LLVM（>= 18，实测 22.1.8）的 C 风格编译器；CMake 构建、CTest 测试。
 - `[x]` **BASE-02** 词法：标识符/数字/字符串/字符/运算符/关键字；整型 `int8..int128/uint8..uint128/isize/usize`，浮点 `float/float32/float64`；`#`/`...`/`::`(待补) 等符号。
 - `[x]` **BASE-03** 语法：函数、变量、数组、struct/class/union/enum、typedef、`sizeof`、初始化列表、三元、逗号、赋值复合运算符、前缀/后缀 `++/--`、成员访问 `.`/`->`、下标、方法调用。
-- `[x]` **BASE-04** 控制流：if/else、while、do-while、for、switch/case/default（含贯穿）、break、continue、return、goto/label、defer。
+- `[x]` **BASE-04** 控制流：if/else、while、do-while、for、switch/case/default（含贯穿）、break、continue、return、defer。（`goto`/label 已按 NG-01 移除）
 - `[x]` **BASE-05** 语义：作用域/符号表、函数重载（`OverloadSet`）、运算符重载（`operator`）、左值/右值、隐式类型转换（部分）、常量折叠 `constexpr`、`print/println` 内建与 `to_string` 分派。
 - `[x]` **BASE-06** 代码生成：基础类型/指针/数组/struct/class/union/enum/函数指针、全局变量、字符串字面量、指针算术（GEP）、负浮点（fneg）、非 void 函数补 `unreachable`。
-- `[x]` **BASE-07** 驱动：`-c/-o/-S/-E/-I/-D/-O/-g/-v/-Wall/-Werror/-std/-fsyntax-only/-l/-L`、JIT、`cc` 链接系统 libc。
+- `[x]` **BASE-07** 驱动：`-c/-o/-S/-M/-O/-g/-v/-Wall/-Werror/-std/-fsyntax-only/-l/-L`、JIT、`cc` 链接系统 libc。（`-E/-I/-D` 已按 TOOL-02 移除；模块搜索路径改用 `-M/--module-path`）
 - `[x]` **BASE-08** 自带标准库 **libsafec**（`src/libsafec/`，`namespace safec`，独立目标 `safec` → `build/lib/libsafec.a`）：`printf/sprintf`、`malloc/free/calloc/realloc`、`strlen/strcmp/strcpy/memcpy/memset/memcmp`。
 - `[x]` **BASE-09** `resources/main.c` 可完整编译运行。全量 **528** 测试通过。
 - `[x]` **BASE-10** `(新)` 既有实现已在 `src/libsafec/` 使用 `namespace safec`，但语言层未定义 `namespace`（规范缺口，见 PAR-22/MOD-12）。现已实现 `namespace`（值 + 类型）。
@@ -46,7 +46,7 @@
 
 - `[ ]` **LEX-01** `(已实现)` 关键字与基础类型关键字词法；核对与规范一致。
 - `[~]` **LEX-02** `(新)` 新增关键字 token：`template`、`typename`、`this`；弃用未使用的 `generic`。（`generic`/`comptime` token 已按 DEC-18 移除；`template`/`typename`/`this` 待补）
-- `[ ]` **LEX-03** `(改)` 移除/废弃：C 预处理器与宏相关 token（`#include/#define/#if`）与 `-E/-I/-D`（见 Non-goals）。
+- `[x]` **LEX-03** `(改)` 移除/废弃：C 预处理器与宏相关 token（`#include/#define/#if`）与 `-E/-I/-D`（见 Non-goals）。`#` 仍作为 `TOKEN_HASH` 词法识别，由解析器以“不支持预处理指令”报错。
 - `[ ]` **LEX-04** `(已实现)` 整型字面量：十进制/十六进制/二进制/八进制/分隔符/后缀；补全测试。
 - `[ ]` **LEX-05** `(已实现)` 浮点字面量：小数/指数/`f16/f32/f64/f128` 后缀；补全测试。
 - `[ ]` **LEX-06** `(已实现)` 字符与字符串字面量：转义、UTF-8；补原始字符串/多行字符串。
@@ -75,7 +75,7 @@
 - `[ ]` **PAR-06** `(新)` 指针限定符：`const/volatile/restrict/atomic`。
 - `[ ]` **PAR-07** `(新)` 注解挂载点：类型/字段/函数/参数/变量/模块。
 - `[ ]` **PAR-08** `(已实现)` 表达式：字面量/标识符/调用/成员访问/下标/一元/二元/三元/强转；补切片表达式。
-- `[ ]` **PAR-09** `(改)` 语句：块、if/else、while、do-while、for、switch/case、return、break、continue、声明。（**不含 goto/label**，见 Non-goals）
+- `[x]` **PAR-09** `(改)` 语句：块、if/else、while、do-while、for、switch/case、return、break、continue、声明。（**不含 goto/label**，见 Non-goals；已移除 goto/标签解析）
 - `[ ]` **PAR-10** `(新)` 位域声明：`T name : N;`（struct/union 成员），含零宽位域。
 - `[ ]` **PAR-11** `(新)` 简单 lambda：语法（建议 C++ 风格 `[capture](params) -> T { ... }` 或最简 `[](p){...}`）、捕获列表。
 - `[ ]` **PAR-12** `(新)` 匿名 class/struct/union：匿名类型定义、匿名成员提升。
@@ -109,7 +109,7 @@
 - `[ ]` **MOD-11** 导入符号访问语法待定并实现（`math.add` 还是直接 `add`）。
 - `[~]` **MOD-12** `(新)` `namespace` 语义：嵌套/开放命名空间、限定查找、与模块的关系（见 DEC-17）。（草案见 `docs/spec/modules.md`；嵌套查找 + 名称隔离已实现）
 - `[~]` **MOD-13** `(新)` 模块/编译单元文件布局：文件 ↔ 模块映射、导出单元、单文件多模块规则。（草案见 `docs/spec/modules.md`；点分名↔目录文件映射已实现）
-- `[~]` **MOD-14** `(新)` `import` 搜索路径与名称解析顺序、循环导入诊断细化（细化 MOD-07）。（搜索顺序：导入者目录 → `-I` → `STD_DIR`；循环用规范化路径集合去重/终止；草案见 `docs/spec/modules.md`）
+- `[~]` **MOD-14** `(新)` `import` 搜索路径与名称解析顺序、循环导入诊断细化（细化 MOD-07）。（搜索顺序：导入者目录 → `-M/--module-path` → `STD_DIR`；循环用规范化路径集合去重/终止；草案见 `docs/spec/modules.md`）
 - `[~]` **MOD-15** `(新)` **名称修饰方案（规范性）**：C ABI、方法、模板单态化、`static` 成员、namespace 的完整规则（细化 MOD-08）。（现状+目标见 `docs/spec/abi.md`）
 
 ---
@@ -421,7 +421,7 @@
 ## 18. 工具链与驱动（TOOL）
 
 - `[ ]` **TOOL-01** `(已实现)` 编译器 CLI：`check/build/run`；补 `smc test` runner（STD-22）。
-- `[ ]` **TOOL-02** `(改)` 移除 C 预处理器相关：`-E/-I/-D`、`src/preprocessor/`、`MacroTable` 及测试（Non-goals）。
+- `[x]` **TOOL-02** `(改)` 移除 C 预处理器相关：`-E/-I/-D`、`src/preprocessor/`、`MacroTable` 及测试（Non-goals）。已删除源码与测试；`-I` 由 `-M/--module-path` 取代。
 - `[ ]` **TOOL-03** 调试器集成：DWARF、断点、变量查看。
 - `[ ]` **TOOL-04** 交叉编译工具链配置。
 - `[ ]` **TOOL-05** 构建系统集成：Make/Ninja/CMake。
@@ -477,8 +477,8 @@
 
 ## 21. 明确不做（Non-goals）
 
-- `[ ]` **NG-01** `goto` / 标签（现有 `GotoStmtAST`/`LabelStmtAST` 与解析分支需移除）。
-- `[ ]` **NG-02** 传统 C 预处理器与宏（`#include/#define/#if/#ifdef/#pragma once`、`-E/-I/-D`）。
+- `[x]` **NG-01** `goto` / 标签（现有 `GotoStmtAST`/`LabelStmtAST` 与解析分支需移除）。已移除 AST/解析/语义/代码生成与测试。
+- `[x]` **NG-02** 传统 C 预处理器与宏（`#include/#define/#if/#ifdef/#pragma once`、`-E/-I/-D`）。已移除 `src/preprocessor/`、`MacroTable`、`-E/-I/-D` 及测试；`#` 换以明确报错。
 - `[ ]` **NG-03** trait / interface / concept（泛型无约束，靠运算符重载与扩展点）。
 - `[ ]` **NG-04** 所有权 / 借用 / 生命周期模型（安全能力仅限边界检查 + 空指针检查 + UB 检查）。
 - `[ ]` **NG-05** 错误传播算子 `?`（Result/Optional 一律显式判断）。
@@ -496,7 +496,7 @@
 ## 22. 建议实现顺序（里程碑）
 
 ### P0：最小可用编译器（已有大量基础，补齐缺口）
-- `[ ]` **P0-01** 清理与决策一致的冲突：移除预处理器、goto/label、`-E/-I/-D`（NG-01/02/TOOL-02）。
+- `[x]` **P0-01** 清理与决策一致的冲突：移除预处理器、goto/label、`-E/-I/-D`（NG-01/02/TOOL-02）。已完成；`-I` 由 `-M/--module-path` 取代。
 - `[~]` **P0-02** C 互操作绑定层（MOD-09/STD-23）——无预处理器后的刚需。文件化 `libs/std/c.smc` + `extern` 已可用。
 - `[x]` **P0-03** 变量初始化检查（SEM-01/02）。已实现（W3001，含分支合并/循环；`-Werror` 可将警告变失败）。
 - `[~]` **P0-04** module/import/export（MOD-04~07）。源文件 `import` 已实现（搜索路径/点分名/循环）；`module`/`export`/可见性待补。

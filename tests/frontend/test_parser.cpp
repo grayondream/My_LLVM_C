@@ -1000,23 +1000,6 @@ TEST_F(ParserStmtTest, ContinueStatement) {
     ASSERT_NE(continueStmt, nullptr);
 }
 
-TEST_F(ParserStmtTest, GotoStatement) {
-    auto stmt = parseStmt("int f() { goto label; }");
-    ASSERT_NE(stmt, nullptr);
-    auto gotoStmt = dynamic_cast<GotoStmtAST*>(stmt);
-    ASSERT_NE(gotoStmt, nullptr);
-    EXPECT_EQ(gotoStmt->label, "label");
-}
-
-TEST_F(ParserStmtTest, LabelStatement) {
-    auto stmt = parseStmt("int f() { label: return 0; }");
-    ASSERT_NE(stmt, nullptr);
-    auto labelStmt = dynamic_cast<LabelStmtAST*>(stmt);
-    ASSERT_NE(labelStmt, nullptr);
-    EXPECT_EQ(labelStmt->label, "label");
-    EXPECT_NE(labelStmt->stmt, nullptr);
-}
-
 TEST_F(ParserStmtTest, ExprStatement) {
     auto stmt = parseStmt("int f() { x; }");
     ASSERT_NE(stmt, nullptr);
@@ -1797,31 +1780,6 @@ TEST_F(ParserErrorTest, MissingSemicolonAfterContinueReportsError) {
     EXPECT_TRUE(found);
 }
 
-TEST_F(ParserErrorTest, MissingSemicolonAfterGotoReportsError) {
-    auto [tu, errors] = parseWithErrors("int f() { goto label }");
-    ASSERT_FALSE(errors.empty());
-    bool found = false;
-    for (const auto& err : errors) {
-        if (err.message.find("expected ';' after 'goto'") != std::string::npos) {
-            found = true;
-            break;
-        }
-    }
-    EXPECT_TRUE(found);
-}
-
-TEST_F(ParserErrorTest, MissingLabelAfterGotoReportsError) {
-    auto [tu, errors] = parseWithErrors("int f() { goto ; }");
-    ASSERT_FALSE(errors.empty());
-    bool found = false;
-    for (const auto& err : errors) {
-        if (err.message.find("expected label name after 'goto'") != std::string::npos) {
-            found = true;
-            break;
-        }
-    }
-    EXPECT_TRUE(found);
-}
 
 TEST_F(ParserErrorTest, MissingClosingParenInFuncCallReportsError) {
     auto [tu, errors] = parseWithErrors("int f() { foo(1; }");
@@ -1963,4 +1921,25 @@ TEST_F(ParserClassTest, ClassInheritance) {
     auto& derivedDecl = dynamic_cast<StructDeclAST&>(*ast->declarations[1]);
     EXPECT_EQ(derivedDecl.name, "Derived");
     EXPECT_EQ(derivedDecl.baseClass, "Base");
+}
+
+TEST_F(ParserErrorTest, GotoIsRejected) {
+    // P0-01 / NG-01: goto is not part of the language; `goto` lexes as an
+    // identifier, so this must be a parse error (never a valid statement).
+    auto [tu, errors] = parseWithErrors("int f() { goto label; }");
+    EXPECT_FALSE(errors.empty());
+}
+
+TEST_F(ParserErrorTest, PreprocessorDirectiveIsRejected) {
+    // P0-01 / NG-02: there is no preprocessor.
+    auto [tu, errors] = parseWithErrors("#include <stdio.h>\nint main() { return 0; }");
+    ASSERT_FALSE(errors.empty());
+    bool found = false;
+    for (const auto& err : errors) {
+        if (err.message.find("preprocessor") != std::string::npos) {
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found);
 }

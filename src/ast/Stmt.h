@@ -107,24 +107,6 @@ public:
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
-class GotoStmtAST : public StmtAST {
-public:
-    std::string label;
-
-    explicit GotoStmtAST(const std::string& l) : label(l) {}
-    llvm::Value* codegen(CodegenContext& ctx) override;
-};
-
-class LabelStmtAST : public StmtAST {
-public:
-    std::string label;
-    std::unique_ptr<StmtAST> stmt;
-
-    LabelStmtAST(const std::string& l, std::unique_ptr<StmtAST> s)
-        : label(l), stmt(std::move(s)) {}
-    llvm::Value* codegen(CodegenContext& ctx) override;
-};
-
 class NullStmtAST : public StmtAST {
 public:
     NullStmtAST() = default;

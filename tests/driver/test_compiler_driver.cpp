@@ -22,34 +22,19 @@ TEST_F(CompilerDriverTest, ParseOutputFlag) {
     EXPECT_EQ(driver.getOutputFile(), "out.o");
 }
 
-TEST_F(CompilerDriverTest, ParseSingleIncludePath) {
-    const char* argv[] = {"my_llvm_c", "-I", "/usr/include", "test.c"};
+TEST_F(CompilerDriverTest, ParseSingleModulePath) {
+    const char* argv[] = {"my_llvm_c", "-M", "libs", "test.c"};
     ASSERT_TRUE(driver.parseArguments(4, argv));
-    ASSERT_EQ(driver.getIncludePaths().size(), 1u);
-    EXPECT_EQ(driver.getIncludePaths()[0], "/usr/include");
+    ASSERT_EQ(driver.getModulePaths().size(), 1u);
+    EXPECT_EQ(driver.getModulePaths()[0], "libs");
 }
 
-TEST_F(CompilerDriverTest, ParseMultipleIncludePaths) {
-    const char* argv[] = {"my_llvm_c", "-I", "/usr/include", "-I", "/usr/local/include", "test.c"};
+TEST_F(CompilerDriverTest, ParseMultipleModulePaths) {
+    const char* argv[] = {"my_llvm_c", "-M", "libs", "-M", "vendored", "test.c"};
     ASSERT_TRUE(driver.parseArguments(6, argv));
-    ASSERT_EQ(driver.getIncludePaths().size(), 2u);
-    EXPECT_EQ(driver.getIncludePaths()[0], "/usr/include");
-    EXPECT_EQ(driver.getIncludePaths()[1], "/usr/local/include");
-}
-
-TEST_F(CompilerDriverTest, ParseDefine) {
-    const char* argv[] = {"my_llvm_c", "-D", "DEBUG", "test.c"};
-    ASSERT_TRUE(driver.parseArguments(4, argv));
-    ASSERT_EQ(driver.getDefines().size(), 1u);
-    EXPECT_EQ(driver.getDefines()[0], "DEBUG");
-}
-
-TEST_F(CompilerDriverTest, ParseMultipleDefines) {
-    const char* argv[] = {"my_llvm_c", "-D", "DEBUG=1", "-D", "RELEASE", "test.c"};
-    ASSERT_TRUE(driver.parseArguments(6, argv));
-    ASSERT_EQ(driver.getDefines().size(), 2u);
-    EXPECT_EQ(driver.getDefines()[0], "DEBUG=1");
-    EXPECT_EQ(driver.getDefines()[1], "RELEASE");
+    ASSERT_EQ(driver.getModulePaths().size(), 2u);
+    EXPECT_EQ(driver.getModulePaths()[0], "libs");
+    EXPECT_EQ(driver.getModulePaths()[1], "vendored");
 }
 
 TEST_F(CompilerDriverTest, DefaultBehaviorIsJitMode) {
@@ -79,12 +64,6 @@ TEST_F(CompilerDriverTest, ParseEmitIR) {
     const char* argv[] = {"my_llvm_c", "-S", "test.c"};
     ASSERT_TRUE(driver.parseArguments(3, argv));
     EXPECT_TRUE(driver.getEmitIR());
-}
-
-TEST_F(CompilerDriverTest, ParsePreprocessOnly) {
-    const char* argv[] = {"my_llvm_c", "-E", "test.c"};
-    ASSERT_TRUE(driver.parseArguments(3, argv));
-    EXPECT_TRUE(driver.getPreprocessOnly());
 }
 
 TEST_F(CompilerDriverTest, ParseSyntaxOnly) {
@@ -174,15 +153,13 @@ TEST_F(CompilerDriverTest, ParseMultipleLibPaths) {
 }
 
 TEST_F(CompilerDriverTest, ParseCombinedFlags) {
-    const char* argv[] = {"my_llvm_c", "-c", "-g", "-O", "2", "-I", "/usr/include", "-D", "DEBUG", "-o", "out.o", "test.c"};
-    ASSERT_TRUE(driver.parseArguments(12, argv));
+    const char* argv[] = {"my_llvm_c", "-c", "-g", "-O", "2", "-M", "libs", "-o", "out.o", "test.c"};
+    ASSERT_TRUE(driver.parseArguments(10, argv));
     EXPECT_TRUE(driver.getCompileOnly());
     EXPECT_TRUE(driver.getIncludeDebug());
     EXPECT_EQ(driver.getOptLevel(), 2);
-    ASSERT_EQ(driver.getIncludePaths().size(), 1u);
-    EXPECT_EQ(driver.getIncludePaths()[0], "/usr/include");
-    ASSERT_EQ(driver.getDefines().size(), 1u);
-    EXPECT_EQ(driver.getDefines()[0], "DEBUG");
+    ASSERT_EQ(driver.getModulePaths().size(), 1u);
+    EXPECT_EQ(driver.getModulePaths()[0], "libs");
     EXPECT_EQ(driver.getOutputFile(), "out.o");
     ASSERT_EQ(driver.getInputFiles().size(), 1u);
     EXPECT_EQ(driver.getInputFiles()[0], "test.c");

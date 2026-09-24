@@ -96,14 +96,12 @@ static bool emitObjectFile(llvm::Module& module, const std::string& outputPath) 
 bool CompilerDriver::parseArguments(int argc, const char* argv[]) {
     inputFiles.clear();
     outputFile.clear();
-    includePaths.clear();
-    defines.clear();
+    modulePaths.clear();
     libs.clear();
     libPaths.clear();
     compileOnly = false;
     emitIR = false;
     emitObj = false;
-    preprocessOnly = false;
     syntaxOnly = false;
     jitMode = false;
     usePrelude = true;
@@ -146,9 +144,7 @@ bool CompilerDriver::parseArguments(int argc, const char* argv[]) {
         ("c", "Compile only, do not link")
         ("o,output", "Output file", cxxopts::value<std::string>())
         ("S", "Emit IR only")
-        ("E", "Preprocess only")
-        ("I", "Add include path", cxxopts::value<std::vector<std::string>>())
-        ("D", "Add preprocessor definition", cxxopts::value<std::vector<std::string>>())
+        ("M,module-path", "Add module import search path", cxxopts::value<std::vector<std::string>>())
         ("O", "Optimization level (0-3)", cxxopts::value<int>())
         ("g", "Include debug information")
         ("v,verbose", "Verbose output")
@@ -171,7 +167,6 @@ bool CompilerDriver::parseArguments(int argc, const char* argv[]) {
 
         if (result.count("c")) compileOnly = true;
         if (result.count("S")) emitIR = true;
-        if (result.count("E")) preprocessOnly = true;
         if (result.count("g")) includeDebug = true;
         if (result.count("v")) verbose = true;
         if (result.count("no-prelude")) usePrelude = false;
@@ -179,8 +174,7 @@ bool CompilerDriver::parseArguments(int argc, const char* argv[]) {
         if (result.count("o")) outputFile = result["o"].as<std::string>();
         if (result.count("O")) optLevel = result["O"].as<int>();
 
-        if (result.count("I")) includePaths = result["I"].as<std::vector<std::string>>();
-        if (result.count("D")) defines = result["D"].as<std::vector<std::string>>();
+        if (result.count("M")) modulePaths = result["M"].as<std::vector<std::string>>();
         if (result.count("l")) libs = result["l"].as<std::vector<std::string>>();
         if (result.count("L")) libPaths = result["L"].as<std::vector<std::string>>();
 
@@ -267,7 +261,7 @@ int CompilerDriver::compileFile(const std::string& inputFile) {
             std::filesystem::weakly_canonical(std::filesystem::path(inputFile), canonEc).string());
 
         smc::ModuleSearchPaths paths;
-        for (const auto& dir : includePaths) {
+        for (const auto& dir : modulePaths) {
             paths.dirs.push_back(dir);
         }
 #ifdef STD_DIR
@@ -289,11 +283,6 @@ int CompilerDriver::compileFile(const std::string& inputFile) {
         return 0;
     }
 
-    if (preprocessOnly) {
-        std::cout << content;
-        return 0;
-    }
-
     // Inject the built-in std.c libc binding layer (MOD-09 / STD-23) before
     // semantic analysis so its declarations precede user code. Prefer the
     // on-disk module (libs/std/c.smc), falling back to the embedded copy.
@@ -302,7 +291,7 @@ int CompilerDriver::compileFile(const std::string& inputFile) {
 #ifdef STD_DIR
         stdDirs.push_back(STD_DIR);
 #endif
-        for (const auto& dir : includePaths) {
+        for (const auto& dir : modulePaths) {
             stdDirs.push_back(dir);
         }
         if (auto prelude = smc::parseStdCPrelude(smc::loadStdCPrelude(stdDirs), "<std.c>")) {
@@ -392,9 +381,7 @@ void CompilerDriver::printHelp() const {
               << "  -c              Compile only, do not link\n"
               << "  -o <file>       Output file\n"
               << "  -S              Emit IR only\n"
-              << "  -E              Preprocess only\n"
-              << "  -I <path>       Add include path\n"
-              << "  -D <def>        Add preprocessor definition\n"
+              << "  -M <path>       Add module import search path\n"
               << "  -O <level>      Optimization level (0-3)\n"
               << "  -g              Include debug information\n"
               << "  -v              Verbose output\n"

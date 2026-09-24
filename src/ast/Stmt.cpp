@@ -289,38 +289,6 @@ llvm::Value* ContinueStmtAST::codegen(CodegenContext& ctx) {
     return ctx.getBuilder().CreateBr(continueBB);
 }
 
-llvm::Value* GotoStmtAST::codegen(CodegenContext& ctx) {
-    llvm::BasicBlock* labelBB = ctx.getLabel(label);
-    if (!labelBB) {
-        llvm::Function* func = ctx.getBuilder().GetInsertBlock()->getParent();
-        labelBB = llvm::BasicBlock::Create(ctx.getContext(), "label." + label, func);
-        ctx.addLabel(label, labelBB);
-    }
-    return ctx.getBuilder().CreateBr(labelBB);
-}
-
-llvm::Value* LabelStmtAST::codegen(CodegenContext& ctx) {
-    llvm::BasicBlock* existingBB = ctx.getLabel(label);
-    llvm::BasicBlock* labelBB;
-    if (existingBB) {
-        labelBB = existingBB;
-    } else {
-        llvm::Function* func = ctx.getBuilder().GetInsertBlock()->getParent();
-        labelBB = llvm::BasicBlock::Create(ctx.getContext(), "label." + label, func);
-        ctx.addLabel(label, labelBB);
-    }
-
-    if (!ctx.getBuilder().GetInsertBlock()->getTerminator()) {
-        ctx.getBuilder().CreateBr(labelBB);
-    }
-    ctx.getBuilder().SetInsertPoint(labelBB);
-
-    if (stmt) {
-        return stmt->codegen(ctx);
-    }
-    return nullptr;
-}
-
 llvm::Value* NullStmtAST::codegen(CodegenContext& ctx) {
     return nullptr;
 }
