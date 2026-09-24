@@ -1,7 +1,7 @@
 # SafeModern C 1.0 — 关键字 / 保留字 / 运算符总表
 
 > 对应 TODO：**INF-11**、**LEX-14**、**DEC-18**
-> 状态图例：`[impl]` 已实现（见 `src/frontend/Lexer.cpp` 关键字表）｜`[plan]` 规划新增｜`[remove]` 计划移除/废弃｜`[decide]` 待决策
+> 状态图例：`[impl]` 已实现（见 `src/frontend/Lexer.cpp` 关键字表）｜`[plan]` 规划新增｜`[removed]` 已移除（P0-01）｜`[remove]` 计划移除/废弃｜`[decide]` 待决策
 > 本表是词法层唯一权威关键字清单；`docs/spec/grammar.ebnf` 的终结符须与本表一致。
 
 ## 0. 现状说明

@@ -23,6 +23,7 @@ target_compile_definitions(compiler_tests PRIVATE
     E2E_RESOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/e2e/resources"
     SNAPSHOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/diagnostics/snapshots"
     STD_DIR="${CMAKE_SOURCE_DIR}/libs"
+    SPEC_DIR="${CMAKE_SOURCE_DIR}/docs/spec"
 )
 
 target_link_libraries(compiler_tests

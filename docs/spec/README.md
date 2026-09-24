@@ -13,6 +13,10 @@
 | [`compile_time.md`](./compile_time.md) | `compile_time` 语法、求值器、反射 API、沙箱 | CT-01 ~ CT-14 |
 
 > 各分册均为**草案**：`[impl]` 部分已与实现对齐，`[plan]` 部分待对应 DEC 裁决后冻结。
+>
+> 文档与实现的一致性由 `tests/spec/test_spec_conformance.cpp` 约束（P0-07）：验证
+> 规范性优先级表覆盖全部中缀运算符、文法中不再含 `goto`/label/预处理产生式、
+> 关键字表标记了移除项、模块分册使用 `-M/--module-path`。
 
 ## 状态标记
 

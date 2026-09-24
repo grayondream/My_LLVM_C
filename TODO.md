@@ -31,10 +31,10 @@
 - `[~]` **INF-03** **诊断系统**：统一 `Diagnostic`（源码位置/错误码/严重级别/修复建议）、诊断快照测试设施。已实现错误码注册表 + `formatWithSeverity` + fix-it + 快照设施（`tests/diagnostics/snapshots/`）+ 警告独立通道（`getWarnings`，`-Werror` 可控）；表达式节点位置信息待补。
 - `[ ]` **INF-04** 测试框架完善：单元、集成、黄金文件（IR/输出）、诊断快照；CTest 分组与标签。
 - `[ ]` **INF-05** CI：Linux/macOS/Windows 矩阵、交叉编译、ABI 测试、性能基准。（外围仅限构建/测试，不含 LSP/包管理）
-- `[~]` **INF-06** 文档系统：语言规范（EBNF 语法）、类型/ABI 文档、`compile_time` API 文档。（**提前到 P0**，见 P0-07；骨架已建 `docs/spec/`）
-- `[~]` **INF-09** `(新)` **规范性文法（EBNF）**：完整产生式覆盖声明/类型/表达式/语句/注解/模块/`namespace`；作为规范唯一权威来源。（skeleton 见 `docs/spec/grammar.ebnf`；ABI/转换/语义分册待补）
+- `[x]` **INF-06** 文档系统：语言规范（EBNF 语法）、类型/ABI 文档、`compile_time` API 文档。（**提前到 P0**，见 P0-07；`docs/spec/` 六分册 + 一致性测试已建）
+- `[x]` **INF-09** `(新)` **规范性文法（EBNF）**：完整产生式覆盖声明/类型/表达式/语句/注解/模块/`namespace`；作为规范唯一权威来源。（`docs/spec/grammar.ebnf`；ABI/转换/语义分册见 `docs/spec/`；一致性由 `test_spec_conformance` 绑定）
 - `[x]` **INF-10** `(新)` **运算符优先级/结合性总表**：表驱动，并与解析器实现绑定一致性测试。（表在 `docs/spec/grammar.ebnf` §9，实现于 `smc::getOperatorInfo`；`tests/frontend/test_operator_precedence.cpp` 10 项，全量 538 测试通过）
-- `[~]` **INF-11** `(新)` **关键字与保留字总表**：数据类型/存储类/控制流/模块/注解/限定符；区分已用与保留未用。（见 `docs/spec/keywords.md`；`[decide]` 项待 DEC-18 裁决）
+- `[x]` **INF-11** `(新)` **关键字与保留字总表**：数据类型/存储类/控制流/模块/注解/限定符；区分已用与保留未用。（见 `docs/spec/keywords.md`；DEC-18 已冻结，`goto`/`#` 标记为已移除）
 - `[ ]` **INF-12** `(新)` **语言版本标识**：`-std=` 取值、默认版本、特性门控（不含 edition，见 NG-06）。
 - `[~]` **INF-13** `(新)` **诊断格式规范**：错误码命名、位置格式、严重级别、稳定输出（配合 INF-03、TOOL-09）。注册表（E0xxx/E1xxx/E2xxx/W3xxx）与 `file:line:col: severity[CODE]: msg` 格式已落地。
 - `[ ]` **INF-07** 可复现构建：确定性输出、路径无关、固定优化流程。
@@ -89,7 +89,7 @@
 - `[ ]` **PAR-20** 语法错误恢复与高质量诊断。
 - `[ ]` **PAR-21** `(新)` 模板声明语法 `template<typename T>` / `template<typename T, usize N>`（函数/类/别名，见 GEN）。
 - `[x]` **PAR-22** `(新)` `namespace` 声明与限定名 `ns::name` 语法（现缺失；`src/libsafec` 已使用 `namespace safec`）。函数/变量成员、嵌套命名空间、限定类型名（struct/class/union/enum/typedef）均已实现。
-- `[ ]` **PAR-23** `(新)` 运算符优先级/结合性在解析器中的显式实现与表驱动测试（配合 INF-10）。
+- `[x]` **PAR-23** `(新)` 运算符优先级/结合性在解析器中的显式实现与表驱动测试（配合 INF-10）。`smc::getOperatorInfo` 表驱动 + `test_operator_precedence` + `test_spec_conformance`。
 - `[ ]` **PAR-24** `(新)` 别名声明规范形式收敛：`typedef`/`using`/`type` 的取舍与统一 AST（见 DEC-16）。
 
 ---
@@ -137,8 +137,8 @@
 - `[ ]` **TYP-19** 类型相等/兼容/隐式转换/显式转换规则（含常规算术转换）。
 - `[ ]` **TYP-20** 枚举与整数必须显式转换。
 - `[ ]` **TYP-21** ABI 类型检查：`[[repr(C)]]` 下布局可预测；位域布局规则（见 DEC-08）。
-- `[~]` **TYP-22** `(新)` **整数提升与常规算术转换**：转换等级、signed×unsigned 混合规则（细化 TYP-19）。（草案见 `docs/spec/conversions.md`）
-- `[~]` **TYP-23** `(新)` **隐式/显式转换矩阵**：标量、指针、数组、struct/class、enum、Optional/Result 的完整转换表。（草案见 `docs/spec/conversions.md`）
+- `[~]` **TYP-22** `(新)` **整数提升与常规算术转换**：转换等级、signed×unsigned 混合规则（细化 TYP-19）。（规范草案见 `docs/spec/conversions.md` §3；实现仍为弱规则，待落地）
+- `[~]` **TYP-23** `(新)` **隐式/显式转换矩阵**：标量、指针、数组、struct/class、enum、Optional/Result 的完整转换表。（规范矩阵见 `docs/spec/conversions.md` §4；`[plan]` 项待实现）
 - `[~]` **TYP-24** `(新)` **空指针常量语义**：`nullptr`/`NULL`/`0` 与指针/bool 的转换规则。（草案见 `docs/spec/conversions.md`；`null`/`0` 的 int↔ptr 转换、指针比较、指针真值判断已实现；`nullptr` token 待补）
 - `[~]` **TYP-25** `(新)` enum 默认底层类型、枚举常量作用域与限定访问（细化 TYP-09）。枚举常量已可作为值/常量表达式参与运算，支持限定访问 `A::Red`；显式底层类型 `:u8` 待补。
 - `[ ]` **TYP-26** `(新)` 字符串字面量类型、`str`/`String` 生命周期与所有权（细化 FMT-01/02）。
@@ -502,7 +502,7 @@
 - `[~]` **P0-04** module/import/export（MOD-04~07）。源文件 `import` 已实现（搜索路径/点分名/循环）；`module`/`export`/可见性待补。
 - `[~]` **P0-05** 最小 `std.core` / `std.io`（STD-01/12）。`libs/std/{core,io}.smc` 已可通过 `import std.core;` 使用。
 - `[~]` **P0-06** 诊断系统与测试设施（INF-03/04）。诊断核心 + 快照设施已就绪。
-- `[ ]` **P0-07** `(新)` **语言规范骨架**：EBNF + 关键字表 + 优先级表 + 转换矩阵（INF-06/09~11、PAR-23、TYP-22/23）。
+- `[x]` **P0-07** `(新)` **语言规范骨架**：EBNF + 关键字表 + 优先级表 + 转换矩阵（INF-06/09~11、PAR-23、TYP-22/23）。四件套位于 `docs/spec/`，并由 `tests/spec/test_spec_conformance.cpp` 绑定实现；各 `[plan]` 细节仍由对应条目跟踪。
 - `[x]` **P0-08** `(新)` **namespace 支持**（PAR-22、MOD-12、DEC-17）——现有 `libsafec` 已依赖，属刚需。函数/变量、嵌套、限定访问、限定类型名均已实现。
 
 ### P1：核心现代能力

@@ -72,10 +72,11 @@
 
 ## 5. 显式转换 `[impl]/[plan]`
 
-- `[impl]` C 风格 `(T)x`：目前**仅识别基础类型关键字**（`int/float/double/char/void`），见 `parseUnary`。窄化只告警不报错（`CastExprAST` 检查）。
-- `[plan]` `static_cast<T>(x)` / `reinterpret_cast<T>(x)`（LEX-11 / PAR-18）。
-- `[plan]` `enum ↔ int`、指针 ↔ 整数的显式规则（TYP-20/24）。
-- 代码生成 `castValue`（`CodegenContext.cpp:302`）：
+- `[impl]` C 风格 `(T)x`：解析基础类型/指针/命名类型（`parseUnary`）。窄化只告警不报错（`CastExprAST` 检查）。
+- `[impl]` 指针 ↔ 整数的显式转换：`castValue` 对 `Int↔Ptr` 做位宽适配（`ptrtoint`/`inttoptr` 的整数扩展/截断）；指针真值经 `ICmpNE null`（TYP-24 / BASE-06）。
+- `[plan]` `static_cast<T>(x)` / `reinterpret_cast<T>(x)`（LEX-11 / PAR-18；DEC-18 已裁定以此取代 `cast`）。
+- `[plan]` `enum ↔ int` 的**显式**规则（TYP-20）——当前 enum 常量按 int 参与运算，尚未强制显式。
+- 代码生成 `castValue`（`CodegenContext.cpp`）：
 
 | 转换 | 指令 |
 |---|---|
@@ -86,10 +87,12 @@
 | 浮点→更宽/更窄 | `fpext` / `fptrunc` |
 | 指针→指针 | `bitcast` |
 
-## 6. 空指针常量 `[plan]`（TYP-24）
+## 6. 空指针常量（TYP-24）
 
-- 当前：`null` 字面量在 `parsePrimary` 中直接变成整数常量 `0` `[impl]`。
-- 目标：定义 `nullptr` / `NULL` / 字面量 `0` 到指针与 `bool` 的转换规则；指针↔整数不再静默（需显式）。
+- `[impl]` `null` 字面量在 `parsePrimary` 中变成整数常量 `0`。
+- `[impl]` 指针作为条件/`!`/逻辑运算：归一化为“与 null 比较”（`ICmpNE null`），见 BASE-06。
+- `[impl]` 指针与整数的**比较**：非指针一侧提升到指针宽度后按整数比较。
+- `[plan]` `nullptr` / `NULL` 与指针↔整数的静默转换规则（TYP-24 余项）。
 
 ## 7. 常量求值与溢出
 

@@ -84,7 +84,8 @@ import-decl         = 'import' , qualified-name , ';' ;
 (* [plan] 导入符号访问语法/别名未定，见 DEC-02 / MOD-11 *)
 export-decl         = 'export' , declaration ;
 namespace-decl      = 'namespace' , qualified-name , '{' , { top-level-declaration } , '}' ;
-(* [impl] PAR-22 / MOD-12：函数/变量成员；限定类型名待补 *)
+(* [impl] PAR-22 / MOD-12 / P0-08：函数/变量成员、嵌套、限定访问与限定类型名
+   （struct/class/union/enum/typedef/using/type）均已实现 *)
 
 qualified-name      = identifier , { '::' , identifier } ;          (* [impl] '::' token = TOKEN_COLON_COLON *)
 
@@ -130,7 +131,9 @@ bit-field-decl      = type , identifier , ':' , const-expr ;
 (* --- 枚举（AGG-14 / TYP-09 / TYP-25） --- *)
 enum-decl           = 'enum' , identifier , [ ':' , type ]
                       [ '{' , enumerator , { ',' , enumerator } , [ ',' ] , '}' ] , ';' ;
-(* [plan] 底层类型 ':u8' 尚未实现（当前值恒为 int） *)
+(* [plan] 底层类型 ':u8' 尚未实现（当前底层恒为 i32）
+   [impl] TYP-25 / AGG-14：枚举常量为编译期 int，可参与运算与 constexpr；
+          作为 switch 标签；namespace 内支持限定访问 A::Red *)
 enumerator          = identifier , [ '=' , const-expr ] ;
 
 (* --- 模板（GEN-01 / GEN-02 / PAR-21） --- *)
