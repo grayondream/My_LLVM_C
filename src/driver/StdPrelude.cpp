@@ -4,7 +4,10 @@
 #include "frontend/Lexer.h"
 #include "frontend/Parser.h"
 
+#include <filesystem>
+#include <fstream>
 #include <iterator>
+#include <sstream>
 
 namespace smc {
 
@@ -36,6 +39,25 @@ extern int    memcmp(void* a, void* b, usize n);
 extern int    abs(int x);
 extern void   exit(int status);
 )PRELUDE";
+}
+
+std::string loadStdCPrelude(const std::vector<std::string>& dirs) {
+    for (const std::string& dir : dirs) {
+        std::filesystem::path candidate =
+            std::filesystem::path(dir) / "std" / "c.smc";
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(candidate, ec)) {
+            continue;
+        }
+        std::ifstream in(candidate, std::ios::binary);
+        if (!in.is_open()) {
+            continue;
+        }
+        std::ostringstream ss;
+        ss << in.rdbuf();
+        return ss.str();
+    }
+    return builtinStdCPrelude();
 }
 
 std::unique_ptr<TranslationUnitAST> parseStdCPrelude(const std::string& source,

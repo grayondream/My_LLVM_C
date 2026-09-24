@@ -1,0 +1,25 @@
+// ===== std.c — libc binding layer (MOD-09 / STD-23) =====
+// Declarations only: the linker resolves them against the C library. This file
+// is the authoritative source; the compiler embeds the same text as a fallback
+// for installations that lack the standard-library directory.
+extern int    printf(char* format, ...);
+extern int    puts(char* s);
+extern int    putchar(int c);
+extern int    getchar();
+
+extern void*  malloc(usize size);
+extern void*  calloc(usize count, usize size);
+extern void*  realloc(void* ptr, usize size);
+extern void   free(void* ptr);
+
+extern usize  strlen(char* s);
+extern int    strcmp(char* a, char* b);
+extern int    strncmp(char* a, char* b, usize n);
+extern char*  strcpy(char* dst, char* src);
+extern void*  memcpy(void* dst, void* src, usize n);
+extern void*  memset(void* dst, int value, usize n);
+extern void*  memmove(void* dst, void* src, usize n);
+extern int    memcmp(void* a, void* b, usize n);
+
+extern int    abs(int x);
+extern void   exit(int status);

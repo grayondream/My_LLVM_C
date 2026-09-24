@@ -66,6 +66,9 @@ public:
 class TranslationUnitAST : public ASTNode {
 public:
     std::vector<std::unique_ptr<DeclAST>> declarations;
+    // Module/file names named by `import` at the top level. The driver resolves
+    // and loads them, splicing their declarations in front of this unit's.
+    std::vector<std::string> imports;
 
     explicit TranslationUnitAST(std::vector<std::unique_ptr<DeclAST>> decls)
         : declarations(std::move(decls)) {}

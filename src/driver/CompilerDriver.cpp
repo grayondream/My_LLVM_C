@@ -1,5 +1,6 @@
 #include "CompilerDriver.h"
 #include "Linker.h"
+#include "ModuleLoader.h"
 #include "StdPrelude.h"
 #include "frontend/Lexer.h"
 #include "frontend/Parser.h"
@@ -8,7 +9,9 @@
 #include "support/File.h"
 #include "support/Log.h"
 #include <cxxopts.hpp>
+#include <filesystem>
 #include <iostream>
+#include <set>
 #include <cstdlib>
 
 #include "llvm/IR/LegacyPassManager.h"
@@ -255,6 +258,33 @@ int CompilerDriver::compileFile(const std::string& inputFile) {
         return 1;
     }
 
+    // Resolve source-file imports (P0-04 / MOD-04): parse each imported module
+    // and splice its declarations in front of this unit's.
+    {
+        std::set<std::string> loadedModules;
+        std::error_code canonEc;
+        loadedModules.insert(
+            std::filesystem::weakly_canonical(std::filesystem::path(inputFile), canonEc).string());
+
+        smc::ModuleSearchPaths paths;
+        for (const auto& dir : includePaths) {
+            paths.dirs.push_back(dir);
+        }
+#ifdef STD_DIR
+        paths.dirs.push_back(STD_DIR);
+#endif
+        std::vector<std::string> importErrors;
+        std::string importerDir =
+            std::filesystem::path(inputFile).parent_path().string();
+        smc::processImports(*ast, importerDir, paths, loadedModules, importErrors);
+        if (!importErrors.empty()) {
+            for (const auto& err : importErrors) {
+                std::cerr << err << "\n";
+            }
+            return 1;
+        }
+    }
+
     if (syntaxOnly) {
         return 0;
     }
@@ -265,9 +295,17 @@ int CompilerDriver::compileFile(const std::string& inputFile) {
     }
 
     // Inject the built-in std.c libc binding layer (MOD-09 / STD-23) before
-    // semantic analysis so its declarations precede user code.
+    // semantic analysis so its declarations precede user code. Prefer the
+    // on-disk module (libs/std/c.smc), falling back to the embedded copy.
     if (usePrelude) {
-        if (auto prelude = smc::parseStdCPrelude(smc::builtinStdCPrelude(), "<std.c>")) {
+        std::vector<std::string> stdDirs;
+#ifdef STD_DIR
+        stdDirs.push_back(STD_DIR);
+#endif
+        for (const auto& dir : includePaths) {
+            stdDirs.push_back(dir);
+        }
+        if (auto prelude = smc::parseStdCPrelude(smc::loadStdCPrelude(stdDirs), "<std.c>")) {
             smc::prependDeclarations(*ast, *prelude);
         }
     }

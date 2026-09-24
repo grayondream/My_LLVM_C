@@ -1146,14 +1146,28 @@ std::unique_ptr<TranslationUnitAST> Parser::parse() {
             continue;
         }
         
-        // 检查导入声明
+        // import declaration: `import a.b;` or `import "dir/file.smc";`
         if (check(TokenType::TOKEN_IMPORT)) {
-            advance(); // 消耗 "import"
-            if (check(TokenType::TOKEN_IDENTIFIER)) {
-                std::string importName = advance()->lexeme;
-                imports.push_back(importName);
-                match(TokenType::TOKEN_SEMICOLON);
+            advance(); // consume "import"
+            std::string importName;
+            if (check(TokenType::TOKEN_STRING)) {
+                std::string lex = advance()->lexeme;
+                if (lex.size() >= 2 && lex.front() == '"' && lex.back() == '"') {
+                    importName = lex.substr(1, lex.size() - 2);
+                }
+            } else if (check(TokenType::TOKEN_IDENTIFIER)) {
+                importName = advance()->lexeme;
+                while (check(TokenType::TOKEN_DOT)) {
+                    advance();
+                    auto part = match(TokenType::TOKEN_IDENTIFIER);
+                    if (!part) break;
+                    importName += "." + part->lexeme;
+                }
             }
+            if (!importName.empty()) {
+                imports.push_back(importName);
+            }
+            match(TokenType::TOKEN_SEMICOLON);
             continue;
         }
         
@@ -1177,12 +1191,16 @@ std::unique_ptr<TranslationUnitAST> Parser::parse() {
         }
     }
     
-    // 如果有模块声明，创建模块声明节点
+    auto tu = std::make_unique<TranslationUnitAST>(std::move(decls));
+    tu->imports = imports;
+
+    // 如果有模块声明，创建模块声明节点（imports 已记录在 TU 上）
     if (!moduleName.empty()) {
-        decls.push_back(std::make_unique<ModuleDeclAST>(moduleName, std::move(imports), std::move(exports)));
+        tu->declarations.push_back(
+            std::make_unique<ModuleDeclAST>(moduleName, imports, std::move(exports)));
     }
-    
-    return std::make_unique<TranslationUnitAST>(std::move(decls));
+
+    return tu;
 }
 
 bool Parser::check(TokenType type) const {

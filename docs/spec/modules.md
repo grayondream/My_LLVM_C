@@ -6,15 +6,16 @@
 
 ## 1. 现状 `[impl]`
 
-`Parser::parse` 当前仅做**记录**，未实现任何跨文件解析：
-
-| 语法 | 解析结果 | 缺口 |
+| 语法 | 解析结果 | 状态 |
 |---|---|---|
-| `module NAME;` | `ModuleDeclAST(name, imports, exports)` | 无文件映射、无编译单元绑定 |
-| `import NAME;` | 收集到 imports（仅当紧随标识符） | 不加载目标、不建符号 |
-| `export decl` | 解析 `decl` 后丢弃 `export` 标记 | `exports` 恒空，无可见性语义 |
+| `module NAME;` | `ModuleDeclAST(name, imports, exports)` | 记录；无文件映射/编译单元绑定 |
+| `import a.b;` / `import "dir/f.smc";` | 记入 `TranslationUnitAST::imports` | 驱动 `ModuleLoader` 解析并**前插**声明（MOD-04/14） |
+| `export decl` | 解析 `decl`，丢弃标记 | 无可见性语义 |
+| `namespace A { ... }` | `NamespaceDeclAST` | 名称修饰 + 限定/非限定查找（PAR-22/MOD-12） |
 
-其余：符号表为**单文件全局作用域**（`Scope` 链），无模块层级；无 `namespace`；无循环依赖检测。
+导入解析（`src/driver/ModuleLoader.*`）：搜索顺序为**导入者目录 → `-I` → `STD_DIR`**；点分名映射为目录（`a.b` → `a/b.smc`）；以规范化路径集合去重并打破环。被导入的声明**前插**到导入单元之前，因此对其全部可见（单遍语义分析需要）。`std.c` 绑定层即 `libs/std/c.smc`（内嵌兜底）。
+
+其余：符号表为 `Scope` 重载集链，namespace 成员以修饰键（`A_f`）注册；跨模块**可见性/导出**语义尚未实现。
 
 ## 2. 命名空间（MOD-12，DEC-17）`[plan]`
 

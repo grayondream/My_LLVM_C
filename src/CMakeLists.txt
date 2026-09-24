@@ -65,7 +65,10 @@ else()
     target_link_libraries(my_llvm_c_lib PUBLIC ${llvm_libs})
 endif()
 
-target_compile_definitions(my_llvm_c_lib PRIVATE RESOURCE_DIR="${CMAKE_SOURCE_DIR}/resources")
+target_compile_definitions(my_llvm_c_lib PRIVATE
+    RESOURCE_DIR="${CMAKE_SOURCE_DIR}/resources"
+    STD_DIR="${CMAKE_SOURCE_DIR}/libs"
+)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_definitions(my_llvm_c_lib PRIVATE SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG)
@@ -76,7 +79,10 @@ endif()
 add_executable(my_llvm_c main.cpp)
 target_include_directories(my_llvm_c PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(my_llvm_c PRIVATE my_llvm_c_lib)
-target_compile_definitions(my_llvm_c PRIVATE RESOURCE_DIR="${CMAKE_SOURCE_DIR}/resources")
+target_compile_definitions(my_llvm_c PRIVATE
+    RESOURCE_DIR="${CMAKE_SOURCE_DIR}/resources"
+    STD_DIR="${CMAKE_SOURCE_DIR}/libs"
+)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_definitions(my_llvm_c PRIVATE SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG)
