@@ -103,6 +103,52 @@ std::string decodeEscapes(const std::string& s) {
     return out;
 }
 
+// Evaluate an integer constant expression used for enumerator values and
+// similar compile-time integers. Supports literals, unary +/-/~ and the usual
+// binary operators (TYP-25). Returns false for non-constant expressions.
+bool evalIntConstExpr(const ExprAST* expr, long long& out) {
+    if (!expr) return false;
+    if (auto* n = dynamic_cast<const NumberExprAST*>(expr)) {
+        out = n->value;
+        return true;
+    }
+    if (auto* c = dynamic_cast<const CharExprAST*>(expr)) {
+        out = static_cast<unsigned char>(c->value);
+        return true;
+    }
+    if (auto* u = dynamic_cast<const UnaryExprAST*>(expr)) {
+        long long v = 0;
+        if (!evalIntConstExpr(u->operand.get(), v)) return false;
+        switch (u->op) {
+            case UnaryOp::Plus:   out = v;  return true;
+            case UnaryOp::Minus:  out = -v; return true;
+            case UnaryOp::BitNot: out = ~v; return true;
+            default: return false;
+        }
+    }
+    if (auto* b = dynamic_cast<const BinaryExprAST*>(expr)) {
+        long long l = 0, r = 0;
+        if (!evalIntConstExpr(b->left.get(), l) ||
+            !evalIntConstExpr(b->right.get(), r)) {
+            return false;
+        }
+        switch (b->op) {
+            case BinaryOp::Add:    out = l + r; return true;
+            case BinaryOp::Sub:    out = l - r; return true;
+            case BinaryOp::Mul:    out = l * r; return true;
+            case BinaryOp::Div:    if (r == 0) return false; out = l / r; return true;
+            case BinaryOp::Mod:    if (r == 0) return false; out = l % r; return true;
+            case BinaryOp::BitAnd: out = l & r; return true;
+            case BinaryOp::BitOr:  out = l | r; return true;
+            case BinaryOp::BitXor: out = l ^ r; return true;
+            case BinaryOp::LShift: out = l << r; return true;
+            case BinaryOp::RShift: out = l >> r; return true;
+            default: return false;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 const std::vector<Diagnostic>& Parser::getErrors() const {
@@ -1371,6 +1417,8 @@ Type* Parser::lookupNamedType(const std::string& name) const {
         if (Type* t = tc.getTypedef(key)) return t;
         if (ClassType* c = tc.getClass(key)) return c;
         if (StructType* s = tc.getStruct(key)) return s;
+        if (UnionType* u = tc.getUnion(key)) return u;
+        if (EnumType* e = tc.getEnum(key)) return e;
         return nullptr;
     };
     if (name.find("::") != std::string::npos || name.find('.') != std::string::npos) {
@@ -1545,9 +1593,22 @@ Type* Parser::parseBaseType() {
             std::string name = parseQualifiedTypeName();
             std::string key = qualifyTypeDeclName(name);
 
+            // Optional explicit underlying type (TYP-09/TYP-25), e.g.
+            // `typedef enum : uint16 { ... } Name;`.
+            Type* underlyingType = nullptr;
+            if (check(TokenType::TOKEN_COLON)) {
+                advance(); // consume ':'
+                underlyingType = parseType();
+                if (!underlyingType) {
+                    errorUnexpected("expected underlying type after ':'");
+                    return nullptr;
+                }
+            }
+
             if (check(TokenType::TOKEN_LBRACE)) {
                 advance(); // consume '{'
                 auto* enumType = new EnumType(key);
+                enumType->underlyingType = underlyingType;
                 int currentVal = 0;
                 while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
                     if (!check(TokenType::TOKEN_IDENTIFIER)) break;
@@ -1556,8 +1617,9 @@ Type* Parser::parseBaseType() {
                     if (check(TokenType::TOKEN_ASSIGN)) {
                         advance();
                         auto expr = parseExpr(2); // ',' separates enumerators
-                        if (auto num = dynamic_cast<NumberExprAST*>(expr.get())) {
-                            val = num->value;
+                        long long evaluated = 0;
+                        if (evalIntConstExpr(expr.get(), evaluated)) {
+                            val = static_cast<int>(evaluated);
                         }
                     }
                     enumType->addValue(valueName, val);
@@ -1578,6 +1640,7 @@ Type* Parser::parseBaseType() {
             }
 
             auto* enumType = new EnumType(key);
+            enumType->underlyingType = underlyingType;
             TypeContext::instance().addEnum(key, enumType);
             return enumType;
         }
@@ -2344,9 +2407,33 @@ std::unique_ptr<EnumDeclAST> Parser::parseEnumDecl() {
 
     std::string name = qualifyTypeDeclName(parseQualifiedTypeName());
 
+    // Optional explicit underlying type: `enum E : uint8 { ... }` (TYP-09/TYP-25).
+    Type* underlyingType = nullptr;
+    if (check(TokenType::TOKEN_COLON)) {
+        advance(); // consume ':'
+        underlyingType = parseType();
+        if (!underlyingType) {
+            errorUnexpected("expected underlying type after ':'");
+            return nullptr;
+        }
+    }
+
+    // Reuse (or create and register) the enum type so that later `enum Name`
+    // references share this object, including the explicit underlying type.
+    EnumType* enumType = name.empty() ? nullptr : TypeContext::instance().getEnum(name);
+    if (!enumType) {
+        enumType = new EnumType(name);
+        if (!name.empty()) {
+            TypeContext::instance().addEnum(name, enumType);
+        }
+    }
+    enumType->underlyingType = underlyingType;
+
     if (!check(TokenType::TOKEN_LBRACE)) {
         // Forward declaration
-        return std::make_unique<EnumDeclAST>(name, std::vector<std::pair<std::string, int>>{});
+        return std::make_unique<EnumDeclAST>(name,
+                                             std::vector<std::pair<std::string, int>>{},
+                                             underlyingType);
     }
 
     advance(); // consume '{'
@@ -2362,8 +2449,9 @@ std::unique_ptr<EnumDeclAST> Parser::parseEnumDecl() {
         if (check(TokenType::TOKEN_ASSIGN)) {
             advance();
             auto expr = parseExpr(2); // ',' separates enumerators
-            if (auto num = dynamic_cast<NumberExprAST*>(expr.get())) {
-                val = num->value;
+            long long evaluated = 0;
+            if (evalIntConstExpr(expr.get(), evaluated)) {
+                val = static_cast<int>(evaluated);
             }
         }
 
@@ -2376,7 +2464,13 @@ std::unique_ptr<EnumDeclAST> Parser::parseEnumDecl() {
 
     match(TokenType::TOKEN_RBRACE);
 
-    return std::make_unique<EnumDeclAST>(name, std::move(values));
+    // Mirror the values onto the registered type (sema repopulates from the AST).
+    enumType->values.clear();
+    for (auto& v : values) {
+        enumType->addValue(v.first, v.second);
+    }
+
+    return std::make_unique<EnumDeclAST>(name, std::move(values), underlyingType);
 }
 
 std::unique_ptr<TypedefDeclAST> Parser::parseTypedefDecl() {

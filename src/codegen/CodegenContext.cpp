@@ -438,7 +438,14 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
             auto* at = static_cast<ArrayType*>(type);
             return llvm::ArrayType::get(getLLVMType(at->elementType), at->size);
         }
-        case TypeKind::Enum:   return llvm::Type::getInt32Ty(*context);
+        case TypeKind::Enum: {
+            // TYP-09/TYP-25: use the explicit underlying type when present.
+            auto* et = static_cast<EnumType*>(type);
+            if (et->underlyingType) {
+                return getLLVMType(et->underlyingType);
+            }
+            return llvm::Type::getInt32Ty(*context);
+        }
         case TypeKind::Typedef: {
             auto* td = static_cast<TypedefType*>(type);
             return getLLVMType(td->aliasedType);

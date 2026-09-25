@@ -134,9 +134,12 @@ class EnumDeclAST : public DeclAST {
 public:
     std::string name;
     std::vector<std::pair<std::string, int>> values;
+    // Optional explicit underlying type (`enum E : u8`); null means default int.
+    Type* underlyingType;
 
-    EnumDeclAST(const std::string& n, std::vector<std::pair<std::string, int>> vals)
-        : name(n), values(std::move(vals)) {}
+    EnumDeclAST(const std::string& n, std::vector<std::pair<std::string, int>> vals,
+                Type* underlying = nullptr)
+        : name(n), values(std::move(vals)), underlyingType(underlying) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 

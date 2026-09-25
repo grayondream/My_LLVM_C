@@ -89,6 +89,8 @@ class EnumType : public Type {
 public:
     std::string name;
     std::vector<std::pair<std::string, int>> values;
+    // Explicit underlying type (`enum E : u8`); null means the default (int).
+    Type* underlyingType = nullptr;
 
     EnumType(const std::string& n)
         : Type(TypeKind::Enum), name(n) {}

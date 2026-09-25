@@ -142,3 +142,18 @@ TEST(SpecConformance, SemanticsSpecDocumentsAnalysisWarnings) {
     EXPECT_NE(sem.find("W3002"), std::string::npos);
     EXPECT_NE(sem.find("W3003"), std::string::npos);
 }
+
+TEST(SpecConformance, ConversionsSpecDocumentsDefaultArgumentPromotions) {
+    // TYP-09 / varargs: default argument promotions are documented normatively.
+    std::string conv = readSpec("conversions.md");
+    ASSERT_FALSE(conv.empty());
+    EXPECT_NE(conv.find("默认实参提升"), std::string::npos);
+    EXPECT_NE(conv.find("promoteVarArg"), std::string::npos);
+}
+
+TEST(SpecConformance, AbiSpecDocumentsEnumUnderlyingType) {
+    // TYP-09/TYP-25/AGG-14: explicit enum underlying types are documented.
+    std::string abi = readSpec("abi.md");
+    ASSERT_FALSE(abi.empty());
+    EXPECT_NE(abi.find("enum E : uint8"), std::string::npos);
+}

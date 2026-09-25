@@ -131,7 +131,7 @@ bit-field-decl      = type , identifier , ':' , const-expr ;
 (* --- 枚举（AGG-14 / TYP-09 / TYP-25） --- *)
 enum-decl           = 'enum' , identifier , [ ':' , type ]
                       [ '{' , enumerator , { ',' , enumerator } , [ ',' ] , '}' ] , ';' ;
-(* [plan] 底层类型 ':u8' 尚未实现（当前底层恒为 i32）
+(* [impl] 底层类型 ':uint8' 等已实现（默认 i32；TYP-09/TYP-25）
    [impl] TYP-25 / AGG-14：枚举常量为编译期 int，可参与运算与 constexpr；
           作为 switch 标签；namespace 内支持限定访问 A::Red *)
 enumerator          = identifier , [ '=' , const-expr ] ;

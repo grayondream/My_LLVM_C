@@ -1626,18 +1626,43 @@ void SemanticAnalyzer::visit(UnionDeclAST& node) {
 }
 
 void SemanticAnalyzer::visit(EnumDeclAST& node) {
-    auto* enumType = new EnumType(node.name);
+    // Reuse the enum type registered by the parser (which carries the explicit
+    // underlying type) so variable references and this declaration agree.
+    EnumType* enumType = node.name.empty() ? nullptr : typeCtx->getEnum(node.name);
+    if (!enumType) {
+        enumType = new EnumType(node.name);
+        if (!node.name.empty()) {
+            typeCtx->addEnum(node.name, enumType);
+        }
+    }
+    // TYP-09/TYP-25: an explicit underlying type must be an integer type.
+    if (node.underlyingType) {
+        if (!isIntegerType(node.underlyingType) ||
+            stripTypedef(node.underlyingType)->kind == TypeKind::Enum) {
+            emitError("enum '" + node.name + "' underlying type must be an integer type", node);
+        } else {
+            enumType->underlyingType = node.underlyingType;
+        }
+    }
+    enumType->values.clear();
     for (auto& val : node.values) {
         enumType->addValue(val.first, val.second);
         // Enumerators live in the enclosing (namespace) scope, so `A::Red`
         // resolves to the same key as `Red` used inside namespace A.
         enumConstants[scopedName(val.first)] = {enumType, val.second};
     }
-    typeCtx->addEnum(node.name, enumType);
 }
 
 void SemanticAnalyzer::visit(TypedefDeclAST& node) {
     typeCtx->addTypedef(node.name, node.aliasedType);
+    // A typedef of an inline enum (`typedef enum { A, B } E;`) exposes its
+    // enumerators in the enclosing scope (TYP-25).
+    if (Type* t = stripTypedef(node.aliasedType); t && t->kind == TypeKind::Enum) {
+        auto* enumType = static_cast<EnumType*>(t);
+        for (auto& val : enumType->values) {
+            enumConstants[scopedName(val.first)] = {enumType, val.second};
+        }
+    }
 }
 
 void SemanticAnalyzer::visit(ForwardDeclAST& node) {}

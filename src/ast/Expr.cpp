@@ -16,6 +16,41 @@ static llvm::Value* emitRValue(CodegenContext& ctx, ExprAST& expr, llvm::Value* 
     return expr.isLValue ? emitLoad(ctx, v, expr.type) : v;
 }
 
+// C default argument promotions for variadic calls: float -> double and integer
+// types narrower than int -> int (sign- or zero-extended per signedness).
+// `enum` uses its explicit underlying type. Other types are returned unchanged.
+static llvm::Value* promoteVarArg(CodegenContext& ctx, llvm::Value* v, Type* t) {
+    if (!v || !t) return v;
+    while (t->kind == TypeKind::Typedef) {
+        t = static_cast<TypedefType*>(t)->aliasedType;
+    }
+    if (!t) return v;
+    llvm::LLVMContext& c = ctx.getContext();
+    auto& builder = ctx.getBuilder();
+    llvm::Type* i32 = llvm::Type::getInt32Ty(c);
+
+    switch (t->kind) {
+        case TypeKind::Bool:
+            return v->getType()->isIntegerTy(1) ? builder.CreateZExt(v, i32, "promote") : v;
+        case TypeKind::Char:
+        case TypeKind::Int8:
+        case TypeKind::Int16:
+            return builder.CreateSExt(v, i32, "promote");
+        case TypeKind::UInt8:
+        case TypeKind::UInt16:
+            return builder.CreateZExt(v, i32, "promote");
+        case TypeKind::Enum: {
+            auto* et = static_cast<EnumType*>(t);
+            return et->underlyingType ? promoteVarArg(ctx, v, et->underlyingType) : v;
+        }
+        case TypeKind::Float:
+        case TypeKind::Float32:
+            return ctx.castValue(v, llvm::Type::getDoubleTy(c));
+        default:
+            return v;
+    }
+}
+
 // Apply C's default argument promotions so a print argument matches its
 // compile-time chosen printf conversion.
 static llvm::Value* promotePrintArg(CodegenContext& ctx, llvm::Value* v, PrintArgKind kind) {
@@ -476,6 +511,9 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
         }
         if (i < resolvedParamTypes.size()) {
             argVal = ctx.castValue(argVal, ctx.getLLVMType(resolvedParamTypes[i]));
+        } else if (calleeFn->isVarArg()) {
+            // C default argument promotions for the variadic tail.
+            argVal = promoteVarArg(ctx, argVal, args[i]->type);
         }
         argsV.push_back(argVal);
     }

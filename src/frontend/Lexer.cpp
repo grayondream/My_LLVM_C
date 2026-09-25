@@ -1,4 +1,5 @@
 #include "Lexer.h"
+#include <cstdlib>
 #include <stdexcept>
 #include <unordered_map>
 #include "frontend/Token.h"
@@ -378,11 +379,27 @@ Token Lexer::scanNumber(){
             if(c == 'f' || c == 'F' || c == 'l' || c == 'L') break;
             cleanStr += c;
         }
-        return makeToken(TokenType::TOKEN_FLOAT, lexName, std::stod(cleanStr));
+        double value = 0.0;
+        try {
+            value = std::stod(cleanStr);
+        } catch (const std::exception&) {
+            // Out-of-range/negative float literal: saturate instead of throwing
+            // out of the compiler (LEX-17 diagnostic is tracked separately).
+            value = std::strtod(cleanStr.c_str(), nullptr);
+        }
+        return makeToken(TokenType::TOKEN_FLOAT, lexName, value);
     } else {
         std::string cleanStr;
         for(char c : lexName) { if(c != '_') cleanStr += c; }
-        return makeToken(TokenType::TOKEN_NUMBER, lexName, std::stoi(cleanStr));
+        int value = 0;
+        try {
+            value = std::stoi(cleanStr);
+        } catch (const std::exception&) {
+            // Out-of-range integer literal (LEX-17): saturate rather than
+            // propagate std::out_of_range out of the lexer.
+            value = static_cast<int>(std::strtoull(cleanStr.c_str(), nullptr, 10));
+        }
+        return makeToken(TokenType::TOKEN_NUMBER, lexName, value);
     }
 }
 
