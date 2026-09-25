@@ -134,3 +134,11 @@ TEST(SpecConformance, ConversionsSpecDocumentsCastOperators) {
     EXPECT_NE(conv.find("reinterpret_cast"), std::string::npos);
     EXPECT_NE(conv.find("指针→指针"), std::string::npos);
 }
+
+TEST(SpecConformance, SemanticsSpecDocumentsAnalysisWarnings) {
+    // SEM-11: unused-variable and unreachable-code warnings are documented.
+    std::string sem = readSpec("semantics.md");
+    ASSERT_FALSE(sem.empty());
+    EXPECT_NE(sem.find("W3002"), std::string::npos);
+    EXPECT_NE(sem.find("W3003"), std::string::npos);
+}

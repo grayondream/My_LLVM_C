@@ -28,7 +28,7 @@
 
 - `[ ]` **INF-01** 锁定 LLVM 版本与集成层：CMake `find_package(LLVM)`、最低版本断言、版本不匹配诊断。
 - `[ ]` **INF-02** 构建系统：Debug/Release、跨平台（Linux/macOS/Windows）、交叉编译目标配置。
-- `[x]` **INF-03** **诊断系统**：统一 `Diagnostic`（源码位置/错误码/严重级别/修复建议）、诊断快照测试设施。已实现错误码注册表 + `formatWithSeverity` + fix-it + 快照设施（`tests/diagnostics/snapshots/`）+ 警告独立通道（`getWarnings`，`-Werror` 可控）；词法器记录记号**起始**位置，表达式/声明节点由解析器打点，`file:line:col` 对解析与语义诊断均可用（`tests/frontend/test_source_location.cpp`）。
+- `[x]` **INF-03** **诊断系统**：统一 `Diagnostic`（源码位置/错误码/严重级别/修复建议）、诊断快照测试设施。已实现错误码注册表 + `formatWithSeverity` + fix-it + 快照设施（`tests/diagnostics/snapshots/`）+ 警告独立通道（`getWarnings`，`-Werror` 可控）；词法器记录记号**起始**位置，表达式/声明节点由解析器打点，`file:line:col` 对解析与语义诊断均可用（`tests/frontend/test_source_location.cpp`）；语句节点（表达式语句/声明语句/`defer`）亦已打点。
 - `[ ]` **INF-04** 测试框架完善：单元、集成、黄金文件（IR/输出）、诊断快照；CTest 分组与标签。
 - `[ ]` **INF-05** CI：Linux/macOS/Windows 矩阵、交叉编译、ABI 测试、性能基准。（外围仅限构建/测试，不含 LSP/包管理）
 - `[x]` **INF-06** 文档系统：语言规范（EBNF 语法）、类型/ABI 文档、`compile_time` API 文档。（**提前到 P0**，见 P0-07；`docs/spec/` 六分册 + 一致性测试已建）
@@ -175,7 +175,7 @@
 - `[ ]` **SEM-08** 格式字符串类型检查：`{}`、`{:x}`、`{:f}`、`{:02}`、`{:.2f}`（`print/println`）。
 - `[ ]` **SEM-09** 数组/Slice 边界检查策略：静态可证明或运行时检查（见 DEC-06）。
 - `[ ]` **SEM-10** 整数溢出检查策略：Debug 检查 / Release 行为（见 DEC-07）。
-- `[~]` **SEM-11** 警告：未使用变量、不可达代码、弃用 API、enum 穷尽性（未初始化变量已实现 W3001；其余待补）。
+- `[~]` **SEM-11** 警告：未使用变量（W3002）与不可达代码（W3003）已实现（`tests/sema/test_warnings.cpp`；任一引用算使用，`defer` 不影响可达性）；弃用 API（W3004，依赖注解 ANN-05）与 enum 穷尽性（依赖 DEC-13）待定；未初始化变量见 SEM-01/02（W3001）。
 - `[ ]` **SEM-12** 位域语义检查：宽度合法、跨存储单元规则。
 - `[ ]` **SEM-13** UB 清单（**对齐 C 标准**）：为 SEM-09/10/11 与 UBSan 提供依据；不引入所有权/生命周期模型。
 - `[~]` **SEM-14** 静态分析诊断：错误码、源码位置、修复建议。主要检查点已带错误码与 fix 字段（见 `src/sema/Diagnostic.*`）。

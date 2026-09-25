@@ -814,6 +814,16 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
         return std::make_unique<NullStmtAST>();
     }
 
+    // Stamp declaration statements with the location of their first token
+    // (INF-03 / P0-06), so sema diagnostics on the statement carry a position.
+    auto makeDeclStmt = [&](std::unique_ptr<DeclAST> decl) {
+        auto stmt = std::make_unique<DeclStmtAST>(std::move(decl));
+        if (stmtStart) {
+            stmt->setLocation(stmtStart->filename, stmtStart->line, stmtStart->column);
+        }
+        return stmt;
+    };
+
     // if statement
     if (peek() && peek()->type == TokenType::TOKEN_IF) {
         return parseIfStmt();
@@ -872,7 +882,11 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
             return nullptr;
         }
         expect(TokenType::TOKEN_SEMICOLON, "expected ';' after defer statement");
-        return std::make_unique<DeferStmtAST>(std::move(callExpr));
+        auto stmt = std::make_unique<DeferStmtAST>(std::move(callExpr));
+        if (stmtStart) {
+            stmt->setLocation(stmtStart->filename, stmtStart->line, stmtStart->column);
+        }
+        return stmt;
     }
 
     // compound statement (block)
@@ -884,7 +898,7 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
     if (check(TokenType::TOKEN_CONSTEXPR)) {
         auto decl = parseDeclaration();
         if (decl) {
-            return std::make_unique<DeclStmtAST>(std::move(decl));
+            return makeDeclStmt(std::move(decl));
         }
     }
 
@@ -898,7 +912,7 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
             m_currentTokenPos = savedPos;
             auto decl = parseDeclaration();
             if (decl) {
-                return std::make_unique<DeclStmtAST>(std::move(decl));
+                return makeDeclStmt(std::move(decl));
             }
             m_currentTokenPos = savedPos;
         }
@@ -909,13 +923,13 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
                 m_currentTokenPos = savedPos;
                 auto decl = parseDeclaration();
                 if (decl) {
-                    return std::make_unique<DeclStmtAST>(std::move(decl));
+                    return makeDeclStmt(std::move(decl));
                 }
             }
             auto varDecl = parseVariableDeclList(type, nameTok->lexeme);
             if (varDecl) {
                 applyLocation(varDecl.get(), stmtStart ? &*stmtStart : nullptr);
-                return std::make_unique<DeclStmtAST>(std::move(varDecl));
+                return makeDeclStmt(std::move(varDecl));
             }
         }
         // Not a declaration, restore position
@@ -1133,12 +1147,17 @@ std::unique_ptr<StmtAST> Parser::parseContinueStmt() {
 }
 
 std::unique_ptr<StmtAST> Parser::parseExprStmt() {
+    auto startTok = peek();
     auto expr = parseExpr();
     if (!expr) {
         return nullptr;
     }
     expect(TokenType::TOKEN_SEMICOLON, "expected ';' after expression statement");
-    return std::make_unique<ExprStmtAST>(std::move(expr));
+    auto stmt = std::make_unique<ExprStmtAST>(std::move(expr));
+    if (startTok) {
+        stmt->setLocation(startTok->filename, startTok->line, startTok->column);
+    }
+    return stmt;
 }
 
 std::unique_ptr<TranslationUnitAST> Parser::parse() {

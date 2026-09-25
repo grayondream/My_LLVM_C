@@ -14,6 +14,32 @@ static Type* stripTypedef(Type* type) {
     return type;
 }
 
+// SEM-11: true when `stmt` unconditionally transfers control (return/break/
+// continue). Used for the unreachable-code warning (W3003). Trailing `defer`
+// statements do not clear termination — they still run on scope exit.
+static bool stmtAlwaysTransfers(const StmtAST* stmt) {
+    if (!stmt) return false;
+    if (dynamic_cast<const ReturnStmtAST*>(stmt) ||
+        dynamic_cast<const BreakStmtAST*>(stmt) ||
+        dynamic_cast<const ContinueStmtAST*>(stmt)) {
+        return true;
+    }
+    if (auto* compound = dynamic_cast<const CompoundStmtAST*>(stmt)) {
+        for (auto it = compound->stmts.rbegin(); it != compound->stmts.rend(); ++it) {
+            if (!*it) continue;
+            if (dynamic_cast<const DeferStmtAST*>(it->get())) continue;
+            return stmtAlwaysTransfers(it->get());
+        }
+        return false;
+    }
+    if (auto* ifStmt = dynamic_cast<const IfStmtAST*>(stmt)) {
+        return ifStmt->thenStmt && ifStmt->elseStmt &&
+               stmtAlwaysTransfers(ifStmt->thenStmt.get()) &&
+               stmtAlwaysTransfers(ifStmt->elseStmt.get());
+    }
+    return false;
+}
+
 SemanticAnalyzer::SemanticAnalyzer()
     : globalScope(std::make_unique<Scope>(nullptr)),
       currentScope(globalScope.get()),
@@ -49,6 +75,20 @@ void SemanticAnalyzer::enterScope() {
 }
 
 void SemanticAnalyzer::exitScope() {
+    // SEM-11: report local variables/arrays that were never referenced (W3002).
+    // Parameters and globals do not opt in, and must not warn here.
+    if (currentScope != globalScope.get()) {
+        for (auto& entry : currentScope->symbols) {
+            for (Symbol* sym : entry.second.getCandidates()) {
+                if (sym->checkUnused && !sym->isUsed) {
+                    warnings.emplace_back(Diagnostic::Level::Warning,
+                                          DiagnosticCode::WarnUnusedVariable,
+                                          "unused variable '" + sym->name + "'",
+                                          sym->declFile, sym->declLine, sym->declColumn);
+                }
+            }
+        }
+    }
     Scope* parent = currentScope->parent;
     if (currentScope != globalScope.get()) {
         delete currentScope;
@@ -751,6 +791,9 @@ void SemanticAnalyzer::visit(VariableExprAST& node) {
     if (!sym && key != originalName) {
         sym = lookup(originalName);
     }
+    if (sym) {
+        sym->isUsed = true; // SEM-11: any reference counts as a use (W3002).
+    }
     if (!sym) {
         emitError(DiagnosticCode::SemUndeclaredIdentifier, "use of undeclared identifier '" + originalName + "'", node);
         node.type = nullptr;
@@ -1328,9 +1371,21 @@ void SemanticAnalyzer::visit(InitializerListExprAST& node) {
 
 void SemanticAnalyzer::visit(CompoundStmtAST& node) {
     enterScope();
+    bool terminated = false;
+    bool warned = false;
     for (auto& stmt : node.stmts) {
-        if (stmt) {
-            visit(*stmt);
+        if (!stmt) {
+            continue;
+        }
+        // SEM-11: statements after an unconditional transfer are unreachable
+        // (W3003). Warn once per block; trailing `defer`s stay legal.
+        if (terminated && !warned && !dynamic_cast<DeferStmtAST*>(stmt.get())) {
+            emitWarning(DiagnosticCode::WarnUnreachableCode, "unreachable code", *stmt);
+            warned = true;
+        }
+        visit(*stmt);
+        if (stmtAlwaysTransfers(stmt.get())) {
+            terminated = true;
         }
     }
     exitScope();
@@ -1455,6 +1510,15 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
     if (!declare(node.name, node.type)) {
         emitError(DiagnosticCode::SemRedefinition, "redeclaration of variable '" + node.name + "' in the same scope", node);
     }
+    // SEM-11: remember local variables for the unused-variable check (W3002).
+    if (currentFunction) {
+        if (Symbol* sym = currentScope->lookup(node.name)) {
+            sym->checkUnused = true;
+            sym->declFile = node.sourceFile;
+            sym->declLine = node.sourceLine;
+            sym->declColumn = node.sourceColumn;
+        }
+    }
 }
 
 void SemanticAnalyzer::visit(ArrayDeclAST& node) {
@@ -1480,6 +1544,15 @@ void SemanticAnalyzer::visit(ArrayDeclAST& node) {
     }
     if (!declare(node.name, arrayType)) {
         emitError("redeclaration of array '" + node.name + "' in the same scope", node);
+    }
+    // SEM-11: remember local arrays for the unused-variable check (W3002).
+    if (currentFunction) {
+        if (Symbol* sym = currentScope->lookup(node.name)) {
+            sym->checkUnused = true;
+            sym->declFile = node.sourceFile;
+            sym->declLine = node.sourceLine;
+            sym->declColumn = node.sourceColumn;
+        }
     }
 }
 

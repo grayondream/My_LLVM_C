@@ -61,7 +61,10 @@
 | SEM-08 | 格式字符串类型检查 | `[plan]` |
 | SEM-09 | 数组/Slice 边界检查 | 策略见 DEC-06 |
 | SEM-10 | 整数溢出检查 | 策略见 DEC-07 |
-| SEM-11 | 未使用变量/不可达/弃用/枚举穷尽 | 部分 `[impl]`（未初始化 W3001）；其余 `[plan]` |
+| SEM-11 | 未使用变量/不可达/弃用/枚举穷尽 | `[impl]` W3002/W3003（见 6.2）；W3004 弃用与枚举穷尽 `[plan]` |
+| SEM-12 | 位域语义检查 | `[plan]` |
+| SEM-13 | UB 清单（对齐 C） | `[plan]` 基准文档 |
+| SEM-14 | 诊断：错误码/位置/修复建议 | `[impl]` 基础版（INF-03/13） |
 
 ### 6.1 确定赋值分析（SEM-01/02）`[impl]`
 
@@ -73,9 +76,13 @@
 - `while`/`for` 循环体可能执行零次，出口取入口集合；`do-while` 体至少执行一次。
 - `switch` 保守取入口集合；`?:` 对两分支取交集。
 - 每个变量只报告一次。实现：`SemanticAnalyzer::checkInitialization`。
-| SEM-12 | 位域语义检查 | `[plan]` |
-| SEM-13 | UB 清单（对齐 C） | `[plan]` 基准文档 |
-| SEM-14 | 诊断：错误码/位置/修复建议 | `[impl]` 基础版（INF-03/13） |
+
+### 6.2 未使用变量与不可达代码（SEM-11）`[impl]`
+
+- `W3002` **未使用变量**：局部变量/局部数组在 `exitScope` 时若从未被引用则告警；参数、全局变量、函数不检查。任一引用（含仅赋值、取址、读）都算“使用”，即 GCC `-Wunused-variable` 语义（set-but-not-read 不告警）。实现：`Symbol::checkUnused`/`isUsed` + `SemanticAnalyzer::exitScope`。
+- `W3003` **不可达代码**：同一 `{}` 块中，`return`/`break`/`continue`（含两分支都转移的 `if/else`）之后的语句告警，每块至多一次；`defer` 语句不受影响（仍在作用域退出时执行）。实现：`stmtAlwaysTransfers` + `visit(CompoundStmtAST)`。
+- `W3004` 弃用 API 与枚举穷尽性属 `[plan]`：前者依赖注解系统（ANN-05），后者依赖 **DEC-13**（警告还是错误）。
+- 所有分析警告经 `getWarnings()`，不导致编译失败，除非 `-Werror`。
 
 ## 7. 编译期求值边界（CT-14 / DEC-05）
 

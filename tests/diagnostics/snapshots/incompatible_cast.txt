@@ -1,2 +1,3 @@
 snapshot.c:5:15: warning[E2006]: incompatible cast from 'struct S' to 'float'
+snapshot.c:5:5: warning[W3002]: unused variable 'f'
 snapshot.c:5:22: warning[W3001]: variable 's' may be used before it is initialized

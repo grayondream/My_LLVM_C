@@ -13,6 +13,14 @@ public:
     std::string name;
     Type* type;
     llvm::Value* value;
+
+    // SEM-11 unused-variable analysis (W3002). Only local variables opt in via
+    // `checkUnused`; parameters, globals and functions never warn here.
+    bool isUsed = false;
+    bool checkUnused = false;
+    std::string declFile;
+    int declLine = 0;
+    int declColumn = 0;
 };
 
 // Returns the implicit-conversion rank from `from` to `to`:
