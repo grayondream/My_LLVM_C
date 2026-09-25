@@ -95,6 +95,21 @@ int conversionRank(Type* from, Type* to) {
     if (fw > 0 && tb > 0) return 1;               // integer -> floating point
     if (fb > 0 && tb > 0 && tb >= fb) return 1;   // floating point widening
 
+    // C pointer conversions (MEM-10): any pointer converts to any other pointer,
+    // notably `T*` <-> `void*`. Ranked worse than exact/widening conversions so
+    // overload resolution still prefers a specific parameter type.
+    if (from->kind == TypeKind::Pointer && to->kind == TypeKind::Pointer) return 2;
+
+    // A function designator converts to a pointer to a compatible function.
+    if (from->kind == TypeKind::Function && to->kind == TypeKind::Pointer &&
+        to->base && to->base->kind == TypeKind::Function) {
+        return 1;
+    }
+
+    // The null pointer constant (an integer, incl. the `null` literal) converts
+    // to any pointer; ranked worst so real pointer arguments win.
+    if (fw > 0 && to->kind == TypeKind::Pointer) return 3;
+
     return -1;
 }
 

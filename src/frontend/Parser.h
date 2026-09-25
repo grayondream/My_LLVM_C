@@ -74,6 +74,14 @@ private:
     // closing ')' of "(*name)"; returns the pointed-to FunctionType.
     Type* parseFunctionPointerType(Type* returnType);
 
+    // Parse a function-pointer declarator tail after its base return type:
+    //   (* [name]) ( paramTypes )
+    // Returns a pointer-to-function type with `outName` set, or nullptr (and
+    // restores the position) when the input is not a function-pointer
+    // declarator. When `requireName` is true an omitted name is rejected.
+    Type* parseFunctionPointerDeclarator(Type* returnType, std::string& outName,
+                                         bool requireName);
+
     std::unique_ptr<ParamDeclAST> parseParamDecl();
 
     std::unique_ptr<StructDeclAST> parseStructDecl();

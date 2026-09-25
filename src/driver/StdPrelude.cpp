@@ -56,6 +56,12 @@ extern int    fprintf(void* stream, char* format, ...);
 
 // Formatted input from stdin.
 extern int    scanf(char* format, ...);
+
+// Callback-taking libc APIs (MEM-10). Function-pointer parameters are supported
+// in `extern` declarations, so a user function can be passed directly.
+extern void   qsort(void* base, usize count, usize size, int (*compare)(void*, void*));
+extern void*  bsearch(void* key, void* base, usize count, usize size, int (*compare)(void*, void*));
+extern int    atexit(void (*func)(void));
 )PRELUDE";
 }
 

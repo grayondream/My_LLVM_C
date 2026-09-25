@@ -751,7 +751,9 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
     }
     if (object->type && object->type->kind == TypeKind::Pointer &&
         object->type->base && object->type->base->kind == TypeKind::Union) {
-        objVal = builder.CreateLoad(llvm::PointerType::get(ctx.getContext(), 0), objVal, "deref");
+        if (object->isLValue) {
+            objVal = builder.CreateLoad(llvm::PointerType::get(ctx.getContext(), 0), objVal, "deref");
+        }
         llvm::Type* unionLLVM = ctx.getLLVMType(object->type->base);
         if (!unionLLVM) return nullptr;
         return builder.CreateStructGEP(unionLLVM, objVal, 0, "unionmember");
@@ -782,13 +784,19 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
             }
         }
         objType = ctx.getLLVMType(object->type->base);
-        // Load the pointer from the alloca before doing GEP
-        objVal = builder.CreateLoad(llvm::PointerType::get(ctx.getContext(), 0), objVal, "deref");
+        // Load the pointer unless the object already produced a pointer value
+        // (a cast, a call result, `&x`, ...); only lvalue objects are addresses
+        // of a variable that stores the pointer (MEM-10).
+        if (object->isLValue) {
+            objVal = builder.CreateLoad(llvm::PointerType::get(ctx.getContext(), 0), objVal, "deref");
+        }
     } else if (object->type && object->type->kind == TypeKind::Pointer &&
                object->type->base && object->type->base->kind == TypeKind::Class) {
         auto* classType = static_cast<ClassType*>(object->type->base);
-        // Load the pointer from the alloca before doing GEP
-        objVal = builder.CreateLoad(llvm::PointerType::get(ctx.getContext(), 0), objVal, "deref");
+        // Load the pointer unless the object already produced a pointer value.
+        if (object->isLValue) {
+            objVal = builder.CreateLoad(llvm::PointerType::get(ctx.getContext(), 0), objVal, "deref");
+        }
         if (auto* gep = emitClassFieldGEP(ctx, classType, objVal, memberName)) {
             return gep;
         }

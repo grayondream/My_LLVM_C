@@ -66,6 +66,8 @@ namespace 前缀，`namespace std { void abort() { abort(); } }` 会自递归，
 - 文件 I/O（`FILE*` 以不透明 `void*` 传递）：`fopen`、`fclose`、`fread`、`fwrite`、
   `fgets`、`fputs`、`fgetc`、`fputc`、`fprintf`
 - 数值：`abs`
+- 回调（`MEM-10`）：`qsort`、`bsearch`、`atexit`——`extern` 声明支持函数指针形参，
+  用户函数可直接作为回调传入
 
 `dprintf(fd, ...)` 用于访问 stderr（fd = 2），从而**无需暴露 C 的 `FILE` 类型**。
 

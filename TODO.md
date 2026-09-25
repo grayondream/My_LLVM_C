@@ -104,7 +104,7 @@
 - `[x]` **MOD-06** 模块可见性与 `public/private`。每模块私有作用域 + `export` 提升到全局；顶层 `public` 与 `export` 同义（类成员访问级别仍待 PAR-04）。类型名可见性见 `docs/spec/modules.md` §11 限制。
 - `[x]` **MOD-07** 模块循环依赖检测。`ModuleLoader` DFS `active` 栈检出导入环并报错（列出环路径）；`loaded` 去重支持菱形依赖。
 - `[ ]` **MOD-08** 名称修饰：C ABI 符号、class 方法、**模板单态化符号**、`static` 成员。
-- `[~]` **MOD-09** `(改)` **C 互操作（无预处理器方案）**：不解析真实 C 头文件，改用 `extern` 声明 + `std.c` 绑定层。绑定层已文件化到 `libs/std/c.smc`（`src/driver/StdPrelude.*` 优先读文件、内嵌兜底；`--no-prelude` 关闭）+ 修复 `void*` 形参解析。
+- `[x]` **MOD-09** `(改)` **C 互操作（无预处理器方案）**：不解析真实 C 头文件，改用 `extern` 声明 + `std.c` 绑定层。绑定层已文件化到 `libs/std/c.smc`（`src/driver/StdPrelude.*` 优先读文件、内嵌兜底；`--no-prelude` 关闭）；`void*` 形参、函数指针形参与嵌套回调（`int (*cb)(int,int)`）均已支持；回调 API `qsort/bsearch/atexit` 已入库（P0-02 / MEM-10）。
 - `[ ]` **MOD-10** 增量编译：模块/AST/类型/IR 缓存与失效策略（内容哈希）。
 - `[x]` **MOD-11** 导入符号访问语法待定并实现：**直接非限定访问**（DEC-02 冻结）；限定名由模块内 `namespace` 提供。
 - `[x]` **MOD-12** `(新)` `namespace` 语义：嵌套/开放命名空间、限定查找、与模块的关系（DEC-17 已冻结：正交）。（嵌套查找 + 名称隔离 + 限定类型名已实现；规范见 `docs/spec/modules.md`）
@@ -261,7 +261,7 @@
 - `[ ]` **MEM-07** 预留：allocator 接口、arena、pool、placement 分配。
 - `[ ]` **MEM-08** 无隐藏分配；无隐藏控制流（不插入异常/GC/析构）。
 - `[ ]` **MEM-09** ABI：`[[repr(C)]]`、`[[packed]]`、`[[align(64)]]`；位域布局（DEC-08）。
-- `[ ]` **MEM-10** FFI：与 C 函数/结构体/回调互操作（绑定层见 MOD-09）。
+- `[x]` **MEM-10** FFI：与 C 函数/结构体/回调互操作（绑定层见 MOD-09）。已支持：`extern` 声明、函数指针形参（含无名与嵌套回调）、`T*`↔`void*` 传参与 C 风格类型转换 `(int*)p`/`((struct S*)p)->f`；libc `qsort/bsearch/atexit` 可直接传入用户函数作为回调。结构体**按值**传参/返回见 MEM-14。
 - `[ ]` **MEM-11** 调用约定：C 调用约定（可选其他）。
 - `[ ]` **MEM-12** 名称修饰（配合 MOD-08）。
 - `[ ]` **MEM-13** `(新)` freestanding / 无 libc 目标（可选）。
@@ -497,7 +497,7 @@
 
 ### P0：最小可用编译器（已有大量基础，补齐缺口）
 - `[x]` **P0-01** 清理与决策一致的冲突：移除预处理器、goto/label、`-E/-I/-D`（NG-01/02/TOOL-02）。已完成；`-I` 由 `-M/--module-path` 取代。
-- `[~]` **P0-02** C 互操作绑定层（MOD-09/STD-23）——无预处理器后的刚需。文件化 `libs/std/c.smc` + `extern` 已可用。
+- `[x]` **P0-02** C 互操作绑定层（MOD-09/STD-23）——无预处理器后的刚需。文件化 `libs/std/c.smc` + `extern` 已可用；函数指针形参/嵌套回调、C 风格指针转换、`qsort/bsearch/atexit` 已补齐（MEM-10）。
 - `[x]` **P0-03** 变量初始化检查（SEM-01/02）。已实现（W3001，含分支合并/循环；`-Werror` 可将警告变失败）。
 - `[x]` **P0-04** module/import/export（MOD-04~07）。源文件 `import`（搜索路径/点分名/循环报错）、`module` 文件绑定与校验、`export` 可见性、每模块私有作用域均已实现。
 - `[x]` **P0-05** 最小 `std.core` / `std.io`（STD-01/12）。`std::min/max/clamp`、`std::print_*`、`std::read_*`、`std::file_*` 可用；`assert`/`panic` 内建、`abort` 经 `std.c`；规范 `docs/spec/stdlib.md`。

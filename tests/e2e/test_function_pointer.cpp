@@ -1,0 +1,209 @@
+// P0-02 / MEM-10: C interop through function pointers. Function-pointer
+// variables, function-pointer parameters (callbacks), nested callbacks, and a
+// full libc `qsort`/`bsearch` round trip through the std.c binding layer.
+#include <gtest/gtest.h>
+
+#include <cstdint>
+#include <string>
+
+#include "ast/Decl.h"
+#include "codegen/CodegenContext.h"
+#include "driver/StdPrelude.h"
+#include "frontend/Lexer.h"
+#include "frontend/Parser.h"
+#include "sema/SemanticAnalyzer.h"
+#include "support/Log.h"
+
+#include "llvm/ExecutionEngine/Orc/LLJIT.h"
+#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
+#include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
+#include "llvm/IR/Verifier.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/TargetSelect.h"
+
+class FunctionPointerE2E : public ::testing::Test {
+protected:
+    void SetUp() override {
+        spdlog::set_level(spdlog::level::off);
+        static bool init = false;
+        if (!init) {
+            llvm::InitializeAllTargetInfos();
+            llvm::InitializeAllTargets();
+            llvm::InitializeAllTargetMCs();
+            llvm::InitializeAllAsmParsers();
+            llvm::InitializeAllAsmPrinters();
+            init = true;
+        }
+    }
+};
+
+// Compile `source` together with the built-in std.c binding layer and run main
+// in-process. Returns main's value, or -1 on any failure.
+static int runWithPrelude(const std::string& source, const std::string& filename) {
+    auto ast = smc::parseStdCPrelude(source, filename);
+    if (!ast) {
+        ADD_FAILURE() << "user parse failed";
+        return -1;
+    }
+    auto prelude = smc::parseStdCPrelude(smc::builtinStdCPrelude(), "<std.c>");
+    if (!prelude) {
+        ADD_FAILURE() << "prelude parse failed";
+        return -1;
+    }
+    smc::prependDeclarations(*ast, *prelude);
+
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    if (!analyzer.getErrors().empty()) {
+        for (auto& err : analyzer.getErrors()) {
+            ADD_FAILURE() << "semantic error: " << err.format();
+        }
+        return -1;
+    }
+
+    CodegenContext ctx;
+    ctx.setSourceFile(filename);
+    ast->codegen(ctx);
+    ctx.finalizeDebugInfo();
+
+    std::string ve;
+    llvm::raw_string_ostream vs(ve);
+    if (llvm::verifyModule(ctx.getModule(), &vs)) {
+        vs.flush();
+        ADD_FAILURE() << "module verification failed: " << ve;
+        return -1;
+    }
+
+    auto jtmb = llvm::orc::JITTargetMachineBuilder::detectHost();
+    if (!jtmb) {
+        ADD_FAILURE() << "detectHost failed";
+        return -1;
+    }
+    auto jit = llvm::orc::LLJITBuilder()
+        .setJITTargetMachineBuilder(std::move(*jtmb))
+        .create();
+    if (!jit) {
+        ADD_FAILURE() << "LLJIT create failed";
+        return -1;
+    }
+
+    auto ts = llvm::orc::ThreadSafeModule(ctx.takeModule(), ctx.takeContext());
+    if (auto e = (*jit)->addIRModule(std::move(ts))) {
+        ADD_FAILURE() << "addIRModule failed";
+        return -1;
+    }
+
+    auto sym = (*jit)->lookup("main");
+    if (!sym) {
+        ADD_FAILURE() << "lookup main failed";
+        return -1;
+    }
+    return ((int (*)())(intptr_t)sym->getValue())();
+}
+
+TEST_F(FunctionPointerE2E, FunctionPointerVariable) {
+    EXPECT_EQ(runWithPrelude(R"(
+        int add(int a, int b) { return a + b; }
+        int main() {
+            int (*fp)(int, int) = add;
+            return fp(3, 4) - 7;
+        }
+    )", "fp_var.c"), 0);
+}
+
+TEST_F(FunctionPointerE2E, FunctionPointerParameter) {
+    EXPECT_EQ(runWithPrelude(R"(
+        int apply(int (*cb)(int, int), int a, int b) { return cb(a, b); }
+        int mul(int a, int b) { return a * b; }
+        int main() { return apply(mul, 6, 7) - 42; }
+    )", "fp_param.c"), 0);
+}
+
+TEST_F(FunctionPointerE2E, UnnamedFunctionPointerParameter) {
+    // `int (*)(int)` has no name; it may still be declared and the body may
+    // ignore it.
+    EXPECT_EQ(runWithPrelude(R"(
+        int apply(int (*)(int), int x) { return x + 1; }
+        int main() { return apply(0, 41) - 42; }
+    )", "fp_unnamed.c"), 0);
+}
+
+TEST_F(FunctionPointerE2E, NestedCallback) {
+    // A callback that itself takes a callback.
+    EXPECT_EQ(runWithPrelude(R"(
+        int twice(int (*f)(int), int x) { return f(f(x)); }
+        int inc(int x) { return x + 1; }
+        int main() { return twice(inc, 5) - 7; }
+    )", "fp_nested.c"), 0);
+}
+
+TEST_F(FunctionPointerE2E, LibcQsortCallback) {
+    EXPECT_EQ(runWithPrelude(R"(
+        int cmp_int(void* a, void* b) {
+            int* x = (int*)a;
+            int* y = (int*)b;
+            if (*x < *y) return -1;
+            if (*x > *y) return 1;
+            return 0;
+        }
+        int main() {
+            int arr[5];
+            arr[0] = 5; arr[1] = 3; arr[2] = 4; arr[3] = 1; arr[4] = 2;
+            qsort(arr, 5, 4, cmp_int);
+            int i = 0;
+            while (i < 5) {
+                if (arr[i] != i + 1) return 1;
+                i = i + 1;
+            }
+            return 0;
+        }
+    )", "fp_qsort.c"), 0);
+}
+
+TEST_F(FunctionPointerE2E, LibcBsearchCallback) {
+    EXPECT_EQ(runWithPrelude(R"(
+        int cmp_int(void* a, void* b) {
+            int* x = (int*)a;
+            int* y = (int*)b;
+            if (*x < *y) return -1;
+            if (*x > *y) return 1;
+            return 0;
+        }
+        int main() {
+            int arr[5];
+            arr[0] = 1; arr[1] = 2; arr[2] = 3; arr[3] = 4; arr[4] = 5;
+            int key = 4;
+            int* found = (int*)bsearch(&key, arr, 5, 4, cmp_int);
+            if (found == null) return 1;
+            return *found - 4;
+        }
+    )", "fp_bsearch.c"), 0);
+}
+
+TEST_F(FunctionPointerE2E, CastRvaluePointerMemberAccess) {
+    // `((struct S*)p)->field`: the cast is an rvalue pointer, so member access
+    // must not dereference it as if it were an alloca (regression).
+    EXPECT_EQ(runWithPrelude(R"(
+        struct Point { int x; int y; };
+        int main() {
+            struct Point pt;
+            pt.x = 9; pt.y = 2;
+            void* p = &pt;
+            struct Point* q = (struct Point*)p;
+            int viaVar = q->x;
+            int viaCast = ((struct Point*)p)->y;
+            return viaVar + viaCast - 11;
+        }
+    )", "fp_cast_member.c"), 0);
+}
+
+TEST_F(FunctionPointerE2E, CastPointerRoundTrip) {
+    EXPECT_EQ(runWithPrelude(R"(
+        int main() {
+            int v = 7;
+            void* p = (void*)&v;
+            int* q = (int*)p;
+            return *q - 7;
+        }
+    )", "fp_cast_roundtrip.c"), 0);
+}

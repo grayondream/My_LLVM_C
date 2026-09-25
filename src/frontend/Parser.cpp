@@ -349,48 +349,23 @@ std::unique_ptr<ExprAST> Parser::parseUnaryImpl() {
     if (token->type == TokenType::TOKEN_LPAREN) {
         advance(); // consume '('
 
-        // Try to detect cast: (type) expr
-        // Check if next token is a type keyword
-        bool isCast = false;
-        Type* castType = nullptr;
-        if (auto typeTok = peek()) {
-            switch (typeTok->type) {
-                case TokenType::TOKEN_INT:
-                    castType = TypeContext::instance().getInt();
-                    isCast = true;
-                    break;
-                case TokenType::TOKEN_FLOAT:
-                    castType = TypeContext::instance().getFloat();
-                    isCast = true;
-                    break;
-                case TokenType::TOKEN_DOUBLE:
-                    castType = TypeContext::instance().getDouble();
-                    isCast = true;
-                    break;
-                case TokenType::TOKEN_CHAR_KW:
-                    castType = TypeContext::instance().getChar();
-                    isCast = true;
-                    break;
-                case TokenType::TOKEN_VOID:
-                    castType = TypeContext::instance().getVoid();
-                    isCast = true;
-                    break;
-                default:
-                    break;
+        // Try to detect a cast: (type) expr. Speculatively parse a full type and
+        // require the closing ')'; otherwise reparse as a parenthesized
+        // expression. Using parseType (rather than a fixed keyword list) allows
+        // pointers, qualifiers, and named types: (int*)p, (struct S*)p, (void*)
+        // handles, etc. (MEM-10 / P0-02).
+        if (isTypeStart() || check(TokenType::TOKEN_CONST) ||
+            check(TokenType::TOKEN_VOLATILE)) {
+            size_t saved = m_currentTokenPos;
+            Type* castType = parseType();
+            if (castType && match(TokenType::TOKEN_RPAREN)) {
+                auto operand = parseUnary();
+                if (!operand) {
+                    return nullptr;
+                }
+                return std::make_unique<CastExprAST>(castType, std::move(operand));
             }
-        }
-
-        if (isCast) {
-            advance(); // consume type keyword
-            if (!match(TokenType::TOKEN_RPAREN)) {
-                errorUnexpected("expected ')' after cast type");
-                return nullptr;
-            }
-            auto operand = parseUnary();
-            if (!operand) {
-                return nullptr;
-            }
-            return std::make_unique<CastExprAST>(castType, std::move(operand));
+            m_currentTokenPos = saved; // not a cast; reparse as an expression
         }
 
         // Not a cast, parse as parenthesized expression
@@ -1934,24 +1909,11 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationAsType() {
     }
 
     // Function pointer declarator: returnType (*name)(paramTypes)
-    if (check(TokenType::TOKEN_LPAREN)) {
-        size_t saved = m_currentTokenPos;
-        advance(); // '('
-        while (check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE)) advance();
-        if (check(TokenType::TOKEN_STAR)) {
-            advance(); // '*'
-            while (check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE)) advance();
-            if (check(TokenType::TOKEN_IDENTIFIER)) {
-                std::string fpName = advance()->lexeme;
-                if (match(TokenType::TOKEN_RPAREN) && check(TokenType::TOKEN_LPAREN)) {
-                    if (Type* funcType = parseFunctionPointerType(type)) {
-                        Type* ptrType = new Type(TypeKind::Pointer, funcType);
-                        return parseVariableDeclList(ptrType, fpName, isConstexpr);
-                    }
-                }
-            }
+    {
+        std::string fpName;
+        if (Type* ptrType = parseFunctionPointerDeclarator(type, fpName, /*requireName=*/true)) {
+            return parseVariableDeclList(ptrType, fpName, isConstexpr);
         }
-        m_currentTokenPos = saved;
     }
 
     if (!check(TokenType::TOKEN_IDENTIFIER)) return nullptr;
@@ -2002,6 +1964,43 @@ std::unique_ptr<DeclAST> Parser::parseVariableDeclList(Type* type, const std::st
     return std::make_unique<MultiVarDeclAST>(std::move(vars));
 }
 
+Type* Parser::parseFunctionPointerDeclarator(Type* returnType, std::string& outName,
+                                             bool requireName) {
+    outName.clear();
+    if (!check(TokenType::TOKEN_LPAREN)) return nullptr;
+
+    size_t saved = m_currentTokenPos;
+    advance(); // '('
+    while (check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE)) advance();
+    if (!check(TokenType::TOKEN_STAR)) {
+        m_currentTokenPos = saved;
+        return nullptr;
+    }
+    advance(); // '*'
+    while (check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE)) advance();
+
+    if (check(TokenType::TOKEN_IDENTIFIER)) {
+        outName = advance()->lexeme;
+    } else if (requireName) {
+        m_currentTokenPos = saved;
+        return nullptr;
+    }
+
+    if (!match(TokenType::TOKEN_RPAREN) || !check(TokenType::TOKEN_LPAREN)) {
+        m_currentTokenPos = saved;
+        outName.clear();
+        return nullptr;
+    }
+
+    Type* funcType = parseFunctionPointerType(returnType);
+    if (!funcType) {
+        m_currentTokenPos = saved;
+        outName.clear();
+        return nullptr;
+    }
+    return new Type(TypeKind::Pointer, funcType);
+}
+
 Type* Parser::parseFunctionPointerType(Type* returnType) {
     if (!expect(TokenType::TOKEN_LPAREN, "expected '(' after function pointer name")) return nullptr;
 
@@ -2024,10 +2023,11 @@ Type* Parser::parseFunctionPointerType(Type* returnType) {
                 advance();
                 break;
             }
-            Type* paramType = parseType();
-            if (!paramType) return nullptr;
-            if (check(TokenType::TOKEN_IDENTIFIER)) advance(); // optional name
-            paramTypes.push_back(paramType);
+            // Reuse the parameter parser so nested function-pointer parameters
+            // (callbacks taking callbacks) decay the same way.
+            auto param = parseParamDecl();
+            if (!param) return nullptr;
+            paramTypes.push_back(param->type);
             if (!match(TokenType::TOKEN_COMMA)) break;
         }
     }
@@ -2125,7 +2125,12 @@ std::unique_ptr<ParamDeclAST> Parser::parseParamDecl() {
     Type* type = parseType();
     if (!type) return nullptr;
 
+    // Parameter may itself be a function pointer: `int (*cb)(int, int)`.
     std::string name;
+    if (Type* ptrType = parseFunctionPointerDeclarator(type, name, /*requireName=*/false)) {
+        return std::make_unique<ParamDeclAST>(name, ptrType);
+    }
+
     if (check(TokenType::TOKEN_IDENTIFIER)) {
         name = advance()->lexeme;
     }

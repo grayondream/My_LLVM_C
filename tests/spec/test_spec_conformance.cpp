@@ -119,6 +119,8 @@ TEST(SpecConformance, StdlibSpecDocumentsBuiltins) {
     EXPECT_NE(stdlib.find("abort"), std::string::npos);
     EXPECT_NE(stdlib.find("std::print_int"), std::string::npos);
     EXPECT_NE(stdlib.find("std::file_open"), std::string::npos);
+    // MEM-10: callback-taking libc APIs are documented.
+    EXPECT_NE(stdlib.find("qsort"), std::string::npos);
     // DEC-21: panic is not catchable.
     EXPECT_NE(stdlib.find("DEC-21"), std::string::npos);
 }
