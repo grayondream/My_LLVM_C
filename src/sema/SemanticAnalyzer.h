@@ -63,6 +63,8 @@ private:
     Symbol* resolveMethod(ClassType* classType, const std::string& methodName, const std::vector<Type*>& argTypes);
     bool isMethodCall(ExprAST& expr);
     bool tryAnalyzePrintCall(CallExprAST& node);
+    bool tryAnalyzeAssertCall(CallExprAST& node);
+    bool tryAnalyzePanicCall(CallExprAST& node);
     bool lowerToString(CallExprAST& node, size_t argIndex, Type* argType);
     bool hasCircularInheritance(const std::string& className, const std::string& baseClass) const;
 

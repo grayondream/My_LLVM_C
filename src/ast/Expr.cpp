@@ -305,7 +305,92 @@ llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
     }
 }
 
+// Emit `dprintf(2, fmt, extra...)` then `abort()` (STD-01 / STD-27 / DEC-21).
+// `fmt` points at a fixed format string built at compile time (never user data,
+// so `%` in a path or message cannot corrupt the call); `extra` are varargs.
+static void emitDprintfAndAbort(CodegenContext& ctx, llvm::Value* fmt,
+                                const std::vector<llvm::Value*>& extra) {
+    llvm::LLVMContext& c = ctx.getContext();
+    auto& builder = ctx.getBuilder();
+    llvm::Type* i32 = llvm::Type::getInt32Ty(c);
+    llvm::Type* ptr = llvm::PointerType::get(c, 0);
+
+    llvm::FunctionType* dprintfTy = llvm::FunctionType::get(i32, {i32, ptr}, true);
+    llvm::FunctionCallee dprintfFn = ctx.getModule().getOrInsertFunction("dprintf", dprintfTy);
+
+    std::vector<llvm::Value*> callArgs;
+    callArgs.push_back(llvm::ConstantInt::get(i32, 2)); // fd 2 = stderr
+    callArgs.push_back(fmt);
+    callArgs.insert(callArgs.end(), extra.begin(), extra.end());
+    builder.CreateCall(dprintfTy, dprintfFn.getCallee(), callArgs);
+
+    llvm::FunctionType* abortTy = llvm::FunctionType::get(llvm::Type::getVoidTy(c), false);
+    llvm::FunctionCallee abortFn = ctx.getModule().getOrInsertFunction("abort", abortTy);
+    builder.CreateCall(abortTy, abortFn.getCallee(), {});
+}
+
+// "<file>:<line>" for the current node, or "" when unknown.
+static std::string nodeSourcePrefix(const ASTNode& node) {
+    if (node.sourceFile.empty()) return "";
+    return node.sourceFile + ":" + std::to_string(node.sourceLine);
+}
+
 llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
+    // Builtin `assert(cond)`: on a false condition, report the call site and
+    // abort; on success, fall through. Never silently recovers.
+    if (isAssert) {
+        llvm::LLVMContext& c = ctx.getContext();
+        auto& builder = ctx.getBuilder();
+        llvm::Value* cond = args[0]->codegen(ctx);
+        if (!cond) return nullptr;
+        if (args[0]->isLValue) cond = ctx.loadValue(cond, args[0]->type);
+        cond = ctx.coerceToBool(cond);
+        if (!cond) return nullptr;
+
+        llvm::Function* fn = builder.GetInsertBlock()->getParent();
+        llvm::BasicBlock* failBB = llvm::BasicBlock::Create(c, "assert.fail", fn);
+        llvm::BasicBlock* okBB = llvm::BasicBlock::Create(c, "assert.ok", fn);
+        builder.CreateCondBr(cond, okBB, failBB);
+
+        builder.SetInsertPoint(failBB);
+        std::string prefix = nodeSourcePrefix(*this);
+        std::string msg = prefix.empty() ? "assertion failed\n"
+                                         : prefix + ": assertion failed\n";
+        llvm::Value* fmt = builder.CreateGlobalString("%s", ".assertfmt");
+        llvm::Value* text = builder.CreateGlobalString(msg, ".assertmsg");
+        emitDprintfAndAbort(ctx, fmt, {text});
+        builder.CreateUnreachable();
+
+        builder.SetInsertPoint(okBB);
+        return llvm::ConstantInt::get(llvm::Type::getInt32Ty(c), 0);
+    }
+
+    // Builtin `panic(msg)`: report the call site and the user message, then
+    // abort. The block is terminated; a dead continuation keeps later codegen
+    // total (and is unreachable).
+    if (isPanic) {
+        llvm::LLVMContext& c = ctx.getContext();
+        auto& builder = ctx.getBuilder();
+        llvm::Value* userMsg = args[0]->codegen(ctx);
+        if (!userMsg) return nullptr;
+        if (args[0]->isLValue) userMsg = ctx.loadValue(userMsg, args[0]->type);
+        if (!userMsg) return nullptr;
+        if (!userMsg->getType()->isPointerTy()) {
+            userMsg = ctx.castValue(userMsg, llvm::PointerType::get(c, 0));
+        }
+
+        llvm::Function* fn = builder.GetInsertBlock()->getParent();
+        std::string prefix = nodeSourcePrefix(*this);
+        std::string fmtStr = prefix.empty() ? "panic: %s\n" : prefix + ": panic: %s\n";
+        llvm::Value* fmt = builder.CreateGlobalString(fmtStr, ".panicfmt");
+        emitDprintfAndAbort(ctx, fmt, {userMsg});
+        builder.CreateUnreachable();
+
+        llvm::BasicBlock* contBB = llvm::BasicBlock::Create(c, "panic.cont", fn);
+        builder.SetInsertPoint(contBB);
+        return llvm::ConstantInt::get(llvm::Type::getInt32Ty(c), 0);
+    }
+
     // Builtin `print`/`println`: emit a call to the C library's printf with a
     // compile-time-built conversion string.
     if (isPrint) {

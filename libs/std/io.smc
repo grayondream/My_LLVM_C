@@ -5,10 +5,24 @@
 // private; only the helpers are exported (P0-04 / MOD-05).
 module std.io;
 
-extern int  printf(char* format, ...);
-extern int  putchar(int c);
+extern int    printf(char* format, ...);
+extern int    putchar(int c);
+extern int    getchar();
+extern int    dprintf(int fd, char* format, ...);
+extern int    scanf(char* format, ...);
+
+extern void*  fopen(char* path, char* mode);
+extern int    fclose(void* stream);
+extern usize  fread(void* ptr, usize size, usize count, void* stream);
+extern usize  fwrite(void* ptr, usize size, usize count, void* stream);
+extern char*  fgets(char* str, int n, void* stream);
+extern int    fputs(char* s, void* stream);
+extern int    fgetc(void* stream);
+extern int    fputc(int c, void* stream);
 
 export namespace std {
+
+// ----- stdout -----
 
 void print_int(int v) {
     printf("%d", v);
@@ -20,6 +34,95 @@ void print_char(char c) {
 
 void print_str(char* s) {
     printf("%s", s);
+}
+
+void print_bool(int b) {
+    if (b) {
+        printf("true");
+    } else {
+        printf("false");
+    }
+}
+
+// ----- stderr -----
+// `dprintf(fd, ...)` writes to a raw file descriptor; fd 2 is stderr. This
+// avoids exposing the C `FILE` type (STD-23).
+
+void print_err_str(char* s) {
+    dprintf(2, "%s", s);
+}
+
+void print_err_int(int v) {
+    dprintf(2, "%d", v);
+}
+
+// ----- stdin -----
+
+// Returns the next byte from stdin (0..255), or -1 at end of input.
+int read_char() {
+    return getchar();
+}
+
+// Reads a decimal integer from stdin. Returns the parsed value, or 0 when the
+// input is not a valid integer (mirrors `atoi`; there is no separate error
+// channel because SafeModern C has no exceptions).
+int read_int() {
+    int v = 0;
+    scanf("%d", &v);
+    return v;
+}
+
+// Reads one line from stdin into `buf` (capacity `cap`), excluding the
+// newline. Returns the number of bytes stored. Always NUL-terminates.
+int read_line(char* buf, int cap) {
+    int i = 0;
+    while (i < cap - 1) {
+        int c = getchar();
+        if (c == -1 || c == '\n') break;
+        buf[i] = (char)c;
+        i = i + 1;
+    }
+    buf[i] = 0;
+    return i;
+}
+
+// ----- files -----
+// A `FILE*` is passed around as an opaque `void*` handle.
+
+void* file_open(char* path, char* mode) {
+    return fopen(path, mode);
+}
+
+int file_close(void* f) {
+    return fclose(f);
+}
+
+// Reads up to `n` bytes into `buf`; returns the number actually read.
+usize file_read(void* f, void* buf, usize n) {
+    return fread(buf, 1, n, f);
+}
+
+// Writes `n` bytes from `buf`; returns the number actually written.
+usize file_write(void* f, void* buf, usize n) {
+    return fwrite(buf, 1, n, f);
+}
+
+// Reads one line (including the newline, if any) into `buf`; returns `buf`
+// on success, or null at end of file.
+char* file_read_line(char* buf, int cap, void* f) {
+    return fgets(buf, cap, f);
+}
+
+int file_read_char(void* f) {
+    return fgetc(f);
+}
+
+int file_write_char(void* f, int c) {
+    return fputc(c, f);
+}
+
+int file_write_str(void* f, char* s) {
+    return fputs(s, f);
 }
 
 } // namespace std

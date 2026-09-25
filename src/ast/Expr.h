@@ -164,6 +164,11 @@ public:
     bool printNewline = false;
     std::string printCFormat;                 // final printf format string
     std::vector<PrintArgKind> printArgKinds;  // one per `{}` slot
+    // Set by semantic analysis when this is the builtin terminator `assert` or
+    // `panic` (STD-01 / STD-27 / DEC-21). Lowered to a stderr message + abort(),
+    // with the call site's file:line embedded at compile time.
+    bool isAssert = false;
+    bool isPanic = false;
 
     CallExprAST(const std::string& name, std::vector<std::unique_ptr<ExprAST>> arguments)
         : callee(name), args(std::move(arguments)) {}

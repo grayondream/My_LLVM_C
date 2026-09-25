@@ -62,7 +62,7 @@ const std::vector<std::pair<TokenType, const char*>>& infixOperators() {
 
 TEST(SpecConformance, AllSpecDocumentsExist) {
     for (const char* f : {"grammar.ebnf", "keywords.md", "conversions.md", "semantics.md",
-                          "modules.md", "abi.md", "compile_time.md", "README.md"}) {
+                          "modules.md", "abi.md", "compile_time.md", "stdlib.md", "README.md"}) {
         EXPECT_FALSE(readSpec(f).empty()) << "missing spec document: " << f;
     }
 }
@@ -107,4 +107,18 @@ TEST(SpecConformance, ModuleSpecUsesModulePathOption) {
     std::string modules = readSpec("modules.md");
     ASSERT_FALSE(modules.empty());
     EXPECT_NE(modules.find("--module-path"), std::string::npos);
+}
+
+TEST(SpecConformance, StdlibSpecDocumentsBuiltins) {
+    // P0-05 / STD-01 / STD-12 / STD-27: the terminator builtins, the C binding
+    // layer, and the std.io surface are documented normatively.
+    std::string stdlib = readSpec("stdlib.md");
+    ASSERT_FALSE(stdlib.empty());
+    EXPECT_NE(stdlib.find("assert"), std::string::npos);
+    EXPECT_NE(stdlib.find("panic"), std::string::npos);
+    EXPECT_NE(stdlib.find("abort"), std::string::npos);
+    EXPECT_NE(stdlib.find("std::print_int"), std::string::npos);
+    EXPECT_NE(stdlib.find("std::file_open"), std::string::npos);
+    // DEC-21: panic is not catchable.
+    EXPECT_NE(stdlib.find("DEC-21"), std::string::npos);
 }

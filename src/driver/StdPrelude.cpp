@@ -38,6 +38,24 @@ extern int    memcmp(void* a, void* b, usize n);
 
 extern int    abs(int x);
 extern void   exit(int status);
+extern void   abort();
+
+// stderr without exposing the `FILE` type: dprintf(2, ...) writes to stderr.
+extern int    dprintf(int fd, char* format, ...);
+
+// Buffered file I/O. A `FILE*` is passed around as an opaque `void*`.
+extern void*  fopen(char* path, char* mode);
+extern int    fclose(void* stream);
+extern usize  fread(void* ptr, usize size, usize count, void* stream);
+extern usize  fwrite(void* ptr, usize size, usize count, void* stream);
+extern char*  fgets(char* str, int n, void* stream);
+extern int    fputs(char* s, void* stream);
+extern int    fgetc(void* stream);
+extern int    fputc(int c, void* stream);
+extern int    fprintf(void* stream, char* format, ...);
+
+// Formatted input from stdin.
+extern int    scanf(char* format, ...);
 )PRELUDE";
 }
 

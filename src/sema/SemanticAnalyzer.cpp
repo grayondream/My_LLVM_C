@@ -990,9 +990,62 @@ bool SemanticAnalyzer::tryAnalyzePrintCall(CallExprAST& node) {
     return true;
 }
 
+bool SemanticAnalyzer::tryAnalyzeAssertCall(CallExprAST& node) {
+    node.type = typeCtx->getVoid();
+    node.isLValue = false;
+    if (node.args.size() != 1) {
+        emitError("'assert' takes exactly one condition", node);
+        return true;
+    }
+    Type* condType = getExprType(*node.args[0]);
+    if (!condType) {
+        return true; // already reported
+    }
+    if (!isScalarType(condType)) {
+        emitError("'assert' condition must be scalar, got '" + typeToString(condType) + "'", node);
+        return true;
+    }
+    node.isAssert = true;
+    return true;
+}
+
+bool SemanticAnalyzer::tryAnalyzePanicCall(CallExprAST& node) {
+    node.type = typeCtx->getVoid();
+    node.isLValue = false;
+    if (node.args.size() != 1) {
+        emitError("'panic' takes exactly one message", node);
+        return true;
+    }
+    Type* msgType = getExprType(*node.args[0]);
+    if (!msgType) {
+        return true; // already reported
+    }
+    if (!isPointerOrArray(msgType)) {
+        emitError("'panic' message must be a C string, got '" + typeToString(msgType) + "'", node);
+        return true;
+    }
+    node.isPanic = true;
+    return true;
+}
+
 void SemanticAnalyzer::visit(CallExprAST& node) {
     // Resolve a namespace-qualified or namespace-local callee to its mangled key.
     node.callee = resolveNamespaceName(node.callee);
+
+    // Builtin `assert`/`panic` (only when the user has not declared them).
+    // They need the call site's source location, which a library function
+    // cannot see without a preprocessor (STD-27 / DEC-21).
+    if (node.callee == "assert" || node.callee == "panic") {
+        OverloadSet* userDefined = currentScope->lookupOverload(node.callee);
+        if (!userDefined || userDefined->empty()) {
+            if (node.callee == "assert") {
+                tryAnalyzeAssertCall(node);
+            } else {
+                tryAnalyzePanicCall(node);
+            }
+            return;
+        }
+    }
 
     // Builtin `print`/`println` (only when the user has not declared them).
     if (node.callee == "print" || node.callee == "println") {

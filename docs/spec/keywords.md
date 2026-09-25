@@ -129,3 +129,4 @@
 2. 不以关键字形式复用的标识符：`str`、`String`、`Array` 等标准库类型名保持普通标识符。
 3. 上下文关键字（`using`/`type`/`protected`/`compile_time`）在引入二义性前不改为一等关键字，见 DEC-16。
 4. **DEC-18 已裁决**：移除 `register`/`cast`/`typeof`/`comptime`/`generic` 的 token（已从 `Token.h`、`Lexer.cpp`、`Utils.cpp` 删除）。显式转换改用 `static_cast`/`reinterpret_cast`（LEX-11），类型查询改用 `compile_time` 反射（CT-07）。
+5. `print`/`println`/`assert`/`panic` 是**内建标识符**，不是关键字：它们仍是普通标识符，仅在用户未声明同名函数时由语义分析按内建处理（见 `stdlib.md`）。

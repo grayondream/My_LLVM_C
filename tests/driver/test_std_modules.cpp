@@ -76,6 +76,38 @@ int runWithImports(const std::string& source, const std::string& filename) {
     return ((int (*)())(intptr_t)sym->getValue())();
 }
 
+// Compile (sema + codegen + verify) without executing, returning the module IR.
+// Used for the terminating builtins (`assert`/`panic`), which cannot be run
+// in-process because they abort.
+std::string compileToIR(const std::string& source, const std::string& filename) {
+    auto ast = smc::parseStdCPrelude(source, filename);
+    if (!ast) return "";
+
+    smc::ModuleSearchPaths paths{{STD_DIR}};
+    std::set<std::string> loaded;
+    std::vector<std::string> errors;
+    smc::processImports(*ast, ".", paths, loaded, errors);
+    if (!errors.empty()) return "";
+
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    if (!analyzer.getErrors().empty()) return "";
+
+    CodegenContext ctx;
+    ctx.setSourceFile(filename);
+    ast->codegen(ctx);
+    ctx.finalizeDebugInfo();
+
+    std::string ve;
+    llvm::raw_string_ostream vs(ve);
+    if (llvm::verifyModule(ctx.getModule(), &vs)) return "";
+
+    std::string ir;
+    llvm::raw_string_ostream os(ir);
+    ctx.getModule().print(os, nullptr);
+    return ir;
+}
+
 } // namespace
 
 TEST_F(StdModulesTest, ResolvesModulesFromStdDir) {
@@ -109,4 +141,73 @@ TEST_F(StdModulesTest, IoPrintInt) {
     EXPECT_EQ(runWithImports(
         "import std.io;\nint main() { std::print_int(7); return 0; }\n",
         "std_io_print_int.smc"), 0);
+}
+
+// ----- P0-05 / STD-01: builtin assert/panic (location-aware terminators) -----
+
+TEST_F(StdModulesTest, AssertTrueRuns) {
+    // A satisfied assertion is a no-op; execution continues.
+    EXPECT_EQ(runWithImports(
+        "int main() { assert(1 + 1 == 2); return 7; }\n",
+        "assert_true.smc"), 7);
+}
+
+TEST_F(StdModulesTest, AssertFalseEmitsAbortWithLocation) {
+    std::string ir = compileToIR(
+        "int main() { int x = 0; assert(x); return 0; }\n",
+        "assert_false.smc");
+    ASSERT_FALSE(ir.empty());
+    EXPECT_NE(ir.find("@abort"), std::string::npos);
+    EXPECT_NE(ir.find("assert_false.smc:1"), std::string::npos);
+}
+
+TEST_F(StdModulesTest, PanicEmitsAbortWithLocation) {
+    std::string ir = compileToIR(
+        "int main() { panic(\"boom\"); return 0; }\n",
+        "panic.smc");
+    ASSERT_FALSE(ir.empty());
+    EXPECT_NE(ir.find("@abort"), std::string::npos);
+    EXPECT_NE(ir.find("panic.smc:1"), std::string::npos);
+    EXPECT_NE(ir.find("panic: %s"), std::string::npos);
+}
+
+// ----- P0-05 / STD-12: file I/O round trip ------------------------------------
+
+TEST_F(StdModulesTest, FileWriteReadRoundTrip) {
+    EXPECT_EQ(runWithImports(
+        "import std.io;\n"
+        "int main() {\n"
+        "    void* f = std::file_open(\"/tmp/smc_std_io_test.txt\", \"w\");\n"
+        "    if (f == null) return 1;\n"
+        "    char out[4];\n"
+        "    out[0] = 'a'; out[1] = 'b'; out[2] = 'c'; out[3] = 0;\n"
+        "    std::file_write(f, out, 3);\n"
+        "    std::file_close(f);\n"
+        "    void* g = std::file_open(\"/tmp/smc_std_io_test.txt\", \"r\");\n"
+        "    if (g == null) return 2;\n"
+        "    char in[8];\n"
+        "    usize n = std::file_read(g, in, 3);\n"
+        "    std::file_close(g);\n"
+        "    in[n] = 0;\n"
+        "    if (n != 3) return 3;\n"
+        "    if (in[0] != 'a' || in[1] != 'b' || in[2] != 'c') return 4;\n"
+        "    return 0;\n"
+        "}\n", "std_io_file.smc"), 0);
+}
+
+TEST_F(StdModulesTest, IoReadWriteChar) {
+    EXPECT_EQ(runWithImports(
+        "import std.io;\n"
+        "int main() {\n"
+        "    void* f = std::file_open(\"/tmp/smc_std_io_char.txt\", \"w\");\n"
+        "    if (f == null) return 1;\n"
+        "    std::file_write_char(f, 'Z');\n"
+        "    std::file_close(f);\n"
+        "    void* g = std::file_open(\"/tmp/smc_std_io_char.txt\", \"r\");\n"
+        "    if (g == null) return 2;\n"
+        "    int c = std::file_read_char(g);\n"
+        "    std::file_close(g);\n"
+        "    if (c != 'Z') return 3;\n"
+        "    return 0;\n"
+        "}\n", "std_io_char.smc"), 0);
 }

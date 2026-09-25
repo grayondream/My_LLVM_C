@@ -349,7 +349,7 @@
 > 容器采用 **C 语义**：显式 `new/destroy`，不自动释放元素；泛型容器通过扩展点 `to_hash`/`equals`/`to_string` 适配用户类型（无 trait）。
 
 ### std.core
-- `[~]` **STD-01** 基础类型导出；`panic/assert/abort`。已建 `libs/std/core.smc`（`min/max/clamp`）；`panic/assert/abort` 待补。
+- `[x]` **STD-01** 基础类型导出；`panic/assert/abort`。`libs/std/core.smc` 已建（`min/max/clamp`）。`panic`/`assert` 实现为**语言内建**（需调用点编译期信息，无预处理器；见 `docs/spec/stdlib.md`）：`assert(cond)` 失败打印 `file:line: assertion failed` 后 `abort()`，`panic(msg)` 打印 `file:line: panic: <msg>` 后 `abort()`；`abort` 由 `std.c` 绑定层暴露。
 - `[ ]` **STD-02** `Optional<T>`、`Result<T,E>`（显式访问访问器）。
 - `[ ]` **STD-03** 内存操作：`memcpy/memset/memmove/memcmp`。
 - `[ ]` **STD-04** 整数运算与溢出辅助。
@@ -370,7 +370,7 @@
 - `[ ]` **STD-11** `format`、`print`、格式说明解析、编译期检查接口、自定义格式化。
 
 ### std.io
-- `[~]` **STD-12** `print`、`read`、stdout/stderr、文件读写、缓冲 I/O。已建 `libs/std/io.smc`（`print_int/print_char/print_str`，基于 libc）；`read`/文件 I/O 待补。
+- `[x]` **STD-12** `print`、`read`、stdout/stderr、文件读写、缓冲 I/O。`libs/std/io.smc` 已提供 `print_*`、`print_err_*`（stderr，经 `dprintf`）、`read_char/read_int/read_line`、`file_open/close/read/write`、`file_read_line/read_char/write_char/write_str`；基于 libc。
 
 ### std.math / std.bit
 - `[ ]` **STD-13** `sqrt` 等基础数学；浮点分类/舍入/常量；整数数学工具。
@@ -385,13 +385,13 @@
 - `[ ]` **STD-20** `std.time`。
 - `[ ]` **STD-21** `std.os`（进程/env/args/syscall 封装）。
 - `[ ]` **STD-22** `std.testing`（语言内断言/测试；runner 由 `smc test` 提供）。
-- `[~]` **STD-23** `std.c`：手写 libc 绑定层（配合 MOD-09）。已迁到模块文件 `libs/std/c.smc`（内嵌兜底），待扩展。
+- `[x]` **STD-23** `std.c`：手写 libc 绑定层（配合 MOD-09）。`libs/std/c.smc`（内嵌兜底）已扩展：`abort`、`dprintf`（stderr，fd=2）、`fopen/fclose/fread/fwrite/fgets/fputs/fgetc/fputc/fprintf`、`scanf`。
 
 ### std.atomic / std.thread
 - `[ ]` **STD-24** 原子类型封装、load/store/CAS/fence、内存序常量。
 - `[ ]` **STD-25** `Thread`、join/detach、`thread_local` 支持；可选 mutex/condvar。
 - `[~]` **STD-26** `(新)` 扩展点库约定：`to_string`/`to_hash`/`equals` 标准签名与示例（落实 STD-09/FUN-14）。（接口草案见 `docs/spec/semantics.md`）
-- `[ ]` **STD-27** `(新)` `panic/assert/abort` 语义与实现策略：可否恢复、诊断输出、与 `[[nonnull]]` 关系（见 DEC-21）。
+- `[x]` **STD-27** `(新)` `panic/assert/abort` 语义与实现策略：**不可恢复、不可捕获、直接 `abort`**（DEC-21 已冻结）；诊断输出到 stderr 且带 `file:line`；`assert`/`panic` 为内建（用户同名声明优先）。规范见 `docs/spec/stdlib.md`。与 `[[nonnull]]` 的关系（复用终止路径）待 MEM-* 实现。
 
 ---
 
@@ -471,7 +471,7 @@
 - `[x]` **DEC-18** `(新)` `register`/`cast`/`typeof` 等既有 token 的废弃或保留。→ **决定移除**（一并移除 `comptime`/`generic`）；显式转换改用 `static_cast`/`reinterpret_cast`（LEX-11），类型查询改用 `compile_time` 反射（CT-07）。已同步 `Token.h`/`Lexer.cpp`/`Utils.cpp`/`keywords.md`。
 - `[ ]` **DEC-19** `(新)` `main` 入口签名与返回值约定。
 - `[ ]` **DEC-20** `(新)` 字符串字面量所有权/生命周期与 `str`/`String` 边界。
-- `[ ]` **DEC-21** `(新)` `panic` 默认可否被捕获、是否直接 `abort`。
+- `[x]` **DEC-21** `(新)` `panic` 默认可否被捕获、是否直接 `abort`。→ **决定**：不可捕获（语言无异常/无栈展开，NG-05），直接调用 `abort()`；`assert`/`panic` 走同一终止路径，输出带调用点 `file:line`（见 `docs/spec/stdlib.md` §8）。
 
 ---
 
@@ -500,7 +500,7 @@
 - `[~]` **P0-02** C 互操作绑定层（MOD-09/STD-23）——无预处理器后的刚需。文件化 `libs/std/c.smc` + `extern` 已可用。
 - `[x]` **P0-03** 变量初始化检查（SEM-01/02）。已实现（W3001，含分支合并/循环；`-Werror` 可将警告变失败）。
 - `[x]` **P0-04** module/import/export（MOD-04~07）。源文件 `import`（搜索路径/点分名/循环报错）、`module` 文件绑定与校验、`export` 可见性、每模块私有作用域均已实现。
-- `[~]` **P0-05** 最小 `std.core` / `std.io`（STD-01/12）。`libs/std/{core,io}.smc` 已可通过 `import std.core;` 使用。
+- `[x]` **P0-05** 最小 `std.core` / `std.io`（STD-01/12）。`std::min/max/clamp`、`std::print_*`、`std::read_*`、`std::file_*` 可用；`assert`/`panic` 内建、`abort` 经 `std.c`；规范 `docs/spec/stdlib.md`。
 - `[x]` **P0-06** 诊断系统与测试设施（INF-03/04）。诊断核心 + 快照设施 + 词法/语法/声明源码位置均已完成；INF-04 的其余测试框架项（黄金 IR/输出、CTest 分组标签）由 INF-04 单独跟踪。
 - `[x]` **P0-07** `(新)` **语言规范骨架**：EBNF + 关键字表 + 优先级表 + 转换矩阵（INF-06/09~11、PAR-23、TYP-22/23）。四件套位于 `docs/spec/`，并由 `tests/spec/test_spec_conformance.cpp` 绑定实现；各 `[plan]` 细节仍由对应条目跟踪。
 - `[x]` **P0-08** `(新)` **namespace 支持**（PAR-22、MOD-12、DEC-17）——现有 `libsafec` 已依赖，属刚需。函数/变量、嵌套、限定访问、限定类型名均已实现。
