@@ -73,9 +73,11 @@
 ## 5. 显式转换 `[impl]/[plan]`
 
 - `[impl]` C 风格 `(T)x`：`parseUnary` 先试探性解析完整类型并要求立即 `)`，否则回退为括号表达式；因此支持指针、限定符与命名类型，如 `(int*)p`、`(struct S*)p`、`(void*)h`（P0-02 / MEM-10）。窄化只告警不报错（`CastExprAST` 检查）。
+- `[impl]` `static_cast<T>(x)`（LEX-11 / PAR-18 / DEC-18）：允许算术↔算术（含 enum，按整数）、指针/数组↔指针/数组；但**不**允许指针↔整数（须用 `reinterpret_cast`）。不兼容时报错。代码生成走 `castValue`（值转换）。
+- `[impl]` `reinterpret_cast<T>(x)`：任何标量↔标量（按位重解释）。同宽标量（尤其 `float`↔`int`）用 `bitcast` 重解释位模式；指针↔指针用 `bitcast`、指针↔整数用 `ptrtoint`/`inttoptr`。不兼容时报错。
+- `[impl]` 三者为**上下文关键字**：`static_cast`/`reinterpret_cast` 仍是普通标识符，仅在紧跟 `<类型>` 时按转换运算符解析，否则按普通名字处理。
 - `[impl]` 指针 ↔ 整数的显式转换：`castValue` 对 `Int↔Ptr` 做位宽适配（`ptrtoint`/`inttoptr` 的整数扩展/截断）；指针真值经 `ICmpNE null`（TYP-24 / BASE-06）。
-- `[plan]` `static_cast<T>(x)` / `reinterpret_cast<T>(x)`（LEX-11 / PAR-18；DEC-18 已裁定以此取代 `cast`）。
-- `[plan]` `enum ↔ int` 的**显式**规则（TYP-20）——当前 enum 常量按 int 参与运算，尚未强制显式。
+- `[ ]` `enum ↔ int` 的**显式**规则（TYP-20）——当前 enum 常量按 int 参与运算，尚未强制显式。
 - 代码生成 `castValue`（`CodegenContext.cpp`）：
 
 | 转换 | 指令 |
@@ -86,6 +88,8 @@
 | 浮点→整数 | `fptosi` |
 | 浮点→更宽/更窄 | `fpext` / `fptrunc` |
 | 指针→指针 | `bitcast` |
+| `reinterpret_cast` 同宽标量（`float`↔`int` 等） | `bitcast` |
+| `reinterpret_cast` 指针↔整数 | `ptrtoint` / `inttoptr` |
 
 ## 6. 空指针常量（TYP-24）
 

@@ -1105,10 +1105,44 @@ void SemanticAnalyzer::visit(TernaryExprAST& node) {
 
 void SemanticAnalyzer::visit(CastExprAST& node) {
     Type* exprType = getExprType(*node.expr);
-    if (exprType && node.castType && !typesCompatible(exprType, node.castType)) {
-        emitWarning(DiagnosticCode::SemIncompatibleCast,
-                    "incompatible cast from '" + typeToString(exprType) +
-                        "' to '" + typeToString(node.castType) + "'", node);
+    if (exprType && node.castType) {
+        Type* from = stripTypedef(exprType);
+        Type* to = stripTypedef(node.castType);
+        bool ok = true;
+        const char* what = "cast";
+        switch (node.castKind) {
+            case CastKind::Static:
+                // Arithmetic <-> arithmetic (incl. enum, which are integers) or
+                // pointer/array <-> pointer/array. Pointer <-> integer must use
+                // reinterpret_cast (or a C-style cast).
+                ok = (isArithmeticType(from) && isArithmeticType(to)) ||
+                     (isPointerOrArray(from) && isPointerOrArray(to));
+                what = "static_cast";
+                break;
+            case CastKind::Reinterpret:
+                // Any scalar <-> scalar: bit-level reinterpretation.
+                ok = isScalarType(from) && isScalarType(to);
+                what = "reinterpret_cast";
+                break;
+            case CastKind::CStyle:
+            default:
+                ok = typesCompatible(exprType, node.castType);
+                what = "cast";
+                break;
+        }
+        if (!ok) {
+            std::string msg;
+            if (node.castKind == CastKind::CStyle) {
+                // Preserve the historical C-style cast wording.
+                msg = "incompatible cast from '" + typeToString(exprType) + "' to '" +
+                      typeToString(node.castType) + "'";
+                emitWarning(DiagnosticCode::SemIncompatibleCast, msg, node);
+            } else {
+                msg = std::string(what) + ": incompatible cast from '" +
+                      typeToString(exprType) + "' to '" + typeToString(node.castType) + "'";
+                emitError(DiagnosticCode::SemIncompatibleCast, msg, node);
+            }
+        }
     }
     node.type = node.castType;
     node.isLValue = false;

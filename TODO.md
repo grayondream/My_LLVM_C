@@ -54,7 +54,7 @@
 - `[ ]` **LEX-08** `(改)` 泛型 `template<...>` 与比较运算符 `<`、`>>` 拆分的歧义消解（为 GEN 铺路）。
 - `[ ]` **LEX-09** Slice 语法 `T[]` 的 token 与解析支持（当前已有 `SliceType`，核对）。
 - `[ ]` **LEX-10** 注解 token：`[[repr(C)]]/[[packed]]/[[align(64)]]/[[inline]]/[[cold]]/[[nonnull]]/[[deprecated]]`。
-- `[ ]` **LEX-11** `static_cast<T>(x)` / `reinterpret_cast<T>(x)` 等转换关键字（为 INH/CRTP 铺路）。
+- `[x]` **LEX-11** `static_cast<T>(x)` / `reinterpret_cast<T>(x)` 等转换关键字（为 INH/CRTP 铺路）。已实现为**上下文关键字**（紧跟 `<类型>` 时解析），见 PAR-18。
 - `[ ]` **LEX-12** 内联汇编 `asm` token。
 - `[ ]` **LEX-13** 错误恢复与词法诊断（非法字符、未闭合字面量、整型溢出）。
 - `[~]` **LEX-14** `(新)` **关键字/保留字总表落地**（配合 INF-11）：`register`/`cast`/`typeof` 已按 DEC-18 移除 token；`namespace` 关键字与 `::` token 已新增；`template`/`typename`/`this` 待补。
@@ -84,7 +84,7 @@
 - `[ ]` **PAR-15** `(新)` `compile_time` 表达式：`static_assert`、`if`、目标/构建查询、反射（取代 `type_info`）。
 - `[ ]` **PAR-16** `(新)` 内联汇编 `asm` 语句/表达式。
 - `[ ]` **PAR-17** `(新)` `this` 表达式（CRTP 必需）。
-- `[ ]` **PAR-18** `(新)` `static_cast<T>(x)` / C 风格强转；向下转换（CRTP 必需）。
+- `[x]` **PAR-18** `(新)` `static_cast<T>(x)` / C 风格强转；向下转换（CRTP 必需）。C 风格 `(T)x` 已泛化到完整类型（P0-02）；`static_cast`/`reinterpret_cast` 已实现（LEX-11/DEC-18）：static 限算术↔算术、指针↔指针；reinterpret 为标量位重解释（同宽 `bitcast`）。
 - `[ ]` **PAR-19** AST 节点带源码位置/属性/注释/文档；AST 序列化（增量编译缓存）。
 - `[ ]` **PAR-20** 语法错误恢复与高质量诊断。
 - `[ ]` **PAR-21** `(新)` 模板声明语法 `template<typename T>` / `template<typename T, usize N>`（函数/类/别名，见 GEN）。
@@ -513,7 +513,7 @@
 - `[ ]` **P1-05** 注解系统（ANN）。
 - `[ ]` **P1-06** str / String / format（FMT、STD-10/11）。
 - `[ ]` **P1-07** 位域、匿名类型、指定初始化器、lambda（AGG-03~06、PAR-10~13）。
-- `[ ]` **P1-08** `static_cast` / 内联 `asm`（PAR-18、CG-10）。
+- `[~]` **P1-08** `static_cast` / 内联 `asm`（PAR-18、CG-10）。`static_cast`/`reinterpret_cast` 已完成（LEX-11/PAR-18）；内联 `asm`（CG-10/DEC-09）待定。
 - `[ ]` **P1-09** std.mem / std.string / std.format / std.math / **std.collections**（STD-05~14）。
 
 ### P2：工程化与并发

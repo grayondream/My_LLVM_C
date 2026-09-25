@@ -655,6 +655,25 @@ llvm::Value* CastExprAST::codegen(CodegenContext& ctx) {
     if (expr->isLValue) {
         val = emitLoad(ctx, val, expr->type);
     }
+
+    // `reinterpret_cast` reinterprets the bit pattern of same-width scalars
+    // (notably float <-> int). Pointers and pointer<->integer go through
+    // castValue (bitcast / ptrtoint / inttoptr); other pairs fall back to a
+    // value conversion.
+    if (castKind == CastKind::Reinterpret) {
+        llvm::Type* src = val->getType();
+        if (src == targetLLVMType) return val;
+        const bool sameWidthScalars =
+            !src->isPointerTy() && !targetLLVMType->isPointerTy() &&
+            src->isSized() && targetLLVMType->isSized() &&
+            src->getPrimitiveSizeInBits() == targetLLVMType->getPrimitiveSizeInBits() &&
+            (src->isFloatingPointTy() || targetLLVMType->isFloatingPointTy());
+        if (sameWidthScalars) {
+            return ctx.getBuilder().CreateBitCast(val, targetLLVMType, "reinterpret");
+        }
+        return ctx.castValue(val, targetLLVMType);
+    }
+
     return ctx.castValue(val, targetLLVMType);
 }
 

@@ -270,8 +270,8 @@ prefix-expr         = prefix-op , unary-expr
 prefix-op           = '+' | '-' | '!' | '~' | '*' | '&' | '++' | '--' ;
 
 cast-expr           = '(' , type , ')' , unary-expr
-                    | 'static_cast' , '<' , type , '>' , '(' , unary-expr , ')'      (* [plan] PAR-18 *)
-                    | 'reinterpret_cast' , '<' , type , '>' , '(' , unary-expr , ')' ; (* [plan] LEX-11 *)
+                    | 'static_cast' , '<' , type , '>' , '(' , assign-expr , ')'      (* [impl] PAR-18 *)
+                    | 'reinterpret_cast' , '<' , type , '>' , '(' , assign-expr , ')' ; (* [impl] LEX-11 *)
 
 postfix-expr        = primary-expr , { postfix-op } ;
 postfix-op          = '[' , expr , ']'

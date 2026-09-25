@@ -345,6 +345,28 @@ std::unique_ptr<ExprAST> Parser::parseUnaryImpl() {
         return nullptr;
     }
 
+    // Explicit cast operators: `static_cast<T>(x)` / `reinterpret_cast<T>(x)`
+    // (LEX-11 / PAR-18 / DEC-18). They are contextual keywords: recognized only
+    // when immediately followed by `<`, so the names remain usable elsewhere.
+    if (token->type == TokenType::TOKEN_IDENTIFIER &&
+        (token->lexeme == "static_cast" || token->lexeme == "reinterpret_cast") &&
+        m_currentTokenPos + 1 < m_tokens.size() &&
+        m_tokens[m_currentTokenPos + 1].type == TokenType::TOKEN_LT) {
+        const bool isReinterpret = token->lexeme == "reinterpret_cast";
+        advance(); // cast keyword
+        advance(); // '<'
+        Type* castType = parseType();
+        if (!castType) return nullptr;
+        if (!expect(TokenType::TOKEN_GT, "expected '>' after cast type")) return nullptr;
+        if (!expect(TokenType::TOKEN_LPAREN, "expected '(' after cast type")) return nullptr;
+        auto operand = parseExpr(2);
+        if (!operand) return nullptr;
+        if (!expect(TokenType::TOKEN_RPAREN, "expected ')' after cast operand")) return nullptr;
+        return std::make_unique<CastExprAST>(
+            castType, std::move(operand),
+            isReinterpret ? CastKind::Reinterpret : CastKind::Static);
+    }
+
     // Handle parenthesized expressions and cast expressions
     if (token->type == TokenType::TOKEN_LPAREN) {
         advance(); // consume '('

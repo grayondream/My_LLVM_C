@@ -199,13 +199,23 @@ public:
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
+// How a cast was written. `CStyle` is the legacy `(T)x`; `Static`/`Reinterpret`
+// are the explicit operators from LEX-11 / PAR-18 (DEC-18).
+enum class CastKind {
+    CStyle,
+    Static,
+    Reinterpret,
+};
+
 class CastExprAST : public ExprAST {
 public:
     Type* castType;
     std::unique_ptr<ExprAST> expr;
+    CastKind castKind;
 
-    CastExprAST(Type* targetType, std::unique_ptr<ExprAST> e)
-        : castType(targetType), expr(std::move(e)) {}
+    CastExprAST(Type* targetType, std::unique_ptr<ExprAST> e,
+                CastKind kind = CastKind::CStyle)
+        : castType(targetType), expr(std::move(e)), castKind(kind) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 

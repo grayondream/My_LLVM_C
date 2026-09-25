@@ -124,3 +124,13 @@ TEST(SpecConformance, StdlibSpecDocumentsBuiltins) {
     // DEC-21: panic is not catchable.
     EXPECT_NE(stdlib.find("DEC-21"), std::string::npos);
 }
+
+TEST(SpecConformance, ConversionsSpecDocumentsCastOperators) {
+    // LEX-11 / PAR-18 / DEC-18: the explicit cast operators and the extended
+    // overload-conversion ranks are documented normatively.
+    std::string conv = readSpec("conversions.md");
+    ASSERT_FALSE(conv.empty());
+    EXPECT_NE(conv.find("static_cast"), std::string::npos);
+    EXPECT_NE(conv.find("reinterpret_cast"), std::string::npos);
+    EXPECT_NE(conv.find("指针→指针"), std::string::npos);
+}
