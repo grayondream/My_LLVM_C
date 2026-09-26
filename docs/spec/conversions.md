@@ -11,6 +11,7 @@
 - 同 `TypeKind` 基本相等（标量只看 kind）。
 - 指针/数组：递归比较元素类型（数组不比较长度）。
 - struct/class/union：按**名字**相等。
+- enum：按**名字**相等（名义类型，TYP-09/TYP-20）；不同枚举互不相等。
 - typedef：展开后比较。
 - 函数：返回类型 + 参数逐个比较（不比较 `isVarArg`）。
 
@@ -23,14 +24,17 @@
 | 来源 → 目标 | 允许 |
 |---|---|
 | 同 kind | ✅ |
-| 任意算术 → 任意算术 | ✅ |
+| 任意算术 → 任意算术 | ✅（`enum` 除外，见 TYP-20） |
 | 指针 ↔ 指针 | ✅ |
 | 指针 ↔ `int` | ✅（含 0 空指针） |
 | 数组 ↔ 指针 | ✅（退化） |
+| `enum E` ↔ `enum E` | ✅（同一枚举类型） |
+| `enum` ↔ 整数/浮点/其它 `enum` | ❌（须显式转换，TYP-20） |
 
 `getCommonType`（当前）：同 kind 取其一 → `double` → `float` → `int` → 否则取左。
 
 > 这是**弱规则**：尚未实现常规算术转换，signed/unsigned 混合、窄化均被当作兼容。属重点补强项。
+> 但 `enum` 的强类型（TYP-20）与名义相等已落地：赋值/初始化/实参/返回中的 `enum ↔ int` 报错，须用 `(T)` / `static_cast` / `reinterpret_cast`。
 
 ## 3. 整数提升与常规算术转换 `[plan]`（TYP-22）
 
@@ -68,7 +72,7 @@
 | 指针 | 显 | 显 | — | ✗ | 隐(≠0) | 隐(同类型)/显 | 显 |
 | enum | 显 | 显 | 显 | 显 | 显 | ✗ | 隐 |
 
-> `enum` 与整数**必须显式转换**（TYP-20），与上表一致。
+> `enum` 与整数**必须显式转换**（TYP-20）——已实现：`typesCompatible` / `conversionRank` / `checkAssignmentTypes` 对 `enum ↔ 非同类 enum / 整数 / 浮点` 判为不兼容；而算术、位运算与比较运算符仍按整数提升把枚举操作数提升为 `int`（`e + 1`、`e == 4`、`switch(e)` 合法）。
 
 ## 5. 显式转换 `[impl]/[plan]`
 
@@ -77,7 +81,7 @@
 - `[impl]` `reinterpret_cast<T>(x)`：任何标量↔标量（按位重解释）。同宽标量（尤其 `float`↔`int`）用 `bitcast` 重解释位模式；指针↔指针用 `bitcast`、指针↔整数用 `ptrtoint`/`inttoptr`。不兼容时报错。
 - `[impl]` 三者为**上下文关键字**：`static_cast`/`reinterpret_cast` 仍是普通标识符，仅在紧跟 `<类型>` 时按转换运算符解析，否则按普通名字处理。
 - `[impl]` 指针 ↔ 整数的显式转换：`castValue` 对 `Int↔Ptr` 做位宽适配（`ptrtoint`/`inttoptr` 的整数扩展/截断）；指针真值经 `ICmpNE null`（TYP-24 / BASE-06）。
-- `[ ]` `enum ↔ int` 的**显式**规则（TYP-20）——当前 enum 常量按 int 参与运算，尚未强制显式。
+- `[impl]` `enum ↔ int` 及其它标量的**显式**规则（TYP-20）：`(T)x` / `static_cast` / `reinterpret_cast` 均可；隐式赋值/初始化/实参/返回报错（E2003 等）。算术/比较/位运算仍按整数提升处理枚举操作数（`e + 1`、`e == 4`、`switch(e)` 合法）。
 - 代码生成 `castValue`（`CodegenContext.cpp`）：
 
 | 转换 | 指令 |

@@ -124,7 +124,7 @@
 - `[ ]` **TYP-06** 类型别名 `type Handle = u64;`：展开、循环检测。
 - `[ ]` **TYP-07** `struct`：字段、布局、默认公开、C ABI 兼容。
 - `[ ]` **TYP-08** `class`：布局等价 struct，成员函数不占空间。
-- `[~]` **TYP-09** `enum` 强类型：底层类型 `:uint8`、固定大小、不隐式转换。底层类型与固定大小已实现（TYP-25/AGG-14）；`enum ↔ int` 强制显式转换（TYP-20）待补。
+- `[x]` **TYP-09** `enum` 强类型：底层类型 `:uint8`、固定大小、不隐式转换。底层类型/固定大小、名义相等与 `enum ↔ int` 强制显式转换（TYP-20）均已实现。
 - `[ ]` **TYP-10** `union`：C 风格布局、初始化、访问。
 - `[ ]` **TYP-11** 固定数组 `i32[32]`；VLA（可变长度数组）；多维数组。
 - `[ ]` **TYP-12** `Slice`：`{ptr, length}`，不拥有、零拷贝；数组↔Slice 退化规则。
@@ -135,7 +135,7 @@
 - `[ ]` **TYP-17** 函数类型：参数/返回/调用约定/可变参数。
 - `[ ]` **TYP-18** `(新)` 模板实例类型 `Box<i32>`：实例化、缓存、去重（见 GEN）。
 - `[ ]` **TYP-19** 类型相等/兼容/隐式转换/显式转换规则（含常规算术转换）。
-- `[ ]` **TYP-20** 枚举与整数必须显式转换。
+- `[x]` **TYP-20** 枚举与整数必须显式转换。`typesCompatible`/`conversionRank`/`checkAssignmentTypes` 拒绝 `enum ↔ 非同类 enum/整数/浮点` 的隐式转换（赋值/初始化/实参/返回），要求 `(T)`/`static_cast`/`reinterpret_cast`；运算符仍按整数提升。枚举名义相等（同名才相等）。
 - `[ ]` **TYP-21** ABI 类型检查：`[[repr(C)]]` 下布局可预测；位域布局规则（见 DEC-08）。
 - `[~]` **TYP-22** `(新)` **整数提升与常规算术转换**：转换等级、signed×unsigned 混合规则（细化 TYP-19）。（规范草案见 `docs/spec/conversions.md` §3；实现仍为弱规则，待落地）
 - `[~]` **TYP-23** `(新)` **隐式/显式转换矩阵**：标量、指针、数组、struct/class、enum、Optional/Result 的完整转换表。（规范矩阵见 `docs/spec/conversions.md` §4；`[plan]` 项待实现）
@@ -207,7 +207,7 @@
 
 ### enum
 - `[x]` **AGG-14** 底层类型 `:uint8` 等；值/作用域/名称解析。隐式/显式值（含负值与常量表达式）、枚举常量名称解析（含 namespace 限定与 `cfg::Mode` 类型名）、switch 标签、显式底层类型 `enum E : uint8`、`typedef enum : uint16 {...}` 均已实现。
-- `[ ]` **AGG-15** 不隐式转换整数；显式转换语法与实现。
+- `[x]` **AGG-15** 不隐式转换整数；显式转换语法与实现。见 TYP-20：隐式 `enum ↔ int` 被拒，显式 `(T)`/`static_cast`/`reinterpret_cast` 可用。
 - `[ ]` **AGG-16** 固定大小与 ABI；`(新)` 穷尽性检查（配合 SEM-11）。
 
 ### union

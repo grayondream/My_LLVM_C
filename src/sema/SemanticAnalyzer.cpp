@@ -238,6 +238,12 @@ bool SemanticAnalyzer::typesCompatible(Type* left, Type* right) const {
     left = stripTypedef(left);
     right = stripTypedef(right);
     if (!left || !right) return false;
+    // Enum types are strong (TYP-09 / TYP-20): only the exact same enum type is
+    // implicitly compatible; enum <-> integer/float requires an explicit cast.
+    if (left->kind == TypeKind::Enum || right->kind == TypeKind::Enum) {
+        return left->kind == TypeKind::Enum && right->kind == TypeKind::Enum &&
+               static_cast<EnumType*>(left)->name == static_cast<EnumType*>(right)->name;
+    }
     if (left->kind == right->kind) return true;
     if (isArithmeticType(left) && isArithmeticType(right)) return true;
     if (left->kind == TypeKind::Pointer && right->kind == TypeKind::Pointer) return true;
@@ -393,6 +399,12 @@ Type* SemanticAnalyzer::checkBinaryTypes(BinaryOp op, Type* left, Type* right, E
         case BinaryOp::Gt:
         case BinaryOp::Le:
         case BinaryOp::Ge:
+            // Arithmetic operands (including enums, via integer promotion) are
+            // comparable even though enum <-> integer is not implicitly
+            // *assignable* (TYP-20). Pointers compare against pointers/integers.
+            if (isArithmeticType(left) && isArithmeticType(right)) {
+                return typeCtx->getInt();
+            }
             if (!typesCompatible(left, right)) {
                 emitError("comparison of incompatible types: '" + typeToString(left) + "' and '" 
                     + typeToString(right) + "' with '" + binaryOpToString(op) + "'", node);
@@ -424,15 +436,32 @@ Type* SemanticAnalyzer::checkBinaryTypes(BinaryOp op, Type* left, Type* right, E
 Type* SemanticAnalyzer::checkAssignmentTypes(Type* lhs, Type* rhs, ExprAST& node) {
     if (!lhs || !rhs) return nullptr;
 
-    if (lhs->kind == TypeKind::Void || rhs->kind == TypeKind::Void) {
+    Type* lhsRaw = lhs;
+    Type* lhsS = stripTypedef(lhs);
+    Type* rhsS = stripTypedef(rhs);
+
+    if (lhsS->kind == TypeKind::Void || rhsS->kind == TypeKind::Void) {
         emitError("cannot assign to or from 'void' type", node);
         return nullptr;
     }
 
-    if (isArithmeticType(lhs) && isArithmeticType(rhs)) return lhs;
-    if (lhs->kind == rhs->kind) return lhs;
-    if (isPointerOrArray(lhs) && isPointerOrArray(rhs)) return lhs;
-    if (isPointerOrArray(lhs) && isIntegerType(rhs)) return lhs;
+    // Enum types are strong (TYP-09 / TYP-20): assigning between an enum and an
+    // integer (or between distinct enums) requires an explicit cast.
+    if (lhsS->kind == TypeKind::Enum || rhsS->kind == TypeKind::Enum) {
+        if (lhsS->kind == TypeKind::Enum && rhsS->kind == TypeKind::Enum &&
+            static_cast<EnumType*>(lhsS)->name == static_cast<EnumType*>(rhsS)->name) {
+            return lhsRaw;
+        }
+        emitError(DiagnosticCode::SemIncompatibleAssignment,
+                  "cannot assign '" + typeToString(rhs) + "' to '" + typeToString(lhs) +
+                      "' without an explicit conversion (TYP-20)", node);
+        return nullptr;
+    }
+
+    if (isArithmeticType(lhsS) && isArithmeticType(rhsS)) return lhsRaw;
+    if (lhsS->kind == rhsS->kind) return lhsRaw;
+    if (isPointerOrArray(lhsS) && isPointerOrArray(rhsS)) return lhsRaw;
+    if (isPointerOrArray(lhsS) && isIntegerType(rhsS)) return lhsRaw;
 
     emitError(DiagnosticCode::SemIncompatibleAssignment,
               "incompatible types in assignment: cannot assign '" + typeToString(rhs) +
@@ -609,6 +638,45 @@ std::optional<SemanticAnalyzer::ConstValue> SemanticAnalyzer::evaluateConstexpr(
                 case UnaryOp::Not: cv.intVal = !operand->intVal; break;
                 case UnaryOp::BitNot: cv.intVal = ~operand->intVal; break;
                 default: return std::nullopt;
+            }
+            return cv;
+        }
+        return std::nullopt;
+    }
+
+    // Explicit cast in a constant expression, e.g. `(int)SomeEnumerator`
+    // (TYP-20 requires the cast for enum -> int).
+    if (auto* cast = dynamic_cast<CastExprAST*>(expr)) {
+        auto operand = evaluateConstexpr(cast->expr.get());
+        if (!operand) return std::nullopt;
+        Type* to = stripTypedef(cast->castType);
+        if (!to) return std::nullopt;
+
+        ConstValue cv;
+        if (isFloatType(to)) {
+            double d = 0.0;
+            switch (operand->type) {
+                case ConstValue::INT:    d = static_cast<double>(operand->intVal); break;
+                case ConstValue::CHAR:   d = static_cast<double>(operand->charVal); break;
+                case ConstValue::DOUBLE: d = operand->doubleVal; break;
+            }
+            cv.type = ConstValue::DOUBLE;
+            cv.doubleVal = d;
+            return cv;
+        }
+        if (isIntegerType(to)) {
+            long long v = 0;
+            switch (operand->type) {
+                case ConstValue::INT:    v = operand->intVal; break;
+                case ConstValue::CHAR:   v = operand->charVal; break;
+                case ConstValue::DOUBLE: v = static_cast<long long>(operand->doubleVal); break;
+            }
+            if (to->kind == TypeKind::Char) {
+                cv.type = ConstValue::CHAR;
+                cv.charVal = static_cast<char>(v);
+            } else {
+                cv.type = ConstValue::INT;
+                cv.intVal = static_cast<int>(v);
             }
             return cv;
         }
@@ -1169,7 +1237,15 @@ void SemanticAnalyzer::visit(CastExprAST& node) {
                 break;
             case CastKind::CStyle:
             default:
-                ok = typesCompatible(exprType, node.castType);
+                // A C-style cast is the explicit escape hatch: arithmetic <->
+                // arithmetic (incl. enum, TYP-20), pointer/array <-> pointer/
+                // array, and pointer <-> integer. Anything else keeps the
+                // historical "incompatible cast" warning.
+                ok = (isArithmeticType(from) && isArithmeticType(to)) ||
+                     (isPointerOrArray(from) && isPointerOrArray(to)) ||
+                     (isPointerOrArray(from) && isIntegerType(to)) ||
+                     (isIntegerType(from) && isPointerOrArray(to)) ||
+                     typesCompatible(exprType, node.castType);
                 what = "cast";
                 break;
         }

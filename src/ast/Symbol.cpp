@@ -22,6 +22,14 @@ bool typesEqual(Type* a, Type* b) {
             auto* ub = static_cast<UnionType*>(b);
             return ua->name == ub->name;
         }
+        case TypeKind::Enum: {
+            // Enums are nominally typed: two enums are equal only if they share
+            // the same name (TYP-09 / TYP-20). Previously any two enums compared
+            // equal, which silently allowed mixing distinct enums.
+            auto* ea = static_cast<EnumType*>(a);
+            auto* eb = static_cast<EnumType*>(b);
+            return ea->name == eb->name;
+        }
         case TypeKind::Typedef: {
             auto* ta = static_cast<TypedefType*>(a);
             auto* tb = static_cast<TypedefType*>(b);
@@ -85,6 +93,13 @@ int conversionRank(Type* from, Type* to) {
 
     // Arrays decay to a pointer to their first element.
     if (from->kind == TypeKind::Array && to->kind == TypeKind::Pointer) return 1;
+
+    // Enum types are strongly typed (TYP-09 / TYP-20): enum <-> integer/float
+    // and enum <-> other enum require an explicit conversion. Exact-same-enum
+    // was already handled by the `typesEqual` checks above.
+    if (from->kind == TypeKind::Enum || to->kind == TypeKind::Enum) {
+        return -1;
+    }
 
     int fw = integerWidth(from->kind);
     int tw = integerWidth(to->kind);

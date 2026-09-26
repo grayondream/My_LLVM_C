@@ -70,9 +70,10 @@ TEST_F(EnumE2E, ImplicitAndExplicitValues) {
 }
 
 TEST_F(EnumE2E, FirstValueIsZero) {
+    // TYP-20: enumerators are strongly typed; converting to int is explicit.
     EXPECT_EQ(runSource(
         "enum Color { RED, GREEN };\n"
-        "int main() { return RED; }\n"), 0);
+        "int main() { return (int)RED; }\n"), 0);
 }
 
 TEST_F(EnumE2E, EnumeratorInArithmetic) {
@@ -88,9 +89,10 @@ TEST_F(EnumE2E, EnumTypedVariable) {
 }
 
 TEST_F(EnumE2E, EnumeratorIsConstexpr) {
+    // TYP-20: enum -> int is explicit, but still a constant expression.
     EXPECT_EQ(runSource(
         "enum E { X = 3 };\n"
-        "int main() { constexpr int k = X; return k - 3; }\n"), 0);
+        "int main() { constexpr int k = (int)X; return k - 3; }\n"), 0);
 }
 
 TEST_F(EnumE2E, SwitchOnEnum) {

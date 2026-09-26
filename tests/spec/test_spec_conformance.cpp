@@ -151,6 +151,14 @@ TEST(SpecConformance, ConversionsSpecDocumentsDefaultArgumentPromotions) {
     EXPECT_NE(conv.find("promoteVarArg"), std::string::npos);
 }
 
+TEST(SpecConformance, ConversionsSpecDocumentsEnumStrongTyping) {
+    // TYP-20: enum <-> integer requires an explicit conversion.
+    std::string conv = readSpec("conversions.md");
+    ASSERT_FALSE(conv.empty());
+    EXPECT_NE(conv.find("TYP-20"), std::string::npos);
+    EXPECT_NE(conv.find("enum ↔ int"), std::string::npos);
+}
+
 TEST(SpecConformance, AbiSpecDocumentsEnumUnderlyingType) {
     // TYP-09/TYP-25/AGG-14: explicit enum underlying types are documented.
     std::string abi = readSpec("abi.md");
