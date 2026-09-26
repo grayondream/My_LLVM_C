@@ -260,11 +260,11 @@ Type* SemanticAnalyzer::getCommonType(Type* left, Type* right) const {
     right = stripTypedef(right);
     if (!left) return right;
     if (!right) return left;
+    // TYP-22: integer promotion + usual arithmetic conversions.
+    if (isArithmeticType(left) && isArithmeticType(right)) {
+        return usualArithmeticType(left, right);
+    }
     if (left->kind == right->kind) return left;
-    if (left->kind == TypeKind::Double || right->kind == TypeKind::Double) return typeCtx->getDouble();
-    if (left->kind == TypeKind::Float || right->kind == TypeKind::Float) return typeCtx->getFloat();
-    if (left->kind == TypeKind::Int) return left;
-    if (right->kind == TypeKind::Int) return right;
     return left;
 }
 

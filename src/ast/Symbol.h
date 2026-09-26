@@ -29,6 +29,38 @@ public:
 //   -1 = not implicitly convertible
 int conversionRank(Type* from, Type* to);
 
+// --- TYP-22: integer promotion and usual arithmetic conversions -------------
+//
+// These operate on AST types (typedefs stripped, enums mapped to their
+// underlying integer) and are shared by sema (common-type computation) and
+// codegen (signedness of division/remainder/shift/comparison).
+
+// True when `type` (after typedef/enum stripping) is an arithmetic type.
+bool isArithmeticType(Type* type);
+
+// Strip typedefs and map an enum to its underlying type (default `int`).
+Type* arithmeticUnderlying(Type* type);
+
+// Integer conversion rank: bool < char/int8/uint8 < int16/uint16
+// < int/int32/uint32 < int64/uint64/isize/usize < int128/uint128. -1 if not an
+// integer type.
+int integerRank(TypeKind kind);
+
+// Integer promotion: integer types with rank below `int` widen to `int`
+// (TYP-22 §3). Floating-point and other types are returned unchanged.
+Type* promoteArithmeticType(Type* type);
+
+// Usual arithmetic conversions for two arithmetic operands (TYP-22 §3).
+Type* usualArithmeticType(Type* a, Type* b);
+
+// True when the (promoted) arithmetic type is unsigned: `uint32/64/128`, `usize`.
+bool isUnsignedArithmeticType(Type* type);
+
+// True when `type` itself (typedefs stripped, enums via underlying) is an
+// unsigned integer type, including narrow `uint8`/`uint16`. Used to pick
+// `zext`/`uitofp` when extending a source value (TYP-22).
+bool isUnsignedIntegerType(Type* type);
+
 class OverloadSet {
 public:
     void add(Symbol* sym);

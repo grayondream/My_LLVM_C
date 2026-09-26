@@ -1,5 +1,6 @@
 #include "Expr.h"
 #include "Type.h"
+#include "Symbol.h"
 #include "codegen/CodegenContext.h"
 #include "support/Log.h"
 #include "Mangle.h"
@@ -211,13 +212,26 @@ llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
         }
     }
 
-    // Coerce both operands to a common arithmetic type. Floating-point
-    // operations must use the FP opcodes (FAdd/FMul/FCmp...), not the integer
-    // ones.
+    // Coerce both operands to a common arithmetic type (TYP-22). The AST types
+    // drive integer promotion, the usual arithmetic conversions and signedness;
+    // the opcode selection (sdiv/udiv, icmp slt/ult, ashr/lshr) follows suit.
+    Type* leftAst = left->type;
+    Type* rightAst = right->type;
+    const bool isShift = (op == BinaryOp::LShift || op == BinaryOp::RShift);
+    Type* resultAstTy = nullptr;
+    if (leftAst && rightAst && isArithmeticType(leftAst) && isArithmeticType(rightAst)) {
+        // Shifts yield the promoted left operand; other operators the usual
+        // arithmetic common type.
+        resultAstTy = isShift ? promoteArithmeticType(leftAst)
+                              : usualArithmeticType(leftAst, rightAst);
+    }
+
     llvm::Type* lhsTy = lhs->getType();
     llvm::Type* rhsTy = rhs->getType();
     llvm::Type* opType = lhsTy;
-    if (lhsTy->isFloatingPointTy() || rhsTy->isFloatingPointTy()) {
+    if (resultAstTy) {
+        opType = ctx.getLLVMType(resultAstTy);
+    } else if (lhsTy->isFloatingPointTy() || rhsTy->isFloatingPointTy()) {
         if (lhsTy->isFloatingPointTy() && rhsTy->isFloatingPointTy()) {
             opType = (lhsTy->getFPMantissaWidth() >= rhsTy->getFPMantissaWidth()) ? lhsTy : rhsTy;
         } else if (lhsTy->isFloatingPointTy()) {
@@ -228,9 +242,12 @@ llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
     } else if (lhsTy->isIntegerTy() && rhsTy->isIntegerTy()) {
         opType = (lhsTy->getIntegerBitWidth() >= rhsTy->getIntegerBitWidth()) ? lhsTy : rhsTy;
     }
-    lhs = ctx.castValue(lhs, opType);
-    rhs = ctx.castValue(rhs, opType);
+    lhs = ctx.castValue(lhs, leftAst, opType);
+    rhs = ctx.castValue(rhs, rightAst, opType);
     bool isFloat = opType->isFloatingPointTy();
+    // Address comparisons and unsigned common types use unsigned predicates.
+    bool unsignedOp = (leftPtr || rightPtr) ||
+                      (resultAstTy && isUnsignedArithmeticType(resultAstTy));
 
     switch (op) {
         case BinaryOp::Add:    return isFloat ? builder.CreateFAdd(lhs, rhs, "addtmp")
@@ -240,28 +257,35 @@ llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
         case BinaryOp::Mul:    return isFloat ? builder.CreateFMul(lhs, rhs, "multmp")
                                               : builder.CreateMul(lhs, rhs, "multmp");
         case BinaryOp::Div:    return isFloat ? builder.CreateFDiv(lhs, rhs, "divtmp")
-                                              : builder.CreateSDiv(lhs, rhs, "divtmp");
+                                              : (unsignedOp ? builder.CreateUDiv(lhs, rhs, "divtmp")
+                                                            : builder.CreateSDiv(lhs, rhs, "divtmp"));
         case BinaryOp::Mod:    return isFloat ? builder.CreateFRem(lhs, rhs, "modtmp")
-                                              : builder.CreateSRem(lhs, rhs, "modtmp");
+                                              : (unsignedOp ? builder.CreateURem(lhs, rhs, "modtmp")
+                                                            : builder.CreateSRem(lhs, rhs, "modtmp"));
         case BinaryOp::Eq:     return isFloat ? builder.CreateFCmpOEQ(lhs, rhs, "eqtmp")
                                               : builder.CreateICmpEQ(lhs, rhs, "eqtmp");
         case BinaryOp::NotEq:  return isFloat ? builder.CreateFCmpONE(lhs, rhs, "netmp")
                                               : builder.CreateICmpNE(lhs, rhs, "netmp");
         case BinaryOp::Lt:     return isFloat ? builder.CreateFCmpOLT(lhs, rhs, "lttmp")
-                                              : builder.CreateICmpSLT(lhs, rhs, "lttmp");
+                                              : (unsignedOp ? builder.CreateICmpULT(lhs, rhs, "lttmp")
+                                                            : builder.CreateICmpSLT(lhs, rhs, "lttmp"));
         case BinaryOp::Gt:     return isFloat ? builder.CreateFCmpOGT(lhs, rhs, "gttmp")
-                                              : builder.CreateICmpSGT(lhs, rhs, "gttmp");
+                                              : (unsignedOp ? builder.CreateICmpUGT(lhs, rhs, "gttmp")
+                                                            : builder.CreateICmpSGT(lhs, rhs, "gttmp"));
         case BinaryOp::Le:     return isFloat ? builder.CreateFCmpOLE(lhs, rhs, "letmp")
-                                              : builder.CreateICmpSLE(lhs, rhs, "letmp");
+                                              : (unsignedOp ? builder.CreateICmpULE(lhs, rhs, "letmp")
+                                                            : builder.CreateICmpSLE(lhs, rhs, "letmp"));
         case BinaryOp::Ge:     return isFloat ? builder.CreateFCmpOGE(lhs, rhs, "getmp")
-                                              : builder.CreateICmpSGE(lhs, rhs, "getmp");
+                                              : (unsignedOp ? builder.CreateICmpUGE(lhs, rhs, "getmp")
+                                                            : builder.CreateICmpSGE(lhs, rhs, "getmp"));
         case BinaryOp::And:    return builder.CreateAnd(lhs, rhs, "andtmp");
         case BinaryOp::Or:     return builder.CreateOr(lhs, rhs, "ortmp");
         case BinaryOp::BitAnd: return builder.CreateAnd(lhs, rhs, "bitandtmp");
         case BinaryOp::BitOr:  return builder.CreateOr(lhs, rhs, "bitortmp");
         case BinaryOp::BitXor: return builder.CreateXor(lhs, rhs, "bitxortmp");
         case BinaryOp::LShift: return builder.CreateShl(lhs, rhs, "lshifttmp");
-        case BinaryOp::RShift: return builder.CreateAShr(lhs, rhs, "rshifttmp");
+        case BinaryOp::RShift: return unsignedOp ? builder.CreateLShr(lhs, rhs, "rshifttmp")
+                                                 : builder.CreateAShr(lhs, rhs, "rshifttmp");
         default:
             LOGE("invalid binary operator");
             return nullptr;
@@ -468,7 +492,8 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
             if (!argVal) return nullptr;
             if (args[i]->isLValue) argVal = ctx.loadValue(argVal, args[i]->type);
             if (i < resolvedParamTypes.size()) {
-                argVal = ctx.castValue(argVal, ctx.getLLVMType(resolvedParamTypes[i]));
+                argVal = ctx.castValue(argVal, args[i]->type,
+                                       ctx.getLLVMType(resolvedParamTypes[i]));
             }
             argsV.push_back(argVal);
         }
@@ -510,7 +535,8 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
             argVal = emitLoad(ctx, argVal, args[i]->type);
         }
         if (i < resolvedParamTypes.size()) {
-            argVal = ctx.castValue(argVal, ctx.getLLVMType(resolvedParamTypes[i]));
+            argVal = ctx.castValue(argVal, args[i]->type,
+                                   ctx.getLLVMType(resolvedParamTypes[i]));
         } else if (calleeFn->isVarArg()) {
             // C default argument promotions for the variadic tail.
             argVal = promoteVarArg(ctx, argVal, args[i]->type);
@@ -625,7 +651,7 @@ llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
     llvm::Value* result = rhs->isLValue ? emitLoad(ctx, rhsVal, rhs->type) : rhsVal;
 
     if (lhs->type) {
-        result = ctx.castValue(result, ctx.getLLVMType(lhs->type));
+        result = ctx.castValue(result, rhs->type, ctx.getLLVMType(lhs->type));
     }
 
     if (op != AssignOp::Assign) {

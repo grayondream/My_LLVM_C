@@ -137,8 +137,8 @@
 - `[ ]` **TYP-19** 类型相等/兼容/隐式转换/显式转换规则（含常规算术转换）。
 - `[x]` **TYP-20** 枚举与整数必须显式转换。`typesCompatible`/`conversionRank`/`checkAssignmentTypes` 拒绝 `enum ↔ 非同类 enum/整数/浮点` 的隐式转换（赋值/初始化/实参/返回），要求 `(T)`/`static_cast`/`reinterpret_cast`；运算符仍按整数提升。枚举名义相等（同名才相等）。
 - `[ ]` **TYP-21** ABI 类型检查：`[[repr(C)]]` 下布局可预测；位域布局规则（见 DEC-08）。
-- `[~]` **TYP-22** `(新)` **整数提升与常规算术转换**：转换等级、signed×unsigned 混合规则（细化 TYP-19）。（规范草案见 `docs/spec/conversions.md` §3；实现仍为弱规则，待落地）
-- `[~]` **TYP-23** `(新)` **隐式/显式转换矩阵**：标量、指针、数组、struct/class、enum、Optional/Result 的完整转换表。（规范矩阵见 `docs/spec/conversions.md` §4；`[plan]` 项待实现）
+- `[x]` **TYP-22** `(新)` **整数提升与常规算术转换**：转换等级、signed×unsigned 混合规则（细化 TYP-19）。已实现于 `usualArithmeticType`/`promoteArithmeticType`/`isUnsignedArithmeticType`（`src/ast/Symbol.cpp`）：sema 按提升+常规算术转换取公共类型，codegen 按有/无符号选 `udiv`/`urem`、无符号比较、`lshr`/`ashr`，并按源符号选 `zext`/`sext`、`uitofp`/`sitofp`（规范见 `docs/spec/conversions.md` §3/§5）。
+- `[~]` **TYP-23** `(新)` **隐式/显式转换矩阵**：标量、指针、数组、struct/class、enum、Optional/Result 的完整转换表。（规范矩阵见 `docs/spec/conversions.md` §4；`enum` 强类型 TYP-20 与常规算术转换 TYP-22 已落地；隐式**窄化**仍按兼容处理，其余 `[plan]` 项待实现）
 - `[~]` **TYP-24** `(新)` **空指针常量语义**：`nullptr`/`NULL`/`0` 与指针/bool 的转换规则。（草案见 `docs/spec/conversions.md`；`null`/`0` 的 int↔ptr 转换、指针比较、指针真值判断已实现；`nullptr` token 待补）
 - `[x]` **TYP-25** `(新)` enum 默认底层类型、枚举常量作用域与限定访问（细化 TYP-09）。枚举常量可作值/常量表达式（含 `= -1`、`= 1+2+4`），支持限定访问 `A::Red` 与限定类型名 `cfg::Mode`（无需 `enum` 关键字）；显式底层类型 `enum E : uint8`（含 `typedef enum : uint16 {...}`）已实现。
 - `[ ]` **TYP-26** `(新)` 字符串字面量类型、`str`/`String` 生命周期与所有权（细化 FMT-01/02）。

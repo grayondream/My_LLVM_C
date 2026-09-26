@@ -75,6 +75,11 @@ public:
     // conversion is needed or possible.
     llvm::Value* castValue(llvm::Value* val, llvm::Type* targetLLVMType);
 
+    // Signedness-aware variant (TYP-22): `fromAST` supplies the source type so
+    // that widening an unsigned integer uses `zext` (and int->float uses
+    // `uitofp`) instead of the signed variants.
+    llvm::Value* castValue(llvm::Value* val, Type* fromAST, llvm::Type* targetLLVMType);
+
 private:
     std::unique_ptr<llvm::LLVMContext> context;
     llvm::IRBuilder<> builder;

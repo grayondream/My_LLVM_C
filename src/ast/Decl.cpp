@@ -34,7 +34,7 @@ static void storeScalarInitializer(CodegenContext& ctx, llvm::Value* dest,
     llvm::Value* v = expr.codegen(ctx);
     if (!v) return;
     if (expr.isLValue) v = ctx.loadValue(v, expr.type);
-    if (targetType) v = ctx.castValue(v, ctx.getLLVMType(targetType));
+    if (targetType) v = ctx.castValue(v, expr.type, ctx.getLLVMType(targetType));
     if (destLLVM) v = ctx.castValue(v, destLLVM);
     ctx.getBuilder().CreateStore(v, dest);
 }
@@ -128,7 +128,7 @@ static llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
         llvm::Constant* c = llvm::dyn_cast_or_null<llvm::Constant>(e.codegen(ctx));
         if (!c) return nullptr;
         if (llvm::Type* lt = ctx.getLLVMType(target)) {
-            c = llvm::dyn_cast_or_null<llvm::Constant>(ctx.castValue(c, lt));
+            c = llvm::dyn_cast_or_null<llvm::Constant>(ctx.castValue(c, e.type, lt));
         }
         return c;
     };
@@ -227,7 +227,8 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
             }
         }
         if (initConstant) {
-            initConstant = llvm::dyn_cast_or_null<llvm::Constant>(ctx.castValue(initConstant, llvmType));
+            initConstant = llvm::dyn_cast_or_null<llvm::Constant>(
+                ctx.castValue(initConstant, initExpr ? initExpr->type : nullptr, llvmType));
         }
         
         llvm::GlobalVariable::LinkageTypes linkage = type->isConst 
@@ -264,7 +265,7 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
                 if (initExpr->isLValue) {
                     initVal = ctx.loadValue(initVal, initExpr->type);
                 }
-                initVal = ctx.castValue(initVal, llvmType);
+                initVal = ctx.castValue(initVal, initExpr->type, llvmType);
                 ctx.getBuilder().CreateStore(initVal, alloca);
             }
         }

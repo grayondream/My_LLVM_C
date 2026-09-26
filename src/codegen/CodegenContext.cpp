@@ -1,6 +1,7 @@
 #include "CodegenContext.h"
 #include "ast/Type.h"
 #include "ast/Expr.h"
+#include "ast/Symbol.h"
 #include "support/Log.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Metadata.h"
@@ -335,6 +336,36 @@ llvm::Value* CodegenContext::castValue(llvm::Value* val, llvm::Type* targetLLVMT
     }
 
     return val;
+}
+
+llvm::Value* CodegenContext::castValue(llvm::Value* val, Type* fromAST, llvm::Type* targetLLVMType) {
+    if (!val || !targetLLVMType || !fromAST) return castValue(val, targetLLVMType);
+    llvm::Type* srcType = val->getType();
+    if (srcType == targetLLVMType) return val;
+
+    const bool fromUnsigned = isUnsignedIntegerType(fromAST);
+
+    if (srcType->isIntegerTy() && targetLLVMType->isIntegerTy()) {
+        unsigned srcBits = srcType->getIntegerBitWidth();
+        unsigned dstBits = targetLLVMType->getIntegerBitWidth();
+        // A 1-bit integer (bool) must be zero-extended so that `true` becomes 1.
+        if (srcBits == 1 && dstBits > 1) return builder.CreateZExt(val, targetLLVMType, "zexttmp");
+        if (srcBits < dstBits) {
+            return fromUnsigned ? builder.CreateZExt(val, targetLLVMType, "zexttmp")
+                                : builder.CreateSExt(val, targetLLVMType, "sexttmp");
+        }
+        if (srcBits > dstBits) return builder.CreateTrunc(val, targetLLVMType, "trunctmp");
+        return val;
+    }
+
+    if (srcType->isIntegerTy() && targetLLVMType->isFloatingPointTy()) {
+        return fromUnsigned ? builder.CreateUIToFP(val, targetLLVMType, "uitofptmp")
+                            : builder.CreateSIToFP(val, targetLLVMType, "sitofptmp");
+    }
+
+    // Float -> int, float widening/narrowing and pointer conversions do not
+    // depend on the source signedness; reuse the generic implementation.
+    return castValue(val, targetLLVMType);
 }
 
 llvm::Type* CodegenContext::getLLVMType(Type* type) {

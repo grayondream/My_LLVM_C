@@ -82,6 +82,116 @@ static int floatWidth(TypeKind kind) {
     }
 }
 
+static bool isUnsignedKind(TypeKind kind) {
+    switch (kind) {
+        case TypeKind::UInt8:
+        case TypeKind::UInt16:
+        case TypeKind::UInt32:
+        case TypeKind::UInt64:
+        case TypeKind::UInt128:
+        case TypeKind::USize:
+            return true;
+        default:
+            // `bool` promotes to signed int; `char` is treated as signed.
+            return false;
+    }
+}
+
+int integerRank(TypeKind kind) {
+    switch (kind) {
+        case TypeKind::Bool:     return 0;
+        case TypeKind::Char:
+        case TypeKind::Int8:
+        case TypeKind::UInt8:    return 1;
+        case TypeKind::Int16:
+        case TypeKind::UInt16:   return 2;
+        case TypeKind::Int:
+        case TypeKind::Int32:
+        case TypeKind::UInt32:   return 3;
+        case TypeKind::Int64:
+        case TypeKind::UInt64:
+        case TypeKind::ISize:
+        case TypeKind::USize:    return 4;
+        case TypeKind::Int128:
+        case TypeKind::UInt128:  return 5;
+        default:                 return -1;
+    }
+}
+
+Type* arithmeticUnderlying(Type* type) {
+    if (!type) return type;
+    while (type->kind == TypeKind::Typedef) {
+        type = static_cast<TypedefType*>(type)->aliasedType;
+        if (!type) return type;
+    }
+    if (type->kind == TypeKind::Enum) {
+        auto* enumType = static_cast<EnumType*>(type);
+        if (enumType->underlyingType) return arithmeticUnderlying(enumType->underlyingType);
+        return TypeContext::instance().getInt();
+    }
+    return type;
+}
+
+bool isArithmeticType(Type* type) {
+    type = arithmeticUnderlying(type);
+    if (!type) return false;
+    return integerRank(type->kind) >= 0 || floatWidth(type->kind) > 0;
+}
+
+Type* promoteArithmeticType(Type* type) {
+    type = arithmeticUnderlying(type);
+    if (!type) return type;
+    if (floatWidth(type->kind) > 0) return type;
+    int rank = integerRank(type->kind);
+    if (rank < 0) return type;
+    // All integer ranks below `int` are representable by the 32-bit `int`.
+    if (rank < integerRank(TypeKind::Int)) return TypeContext::instance().getInt();
+    return type;
+}
+
+Type* usualArithmeticType(Type* a, Type* b) {
+    a = promoteArithmeticType(a);
+    b = promoteArithmeticType(b);
+    if (!a) return b;
+    if (!b) return a;
+
+    int fa = floatWidth(a->kind);
+    int fb = floatWidth(b->kind);
+    if (fa > 0 || fb > 0) {
+        if (fa > 0 && fb > 0) return fa >= fb ? a : b;
+        return fa > 0 ? a : b;
+    }
+
+    int ra = integerRank(a->kind);
+    int rb = integerRank(b->kind);
+    if (ra < 0 || rb < 0) return a; // not arithmetic; caller handles
+
+    bool ua = isUnsignedKind(a->kind);
+    bool ub = isUnsignedKind(b->kind);
+    if (ua == ub) return ra >= rb ? a : b;
+
+    // Mixed signedness: the unsigned type wins at equal-or-higher rank; a
+    // strictly wider signed type can represent every unsigned value.
+    Type* uns = ua ? a : b;
+    Type* sig = ua ? b : a;
+    if (integerRank(uns->kind) >= integerRank(sig->kind)) return uns;
+    return sig;
+}
+
+bool isUnsignedArithmeticType(Type* type) {
+    type = arithmeticUnderlying(type);
+    if (!type) return false;
+    if (floatWidth(type->kind) > 0) return false;
+    if (integerRank(type->kind) < integerRank(TypeKind::Int)) return false;
+    return isUnsignedKind(type->kind);
+}
+
+bool isUnsignedIntegerType(Type* type) {
+    type = arithmeticUnderlying(type);
+    if (!type) return false;
+    return isUnsignedKind(type->kind);
+}
+
 int conversionRank(Type* from, Type* to) {
     if (!from || !to) return -1;
     if (typesEqual(from, to)) return 0;

@@ -31,33 +31,33 @@
 | `enum E` ↔ `enum E` | ✅（同一枚举类型） |
 | `enum` ↔ 整数/浮点/其它 `enum` | ❌（须显式转换，TYP-20） |
 
-`getCommonType`（当前）：同 kind 取其一 → `double` → `float` → `int` → 否则取左。
+`getCommonType`（`[impl]`，TYP-22）：两个算术操作数按整数提升 + 常规算术转换取公共类型（见 §3）；非算术按同 kind 或取左。
 
-> 这是**弱规则**：尚未实现常规算术转换，signed/unsigned 混合、窄化均被当作兼容。属重点补强项。
-> 但 `enum` 的强类型（TYP-20）与名义相等已落地：赋值/初始化/实参/返回中的 `enum ↔ int` 报错，须用 `(T)` / `static_cast` / `reinterpret_cast`。
+> `enum` 的强类型（TYP-20）与名义相等已落地：赋值/初始化/实参/返回中的 `enum ↔ int` 报错，须用 `(T)` / `static_cast` / `reinterpret_cast`。
+> 常规算术转换（TYP-22）已落地；**隐式窄化**仍被当作兼容（`int → int8` 不报错），属 TYP-23 待定。
 
-## 3. 整数提升与常规算术转换 `[plan]`（TYP-22）
+## 3. 整数提升与常规算术转换 `[impl]`（TYP-22）
 
-目标规则（对齐 C 语义，冻结于 TYP-22）：
+实现于 `usualArithmeticType` / `promoteArithmeticType`（`src/ast/Symbol.cpp`），被语义分析与代码生成共享：
 
-1. **整数提升**：`bool`、`char`、`int8/16`、`uint8/16`、`enum` → `int`；若 `int` 无法表示则 → `uint`。
-2. **常规算术转换**（二元算术/比较，对操作数取公共类型）：
-   - 若任一为浮点：按 `f16 < float32 < float64 < f128` 取较宽者。
-   - 否则：
-     - 提升后若符号性相同 → 取较宽。
-     - 不同符号性：无符号 rank ≥ 有符号 → 无符号；有符号能覆盖无符号全部值 → 有符号；否则 → 无符号版本。
-3. 转换等级（rank，由低到高）：`bool < char < int16 < int32 < int64 < int128`；无符号同宽度与有符号同 rank。
+1. **整数提升**：`bool`、`char`、`int8/16`、`uint8/16`（以及底层窄于 `int` 的 `enum`）→ `int`。
+2. **常规算术转换**（二元算术/比较/位运算，对操作数取公共类型）：
+   - 若任一为浮点：`float32 < float64`，浮点胜过整数。
+   - 否则（提升后同为整数）：
+     - 符号性相同 → 取 rank 较高者。
+     - 不同符号性：无符号 rank ≥ 有符号 → 无符号；有符号 rank 更高则取有符号（可覆盖无符号全部值）。
+3. 转换等级（rank，由低到高）：`bool < char/int8/uint8 < int16/uint16 < int/uint32 < int64/uint64/isize/usize < int128/uint128`；同宽度有/无符号同 rank。
 
-| kind | 位宽（当前 `integerWidth`） |
+| kind | 位宽（`integerRank`） |
 |---|---|
-| bool | 1 |
-| char/int8/uint8 | 8 |
-| int16/uint16 | 16 |
-| int/int32/uint32/enum | 32 |
-| int64/uint64/isize/usize | 64 |
-| int128/uint128 | 128 |
-| float/float32 | 32 |
-| double/float64 | 64 |
+| bool | 0 |
+| char/int8/uint8 | 1 |
+| int16/uint16 | 2 |
+| int/int32/uint32/enum | 3 |
+| int64/uint64/isize/usize | 4 |
+| int128/uint128 | 5 |
+| float/float32 | 32 位 |
+| double/float64 | 64 位 |
 
 ## 4. 转换矩阵 `[plan]`（TYP-23）
 
@@ -86,14 +86,24 @@
 
 | 转换 | 指令 |
 |---|---|
-| 整数→更宽 | `zext`（源为 `i1`）/ `sext` |
+| 整数→更宽 | `zext`（无符号源或 `i1`）/ `sext`（有符号源，TYP-22） |
 | 整数→更窄 | `trunc` |
-| 整数→浮点 | `sitofp` |
+| 整数→浮点 | `uitofp`（无符号源）/ `sitofp` |
 | 浮点→整数 | `fptosi` |
 | 浮点→更宽/更窄 | `fpext` / `fptrunc` |
 | 指针→指针 | `bitcast` |
 | `reinterpret_cast` 同宽标量（`float`↔`int` 等） | `bitcast` |
 | `reinterpret_cast` 指针↔整数 | `ptrtoint` / `inttoptr` |
+
+> `castValue` 提供带源 AST 类型的重载（`castValue(val, fromAST, target)`），按源的有/无符号选择 `zext`/`uitofp`；赋值、初始化、实参、返回与二元运算均走该重载（TYP-22）。
+
+二元运算按公共类型的有/无符号选择指令（`src/ast/Expr.cpp`）：
+
+| 运算 | 有符号 | 无符号 |
+|---|---|---|
+| `/` `%` | `sdiv` / `srem` | `udiv` / `urem` |
+| `<` `>` `<=` `>=` | `icmp slt/…` | `icmp ult/…` |
+| `>>` | `ashr` | `lshr` |
 
 ## 6. 空指针常量（TYP-24）
 

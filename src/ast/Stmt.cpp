@@ -58,8 +58,8 @@ llvm::Value* ReturnStmtAST::codegen(CodegenContext& ctx) {
     if (!v) return nullptr;
     // An lvalue return operand denotes a location; load its value (a pointer
     // rvalue such as `"str"` or a call result is already the value).
+    Type* valType = value->type;
     if (value->isLValue) {
-        Type* valType = value->type;
         if (!valType) {
             auto* varExpr = dynamic_cast<VariableExprAST*>(value.get());
             if (varExpr) {
@@ -73,7 +73,7 @@ llvm::Value* ReturnStmtAST::codegen(CodegenContext& ctx) {
     }
     llvm::Function* func = ctx.getBuilder().GetInsertBlock()->getParent();
     if (func) {
-        v = ctx.castValue(v, func->getReturnType());
+        v = ctx.castValue(v, valType, func->getReturnType());
     }
     // Run all deferred calls (innermost scope first) before leaving the function.
     ctx.emitAllDefers();

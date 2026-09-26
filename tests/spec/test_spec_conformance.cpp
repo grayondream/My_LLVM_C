@@ -159,6 +159,14 @@ TEST(SpecConformance, ConversionsSpecDocumentsEnumStrongTyping) {
     EXPECT_NE(conv.find("enum ↔ int"), std::string::npos);
 }
 
+TEST(SpecConformance, ConversionsSpecDocumentsUsualArithmeticConversions) {
+    // TYP-22: integer promotion + usual arithmetic conversions + signedness.
+    std::string conv = readSpec("conversions.md");
+    ASSERT_FALSE(conv.empty());
+    EXPECT_NE(conv.find("usualArithmeticType"), std::string::npos);
+    EXPECT_NE(conv.find("udiv"), std::string::npos);
+}
+
 TEST(SpecConformance, AbiSpecDocumentsEnumUnderlyingType) {
     // TYP-09/TYP-25/AGG-14: explicit enum underlying types are documented.
     std::string abi = readSpec("abi.md");
