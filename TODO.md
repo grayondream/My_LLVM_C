@@ -7,19 +7,21 @@
 > - 提交时在 message 中引用 ID，例如 `feat(LEX-04): ...`
 > - 所有特性必须映射到可预测的 C 内存模型与 ABI；无隐藏分配/控制流；comptime 无运行时开销
 
+> **进度快照（2026-09-26）**：P0-01 ~ P0-08 全部完成；转换系统 **TYP-09/20/22/25、AGG-14/15** 完成（enum 显式底层类型、enum 强类型、整数提升 + 常规算术转换）；**P1-08** 部分（`static_cast`/`reinterpret_cast` 已完成，内联 `asm` 待定）。当前全量 **683** 测试通过，工作区干净。
+
 ---
 
 ## 0. 现状基线（已完成，勿重复实现）
 
 - `[x]` **BASE-01** 基于 LLVM（>= 18，实测 22.1.8）的 C 风格编译器；CMake 构建、CTest 测试。
-- `[x]` **BASE-02** 词法：标识符/数字/字符串/字符/运算符/关键字；整型 `int8..int128/uint8..uint128/isize/usize`，浮点 `float/float32/float64`；`#`/`...`/`::`(待补) 等符号。
+- `[x]` **BASE-02** 词法：标识符/数字/字符串/字符/运算符/关键字；整型 `int8..int128/uint8..uint128/isize/usize`，浮点 `float/float32/float64`；`#`/`...`/`::` 等符号。
 - `[x]` **BASE-03** 语法：函数、变量、数组、struct/class/union/enum、typedef、`sizeof`、初始化列表、三元、逗号、赋值复合运算符、前缀/后缀 `++/--`、成员访问 `.`/`->`、下标、方法调用。
 - `[x]` **BASE-04** 控制流：if/else、while、do-while、for、switch/case/default（含贯穿）、break、continue、return、defer。（`goto`/label 已按 NG-01 移除）
-- `[x]` **BASE-05** 语义：作用域/符号表、函数重载（`OverloadSet`）、运算符重载（`operator`）、左值/右值、隐式类型转换（部分）、常量折叠 `constexpr`、`print/println` 内建与 `to_string` 分派。
+- `[x]` **BASE-05** 语义：作用域/符号表、函数重载（`OverloadSet`）、运算符重载（`operator`）、左值/右值、隐式类型转换（整数提升 + 常规算术转换，TYP-22）、常量折叠 `constexpr`、`print/println` 内建与 `to_string` 分派。
 - `[x]` **BASE-06** 代码生成：基础类型/指针/数组/struct/class/union/enum/函数指针、全局变量、字符串字面量、指针算术（GEP）、负浮点（fneg）、非 void 函数补 `unreachable`。
 - `[x]` **BASE-07** 驱动：`-c/-o/-S/-M/-O/-g/-v/-Wall/-Werror/-std/-fsyntax-only/-l/-L`、JIT、`cc` 链接系统 libc。（`-E/-I/-D` 已按 TOOL-02 移除；模块搜索路径改用 `-M/--module-path`）
 - `[x]` **BASE-08** 自带标准库 **libsafec**（`src/libsafec/`，`namespace safec`，独立目标 `safec` → `build/lib/libsafec.a`）：`printf/sprintf`、`malloc/free/calloc/realloc`、`strlen/strcmp/strcpy/memcpy/memset/memcmp`。
-- `[x]` **BASE-09** `resources/main.c` 可完整编译运行。全量 **528** 测试通过。
+- `[x]` **BASE-09** `resources/main.c` 可完整编译运行。全量测试通过（当前 **683** 项）。
 - `[x]` **BASE-10** `(新)` 既有实现已在 `src/libsafec/` 使用 `namespace safec`，但语言层未定义 `namespace`（规范缺口，见 PAR-22/MOD-12）。现已实现 `namespace`（值 + 类型）。
 
 ---
@@ -33,7 +35,7 @@
 - `[ ]` **INF-05** CI：Linux/macOS/Windows 矩阵、交叉编译、ABI 测试、性能基准。（外围仅限构建/测试，不含 LSP/包管理）
 - `[x]` **INF-06** 文档系统：语言规范（EBNF 语法）、类型/ABI 文档、`compile_time` API 文档。（**提前到 P0**，见 P0-07；`docs/spec/` 六分册 + 一致性测试已建）
 - `[x]` **INF-09** `(新)` **规范性文法（EBNF）**：完整产生式覆盖声明/类型/表达式/语句/注解/模块/`namespace`；作为规范唯一权威来源。（`docs/spec/grammar.ebnf`；ABI/转换/语义分册见 `docs/spec/`；一致性由 `test_spec_conformance` 绑定）
-- `[x]` **INF-10** `(新)` **运算符优先级/结合性总表**：表驱动，并与解析器实现绑定一致性测试。（表在 `docs/spec/grammar.ebnf` §9，实现于 `smc::getOperatorInfo`；`tests/frontend/test_operator_precedence.cpp` 10 项，全量 538 测试通过）
+- `[x]` **INF-10** `(新)` **运算符优先级/结合性总表**：表驱动，并与解析器实现绑定一致性测试。（表在 `docs/spec/grammar.ebnf` §9，实现于 `smc::getOperatorInfo`；`tests/frontend/test_operator_precedence.cpp` 10 项）
 - `[x]` **INF-11** `(新)` **关键字与保留字总表**：数据类型/存储类/控制流/模块/注解/限定符；区分已用与保留未用。（见 `docs/spec/keywords.md`；DEC-18 已冻结，`goto`/`#` 标记为已移除）
 - `[ ]` **INF-12** `(新)` **语言版本标识**：`-std=` 取值、默认版本、特性门控（不含 edition，见 NG-06）。
 - `[~]` **INF-13** `(新)` **诊断格式规范**：错误码命名、位置格式、严重级别、稳定输出（配合 INF-03、TOOL-09）。注册表（E0xxx/E1xxx/E2xxx/W3xxx）与 `file:line:col: severity[CODE]: msg` 格式已落地。
@@ -134,7 +136,7 @@
 - `[ ]` **TYP-16** 限定符类型：`const/volatile/restrict/atomic`。
 - `[ ]` **TYP-17** 函数类型：参数/返回/调用约定/可变参数。
 - `[ ]` **TYP-18** `(新)` 模板实例类型 `Box<i32>`：实例化、缓存、去重（见 GEN）。
-- `[ ]` **TYP-19** 类型相等/兼容/隐式转换/显式转换规则（含常规算术转换）。
+- `[~]` **TYP-19** 类型相等/兼容/隐式转换/显式转换规则（含常规算术转换）。TYP-20（enum 强类型、名义相等）与 TYP-22（整数提升 + 常规算术转换）已落地；隐式窄化策略与限定符参与见 TYP-23/TYP-16。
 - `[x]` **TYP-20** 枚举与整数必须显式转换。`typesCompatible`/`conversionRank`/`checkAssignmentTypes` 拒绝 `enum ↔ 非同类 enum/整数/浮点` 的隐式转换（赋值/初始化/实参/返回），要求 `(T)`/`static_cast`/`reinterpret_cast`；运算符仍按整数提升。枚举名义相等（同名才相等）。
 - `[ ]` **TYP-21** ABI 类型检查：`[[repr(C)]]` 下布局可预测；位域布局规则（见 DEC-08）。
 - `[x]` **TYP-22** `(新)` **整数提升与常规算术转换**：转换等级、signed×unsigned 混合规则（细化 TYP-19）。已实现于 `usualArithmeticType`/`promoteArithmeticType`/`isUnsignedArithmeticType`（`src/ast/Symbol.cpp`）：sema 按提升+常规算术转换取公共类型，codegen 按有/无符号选 `udiv`/`urem`、无符号比较、`lshr`/`ashr`，并按源符号选 `zext`/`sext`、`uitofp`/`sitofp`（规范见 `docs/spec/conversions.md` §3/§5）。
@@ -208,7 +210,7 @@
 ### enum
 - `[x]` **AGG-14** 底层类型 `:uint8` 等；值/作用域/名称解析。隐式/显式值（含负值与常量表达式）、枚举常量名称解析（含 namespace 限定与 `cfg::Mode` 类型名）、switch 标签、显式底层类型 `enum E : uint8`、`typedef enum : uint16 {...}` 均已实现。
 - `[x]` **AGG-15** 不隐式转换整数；显式转换语法与实现。见 TYP-20：隐式 `enum ↔ int` 被拒，显式 `(T)`/`static_cast`/`reinterpret_cast` 可用。
-- `[ ]` **AGG-16** 固定大小与 ABI；`(新)` 穷尽性检查（配合 SEM-11）。
+- `[~]` **AGG-16** 固定大小与 ABI；`(新)` 穷尽性检查（配合 SEM-11）。固定大小由底层类型决定，已随 AGG-14 实现；`switch` 穷尽性检查是警告还是错误待 **DEC-13** 定夺。
 
 ### union
 - `[ ]` **AGG-17** 声明、字段、布局、初始化与访问；不跟踪活跃成员（C 风格）。
@@ -502,11 +504,11 @@
 - `[x]` **P0-04** module/import/export（MOD-04~07）。源文件 `import`（搜索路径/点分名/循环报错）、`module` 文件绑定与校验、`export` 可见性、每模块私有作用域均已实现。
 - `[x]` **P0-05** 最小 `std.core` / `std.io`（STD-01/12）。`std::min/max/clamp`、`std::print_*`、`std::read_*`、`std::file_*` 可用；`assert`/`panic` 内建、`abort` 经 `std.c`；规范 `docs/spec/stdlib.md`。
 - `[x]` **P0-06** 诊断系统与测试设施（INF-03/04）。诊断核心 + 快照设施 + 词法/语法/声明源码位置均已完成；INF-04 的其余测试框架项（黄金 IR/输出、CTest 分组标签）由 INF-04 单独跟踪。
-- `[x]` **P0-07** `(新)` **语言规范骨架**：EBNF + 关键字表 + 优先级表 + 转换矩阵（INF-06/09~11、PAR-23、TYP-22/23）。四件套位于 `docs/spec/`，并由 `tests/spec/test_spec_conformance.cpp` 绑定实现；各 `[plan]` 细节仍由对应条目跟踪。
+- `[x]` **P0-07** `(新)` **语言规范骨架**：EBNF + 关键字表 + 优先级表 + 转换矩阵（INF-06/09~11、PAR-23、TYP-22/23）。四件套位于 `docs/spec/`，并由 `tests/spec/test_spec_conformance.cpp` 绑定实现；各 `[plan]` 细节仍由对应条目跟踪；TYP-22（整数提升/常规算术转换）已完成。
 - `[x]` **P0-08** `(新)` **namespace 支持**（PAR-22、MOD-12、DEC-17）——现有 `libsafec` 已依赖，属刚需。函数/变量、嵌套、限定访问、限定类型名均已实现。
 
 ### P1：核心现代能力
-- `[ ]` **P1-01** class / enum / union / 数组 / Slice（AGG、TYP-11/12）。
+- `[ ]` **P1-01** class / enum / union / 数组 / Slice（AGG、TYP-11/12）。enum 相关（AGG-14/15、TYP-09/20/25）已完成；class/union/数组/Slice 待补。
 - `[ ]` **P1-02** Optional / Result 显式访问（TYP-13/14/STD-02）。
 - `[ ]` **P1-03** **泛型 + CRTP**（GEN、INH-05、PAR-17/18、CG-07/08）。
 - `[ ]` **P1-04** `compile_time` 与反射（CT；取代 type_info/static_assert）。
