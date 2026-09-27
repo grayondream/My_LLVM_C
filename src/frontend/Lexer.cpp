@@ -439,30 +439,53 @@ Token Lexer::scanNumber(){
         advance();
     }
 
-    bool isfloat = false;
+    bool hasFraction = false;
     if(peek() == '.' and isDigitForRadix(peekNext(), 10)) {
-        isfloat = true;
+        hasFraction = true;
         advance(); // 小数点
         while(isDigitForRadix(peek(), 10) || peek() == '_') {
             advance();
         }
     }
 
+    // LEX-05: exponent = ( 'e' | 'E' ) , [ '+' | '-' ] , decimal-digits.
+    // Only recognised when a digit (or a misplaced '_', so E0004 can point at
+    // it) follows; otherwise the 'e'/'E' is left for the next token (e.g. `1e`
+    // -> NUMBER 1 + IDENT e, `1e+x` stays split), so identifiers that start
+    // with 'e' keep working and no extra diagnostic code is needed.
+    auto exponentFollows = [&]() -> bool {
+        if(peek() != 'e' && peek() != 'E') return false;
+        size_t j = m_currentPos + 1;
+        if(j < m_source.size() && (m_source[j] == '+' || m_source[j] == '-')) j++;
+        return j < m_source.size() &&
+               (isDigitForRadix(m_source[j], 10) || m_source[j] == '_');
+    };
+    bool hasExponent = false;
+    if(exponentFollows()) {
+        hasExponent = true;
+        advance(); // 'e' / 'E'
+        if(peek() == '+' || peek() == '-') {
+            advance();
+        }
+        while(isDigitForRadix(peek(), 10) || peek() == '_') {
+            advance();
+        }
+    }
+
+    const bool isfloat = hasFraction || hasExponent;
     if(isfloat) {
         // LEX-15: float suffix -> target type (f/F/f32 -> float32, f16/f64/f128,
         // legacy l/L -> float64; unsuffixed default is float64).
+        // The numeric portion ends here; everything after it is the suffix.
+        const size_t numberLen = m_currentPos - m_startPos;
         const LiteralKind kind = consumeFloatSuffix();
         const auto lexName = lexeme();
         validateDigitSeparators(lexName, 10);
 
         std::string cleanStr;
-        for(char c : lexName) {
-            if(c == '_') continue;
-            if(c == '.' || isDigitForRadix(c, 10)) {
-                cleanStr += c;
-                continue;
-            }
-            break; // suffix letters
+        for(size_t i = 0; i < numberLen; i++) {
+            if(lexName[i] == '_') continue;
+            cleanStr += lexName[i];
         }
         double value = 0.0;
         try {

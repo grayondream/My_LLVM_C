@@ -253,6 +253,73 @@ TEST(LexerSeparatorTest, RecoveryKeepsNumberTokenAndRestOfStream) {
     EXPECT_EQ(std::get<int>(tokens[3].value), 10);
 }
 
+// LEX-05: floating-point exponents (e/E, optional sign, decimal digits).
+TEST(LexerFloatExponentTest, ExponentWithoutFractionBecomesFloat) {
+    Lexer lexer("e.c", "1e10 0e0 2E+4 1.5e-3");
+    auto tokens = lexer.tokenize();
+    ASSERT_EQ(tokens.size(), 4u);
+    for (const auto& t : tokens) {
+        EXPECT_EQ(t.type, TokenType::TOKEN_FLOAT);
+        EXPECT_EQ(t.literalKind, LiteralKind::Float64);
+    }
+    EXPECT_DOUBLE_EQ(std::get<double>(tokens[0].value), 1e10);
+    EXPECT_DOUBLE_EQ(std::get<double>(tokens[1].value), 0.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(tokens[2].value), 2e4);
+    EXPECT_NEAR(std::get<double>(tokens[3].value), 0.0015, 1e-12);
+    EXPECT_TRUE(lexer.getDiagnostics().empty());
+}
+
+TEST(LexerFloatExponentTest, ExponentCombinesWithSuffix) {
+    Lexer lexer("e.c", "1e10f 1.5e3f16 2.5e2f32 3.5e4f128");
+    auto tokens = lexer.tokenize();
+    ASSERT_EQ(tokens.size(), 4u);
+    EXPECT_EQ(tokens[0].literalKind, LiteralKind::Float32);
+    EXPECT_EQ(tokens[1].literalKind, LiteralKind::Float16);
+    EXPECT_EQ(tokens[2].literalKind, LiteralKind::Float32);
+    EXPECT_EQ(tokens[3].literalKind, LiteralKind::Float128);
+    EXPECT_DOUBLE_EQ(std::get<double>(tokens[0].value), 1e10);
+    EXPECT_NEAR(std::get<double>(tokens[1].value), 1500.0, 1e-9);
+}
+
+TEST(LexerFloatExponentTest, HexEIsADigitNotAnExponent) {
+    Lexer lexer("e.c", "0x1e10");
+    auto tokens = lexer.tokenize();
+    ASSERT_EQ(tokens.size(), 1u);
+    EXPECT_EQ(tokens[0].type, TokenType::TOKEN_NUMBER);
+    EXPECT_EQ(tokens[0].literalKind, LiteralKind::Int);
+    EXPECT_EQ(std::get<int>(tokens[0].value), 0x1e10);
+}
+
+TEST(LexerFloatExponentTest, IncompleteExponentIsLeftAlone) {
+    Lexer lexer("e.c", "1e 1e+x");
+    auto tokens = lexer.tokenize();
+    ASSERT_EQ(tokens.size(), 6u);
+    EXPECT_EQ(tokens[0].type, TokenType::TOKEN_NUMBER);
+    EXPECT_EQ(std::get<int>(tokens[0].value), 1);
+    EXPECT_EQ(tokens[1].type, TokenType::TOKEN_IDENTIFIER);
+    EXPECT_EQ(tokens[1].lexeme, "e");
+    EXPECT_EQ(tokens[2].type, TokenType::TOKEN_NUMBER);
+    EXPECT_EQ(tokens[3].type, TokenType::TOKEN_IDENTIFIER);
+    EXPECT_EQ(tokens[3].lexeme, "e");
+    EXPECT_EQ(tokens[4].type, TokenType::TOKEN_PLUS);
+    EXPECT_EQ(tokens[5].type, TokenType::TOKEN_IDENTIFIER);
+    EXPECT_EQ(tokens[5].lexeme, "x");
+}
+
+TEST(LexerFloatExponentTest, SeparatorsWithinExponentAreValidated) {
+    Lexer ok("ok.c", "1e1_0 1_0e1_0");
+    ok.tokenize();
+    EXPECT_TRUE(ok.getDiagnostics().empty());
+
+    Lexer bad("bad.c", "1e_10");
+    bad.tokenize();
+    const Diagnostic* d =
+        findDiag(bad.getDiagnostics(), DiagnosticCode::LexInvalidDigitSeparator);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->line, 1);
+    EXPECT_EQ(d->column, 3);
+}
+
 TEST(ClassKeywordTest, ClassTokenIsRecognized) {
     std::string source = "class Foo { int x; };";
     Lexer lexer("test.c", source);
