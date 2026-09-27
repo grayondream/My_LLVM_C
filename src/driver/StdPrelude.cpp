@@ -6,6 +6,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <iterator>
 #include <sstream>
 
@@ -91,6 +92,20 @@ std::unique_ptr<TranslationUnitAST> parseStdCPrelude(const std::string& source,
     }
     Lexer lexer(filename, source);
     auto tokens = lexer.tokenize();
+
+    // LEX-13 / LEX-17: the prelude is compiler-provided; a lexical error means a
+    // corrupted binding layer, so report it rather than parsing garbage.
+    bool lexError = false;
+    for (const auto& diag : lexer.getDiagnostics()) {
+        std::cerr << diag.formatWithSeverity() << "\n";
+        if (diag.isError()) {
+            lexError = true;
+        }
+    }
+    if (lexError) {
+        return nullptr;
+    }
+
     Parser parser(tokens);
     return parser.parse();
 }

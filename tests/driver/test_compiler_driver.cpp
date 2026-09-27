@@ -1,4 +1,9 @@
 #include <gtest/gtest.h>
+
+#include <filesystem>
+#include <fstream>
+#include <string>
+
 #include "driver/CompilerDriver.h"
 
 class CompilerDriverTest : public ::testing::Test {
@@ -191,4 +196,33 @@ TEST_F(CompilerDriverTest, DefaultOutputIsAOut) {
     const char* argv[] = {"my_llvm_c", "test.c"};
     ASSERT_TRUE(driver.parseArguments(2, argv));
     EXPECT_EQ(driver.getOutputFile(), "a.out");
+}
+
+namespace {
+std::filesystem::path writeTempSource(const std::string& name, const std::string& text) {
+    std::filesystem::path p = std::filesystem::temp_directory_path() / name;
+    std::ofstream out(p);
+    out << text;
+    return p;
+}
+} // namespace
+
+TEST_F(CompilerDriverTest, LexSyntaxOnlySucceedsForValidSource) {
+    const std::filesystem::path p =
+        writeTempSource("smc_driver_valid.c", "int main() { return 0; }\n");
+    const std::string path = p.string();
+    const char* argv[] = {"my_llvm_c", "-fsyntax-only", path.c_str()};
+    ASSERT_TRUE(driver.parseArguments(3, argv));
+    EXPECT_EQ(driver.run(), 0);
+    std::filesystem::remove(p);
+}
+
+TEST_F(CompilerDriverTest, InvalidCharacterFailsCompilation) {
+    // LEX-13: the driver must surface lexer diagnostics and fail the build.
+    const std::filesystem::path p = writeTempSource("smc_driver_badlex.c", "int @ x;\n");
+    const std::string path = p.string();
+    const char* argv[] = {"my_llvm_c", "-fsyntax-only", path.c_str()};
+    ASSERT_TRUE(driver.parseArguments(3, argv));
+    EXPECT_EQ(driver.run(), 1);
+    std::filesystem::remove(p);
 }

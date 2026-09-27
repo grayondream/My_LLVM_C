@@ -131,6 +131,19 @@ void loadModuleFile(const std::string& path,
 
     Lexer lexer(canonical, source);
     auto tokens = lexer.tokenize();
+
+    // LEX-13 / LEX-17: report lexical diagnostics for imported modules too.
+    bool lexError = false;
+    for (const auto& diag : lexer.getDiagnostics()) {
+        errors.push_back(diag.formatWithSeverity());
+        if (diag.isError()) {
+            lexError = true;
+        }
+    }
+    if (lexError) {
+        return;
+    }
+
     Parser parser(tokens);
     auto ast = parser.parse();
     if (!ast) {

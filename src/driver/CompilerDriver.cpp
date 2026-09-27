@@ -239,6 +239,19 @@ int CompilerDriver::compileFile(const std::string& inputFile) {
     Lexer lexer(inputFile, content);
     auto tokens = lexer.tokenize();
 
+    // LEX-13 / LEX-17: surface lexical diagnostics (E0001/E0002/E0003) and stop
+    // before parsing; scanning already recovered so later tokens stay usable.
+    bool lexError = false;
+    for (const auto& diag : lexer.getDiagnostics()) {
+        std::cerr << diag.formatWithSeverity() << "\n";
+        if (diag.isError()) {
+            lexError = true;
+        }
+    }
+    if (lexError) {
+        return 1;
+    }
+
     Parser parser(tokens);
     auto ast = parser.parse();
     if (!ast) {

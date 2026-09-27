@@ -1,0 +1,1 @@
+snapshot.c:2:21: error[E0001]: invalid character '@'

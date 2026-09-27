@@ -1,6 +1,6 @@
 #include "Lexer.h"
 #include <cstdlib>
-#include <stdexcept>
+#include <limits>
 #include <unordered_map>
 #include "frontend/Token.h"
 #include "support/Log.h"
@@ -152,15 +152,19 @@ Token Lexer::makeToken(const TokenType type, const std::string& lexeme, const To
     return token;
 }
 
-void Lexer::error(const std::string& msg) const {
-    throw std::runtime_error(m_filename + ": " + msg + " at line " + std::to_string(m_lineNum) + ", col " + std::to_string(m_colNum));
+void Lexer::report(DiagnosticCode code, const std::string& msg, size_t line, size_t col) {
+    m_diagnostics.emplace_back(Diagnostic::Level::Error, code, msg, m_filename,
+                               static_cast<int>(line), static_cast<int>(col));
+}
+
+const std::vector<Diagnostic>& Lexer::getDiagnostics() const {
+    return m_diagnostics;
 }
         
 std::vector<Token> Lexer::tokenize() {
     std::vector<Token> tokens{};
     while(!isEof()) {
-        skipWhitespace();
-        skipComment();
+        skipTrivia();
         m_startPos = m_currentPos;  
         if(isEof()) {
             break;
@@ -177,8 +181,7 @@ std::vector<Token> Lexer::tokenize() {
 
 Token Lexer::nextToken() {
     while(!isEof()) {
-        skipWhitespace();
-        skipComment();
+        skipTrivia();
         m_startPos = m_currentPos;
         if(isEof()) {
             break;
@@ -214,6 +217,19 @@ void Lexer::skipWhitespace() {
     return;
 }
         
+void Lexer::skipTrivia() {
+    while (true) {
+        skipWhitespace();
+        const char ch = peek();
+        const char nextCh = peekNext();
+        if (ch == '/' && (nextCh == '/' || nextCh == '*')) {
+            skipComment();
+        } else {
+            break;
+        }
+    }
+}
+
 void Lexer::skipComment() {
     while (true) {
         const char ch = peek();
@@ -221,6 +237,10 @@ void Lexer::skipComment() {
         if (ch == '/' && nextCh == '/') {
             advanceNextLine();
         } else if (ch == '/' && nextCh == '*') {
+            // LEX-13: remember where the comment opened so an unterminated
+            // comment (E0002) points at its start.
+            const size_t startLine = m_lineNum;
+            const size_t startCol = m_colNum + 1;
             advance(); 
             advance(); 
 
@@ -229,6 +249,8 @@ void Lexer::skipComment() {
             }
 
             if (isEof()) {
+                report(DiagnosticCode::LexUnterminatedLiteral,
+                       "unterminated block comment", startLine, startCol);
                 return;
             }
 
@@ -265,6 +287,23 @@ Token Lexer::scanIdentifier() {
 }
 
 Token Lexer::scanNumber(){
+    // LEX-17: accumulate integer literals in 64 bits so overflow is detected
+    // without invoking signed-overflow UB, and diagnose E0003 once when the
+    // value no longer fits in uint64 (recovery: keep scanning the literal).
+    bool overflowed = false;
+    const unsigned long long maxVal = std::numeric_limits<unsigned long long>::max();
+    auto addDigit = [&](unsigned long long& acc, unsigned base, unsigned digit) {
+        if (overflowed) return;
+        if (acc > (maxVal - digit) / base) {
+            overflowed = true;
+            report(DiagnosticCode::LexIntegerOverflow,
+                   "integer literal overflows 64 bits",
+                   m_tokenStartLine, m_tokenStartCol);
+        } else {
+            acc = acc * base + digit;
+        }
+    };
+
     // 检查是否是二进制、八进制或十六进制
     if(peek() == '0' && !isEof()) {
         char next = peekNext();
@@ -281,15 +320,12 @@ Token Lexer::scanNumber(){
                 }
             }
             const auto lexName = lexeme();
-            std::string binaryStr;
+            unsigned long long value = 0;
             for(size_t i = 2; i < lexName.size(); i++) {
-                if(lexName[i] != '_') binaryStr += lexName[i];
+                if(lexName[i] == '_') continue;
+                addDigit(value, 2, static_cast<unsigned>(lexName[i] - '0'));
             }
-            int value = 0;
-            for(char c : binaryStr) {
-                value = value * 2 + (c - '0');
-            }
-            return makeToken(TokenType::TOKEN_NUMBER, lexName, value);
+            return makeToken(TokenType::TOKEN_NUMBER, lexName, static_cast<int>(value));
         } else if(next == 'o' || next == 'O') {
             // 八进制字面量
             advance(); // 消耗 '0'
@@ -303,15 +339,12 @@ Token Lexer::scanNumber(){
                 }
             }
             const auto lexName = lexeme();
-            std::string octalStr;
+            unsigned long long value = 0;
             for(size_t i = 2; i < lexName.size(); i++) {
-                if(lexName[i] != '_') octalStr += lexName[i];
+                if(lexName[i] == '_') continue;
+                addDigit(value, 8, static_cast<unsigned>(lexName[i] - '0'));
             }
-            int value = 0;
-            for(char c : octalStr) {
-                value = value * 8 + (c - '0');
-            }
-            return makeToken(TokenType::TOKEN_NUMBER, lexName, value);
+            return makeToken(TokenType::TOKEN_NUMBER, lexName, static_cast<int>(value));
         } else if(next == 'x' || next == 'X') {
             // 十六进制字面量
             advance(); // 消耗 '0'
@@ -325,17 +358,17 @@ Token Lexer::scanNumber(){
                 }
             }
             const auto lexName = lexeme();
-            std::string hexStr;
+            unsigned long long value = 0;
             for(size_t i = 2; i < lexName.size(); i++) {
-                if(lexName[i] != '_') hexStr += lexName[i];
+                const char c = lexName[i];
+                if(c == '_') continue;
+                unsigned digit = 0;
+                if(c >= '0' && c <= '9') digit = static_cast<unsigned>(c - '0');
+                else if(c >= 'a' && c <= 'f') digit = static_cast<unsigned>(c - 'a' + 10);
+                else if(c >= 'A' && c <= 'F') digit = static_cast<unsigned>(c - 'A' + 10);
+                addDigit(value, 16, digit);
             }
-            int value = 0;
-            for(char c : hexStr) {
-                if(c >= '0' && c <= '9') value = value * 16 + (c - '0');
-                else if(c >= 'a' && c <= 'f') value = value * 16 + (c - 'a' + 10);
-                else if(c >= 'A' && c <= 'F') value = value * 16 + (c - 'A' + 10);
-            }
-            return makeToken(TokenType::TOKEN_NUMBER, lexName, value);
+            return makeToken(TokenType::TOKEN_NUMBER, lexName, static_cast<int>(value));
         }
     }
 
@@ -389,17 +422,12 @@ Token Lexer::scanNumber(){
         }
         return makeToken(TokenType::TOKEN_FLOAT, lexName, value);
     } else {
-        std::string cleanStr;
-        for(char c : lexName) { if(c != '_') cleanStr += c; }
-        int value = 0;
-        try {
-            value = std::stoi(cleanStr);
-        } catch (const std::exception&) {
-            // Out-of-range integer literal (LEX-17): saturate rather than
-            // propagate std::out_of_range out of the lexer.
-            value = static_cast<int>(std::strtoull(cleanStr.c_str(), nullptr, 10));
+        unsigned long long value = 0;
+        for(char c : lexName) {
+            if(c == '_') continue;
+            addDigit(value, 10, static_cast<unsigned>(c - '0'));
         }
-        return makeToken(TokenType::TOKEN_NUMBER, lexName, value);
+        return makeToken(TokenType::TOKEN_NUMBER, lexName, static_cast<int>(value));
     }
 }
 
@@ -409,6 +437,13 @@ Token Lexer::scanString() {
         advance(); // 消耗 'r'
         advance(); // 消耗 '"'
         while(true){
+            if(isEof()) {
+                // LEX-13: unterminated raw string must not loop past EOF.
+                report(DiagnosticCode::LexUnterminatedLiteral,
+                       "unterminated raw string literal",
+                       m_tokenStartLine, m_tokenStartCol);
+                break;
+            }
             const char ch = peek();
             if(ch == '"') {
                 advance();
@@ -423,20 +458,33 @@ Token Lexer::scanString() {
     // 普通字符串
     advance();
     while(true){
+        if(isEof()) {
+            // LEX-13: report and stop instead of looping forever at EOF.
+            report(DiagnosticCode::LexUnterminatedLiteral,
+                   "unterminated string literal",
+                   m_tokenStartLine, m_tokenStartCol);
+            break;
+        }
         const char ch = peek();
         if(ch == '"') {
             advance();
             break;
-        } else if(ch == '\\' && !isEof()) {
+        } else if(ch == '\\') {
             // 处理转义序列
             advance(); // 消耗 '\'
+            if(isEof()) {
+                report(DiagnosticCode::LexUnterminatedLiteral,
+                       "unterminated string literal",
+                       m_tokenStartLine, m_tokenStartCol);
+                break;
+            }
             char escapeChar = peek();
-            if(escapeChar == 'u' && !isEof()) {
+            if(escapeChar == 'u') {
                 // Unicode转义 \u{XXXX}
                 advance(); // 消耗 'u'
                 if(peek() == '{') {
                     advance(); // 消耗 '{'
-                    while(peek() != '}' && !isEof()) {
+                    while(!isEof() && peek() != '}') {
                         advance();
                     }
                     if(peek() == '}') {
@@ -457,20 +505,33 @@ Token Lexer::scanString() {
 Token Lexer::scanChar() {
     advance(); // 消耗开始的引号
     while(true){
+        if(isEof()) {
+            // LEX-13: report and stop instead of looping forever at EOF.
+            report(DiagnosticCode::LexUnterminatedLiteral,
+                   "unterminated character literal",
+                   m_tokenStartLine, m_tokenStartCol);
+            break;
+        }
         const char ch = peek();
         if(ch == '\'') {
             advance();
             break;
-        } else if(ch == '\\' && !isEof()) {
+        } else if(ch == '\\') {
             // 处理转义序列
             advance(); // 消耗 '\'
+            if(isEof()) {
+                report(DiagnosticCode::LexUnterminatedLiteral,
+                       "unterminated character literal",
+                       m_tokenStartLine, m_tokenStartCol);
+                break;
+            }
             char escapeChar = peek();
-            if(escapeChar == 'u' && !isEof()) {
+            if(escapeChar == 'u') {
                 // Unicode转义 \u{XXXX}
                 advance(); // 消耗 'u'
                 if(peek() == '{') {
                     advance(); // 消耗 '{'
-                    while(peek() != '}' && !isEof()) {
+                    while(!isEof() && peek() != '}') {
                         advance();
                     }
                     if(peek() == '}') {
@@ -703,7 +764,12 @@ Token Lexer::scanToken() {
         token = makeToken(TokenType::TOKEN_HASH, lexeme());
         break;
     default:
-        token = makeToken(TokenType::TOKEN_UNKNOWN, lexeme());
+        // LEX-13: unknown characters are diagnosed (E0001) and skipped so the
+        // rest of the stream stays lexable; tokenize() drops the TOKEN_UNKNOWN.
+        report(DiagnosticCode::LexInvalidCharacter,
+               std::string("invalid character '") + ch + "'",
+               m_tokenStartLine, m_tokenStartCol);
+        token = makeToken(TokenType::TOKEN_UNKNOWN, std::string(1, ch));
         break;
     }
 

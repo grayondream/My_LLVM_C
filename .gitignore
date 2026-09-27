@@ -10,4 +10,5 @@ docs/*
 *.gcda
 *.gcno
 PROGRESS.md
+Progress.md
 .tmp

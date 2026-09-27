@@ -33,6 +33,11 @@ std::string analyzeDiagnostics(const std::string& source) {
     auto ast = parser.parse();
 
     std::ostringstream out;
+    // LEX-13 / LEX-17: include lexical diagnostics (E0001/E0002/E0003) so the
+    // pipeline snapshot covers the whole front end.
+    for (const auto& d : lexer.getDiagnostics()) {
+        out << d.formatWithSeverity() << "\n";
+    }
     if (!ast) {
         out << "<parse failed>\n";
         return out.str();
@@ -116,6 +121,12 @@ int main() {
     int y;
     return y;
 }
+)"));
+}
+
+TEST_F(DiagnosticSnapshotTest, LexicalInvalidCharacter) {
+    expectSnapshot("lexical_invalid_character", analyzeDiagnostics(R"(
+int f() { return 0; @ }
 )"));
 }
 
