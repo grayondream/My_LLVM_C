@@ -6,6 +6,29 @@
 #include "support/Log.h"
 #include "support/Utils.h"
 
+namespace {
+
+// LEX-17: a character is a digit of `radix` (2/8/10/16).
+bool isDigitForRadix(char c, int radix) {
+    switch (radix) {
+        case 2:  return c == '0' || c == '1';
+        case 8:  return c >= '0' && c <= '7';
+        case 10: return c >= '0' && c <= '9';
+        case 16: return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        default: return false;
+    }
+}
+
+// Numeric value of a digit character (0 for non-digits).
+unsigned digitValue(char c) {
+    if (c >= '0' && c <= '9') return static_cast<unsigned>(c - '0');
+    if (c >= 'a' && c <= 'f') return static_cast<unsigned>(c - 'a' + 10);
+    if (c >= 'A' && c <= 'F') return static_cast<unsigned>(c - 'A' + 10);
+    return 0;
+}
+
+} // namespace
+
 static const std::unordered_map<std::string, TokenType> keywordMap = {
     // ===== 基本类型 =====
     {"int", TokenType::TOKEN_INT},
@@ -286,6 +309,77 @@ Token Lexer::scanIdentifier() {
     return makeToken(TokenType::TOKEN_IDENTIFIER, lexName);
 }
 
+void Lexer::validateDigitSeparators(const std::string& lexeme, int radix) {
+    for(size_t i = 0; i < lexeme.size(); i++) {
+        if(lexeme[i] != '_') continue;
+        const char prev = (i > 0) ? lexeme[i - 1] : '\0';
+        const char next = (i + 1 < lexeme.size()) ? lexeme[i + 1] : '\0';
+        if(!isDigitForRadix(prev, radix) || !isDigitForRadix(next, radix)) {
+            // Report the first misplaced separator only; keep scanning so the
+            // literal (and everything after it) is still tokenized.
+            report(DiagnosticCode::LexInvalidDigitSeparator,
+                   "misplaced digit separator '_'",
+                   m_tokenStartLine, m_tokenStartCol + i);
+            return;
+        }
+    }
+}
+
+LiteralKind Lexer::consumeIntegerSuffix() {
+    const char c0 = peek();
+    const bool isU = (c0 == 'u' || c0 == 'U');
+    const bool isL = (c0 == 'l' || c0 == 'L');
+    if(!isU && !isL) {
+        return LiteralKind::Int; // unsuffixed default
+    }
+    advance();
+
+    const char c1 = peek();
+    const bool c1IsU = (c1 == 'u' || c1 == 'U');
+    const bool c1IsL = (c1 == 'l' || c1 == 'L');
+    if((isU && c1IsL) || (isL && c1IsU)) {
+        advance();
+        return LiteralKind::ULong; // 'ul' / 'lu'
+    }
+    return isU ? LiteralKind::UInt : LiteralKind::Long;
+}
+
+LiteralKind Lexer::consumeFloatSuffix() {
+    const char c = peek();
+    if(c == 'f' || c == 'F') {
+        advance();
+        // Maximal munch of the typed suffixes f16/f32/f64/f128.
+        if(peek() == '1' && peekNext() == '6') {
+            advance();
+            advance();
+            return LiteralKind::Float16;
+        }
+        if(peek() == '1' && peekNext() == '2' &&
+           m_source.compare(m_currentPos, 3, "128") == 0) {
+            advance();
+            advance();
+            advance();
+            return LiteralKind::Float128;
+        }
+        if(peek() == '3' && peekNext() == '2') {
+            advance();
+            advance();
+            return LiteralKind::Float32;
+        }
+        if(peek() == '6' && peekNext() == '4') {
+            advance();
+            advance();
+            return LiteralKind::Float64;
+        }
+        return LiteralKind::Float32; // bare 'f' / 'F'
+    }
+    if(c == 'l' || c == 'L') {
+        advance();
+        return LiteralKind::Float64; // legacy long-double spelling
+    }
+    return LiteralKind::Float64; // unsuffixed default
+}
+
 Token Lexer::scanNumber(){
     // LEX-17: accumulate integer literals in 64 bits so overflow is detected
     // without invoking signed-overflow UB, and diagnose E0003 once when the
@@ -304,113 +398,71 @@ Token Lexer::scanNumber(){
         }
     };
 
-    // 检查是否是二进制、八进制或十六进制
-    if(peek() == '0' && !isEof()) {
-        char next = peekNext();
+    // Prefixed integer literals: binary (0b), octal (0o), hexadecimal (0x).
+    // LEX-15: an optional integer suffix (u/l/ul/lu) may follow the digits.
+    if(peek() == '0') {
+        const char next = peekNext();
+        int radix = 0;
         if(next == 'b' || next == 'B') {
-            // 二进制字面量
-            advance(); // 消耗 '0'
-            advance(); // 消耗 'b' 或 'B'
-            while(true){
-                const char ch = peek();
-                if(ch == '0' || ch == '1' || ch == '_') {
-                    advance();
-                } else {
-                    break;
-                }
-            }
-            const auto lexName = lexeme();
-            unsigned long long value = 0;
-            for(size_t i = 2; i < lexName.size(); i++) {
-                if(lexName[i] == '_') continue;
-                addDigit(value, 2, static_cast<unsigned>(lexName[i] - '0'));
-            }
-            return makeToken(TokenType::TOKEN_NUMBER, lexName, static_cast<int>(value));
+            radix = 2;
         } else if(next == 'o' || next == 'O') {
-            // 八进制字面量
-            advance(); // 消耗 '0'
-            advance(); // 消耗 'o' 或 'O'
-            while(true){
-                const char ch = peek();
-                if((ch >= '0' && ch <= '7') || ch == '_') {
-                    advance();
-                } else {
-                    break;
-                }
-            }
-            const auto lexName = lexeme();
-            unsigned long long value = 0;
-            for(size_t i = 2; i < lexName.size(); i++) {
-                if(lexName[i] == '_') continue;
-                addDigit(value, 8, static_cast<unsigned>(lexName[i] - '0'));
-            }
-            return makeToken(TokenType::TOKEN_NUMBER, lexName, static_cast<int>(value));
+            radix = 8;
         } else if(next == 'x' || next == 'X') {
-            // 十六进制字面量
+            radix = 16;
+        }
+
+        if(radix != 0) {
             advance(); // 消耗 '0'
-            advance(); // 消耗 'x' 或 'X'
-            while(true){
-                const char ch = peek();
-                if(std::isxdigit(ch) || ch == '_') {
-                    advance();
-                } else {
-                    break;
-                }
+            advance(); // 消耗前缀字母
+            while(isDigitForRadix(peek(), radix) || peek() == '_') {
+                advance();
             }
+            const LiteralKind kind = consumeIntegerSuffix();
             const auto lexName = lexeme();
+            validateDigitSeparators(lexName, radix);
+
             unsigned long long value = 0;
             for(size_t i = 2; i < lexName.size(); i++) {
                 const char c = lexName[i];
                 if(c == '_') continue;
-                unsigned digit = 0;
-                if(c >= '0' && c <= '9') digit = static_cast<unsigned>(c - '0');
-                else if(c >= 'a' && c <= 'f') digit = static_cast<unsigned>(c - 'a' + 10);
-                else if(c >= 'A' && c <= 'F') digit = static_cast<unsigned>(c - 'A' + 10);
-                addDigit(value, 16, digit);
+                if(!isDigitForRadix(c, radix)) break;
+                addDigit(value, radix, digitValue(c));
             }
-            return makeToken(TokenType::TOKEN_NUMBER, lexName, static_cast<int>(value));
+            Token token = makeToken(TokenType::TOKEN_NUMBER, lexName, static_cast<int>(value));
+            token.literalKind = kind;
+            return token;
         }
     }
 
     // 十进制整数或浮点数
-    while(true){
-        const char ch = peek();
-        if(std::isdigit(ch) || ch == '_') {
-            advance();
-        } else {
-            break;
-        }
+    while(isDigitForRadix(peek(), 10) || peek() == '_') {
+        advance();
     }
 
     bool isfloat = false;
-    if(peek() == '.' and std::isdigit(peekNext())) {
+    if(peek() == '.' and isDigitForRadix(peekNext(), 10)) {
         isfloat = true;
-        advance(); // consume the '.'
-        while(true){
-            const char ch = peek();
-            if(std::isdigit(ch) || ch == '_') {
-                advance();
-            } else {
-                break;
-            }
-        }
-    }
-
-    // Floating-point literal suffix (e.g. 3.14f, 2.0F, 1.5L).
-    if(isfloat) {
-        const char suffix = peek();
-        if(suffix == 'f' || suffix == 'F' || suffix == 'l' || suffix == 'L') {
+        advance(); // 小数点
+        while(isDigitForRadix(peek(), 10) || peek() == '_') {
             advance();
         }
     }
 
-    const auto lexName = lexeme();
     if(isfloat) {
+        // LEX-15: float suffix -> target type (f/F/f32 -> float32, f16/f64/f128,
+        // legacy l/L -> float64; unsuffixed default is float64).
+        const LiteralKind kind = consumeFloatSuffix();
+        const auto lexName = lexeme();
+        validateDigitSeparators(lexName, 10);
+
         std::string cleanStr;
         for(char c : lexName) {
             if(c == '_') continue;
-            if(c == 'f' || c == 'F' || c == 'l' || c == 'L') break;
-            cleanStr += c;
+            if(c == '.' || isDigitForRadix(c, 10)) {
+                cleanStr += c;
+                continue;
+            }
+            break; // suffix letters
         }
         double value = 0.0;
         try {
@@ -420,15 +472,25 @@ Token Lexer::scanNumber(){
             // out of the compiler (LEX-17 diagnostic is tracked separately).
             value = std::strtod(cleanStr.c_str(), nullptr);
         }
-        return makeToken(TokenType::TOKEN_FLOAT, lexName, value);
-    } else {
-        unsigned long long value = 0;
-        for(char c : lexName) {
-            if(c == '_') continue;
-            addDigit(value, 10, static_cast<unsigned>(c - '0'));
-        }
-        return makeToken(TokenType::TOKEN_NUMBER, lexName, static_cast<int>(value));
+        Token token = makeToken(TokenType::TOKEN_FLOAT, lexName, value);
+        token.literalKind = kind;
+        return token;
     }
+
+    // 十进制整型
+    const LiteralKind kind = consumeIntegerSuffix();
+    const auto lexName = lexeme();
+    validateDigitSeparators(lexName, 10);
+
+    unsigned long long value = 0;
+    for(char c : lexName) {
+        if(c == '_') continue;
+        if(!isDigitForRadix(c, 10)) break;
+        addDigit(value, 10, digitValue(c));
+    }
+    Token token = makeToken(TokenType::TOKEN_NUMBER, lexName, static_cast<int>(value));
+    token.literalKind = kind;
+    return token;
 }
 
 Token Lexer::scanString() {

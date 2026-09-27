@@ -46,6 +46,15 @@ private:
     Token scanNumber();
     Token scanString();
     Token scanChar();
+
+    // LEX-15 / LEX-17 numeric-literal helpers.
+    // Validate '_' separators: each must sit between two digits of `radix`
+    // (2/8/10/16); the first violation reports E0004 and scanning continues.
+    void validateDigitSeparators(const std::string& lexeme, int radix);
+    // Consume an optional integer suffix (u/U, l/L, ul/lu) and classify it.
+    LiteralKind consumeIntegerSuffix();
+    // Consume an optional float suffix (f/F, f16/f32/f64/f128, legacy l/L).
+    LiteralKind consumeFloatSuffix();
 private:
     std::string m_source;
     std::string m_filename;

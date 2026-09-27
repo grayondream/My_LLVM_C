@@ -136,6 +136,123 @@ TEST(LexerDiagnosticsTest, DiagnosticFormatCarriesCodeAndPosition) {
     EXPECT_NE(formatted.find("E0001"), std::string::npos);
 }
 
+// LEX-15: literal suffixes and the default/base type mapping.
+TEST(LexerNumberSuffixTest, UnsuffixedIntegersDefaultToInt) {
+    Lexer lexer("n.c", "42 2147483647");
+    auto tokens = lexer.tokenize();
+    ASSERT_EQ(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::TOKEN_NUMBER);
+    EXPECT_EQ(tokens[0].literalKind, LiteralKind::Int);
+    EXPECT_EQ(tokens[1].literalKind, LiteralKind::Int);
+}
+
+TEST(LexerNumberSuffixTest, UnsuffixedFloatDefaultsToFloat64) {
+    Lexer lexer("n.c", "3.14");
+    auto tokens = lexer.tokenize();
+    ASSERT_EQ(tokens.size(), 1u);
+    EXPECT_EQ(tokens[0].type, TokenType::TOKEN_FLOAT);
+    EXPECT_EQ(tokens[0].literalKind, LiteralKind::Float64);
+}
+
+TEST(LexerNumberSuffixTest, IntegerSuffixesAreRecognizedOnAllRadixes) {
+    Lexer lexer("n.c", "1u 1U 1l 1L 1ul 1UL 1lu 1LU 0xFFu 0b10L 0o7u");
+    auto tokens = lexer.tokenize();
+    ASSERT_EQ(tokens.size(), 11u);
+    EXPECT_EQ(tokens[0].literalKind, LiteralKind::UInt);
+    EXPECT_EQ(tokens[1].literalKind, LiteralKind::UInt);
+    EXPECT_EQ(tokens[2].literalKind, LiteralKind::Long);
+    EXPECT_EQ(tokens[3].literalKind, LiteralKind::Long);
+    EXPECT_EQ(tokens[4].literalKind, LiteralKind::ULong);
+    EXPECT_EQ(tokens[5].literalKind, LiteralKind::ULong);
+    EXPECT_EQ(tokens[6].literalKind, LiteralKind::ULong);
+    EXPECT_EQ(tokens[7].literalKind, LiteralKind::ULong);
+    EXPECT_EQ(tokens[8].literalKind, LiteralKind::UInt);
+    EXPECT_EQ(tokens[9].literalKind, LiteralKind::Long);
+    EXPECT_EQ(tokens[10].literalKind, LiteralKind::UInt);
+    EXPECT_EQ(std::get<int>(tokens[0].value), 1);
+}
+
+TEST(LexerNumberSuffixTest, FloatSuffixesMapToKinds) {
+    Lexer lexer("n.c", "3.14f 2.0F 3.5f16 4.5f32 5.5f64 6.5f128 1.5L 2.5l");
+    auto tokens = lexer.tokenize();
+    ASSERT_EQ(tokens.size(), 8u);
+    EXPECT_EQ(tokens[0].literalKind, LiteralKind::Float32);
+    EXPECT_EQ(tokens[1].literalKind, LiteralKind::Float32);
+    EXPECT_EQ(tokens[2].literalKind, LiteralKind::Float16);
+    EXPECT_EQ(tokens[3].literalKind, LiteralKind::Float32);
+    EXPECT_EQ(tokens[4].literalKind, LiteralKind::Float64);
+    EXPECT_EQ(tokens[5].literalKind, LiteralKind::Float128);
+    EXPECT_EQ(tokens[6].literalKind, LiteralKind::Float64);
+    EXPECT_EQ(tokens[7].literalKind, LiteralKind::Float64);
+    EXPECT_NEAR(std::get<double>(tokens[0].value), 3.14, 1e-9);
+}
+
+TEST(LexerNumberSuffixTest, LiteralKindNameMappingTable) {
+    EXPECT_STREQ(literalKindName(LiteralKind::Int), "int");
+    EXPECT_STREQ(literalKindName(LiteralKind::UInt), "uint32");
+    EXPECT_STREQ(literalKindName(LiteralKind::Long), "int64");
+    EXPECT_STREQ(literalKindName(LiteralKind::ULong), "uint64");
+    EXPECT_STREQ(literalKindName(LiteralKind::Float16), "float16");
+    EXPECT_STREQ(literalKindName(LiteralKind::Float32), "float32");
+    EXPECT_STREQ(literalKindName(LiteralKind::Float64), "float64");
+    EXPECT_STREQ(literalKindName(LiteralKind::Float128), "float128");
+}
+
+// LEX-17: a digit separator '_' is only valid between two digits.
+TEST(LexerSeparatorTest, ValidSeparatorsProduceNoDiagnostics) {
+    Lexer lexer("ok.c", "1_000 0xFF_FF 0b1010_1010 0o7_7 1_000.000_1");
+    auto tokens = lexer.tokenize();
+    EXPECT_TRUE(lexer.getDiagnostics().empty());
+    ASSERT_EQ(tokens.size(), 5u);
+}
+
+TEST(LexerSeparatorTest, ConsecutiveSeparatorsReportE0004) {
+    Lexer lexer("bad.c", "1__0");
+    lexer.tokenize();
+    const Diagnostic* d =
+        findDiag(lexer.getDiagnostics(), DiagnosticCode::LexInvalidDigitSeparator);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(diagnosticId(d->code), "E0004");
+    EXPECT_EQ(d->line, 1);
+    EXPECT_EQ(d->column, 2);
+}
+
+TEST(LexerSeparatorTest, TrailingSeparatorReportsE0004) {
+    Lexer lexer("bad.c", "0xFF_");
+    lexer.tokenize();
+    const Diagnostic* d =
+        findDiag(lexer.getDiagnostics(), DiagnosticCode::LexInvalidDigitSeparator);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->column, 5);
+}
+
+TEST(LexerSeparatorTest, SeparatorAfterPrefixReportsE0004) {
+    Lexer lexer("bad.c", "0x_FF");
+    lexer.tokenize();
+    const Diagnostic* d =
+        findDiag(lexer.getDiagnostics(), DiagnosticCode::LexInvalidDigitSeparator);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->column, 3);
+}
+
+TEST(LexerSeparatorTest, SeparatorBeforeFractionReportsE0004) {
+    Lexer lexer("bad.c", "1_.5");
+    lexer.tokenize();
+    const Diagnostic* d =
+        findDiag(lexer.getDiagnostics(), DiagnosticCode::LexInvalidDigitSeparator);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->column, 2);
+}
+
+TEST(LexerSeparatorTest, RecoveryKeepsNumberTokenAndRestOfStream) {
+    Lexer lexer("bad.c", "int x = 1__0; int y = 2;");
+    auto tokens = lexer.tokenize();
+    EXPECT_FALSE(lexer.getDiagnostics().empty());
+    ASSERT_EQ(tokens.size(), 10u);
+    EXPECT_EQ(tokens[3].type, TokenType::TOKEN_NUMBER);
+    EXPECT_EQ(std::get<int>(tokens[3].value), 10);
+}
+
 TEST(ClassKeywordTest, ClassTokenIsRecognized) {
     std::string source = "class Foo { int x; };";
     Lexer lexer("test.c", source);

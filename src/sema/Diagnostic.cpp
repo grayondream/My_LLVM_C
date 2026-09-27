@@ -8,6 +8,7 @@ const DiagnosticInfo kRegistry[] = {
     {DiagnosticCode::LexInvalidCharacter,       "E0001", "invalid character"},
     {DiagnosticCode::LexUnterminatedLiteral,     "E0002", "unterminated literal"},
     {DiagnosticCode::LexIntegerOverflow,         "E0003", "integer literal overflow"},
+    {DiagnosticCode::LexInvalidDigitSeparator,   "E0004", "misplaced digit separator"},
 
     {DiagnosticCode::SynUnexpectedToken,         "E1001", "unexpected token"},
     {DiagnosticCode::SynExpected,                "E1002", "expected token"},

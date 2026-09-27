@@ -37,22 +37,28 @@ identifier-continue = letter | digit | '_' ;
 (* [plan] LEX-18: 允许的 Unicode 范围、NFC 规范化、与关键字冲突处理 *)
 
 (* --- 整型字面量 LEX-04 / LEX-15 / LEX-17 --- *)
+(* 分隔符 '_' 只能出现在两个数字之间；前导、结尾、连续、紧邻进制前缀均非法（E0004）。*)
 integer-literal     = decimal-literal
                     | hex-literal
                     | binary-literal
                     | octal-literal ;
-decimal-literal     = digit , { digit | '_' } ;
-hex-literal         = '0x' , hex-digit , { hex-digit | '_' } ;
-binary-literal      = '0b' , bin-digit , { bin-digit | '_' } ;
-octal-literal       = '0o' , oct-digit , { oct-digit | '_' } ;      (* [plan] 前缀/分隔符规则见 LEX-17 *)
-integer-suffix      = [ 'u' | 'l' | 'ul' | 'lu' ] ;                 (* [plan] 后缀 → 类型映射见 LEX-15 *)
+decimal-literal     = decimal-digits ;
+decimal-digits      = decimal-digit , { [ '_' ] , decimal-digit } ;
+hex-literal         = '0' , ( 'x' | 'X' ) , hex-digits ;
+hex-digits          = hex-digit , { [ '_' ] , hex-digit } ;
+binary-literal      = '0' , ( 'b' | 'B' ) , binary-digits ;
+binary-digits       = binary-digit , { [ '_' ] , binary-digit } ;
+octal-literal       = '0' , ( 'o' | 'O' ) , octal-digits ;
+octal-digits        = octal-digit , { [ '_' ] , octal-digit } ;
+integer-suffix      = [ 'u' | 'l' | 'ul' | 'lu' ] ;
+(* [impl] LEX-15 后缀 → 基础类型：无→int；u→uint32；l→int64；ul/lu→uint64（大小写不敏感）*)
 
 (* --- 浮点字面量 LEX-05 / TYP-04 --- *)
-float-literal       = decimal-literal , '.' , [ decimal-literal ] , [ exponent ] , [ float-suffix ]
-                    | decimal-literal , exponent , [ float-suffix ] ;
-exponent            = ( 'e' | 'E' ) , [ '+' | '-' ] , decimal-literal ;
-float-suffix        = 'f16' | 'f32' | 'f64' | 'f128' ;
-(* [plan] f16/f32/f64/f128 为后缀；目标类型 f16/f32/f64/f128，见 LEX-15/TYP-04 *)
+float-literal       = decimal-digits , '.' , [ decimal-digits ] , [ exponent ] , [ float-suffix ]
+                    | decimal-digits , exponent , [ float-suffix ] ;
+exponent            = ( 'e' | 'E' ) , [ '+' | '-' ] , decimal-digits ;
+float-suffix        = 'f' | 'f16' | 'f32' | 'f64' | 'f128' | 'l' ;
+(* [impl] LEX-15 后缀 → 基础类型：无→float64；f/f32→float32；f64→float64；f16/f128→对应类型；l 为 float64 旧写法 *)
 
 (* --- 字符/字符串字面量 LEX-06 / LEX-16 --- *)
 char-literal        = "'" , ( char-char | escape-sequence ) , "'" ;

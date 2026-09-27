@@ -11,6 +11,7 @@ enum class DiagnosticCode {
     LexInvalidCharacter,
     LexUnterminatedLiteral,
     LexIntegerOverflow,
+    LexInvalidDigitSeparator,
 
     SynUnexpectedToken,
     SynExpected,

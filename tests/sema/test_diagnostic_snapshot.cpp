@@ -130,6 +130,12 @@ int f() { return 0; @ }
 )"));
 }
 
+TEST_F(DiagnosticSnapshotTest, LexicalDigitSeparator) {
+    expectSnapshot("lexical_digit_separator", analyzeDiagnostics(R"(
+int f() { return 1__0; }
+)"));
+}
+
 TEST_F(DiagnosticSnapshotTest, BranchInitializationIsPathSensitive) {
     // Assigned on both branches -> no warning; only one branch -> join loses it.
     expectSnapshot("uninitialized_branch", analyzeDiagnostics(R"(
