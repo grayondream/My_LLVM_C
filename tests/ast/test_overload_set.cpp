@@ -22,7 +22,7 @@ protected:
 
 TEST_F(OverloadSetTest, AddSingleSymbol) {
     OverloadSet overloadSet;
-    Symbol sym("add", new FunctionType(typeCtx->getInt(), {typeCtx->getInt(), typeCtx->getInt()}));
+    Symbol sym("add", new FunctionType(typeCtx->getInt32(), {typeCtx->getInt32(), typeCtx->getInt32()}));
     
     overloadSet.add(&sym);
     
@@ -32,8 +32,8 @@ TEST_F(OverloadSetTest, AddSingleSymbol) {
 
 TEST_F(OverloadSetTest, AddMultipleSymbols) {
     OverloadSet overloadSet;
-    Symbol sym1("add", new FunctionType(typeCtx->getInt(), {typeCtx->getInt(), typeCtx->getInt()}));
-    Symbol sym2("add", new FunctionType(typeCtx->getFloat(), {typeCtx->getFloat(), typeCtx->getFloat()}));
+    Symbol sym1("add", new FunctionType(typeCtx->getInt32(), {typeCtx->getInt32(), typeCtx->getInt32()}));
+    Symbol sym2("add", new FunctionType(typeCtx->getFloat32(), {typeCtx->getFloat32(), typeCtx->getFloat32()}));
     
     overloadSet.add(&sym1);
     overloadSet.add(&sym2);
@@ -43,45 +43,45 @@ TEST_F(OverloadSetTest, AddMultipleSymbols) {
 
 TEST_F(OverloadSetTest, ResolveExactMatch) {
     OverloadSet overloadSet;
-    Symbol sym1("add", new FunctionType(typeCtx->getInt(), {typeCtx->getInt(), typeCtx->getInt()}));
-    Symbol sym2("add", new FunctionType(typeCtx->getFloat(), {typeCtx->getFloat(), typeCtx->getFloat()}));
+    Symbol sym1("add", new FunctionType(typeCtx->getInt32(), {typeCtx->getInt32(), typeCtx->getInt32()}));
+    Symbol sym2("add", new FunctionType(typeCtx->getFloat32(), {typeCtx->getFloat32(), typeCtx->getFloat32()}));
     
     overloadSet.add(&sym1);
     overloadSet.add(&sym2);
     
-    Symbol* resolved = overloadSet.resolve({typeCtx->getInt(), typeCtx->getInt()});
+    Symbol* resolved = overloadSet.resolve({typeCtx->getInt32(), typeCtx->getInt32()});
     EXPECT_EQ(resolved, &sym1);
     
-    resolved = overloadSet.resolve({typeCtx->getFloat(), typeCtx->getFloat()});
+    resolved = overloadSet.resolve({typeCtx->getFloat32(), typeCtx->getFloat32()});
     EXPECT_EQ(resolved, &sym2);
 }
 
 TEST_F(OverloadSetTest, ResolveNoMatch) {
     OverloadSet overloadSet;
-    Symbol sym1("add", new FunctionType(typeCtx->getInt(), {typeCtx->getInt(), typeCtx->getInt()}));
+    Symbol sym1("add", new FunctionType(typeCtx->getInt32(), {typeCtx->getInt32(), typeCtx->getInt32()}));
     
     overloadSet.add(&sym1);
     
-    Symbol* resolved = overloadSet.resolve({typeCtx->getDouble(), typeCtx->getDouble()});
+    Symbol* resolved = overloadSet.resolve({typeCtx->getFloat64(), typeCtx->getFloat64()});
     EXPECT_EQ(resolved, nullptr);
 }
 
 TEST_F(OverloadSetTest, ResolveAmbiguous) {
     OverloadSet overloadSet;
-    Symbol sym1("add", new FunctionType(typeCtx->getInt(), {typeCtx->getInt(), typeCtx->getInt()}));
-    Symbol sym2("add", new FunctionType(typeCtx->getInt(), {typeCtx->getInt(), typeCtx->getInt()}));
+    Symbol sym1("add", new FunctionType(typeCtx->getInt32(), {typeCtx->getInt32(), typeCtx->getInt32()}));
+    Symbol sym2("add", new FunctionType(typeCtx->getInt32(), {typeCtx->getInt32(), typeCtx->getInt32()}));
     
     overloadSet.add(&sym1);
     overloadSet.add(&sym2);
     
-    Symbol* resolved = overloadSet.resolve({typeCtx->getInt(), typeCtx->getInt()});
+    Symbol* resolved = overloadSet.resolve({typeCtx->getInt32(), typeCtx->getInt32()});
     EXPECT_EQ(resolved, nullptr);
 }
 
 TEST_F(OverloadSetTest, GetCandidates) {
     OverloadSet overloadSet;
-    Symbol sym1("add", new FunctionType(typeCtx->getInt(), {typeCtx->getInt(), typeCtx->getInt()}));
-    Symbol sym2("add", new FunctionType(typeCtx->getFloat(), {typeCtx->getFloat(), typeCtx->getFloat()}));
+    Symbol sym1("add", new FunctionType(typeCtx->getInt32(), {typeCtx->getInt32(), typeCtx->getInt32()}));
+    Symbol sym2("add", new FunctionType(typeCtx->getFloat32(), {typeCtx->getFloat32(), typeCtx->getFloat32()}));
     
     overloadSet.add(&sym1);
     overloadSet.add(&sym2);
@@ -99,14 +99,14 @@ TEST_F(OverloadSetTest, EmptyOverloadSet) {
     EXPECT_EQ(overloadSet.size(), 0u);
     EXPECT_EQ(overloadSet.getCandidates().size(), 0u);
     
-    Symbol* resolved = overloadSet.resolve({typeCtx->getInt()});
+    Symbol* resolved = overloadSet.resolve({typeCtx->getInt32()});
     EXPECT_EQ(resolved, nullptr);
 }
 
 TEST_F(ScopeTest, LookupOverload) {
     Scope scope(nullptr);
-    Symbol sym1("add", new FunctionType(typeCtx->getInt(), {typeCtx->getInt(), typeCtx->getInt()}));
-    Symbol sym2("add", new FunctionType(typeCtx->getFloat(), {typeCtx->getFloat(), typeCtx->getFloat()}));
+    Symbol sym1("add", new FunctionType(typeCtx->getInt32(), {typeCtx->getInt32(), typeCtx->getInt32()}));
+    Symbol sym2("add", new FunctionType(typeCtx->getFloat32(), {typeCtx->getFloat32(), typeCtx->getFloat32()}));
     
     scope.declare("add", &sym1);
     scope.declare("add", &sym2);
@@ -118,8 +118,8 @@ TEST_F(ScopeTest, LookupOverload) {
 
 TEST_F(ScopeTest, DeclareRejectsDuplicateSignature) {
     Scope scope(nullptr);
-    Symbol sym1("add", new FunctionType(typeCtx->getInt(), {typeCtx->getInt(), typeCtx->getInt()}));
-    Symbol sym2("add", new FunctionType(typeCtx->getInt(), {typeCtx->getInt(), typeCtx->getInt()}));
+    Symbol sym1("add", new FunctionType(typeCtx->getInt32(), {typeCtx->getInt32(), typeCtx->getInt32()}));
+    Symbol sym2("add", new FunctionType(typeCtx->getInt32(), {typeCtx->getInt32(), typeCtx->getInt32()}));
     
     EXPECT_TRUE(scope.declare("add", &sym1));
     EXPECT_FALSE(scope.declare("add", &sym2));
@@ -128,8 +128,8 @@ TEST_F(ScopeTest, DeclareRejectsDuplicateSignature) {
 
 TEST_F(ScopeTest, LookupReturnsFirstCandidate) {
     Scope scope(nullptr);
-    Symbol sym1("add", new FunctionType(typeCtx->getInt(), {typeCtx->getInt(), typeCtx->getInt()}));
-    Symbol sym2("add", new FunctionType(typeCtx->getFloat(), {typeCtx->getFloat(), typeCtx->getFloat()}));
+    Symbol sym1("add", new FunctionType(typeCtx->getInt32(), {typeCtx->getInt32(), typeCtx->getInt32()}));
+    Symbol sym2("add", new FunctionType(typeCtx->getFloat32(), {typeCtx->getFloat32(), typeCtx->getFloat32()}));
     
     scope.declare("add", &sym1);
     scope.declare("add", &sym2);

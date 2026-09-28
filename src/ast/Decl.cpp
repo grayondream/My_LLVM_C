@@ -9,9 +9,9 @@
 static llvm::Constant* foldToConstant(CodegenContext& ctx, const FoldedValue& fv) {
     switch (fv.type) {
         case FoldedValue::INT:
-            return llvm::ConstantInt::get(ctx.getLLVMType(new Type(TypeKind::Int)), fv.intVal);
+            return llvm::ConstantInt::get(ctx.getLLVMType(new Type(TypeKind::Int32)), fv.intVal);
         case FoldedValue::DOUBLE:
-            return llvm::ConstantFP::get(ctx.getLLVMType(new Type(TypeKind::Double)), fv.doubleVal);
+            return llvm::ConstantFP::get(ctx.getLLVMType(new Type(TypeKind::Float64)), fv.doubleVal);
         case FoldedValue::CHAR:
             return llvm::ConstantInt::get(ctx.getLLVMType(new Type(TypeKind::Char)), fv.charVal);
         default:

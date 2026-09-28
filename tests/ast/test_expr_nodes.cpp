@@ -56,9 +56,9 @@ TEST_F(ExprNodeTest, TernaryExprAST) {
 
 TEST_F(ExprNodeTest, CastExprAST) {
     auto expr = std::make_unique<NumberExprAST>(42);
-    auto cast = std::make_unique<CastExprAST>(typeCtx->getFloat(), std::move(expr));
+    auto cast = std::make_unique<CastExprAST>(typeCtx->getFloat32(), std::move(expr));
 
-    EXPECT_EQ(cast->castType->kind, TypeKind::Float);
+    EXPECT_EQ(cast->castType->kind, TypeKind::Float32);
     EXPECT_NE(cast->expr, nullptr);
 }
 
@@ -102,8 +102,8 @@ TEST_F(ExprNodeTest, MemberAccessExprAST) {
 }
 
 TEST_F(ExprNodeTest, SizeofExprAST) {
-    auto sizeofType = std::make_unique<SizeofExprAST>(typeCtx->getInt());
-    EXPECT_EQ(sizeofType->sizeofType->kind, TypeKind::Int);
+    auto sizeofType = std::make_unique<SizeofExprAST>(typeCtx->getInt32());
+    EXPECT_EQ(sizeofType->sizeofType->kind, TypeKind::Int32);
     EXPECT_EQ(sizeofType->expr, nullptr);
 
     auto sizeofExpr = std::make_unique<SizeofExprAST>(

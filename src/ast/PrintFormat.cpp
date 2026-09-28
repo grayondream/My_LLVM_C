@@ -83,7 +83,6 @@ bool builtinPrintKind(Type* type, PrintArgKind& outKind) {
     switch (type->kind) {
         case TypeKind::Bool:    outKind = PrintArgKind::Bool;    return true;
         case TypeKind::Char:    outKind = PrintArgKind::Char;    return true;
-        case TypeKind::Int:
         case TypeKind::Int8:
         case TypeKind::Int16:
         case TypeKind::Int32:   outKind = PrintArgKind::Int32;   return true;
@@ -94,10 +93,8 @@ bool builtinPrintKind(Type* type, PrintArgKind& outKind) {
         case TypeKind::UInt32:  outKind = PrintArgKind::UInt32;  return true;
         case TypeKind::UInt64:
         case TypeKind::USize:   outKind = PrintArgKind::UInt64;  return true;
-        case TypeKind::Float:
         case TypeKind::Float32:
-        case TypeKind::Float64:
-        case TypeKind::Double:  outKind = PrintArgKind::Float;   return true;
+        case TypeKind::Float64: outKind = PrintArgKind::Float;   return true;
         case TypeKind::Enum:    outKind = PrintArgKind::Int32;   return true;
         case TypeKind::Pointer:
             outKind = (type->base && type->base->kind == TypeKind::Char)

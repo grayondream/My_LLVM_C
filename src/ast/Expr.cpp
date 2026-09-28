@@ -44,7 +44,6 @@ static llvm::Value* promoteVarArg(CodegenContext& ctx, llvm::Value* v, Type* t) 
             auto* et = static_cast<EnumType*>(t);
             return et->underlyingType ? promoteVarArg(ctx, v, et->underlyingType) : v;
         }
-        case TypeKind::Float:
         case TypeKind::Float32:
             return ctx.castValue(v, llvm::Type::getDoubleTy(c));
         default:

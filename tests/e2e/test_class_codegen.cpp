@@ -103,7 +103,7 @@ TEST_F(ClassCodegenE2E, SimpleClass) {
         
         int32 main() {
             Foo f;
-            f.setX((int32)42);
+            f.setX(42);
             return f.getX() - 42;
         }
     )", "test_class_simple.c"), 0);
@@ -145,8 +145,8 @@ TEST_F(ClassCodegenE2E, ClassWithInheritance) {
         
         int32 main() {
             Derived d;
-            d.setX((int32)10);
-            d.setY((int32)20);
+            d.setX(10);
+            d.setY(20);
             return d.getX() + d.getY() - 30;
         }
     )", "test_class_inherit.c"), 0);
@@ -162,7 +162,7 @@ TEST_F(ClassCodegenE2E, ClassMethodCallFromMain) {
         
         int32 main() {
             Math m;
-            m.setValue((int32)21);
+            m.setValue(21);
             return m.doubleIt() - 42;
         }
     )", "test_class_method_call.c"), 0);

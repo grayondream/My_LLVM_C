@@ -204,7 +204,7 @@ std::string SemanticAnalyzer::resolveNamespaceName(const std::string& name) cons
 bool SemanticAnalyzer::isIntegerType(Type* type) const {
     type = stripTypedef(type);
     if (!type) return false;
-    return type->kind == TypeKind::Int || type->kind == TypeKind::Char || type->kind == TypeKind::Enum ||
+    return type->kind == TypeKind::Char || type->kind == TypeKind::Enum ||
            type->kind == TypeKind::Bool ||
            type->kind == TypeKind::Int8 || type->kind == TypeKind::Int16 ||
            type->kind == TypeKind::Int32 || type->kind == TypeKind::Int64 || type->kind == TypeKind::Int128 ||
@@ -216,8 +216,8 @@ bool SemanticAnalyzer::isIntegerType(Type* type) const {
 bool SemanticAnalyzer::isFloatType(Type* type) const {
     type = stripTypedef(type);
     if (!type) return false;
-    return type->kind == TypeKind::Float || type->kind == TypeKind::Double ||
-           type->kind == TypeKind::Float32 || type->kind == TypeKind::Float64;
+    return type->kind == TypeKind::Float32 || type->kind == TypeKind::Float64 ||
+           type->kind == TypeKind::Float16 || type->kind == TypeKind::Float128;
 }
 
 bool SemanticAnalyzer::isArithmeticType(Type* type) const {
@@ -247,8 +247,8 @@ bool SemanticAnalyzer::typesCompatible(Type* left, Type* right) const {
     if (left->kind == right->kind) return true;
     if (isArithmeticType(left) && isArithmeticType(right)) return true;
     if (left->kind == TypeKind::Pointer && right->kind == TypeKind::Pointer) return true;
-    if (left->kind == TypeKind::Pointer && right->kind == TypeKind::Int) return true;
-    if (left->kind == TypeKind::Int && right->kind == TypeKind::Pointer) return true;
+    if (left->kind == TypeKind::Pointer && right->kind == TypeKind::Int32) return true;
+    if (left->kind == TypeKind::Int32 && right->kind == TypeKind::Pointer) return true;
     // Arrays decay to a pointer to their first element.
     if (left->kind == TypeKind::Pointer && right->kind == TypeKind::Array) return true;
     if (left->kind == TypeKind::Array && right->kind == TypeKind::Pointer) return true;
@@ -272,9 +272,6 @@ std::string SemanticAnalyzer::typeToString(Type* type) const {
     if (!type) return "<unknown>";
     switch (type->kind) {
         case TypeKind::Void: return "void";
-        case TypeKind::Int: return "int";
-        case TypeKind::Float: return "float";
-        case TypeKind::Double: return "double";
         case TypeKind::Char: return "char";
         case TypeKind::Bool: return "bool";
         case TypeKind::Int8: return "int8";
@@ -405,18 +402,18 @@ Type* SemanticAnalyzer::checkBinaryTypes(BinaryOp op, Type* left, Type* right, E
             // comparable even though enum <-> integer is not implicitly
             // *assignable* (TYP-20). Pointers compare against pointers/integers.
             if (isArithmeticType(left) && isArithmeticType(right)) {
-                return typeCtx->getInt();
+                return typeCtx->getInt32();
             }
             if (!typesCompatible(left, right)) {
                 emitError("comparison of incompatible types: '" + typeToString(left) + "' and '" 
                     + typeToString(right) + "' with '" + binaryOpToString(op) + "'", node);
                 return nullptr;
             }
-            return typeCtx->getInt();
+            return typeCtx->getInt32();
 
         case BinaryOp::And:
         case BinaryOp::Or:
-            return typeCtx->getInt();
+            return typeCtx->getInt32();
 
         case BinaryOp::BitAnd:
         case BinaryOp::BitOr:
@@ -822,12 +819,12 @@ SemanticAnalyzer::evalConstexprStmt(StmtAST* stmt, ConstEnv& env, int depth) {
 }
 
 void SemanticAnalyzer::visit(NumberExprAST& node) {
-    node.type = typeCtx->getInt();
+    node.type = typeCtx->getInt32();
     node.isLValue = false;
 }
 
 void SemanticAnalyzer::visit(FloatExprAST& node) {
-    node.type = typeCtx->getFloat();
+    node.type = typeCtx->getFloat32();
     node.isLValue = false;
 }
 
@@ -951,7 +948,7 @@ void SemanticAnalyzer::visit(UnaryExprAST& node) {
             }
             break;
         case UnaryOp::Not:
-            node.type = typeCtx->getInt();
+            node.type = typeCtx->getInt32();
             break;
         case UnaryOp::BitNot:
             if (!isIntegerType(operandType)) {
@@ -987,7 +984,7 @@ void SemanticAnalyzer::visit(UnaryExprAST& node) {
             }
             break;
         case UnaryOp::Sizeof:
-            node.type = typeCtx->getInt();
+            node.type = typeCtx->getInt32();
             break;
     }
     // A dereference denotes the pointee and is therefore an lvalue.
@@ -1434,7 +1431,7 @@ void SemanticAnalyzer::visit(SizeofExprAST& node) {
             emitError("invalid operand to sizeof", node);
         }
     }
-    node.type = typeCtx->getInt();
+    node.type = typeCtx->getInt32();
     node.isLValue = false;
 }
 
@@ -1442,7 +1439,7 @@ void SemanticAnalyzer::visit(InitializerListExprAST& node) {
     if (!node.initializers.empty()) {
         node.type = getExprType(*node.initializers[0]);
     } else {
-        node.type = typeCtx->getInt();
+        node.type = typeCtx->getInt32();
     }
     node.isLValue = false;
 }

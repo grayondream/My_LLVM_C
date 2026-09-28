@@ -20,7 +20,7 @@ protected:
 
 TEST_F(SemanticAnalyzerTest, ValidProgramPasses) {
     std::vector<std::unique_ptr<DeclAST>> decls;
-    decls.push_back(std::make_unique<VarDeclAST>("x", typeCtx->getInt()));
+    decls.push_back(std::make_unique<VarDeclAST>("x", typeCtx->getInt32()));
     TranslationUnitAST tu(std::move(decls));
     analyzer->analyze(tu);
     EXPECT_TRUE(analyzer->getErrors().empty());
@@ -52,7 +52,7 @@ TEST_F(SemanticAnalyzerTest, TypeMismatchDetected) {
     auto body = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
 
     std::vector<std::unique_ptr<ParamDeclAST>> params;
-    params.push_back(std::make_unique<ParamDeclAST>("x", typeCtx->getInt()));
+    params.push_back(std::make_unique<ParamDeclAST>("x", typeCtx->getInt32()));
 
     std::vector<std::unique_ptr<DeclAST>> decls;
     decls.push_back(std::make_unique<FunctionDeclAST>(
@@ -73,12 +73,12 @@ TEST_F(SemanticAnalyzerTest, FunctionCallArgumentMismatch) {
     auto body = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
 
     std::vector<std::unique_ptr<ParamDeclAST>> params;
-    params.push_back(std::make_unique<ParamDeclAST>("a", typeCtx->getInt()));
-    params.push_back(std::make_unique<ParamDeclAST>("b", typeCtx->getInt()));
+    params.push_back(std::make_unique<ParamDeclAST>("a", typeCtx->getInt32()));
+    params.push_back(std::make_unique<ParamDeclAST>("b", typeCtx->getInt32()));
 
     std::vector<std::unique_ptr<DeclAST>> decls;
     decls.push_back(std::make_unique<FunctionDeclAST>(
-        "add", typeCtx->getInt(), params, body));
+        "add", typeCtx->getInt32(), params, body));
     TranslationUnitAST tu(std::move(decls));
     analyzer->analyze(tu);
     EXPECT_FALSE(analyzer->getErrors().empty());
@@ -97,12 +97,12 @@ TEST_F(SemanticAnalyzerTest, ValidFunctionCall) {
     auto body = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
 
     std::vector<std::unique_ptr<ParamDeclAST>> params;
-    params.push_back(std::make_unique<ParamDeclAST>("a", typeCtx->getInt()));
-    params.push_back(std::make_unique<ParamDeclAST>("b", typeCtx->getInt()));
+    params.push_back(std::make_unique<ParamDeclAST>("a", typeCtx->getInt32()));
+    params.push_back(std::make_unique<ParamDeclAST>("b", typeCtx->getInt32()));
 
     std::vector<std::unique_ptr<DeclAST>> decls;
     decls.push_back(std::make_unique<FunctionDeclAST>(
-        "add", typeCtx->getInt(), params, body));
+        "add", typeCtx->getInt32(), params, body));
     TranslationUnitAST tu(std::move(decls));
     analyzer->analyze(tu);
     EXPECT_TRUE(analyzer->getErrors().empty());
@@ -116,7 +116,7 @@ TEST_F(SemanticAnalyzerTest, ScopeNestingWorks) {
 
     std::vector<std::unique_ptr<StmtAST>> outerStmts;
     outerStmts.push_back(std::make_unique<DeclStmtAST>(
-        std::make_unique<VarDeclAST>("x", typeCtx->getInt())));
+        std::make_unique<VarDeclAST>("x", typeCtx->getInt32())));
     outerStmts.push_back(std::move(innerBody));
     auto outerBody = std::make_unique<CompoundStmtAST>(std::move(outerStmts));
 
@@ -132,9 +132,9 @@ TEST_F(SemanticAnalyzerTest, ScopeNestingWorks) {
 TEST_F(SemanticAnalyzerTest, RedefinitionDetected) {
     std::vector<std::unique_ptr<StmtAST>> stmts;
     stmts.push_back(std::make_unique<DeclStmtAST>(
-        std::make_unique<VarDeclAST>("x", typeCtx->getInt())));
+        std::make_unique<VarDeclAST>("x", typeCtx->getInt32())));
     stmts.push_back(std::make_unique<DeclStmtAST>(
-        std::make_unique<VarDeclAST>("x", typeCtx->getInt())));
+        std::make_unique<VarDeclAST>("x", typeCtx->getInt32())));
     auto body = std::make_unique<CompoundStmtAST>(std::move(stmts));
 
     std::vector<std::unique_ptr<ParamDeclAST>> params;
@@ -195,7 +195,7 @@ TEST_F(SemanticAnalyzerTest, AssignmentTypeMismatchErrorMessageIncludesTypes) {
     auto body = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
 
     std::vector<std::unique_ptr<ParamDeclAST>> params;
-    params.push_back(std::make_unique<ParamDeclAST>("x", typeCtx->getInt()));
+    params.push_back(std::make_unique<ParamDeclAST>("x", typeCtx->getInt32()));
 
     std::vector<std::unique_ptr<DeclAST>> decls;
     decls.push_back(std::make_unique<FunctionDeclAST>(
@@ -232,7 +232,7 @@ TEST_F(SemanticAnalyzerTest, ReturnTypeErrorIncludesTypes) {
     std::vector<std::unique_ptr<ParamDeclAST>> params;
     std::vector<std::unique_ptr<DeclAST>> decls;
     decls.push_back(std::make_unique<FunctionDeclAST>(
-        "foo", typeCtx->getFloat(), params, body));
+        "foo", typeCtx->getFloat32(), params, body));
     TranslationUnitAST tu(std::move(decls));
     analyzer->analyze(tu);
     ASSERT_FALSE(analyzer->getErrors().empty());
@@ -287,12 +287,12 @@ TEST_F(SemanticAnalyzerTest, WrongNumberOfArgumentsErrorMessage) {
     auto body = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
 
     std::vector<std::unique_ptr<ParamDeclAST>> params;
-    params.push_back(std::make_unique<ParamDeclAST>("a", typeCtx->getInt()));
-    params.push_back(std::make_unique<ParamDeclAST>("b", typeCtx->getInt()));
+    params.push_back(std::make_unique<ParamDeclAST>("a", typeCtx->getInt32()));
+    params.push_back(std::make_unique<ParamDeclAST>("b", typeCtx->getInt32()));
 
     std::vector<std::unique_ptr<DeclAST>> decls;
     decls.push_back(std::make_unique<FunctionDeclAST>(
-        "add", typeCtx->getInt(), params, body));
+        "add", typeCtx->getInt32(), params, body));
     TranslationUnitAST tu(std::move(decls));
     analyzer->analyze(tu);
     ASSERT_FALSE(analyzer->getErrors().empty());
@@ -302,9 +302,9 @@ TEST_F(SemanticAnalyzerTest, WrongNumberOfArgumentsErrorMessage) {
 TEST_F(SemanticAnalyzerTest, RedeclarationErrorMessage) {
     std::vector<std::unique_ptr<StmtAST>> stmts;
     stmts.push_back(std::make_unique<DeclStmtAST>(
-        std::make_unique<VarDeclAST>("x", typeCtx->getInt())));
+        std::make_unique<VarDeclAST>("x", typeCtx->getInt32())));
     stmts.push_back(std::make_unique<DeclStmtAST>(
-        std::make_unique<VarDeclAST>("x", typeCtx->getFloat())));
+        std::make_unique<VarDeclAST>("x", typeCtx->getFloat32())));
     auto body = std::make_unique<CompoundStmtAST>(std::move(stmts));
 
     std::vector<std::unique_ptr<ParamDeclAST>> params;
@@ -326,7 +326,7 @@ TEST_F(SemanticAnalyzerTest, NonVoidFunctionMustReturnValueErrorMessage) {
     std::vector<std::unique_ptr<ParamDeclAST>> params;
     std::vector<std::unique_ptr<DeclAST>> decls;
     decls.push_back(std::make_unique<FunctionDeclAST>(
-        "foo", typeCtx->getInt(), params, body));
+        "foo", typeCtx->getInt32(), params, body));
     TranslationUnitAST tu(std::move(decls));
     analyzer->analyze(tu);
     ASSERT_FALSE(analyzer->getErrors().empty());
@@ -336,7 +336,7 @@ TEST_F(SemanticAnalyzerTest, NonVoidFunctionMustReturnValueErrorMessage) {
 TEST_F(SemanticAnalyzerTest, CastWarningFormat) {
     // Cast from int to float should produce a warning
     auto castExpr = std::make_unique<CastExprAST>(
-        typeCtx->getFloat(), std::make_unique<NumberExprAST>(42));
+        typeCtx->getFloat32(), std::make_unique<NumberExprAST>(42));
 
     std::vector<std::unique_ptr<StmtAST>> bodyStmts;
     bodyStmts.push_back(std::make_unique<ExprStmtAST>(std::move(castExpr)));
@@ -382,7 +382,7 @@ TEST_F(SemanticAnalyzerTest, AssignmentErrorMessageContainsBothTypes) {
     auto body = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
 
     std::vector<std::unique_ptr<ParamDeclAST>> params;
-    params.push_back(std::make_unique<ParamDeclAST>("x", typeCtx->getInt()));
+    params.push_back(std::make_unique<ParamDeclAST>("x", typeCtx->getInt32()));
 
     std::vector<std::unique_ptr<DeclAST>> decls;
     decls.push_back(std::make_unique<FunctionDeclAST>(
@@ -403,7 +403,7 @@ TEST_F(SemanticAnalyzerTest, ReturnTypeErrorContainsFunctionName) {
     std::vector<std::unique_ptr<ParamDeclAST>> params;
     std::vector<std::unique_ptr<DeclAST>> decls;
     decls.push_back(std::make_unique<FunctionDeclAST>(
-        "myFunc", typeCtx->getFloat(), params, body));
+        "myFunc", typeCtx->getFloat32(), params, body));
     TranslationUnitAST tu(std::move(decls));
     analyzer->analyze(tu);
     ASSERT_FALSE(analyzer->getErrors().empty());
@@ -411,7 +411,7 @@ TEST_F(SemanticAnalyzerTest, ReturnTypeErrorContainsFunctionName) {
 }
 
 TEST_F(SemanticAnalyzerTest, ConstAssignmentError) {
-    auto constIntType = new Type(TypeKind::Int);
+    auto constIntType = new Type(TypeKind::Int32);
     constIntType->isConst = true;
 
     std::vector<std::unique_ptr<StmtAST>> bodyStmts;
@@ -436,7 +436,7 @@ TEST_F(SemanticAnalyzerTest, ConstAssignmentError) {
 
 TEST_F(SemanticAnalyzerTest, ConstexprMustHaveInitializer) {
     std::vector<std::unique_ptr<DeclAST>> decls;
-    decls.push_back(std::make_unique<VarDeclAST>("x", typeCtx->getInt(), nullptr, true));
+    decls.push_back(std::make_unique<VarDeclAST>("x", typeCtx->getInt32(), nullptr, true));
     TranslationUnitAST tu(std::move(decls));
     analyzer->analyze(tu);
     EXPECT_FALSE(analyzer->getErrors().empty());
@@ -454,7 +454,7 @@ TEST_F(SemanticAnalyzerTest, ConstexprConstantFolding) {
             std::make_unique<NumberExprAST>(4)));
 
     std::vector<std::unique_ptr<DeclAST>> decls;
-    decls.push_back(std::make_unique<VarDeclAST>("x", typeCtx->getInt(), std::move(initExpr), true));
+    decls.push_back(std::make_unique<VarDeclAST>("x", typeCtx->getInt32(), std::move(initExpr), true));
     TranslationUnitAST tu(std::move(decls));
     analyzer->analyze(tu);
     EXPECT_TRUE(analyzer->getErrors().empty());
@@ -467,9 +467,9 @@ TEST_F(SemanticAnalyzerTest, ConstexprConstantFolding) {
 TEST_F(SemanticAnalyzerTest, ConstexprNonConstantError) {
     std::vector<std::unique_ptr<StmtAST>> bodyStmts;
     bodyStmts.push_back(std::make_unique<DeclStmtAST>(
-        std::make_unique<VarDeclAST>("y", typeCtx->getInt())));
+        std::make_unique<VarDeclAST>("y", typeCtx->getInt32())));
     bodyStmts.push_back(std::make_unique<DeclStmtAST>(
-        std::make_unique<VarDeclAST>("x", typeCtx->getInt(),
+        std::make_unique<VarDeclAST>("x", typeCtx->getInt32(),
             std::make_unique<VariableExprAST>("y"), true)));
     auto body = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
 
@@ -495,11 +495,11 @@ TEST_F(SemanticAnalyzerTest, ConstexprFunctionWithValidSignature) {
     auto body = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
 
     std::vector<std::unique_ptr<ParamDeclAST>> params;
-    params.push_back(std::make_unique<ParamDeclAST>("x", typeCtx->getInt()));
+    params.push_back(std::make_unique<ParamDeclAST>("x", typeCtx->getInt32()));
 
     std::vector<std::unique_ptr<DeclAST>> decls;
     decls.push_back(std::make_unique<FunctionDeclAST>(
-        "square", typeCtx->getInt(), params, body, true));
+        "square", typeCtx->getInt32(), params, body, true));
     TranslationUnitAST tu(std::move(decls));
     analyzer->analyze(tu);
     EXPECT_TRUE(analyzer->getErrors().empty());
@@ -534,12 +534,12 @@ TEST_F(SemanticAnalyzerTest, ConstexprFunctionWithNonLiteralParameter) {
     auto body = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
 
     std::vector<std::unique_ptr<ParamDeclAST>> params;
-    auto pointerType = std::make_unique<Type>(TypeKind::Pointer, typeCtx->getInt());
+    auto pointerType = std::make_unique<Type>(TypeKind::Pointer, typeCtx->getInt32());
     params.push_back(std::make_unique<ParamDeclAST>("p", pointerType.get()));
 
     std::vector<std::unique_ptr<DeclAST>> decls;
     decls.push_back(std::make_unique<FunctionDeclAST>(
-        "bad", typeCtx->getInt(), params, body, true));
+        "bad", typeCtx->getInt32(), params, body, true));
     TranslationUnitAST tu(std::move(decls));
     analyzer->analyze(tu);
     EXPECT_FALSE(analyzer->getErrors().empty());
@@ -551,13 +551,13 @@ TEST_F(SemanticAnalyzerTest, ConstexprFunctionWithNonLiteralParameter) {
 TEST_F(SemanticAnalyzerTest, OverloadResolutionExactMatch) {
     // Declare two overloaded functions: add(int, int) and add(float, float)
     std::vector<std::unique_ptr<ParamDeclAST>> params1;
-    params1.push_back(std::make_unique<ParamDeclAST>("a", typeCtx->getInt()));
-    params1.push_back(std::make_unique<ParamDeclAST>("b", typeCtx->getInt()));
+    params1.push_back(std::make_unique<ParamDeclAST>("a", typeCtx->getInt32()));
+    params1.push_back(std::make_unique<ParamDeclAST>("b", typeCtx->getInt32()));
     auto body1 = std::make_unique<CompoundStmtAST>(std::vector<std::unique_ptr<StmtAST>>());
     
     std::vector<std::unique_ptr<ParamDeclAST>> params2;
-    params2.push_back(std::make_unique<ParamDeclAST>("a", typeCtx->getFloat()));
-    params2.push_back(std::make_unique<ParamDeclAST>("b", typeCtx->getFloat()));
+    params2.push_back(std::make_unique<ParamDeclAST>("a", typeCtx->getFloat32()));
+    params2.push_back(std::make_unique<ParamDeclAST>("b", typeCtx->getFloat32()));
     auto body2 = std::make_unique<CompoundStmtAST>(std::vector<std::unique_ptr<StmtAST>>());
     
     // Call with int arguments
@@ -571,12 +571,12 @@ TEST_F(SemanticAnalyzerTest, OverloadResolutionExactMatch) {
     auto callerBody = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
     
     std::vector<std::unique_ptr<DeclAST>> decls;
-    decls.push_back(std::make_unique<FunctionDeclAST>("add", typeCtx->getInt(), params1, body1));
-    decls.push_back(std::make_unique<FunctionDeclAST>("add", typeCtx->getFloat(), params2, body2));
+    decls.push_back(std::make_unique<FunctionDeclAST>("add", typeCtx->getInt32(), params1, body1));
+    decls.push_back(std::make_unique<FunctionDeclAST>("add", typeCtx->getFloat32(), params2, body2));
     
     // Add caller function
     std::vector<std::unique_ptr<ParamDeclAST>> callerParams;
-    decls.push_back(std::make_unique<FunctionDeclAST>("caller", typeCtx->getInt(), callerParams, callerBody));
+    decls.push_back(std::make_unique<FunctionDeclAST>("caller", typeCtx->getInt32(), callerParams, callerBody));
     
     TranslationUnitAST tu(std::move(decls));
     analyzer->analyze(tu);
@@ -585,8 +585,8 @@ TEST_F(SemanticAnalyzerTest, OverloadResolutionExactMatch) {
 
 TEST_F(SemanticAnalyzerTest, OverloadResolutionNoMatch) {
     std::vector<std::unique_ptr<ParamDeclAST>> params;
-    params.push_back(std::make_unique<ParamDeclAST>("a", typeCtx->getInt()));
-    params.push_back(std::make_unique<ParamDeclAST>("b", typeCtx->getInt()));
+    params.push_back(std::make_unique<ParamDeclAST>("a", typeCtx->getInt32()));
+    params.push_back(std::make_unique<ParamDeclAST>("b", typeCtx->getInt32()));
     auto body = std::make_unique<CompoundStmtAST>(std::vector<std::unique_ptr<StmtAST>>());
     
     // Call with float arguments (no matching overload)
@@ -600,10 +600,10 @@ TEST_F(SemanticAnalyzerTest, OverloadResolutionNoMatch) {
     auto callerBody = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
     
     std::vector<std::unique_ptr<DeclAST>> decls;
-    decls.push_back(std::make_unique<FunctionDeclAST>("add", typeCtx->getInt(), params, body));
+    decls.push_back(std::make_unique<FunctionDeclAST>("add", typeCtx->getInt32(), params, body));
     
     std::vector<std::unique_ptr<ParamDeclAST>> callerParams;
-    decls.push_back(std::make_unique<FunctionDeclAST>("caller", typeCtx->getInt(), callerParams, callerBody));
+    decls.push_back(std::make_unique<FunctionDeclAST>("caller", typeCtx->getInt32(), callerParams, callerBody));
     
     TranslationUnitAST tu(std::move(decls));
     analyzer->analyze(tu);

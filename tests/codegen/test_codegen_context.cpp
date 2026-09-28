@@ -132,7 +132,7 @@ TEST_F(CodegenContextTest, CommaExpr) {
 }
 
 TEST_F(CodegenContextTest, SizeofExpr) {
-    auto sz = std::make_unique<SizeofExprAST>(typeCtx->getInt());
+    auto sz = std::make_unique<SizeofExprAST>(typeCtx->getInt32());
     llvm::Value* val = sz->codegen(*ctx);
     ASSERT_NE(val, nullptr);
     auto* ci = llvm::dyn_cast<llvm::ConstantInt>(val);
@@ -141,7 +141,7 @@ TEST_F(CodegenContextTest, SizeofExpr) {
 }
 
 TEST_F(CodegenContextTest, SizeofPointer) {
-    auto ptrType = new Type(TypeKind::Pointer, typeCtx->getInt());
+    auto ptrType = new Type(TypeKind::Pointer, typeCtx->getInt32());
     auto sz = std::make_unique<SizeofExprAST>(ptrType);
     llvm::Value* val = sz->codegen(*ctx);
     ASSERT_NE(val, nullptr);
@@ -171,7 +171,7 @@ TEST_F(CodegenContextTest, TernaryExpr) {
 
 TEST_F(CodegenContextTest, CastExprIntToFloat) {
     auto expr = std::make_unique<NumberExprAST>(42);
-    auto cast = std::make_unique<CastExprAST>(typeCtx->getFloat(), std::move(expr));
+    auto cast = std::make_unique<CastExprAST>(typeCtx->getFloat32(), std::move(expr));
     llvm::Value* val = cast->codegen(*ctx);
     ASSERT_NE(val, nullptr);
     EXPECT_TRUE(val->getType()->isFloatTy());
@@ -190,7 +190,7 @@ TEST_F(CodegenContextTest, CastExprIntToChar) {
 TEST_F(CodegenContextTest, AssignmentExpr) {
     auto* alloca = ctx->getBuilder().CreateAlloca(
         llvm::Type::getInt32Ty(ctx->getContext()), nullptr, "x");
-    ctx->declareVariable("x", alloca, typeCtx->getInt());
+    ctx->declareVariable("x", alloca, typeCtx->getInt32());
 
     auto lhs = std::make_unique<VariableExprAST>("x");
     auto rhs = std::make_unique<NumberExprAST>(42);
@@ -204,7 +204,7 @@ TEST_F(CodegenContextTest, AssignmentExpr) {
 TEST_F(CodegenContextTest, CompoundAssignmentExpr) {
     auto* alloca = ctx->getBuilder().CreateAlloca(
         llvm::Type::getInt32Ty(ctx->getContext()), nullptr, "x");
-    ctx->declareVariable("x", alloca, typeCtx->getInt());
+    ctx->declareVariable("x", alloca, typeCtx->getInt32());
     ctx->getBuilder().CreateStore(
         llvm::ConstantInt::get(ctx->getContext(), llvm::APInt(32, 10)), alloca);
 
@@ -222,7 +222,7 @@ TEST_F(CodegenContextTest, ArrayAccessExpr) {
     llvm::ArrayType* arrType = llvm::ArrayType::get(i32, 5);
     auto* alloca = ctx->getBuilder().CreateAlloca(arrType, nullptr, "arr");
 
-    auto* arrVarType = new ArrayType(typeCtx->getInt(), 5);
+    auto* arrVarType = new ArrayType(typeCtx->getInt32(), 5);
     ctx->declareVariable("arr", alloca, arrVarType);
 
     auto arrVar = std::make_unique<VariableExprAST>("arr");
@@ -245,8 +245,8 @@ TEST_F(CodegenContextTest, MemberAccessExpr) {
     ctx->getBuilder().SetInsertPoint(bb);
 
     auto* structType = new StructType("Point");
-    structType->addField("x", typeCtx->getInt());
-    structType->addField("y", typeCtx->getInt());
+    structType->addField("x", typeCtx->getInt32());
+    structType->addField("y", typeCtx->getInt32());
 
     llvm::Type* i32 = llvm::Type::getInt32Ty(ctx->getContext());
     llvm::StructType* llvmStruct = llvm::StructType::create(
@@ -415,7 +415,7 @@ TEST_F(CodegenContextTest, CompoundStmt) {
 // ============================================================
 
 TEST_F(CodegenContextTest, VarDecl) {
-    auto varDecl = std::make_unique<VarDeclAST>("x", typeCtx->getInt());
+    auto varDecl = std::make_unique<VarDeclAST>("x", typeCtx->getInt32());
     llvm::Value* val = varDecl->codegen(*ctx);
     ASSERT_NE(val, nullptr);
     ctx->getBuilder().CreateRetVoid();
@@ -424,7 +424,7 @@ TEST_F(CodegenContextTest, VarDecl) {
 
 TEST_F(CodegenContextTest, VarDeclWithInit) {
     auto varDecl = std::make_unique<VarDeclAST>(
-        "x", typeCtx->getInt(), std::make_unique<NumberExprAST>(42));
+        "x", typeCtx->getInt32(), std::make_unique<NumberExprAST>(42));
     llvm::Value* val = varDecl->codegen(*ctx);
     ASSERT_NE(val, nullptr);
     ctx->getBuilder().CreateRetVoid();
@@ -432,7 +432,7 @@ TEST_F(CodegenContextTest, VarDeclWithInit) {
 }
 
 TEST_F(CodegenContextTest, ArrayDecl) {
-    auto arrDecl = std::make_unique<ArrayDeclAST>("arr", typeCtx->getInt(), 10);
+    auto arrDecl = std::make_unique<ArrayDeclAST>("arr", typeCtx->getInt32(), 10);
     llvm::Value* val = arrDecl->codegen(*ctx);
     ASSERT_NE(val, nullptr);
     EXPECT_TRUE(val->getType()->isPointerTy());
@@ -442,8 +442,8 @@ TEST_F(CodegenContextTest, ArrayDecl) {
 
 TEST_F(CodegenContextTest, StructDecl) {
     std::vector<std::pair<std::string, Type*>> fields;
-    fields.push_back({"x", typeCtx->getInt()});
-    fields.push_back({"y", typeCtx->getInt()});
+    fields.push_back({"x", typeCtx->getInt32()});
+    fields.push_back({"y", typeCtx->getInt32()});
     auto structDecl = std::make_unique<StructDeclAST>("Point", std::move(fields));
     llvm::Value* val = structDecl->codegen(*ctx);
     EXPECT_TRUE(verifyModule());
@@ -460,7 +460,7 @@ TEST_F(CodegenContextTest, EnumDecl) {
 }
 
 TEST_F(CodegenContextTest, TypedefDecl) {
-    auto typedefDecl = std::make_unique<TypedefDeclAST>("MyInt", typeCtx->getInt());
+    auto typedefDecl = std::make_unique<TypedefDeclAST>("MyInt", typeCtx->getInt32());
     llvm::Value* val = typedefDecl->codegen(*ctx);
     EXPECT_TRUE(verifyModule());
 }
@@ -472,7 +472,7 @@ TEST_F(CodegenContextTest, ForwardDecl) {
 }
 
 TEST_F(CodegenContextTest, DeclStmt) {
-    auto varDecl = std::make_unique<VarDeclAST>("x", typeCtx->getInt());
+    auto varDecl = std::make_unique<VarDeclAST>("x", typeCtx->getInt32());
     auto declStmt = std::make_unique<DeclStmtAST>(std::move(varDecl));
     llvm::Value* val = declStmt->codegen(*ctx);
     ASSERT_NE(val, nullptr);
@@ -482,7 +482,7 @@ TEST_F(CodegenContextTest, DeclStmt) {
 
 TEST_F(CodegenContextTest, FunctionDecl) {
     std::vector<std::unique_ptr<ParamDeclAST>> params;
-    params.push_back(std::make_unique<ParamDeclAST>("a", typeCtx->getInt()));
+    params.push_back(std::make_unique<ParamDeclAST>("a", typeCtx->getInt32()));
 
     auto returnValue = std::make_unique<VariableExprAST>("a");
     returnValue->isLValue = true;  // sema normally sets this
@@ -491,7 +491,7 @@ TEST_F(CodegenContextTest, FunctionDecl) {
     auto body = std::make_unique<CompoundStmtAST>(std::move(bodyStmts));
 
     auto funcDecl = std::make_unique<FunctionDeclAST>(
-        "identity", typeCtx->getInt(), params, body);
+        "identity", typeCtx->getInt32(), params, body);
     llvm::Value* val = funcDecl->codegen(*ctx);
     ASSERT_NE(val, nullptr);
     auto* func = llvm::cast<llvm::Function>(val);
@@ -501,8 +501,8 @@ TEST_F(CodegenContextTest, FunctionDecl) {
 
 TEST_F(CodegenContextTest, TranslationUnit) {
     std::vector<std::unique_ptr<DeclAST>> decls;
-    decls.push_back(std::make_unique<VarDeclAST>("x", typeCtx->getInt()));
-    decls.push_back(std::make_unique<VarDeclAST>("y", typeCtx->getFloat()));
+    decls.push_back(std::make_unique<VarDeclAST>("x", typeCtx->getInt32()));
+    decls.push_back(std::make_unique<VarDeclAST>("y", typeCtx->getFloat32()));
     auto tu = std::make_unique<TranslationUnitAST>(std::move(decls));
     llvm::Value* val = tu->codegen(*ctx);
     ctx->getBuilder().CreateRetVoid();
@@ -553,7 +553,7 @@ TEST_F(CodegenContextTest, ScopePushPop) {
 TEST_F(CodegenContextTest, VariableLookup) {
     auto* alloca = ctx->getBuilder().CreateAlloca(
         llvm::Type::getInt32Ty(ctx->getContext()), nullptr, "x");
-    ctx->declareVariable("x", alloca, typeCtx->getInt());
+    ctx->declareVariable("x", alloca, typeCtx->getInt32());
 
     llvm::Value* val = ctx->lookupVariable("x");
     ASSERT_NE(val, nullptr);
@@ -562,7 +562,7 @@ TEST_F(CodegenContextTest, VariableLookup) {
 TEST_F(CodegenContextTest, VariableLookupNestedScope) {
     auto* alloca = ctx->getBuilder().CreateAlloca(
         llvm::Type::getInt32Ty(ctx->getContext()), nullptr, "x");
-    ctx->declareVariable("x", alloca, typeCtx->getInt());
+    ctx->declareVariable("x", alloca, typeCtx->getInt32());
 
     ctx->pushScope();
     llvm::Value* val = ctx->lookupVariable("x");
@@ -575,17 +575,17 @@ TEST_F(CodegenContextTest, VariableLookupNestedScope) {
 // ============================================================
 
 TEST_F(CodegenContextTest, GetLLVMTypeInt) {
-    llvm::Type* t = ctx->getLLVMType(typeCtx->getInt());
+    llvm::Type* t = ctx->getLLVMType(typeCtx->getInt32());
     EXPECT_TRUE(t->isIntegerTy(32));
 }
 
 TEST_F(CodegenContextTest, GetLLVMTypeFloat) {
-    llvm::Type* t = ctx->getLLVMType(typeCtx->getFloat());
+    llvm::Type* t = ctx->getLLVMType(typeCtx->getFloat32());
     EXPECT_TRUE(t->isFloatTy());
 }
 
 TEST_F(CodegenContextTest, GetLLVMTypeDouble) {
-    llvm::Type* t = ctx->getLLVMType(typeCtx->getDouble());
+    llvm::Type* t = ctx->getLLVMType(typeCtx->getFloat64());
     EXPECT_TRUE(t->isDoubleTy());
 }
 
@@ -600,7 +600,7 @@ TEST_F(CodegenContextTest, GetLLVMTypeVoid) {
 }
 
 TEST_F(CodegenContextTest, GetLLVMTypePointer) {
-    auto* ptrType = new Type(TypeKind::Pointer, typeCtx->getInt());
+    auto* ptrType = new Type(TypeKind::Pointer, typeCtx->getInt32());
     llvm::Type* t = ctx->getLLVMType(ptrType);
     EXPECT_TRUE(t->isPointerTy());
 }
@@ -616,7 +616,7 @@ TEST_F(CodegenContextTest, LLVMTypeFloat16AndFloat128) {
 
 TEST_F(CodegenContextTest, ConstexprLocalVariable) {
     ctx->pushScope(); // Simulate being inside a function
-    auto* intType = typeCtx->getInt();
+    auto* intType = typeCtx->getInt32();
     intType->isConst = true;
     auto varDecl = std::make_unique<VarDeclAST>("x", intType, nullptr, true);
     FoldedValue fv;
@@ -651,7 +651,7 @@ TEST_F(CodegenContextTest, ConstexprLocalVariable) {
 
 TEST_F(CodegenContextTest, ConstexprLocalVariableDouble) {
     ctx->pushScope(); // Simulate being inside a function
-    auto* doubleType = typeCtx->getDouble();
+    auto* doubleType = typeCtx->getFloat64();
     doubleType->isConst = true;
     auto varDecl = std::make_unique<VarDeclAST>("d", doubleType, nullptr, true);
     FoldedValue fv;
@@ -714,7 +714,7 @@ TEST_F(CodegenContextTest, ConstexprLocalVariableChar) {
 TEST_F(CodegenContextTest, ConstGlobalVariable) {
     // Global scope test - need to use a fresh context
     auto globalCtx = std::make_unique<CodegenContext>();
-    auto* intType = typeCtx->getInt();
+    auto* intType = typeCtx->getInt32();
     intType->isConst = true;
     
     auto varDecl = std::make_unique<VarDeclAST>("g", intType, std::make_unique<NumberExprAST>(10));
@@ -739,7 +739,7 @@ TEST_F(CodegenContextTest, ConstGlobalVariable) {
 
 TEST_F(CodegenContextTest, ConstexprGlobalVariable) {
     auto globalCtx = std::make_unique<CodegenContext>();
-    auto* intType = typeCtx->getInt();
+    auto* intType = typeCtx->getInt32();
     intType->isConst = true;
     
     auto varDecl = std::make_unique<VarDeclAST>("gc", intType, nullptr, true);

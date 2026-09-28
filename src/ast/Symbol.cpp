@@ -58,7 +58,6 @@ static int integerWidth(TypeKind kind) {
         case TypeKind::UInt8:    return 8;
         case TypeKind::Int16:    return 16;
         case TypeKind::UInt16:   return 16;
-        case TypeKind::Int:
         case TypeKind::Int32:    return 32;
         case TypeKind::UInt32:   return 32;
         case TypeKind::Int64:
@@ -75,9 +74,7 @@ static int integerWidth(TypeKind kind) {
 static int floatWidth(TypeKind kind) {
     switch (kind) {
         case TypeKind::Float16:  return 16;
-        case TypeKind::Float:
         case TypeKind::Float32:  return 32;
-        case TypeKind::Double:
         case TypeKind::Float64:  return 64;
         case TypeKind::Float128: return 128;
         default:                 return 0;
@@ -107,7 +104,6 @@ int integerRank(TypeKind kind) {
         case TypeKind::UInt8:    return 1;
         case TypeKind::Int16:
         case TypeKind::UInt16:   return 2;
-        case TypeKind::Int:
         case TypeKind::Int32:
         case TypeKind::UInt32:   return 3;
         case TypeKind::Int64:
@@ -129,7 +125,7 @@ Type* arithmeticUnderlying(Type* type) {
     if (type->kind == TypeKind::Enum) {
         auto* enumType = static_cast<EnumType*>(type);
         if (enumType->underlyingType) return arithmeticUnderlying(enumType->underlyingType);
-        return TypeContext::instance().getInt();
+        return TypeContext::instance().getInt32();
     }
     return type;
 }
@@ -147,7 +143,7 @@ Type* promoteArithmeticType(Type* type) {
     int rank = integerRank(type->kind);
     if (rank < 0) return type;
     // All integer ranks below `int` are representable by the 32-bit `int`.
-    if (rank < integerRank(TypeKind::Int)) return TypeContext::instance().getInt();
+    if (rank < integerRank(TypeKind::Int32)) return TypeContext::instance().getInt32();
     return type;
 }
 
@@ -184,7 +180,7 @@ bool isUnsignedArithmeticType(Type* type) {
     type = arithmeticUnderlying(type);
     if (!type) return false;
     if (floatWidth(type->kind) > 0) return false;
-    if (integerRank(type->kind) < integerRank(TypeKind::Int)) return false;
+    if (integerRank(type->kind) < integerRank(TypeKind::Int32)) return false;
     return isUnsignedKind(type->kind);
 }
 

@@ -1440,15 +1440,15 @@ Type* Parser::parseBaseType() {
     switch (tok->type) {
         case TokenType::TOKEN_INT: {
             advance();
-            return TypeContext::instance().getInt();
+            return TypeContext::instance().getInt32();
         }
         case TokenType::TOKEN_FLOAT: {
             advance();
-            return TypeContext::instance().getFloat();
+            return TypeContext::instance().getFloat32();
         }
         case TokenType::TOKEN_DOUBLE: {
             advance();
-            return TypeContext::instance().getDouble();
+            return TypeContext::instance().getFloat64();
         }
         case TokenType::TOKEN_CHAR_KW: {
             advance();

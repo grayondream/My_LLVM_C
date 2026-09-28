@@ -31,12 +31,6 @@ llvm::DIType* getDIType(CodegenContext& ctx, Type* type) {
     switch (type->kind) {
         case TypeKind::Void:
             return nullptr;
-        case TypeKind::Int:
-            return builder.createBasicType("int", 32, llvm::dwarf::DW_ATE_signed);
-        case TypeKind::Float:
-            return builder.createBasicType("float", 32, llvm::dwarf::DW_ATE_float);
-        case TypeKind::Double:
-            return builder.createBasicType("double", 64, llvm::dwarf::DW_ATE_float);
         case TypeKind::Char:
             return builder.createBasicType("char", 8, llvm::dwarf::DW_ATE_signed_char);
         case TypeKind::Bool:
@@ -372,9 +366,6 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
     if (!type) return llvm::Type::getVoidTy(*context);
 
     switch (type->kind) {
-        case TypeKind::Int:    return llvm::Type::getInt32Ty(*context);
-        case TypeKind::Float:  return llvm::Type::getFloatTy(*context);
-        case TypeKind::Double: return llvm::Type::getDoubleTy(*context);
         case TypeKind::Char:   return llvm::Type::getInt8Ty(*context);
         case TypeKind::Void:   return llvm::Type::getVoidTy(*context);
         case TypeKind::Bool:   return llvm::Type::getInt1Ty(*context);

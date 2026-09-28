@@ -79,7 +79,7 @@ TEST_F(ClassE2ETest, BasicClass) {
         
         int32 main() {
             Foo f;
-            f.setX((int32)42);
+            f.setX(42);
             return f.getX();
         }
     )", "test_class.c"), 42);
@@ -99,8 +99,8 @@ TEST_F(ClassE2ETest, ClassInheritance) {
         
         int32 main() {
             Derived d;
-            d.setX((int32)10);
-            d.setY((int32)20);
+            d.setX(10);
+            d.setY(20);
             return d.x + d.y;
         }
     )", "test_inherit.c"), 30);

@@ -13,10 +13,10 @@ protected:
 
 TEST_F(DeclNodeTest, ArrayDeclAST) {
     auto arrDecl = std::make_unique<ArrayDeclAST>(
-        "arr", typeCtx->getInt(), 10);
+        "arr", typeCtx->getInt32(), 10);
 
     EXPECT_EQ(arrDecl->name, "arr");
-    EXPECT_EQ(arrDecl->elementType->kind, TypeKind::Int);
+    EXPECT_EQ(arrDecl->elementType->kind, TypeKind::Int32);
     EXPECT_EQ(arrDecl->size, 10);
     EXPECT_EQ(arrDecl->initExpr, nullptr);
 }
@@ -24,15 +24,15 @@ TEST_F(DeclNodeTest, ArrayDeclAST) {
 TEST_F(DeclNodeTest, ArrayDeclASTWithInit) {
     auto init = std::make_unique<NumberExprAST>(42);
     auto arrDecl = std::make_unique<ArrayDeclAST>(
-        "arr", typeCtx->getInt(), 5, std::move(init));
+        "arr", typeCtx->getInt32(), 5, std::move(init));
 
     EXPECT_NE(arrDecl->initExpr, nullptr);
 }
 
 TEST_F(DeclNodeTest, StructDeclAST) {
     std::vector<std::pair<std::string, Type*>> fields;
-    fields.push_back({"x", typeCtx->getInt()});
-    fields.push_back({"y", typeCtx->getInt()});
+    fields.push_back({"x", typeCtx->getInt32()});
+    fields.push_back({"y", typeCtx->getInt32()});
 
     auto structDecl = std::make_unique<StructDeclAST>("Point", std::move(fields));
 
@@ -44,8 +44,8 @@ TEST_F(DeclNodeTest, StructDeclAST) {
 
 TEST_F(DeclNodeTest, UnionDeclAST) {
     std::vector<std::pair<std::string, Type*>> members;
-    members.push_back({"i", typeCtx->getInt()});
-    members.push_back({"f", typeCtx->getFloat()});
+    members.push_back({"i", typeCtx->getInt32()});
+    members.push_back({"f", typeCtx->getFloat32()});
 
     auto unionDecl = std::make_unique<UnionDeclAST>("Data", std::move(members));
 
@@ -70,10 +70,10 @@ TEST_F(DeclNodeTest, EnumDeclAST) {
 
 TEST_F(DeclNodeTest, TypedefDeclAST) {
     auto typedefDecl = std::make_unique<TypedefDeclAST>(
-        "MyInt", typeCtx->getInt());
+        "MyInt", typeCtx->getInt32());
 
     EXPECT_EQ(typedefDecl->name, "MyInt");
-    EXPECT_EQ(typedefDecl->aliasedType->kind, TypeKind::Int);
+    EXPECT_EQ(typedefDecl->aliasedType->kind, TypeKind::Int32);
 }
 
 TEST_F(DeclNodeTest, ForwardDeclAST) {
@@ -82,7 +82,7 @@ TEST_F(DeclNodeTest, ForwardDeclAST) {
 }
 
 TEST_F(DeclNodeTest, SourceLocation) {
-    auto decl = std::make_unique<VarDeclAST>("x", typeCtx->getInt());
+    auto decl = std::make_unique<VarDeclAST>("x", typeCtx->getInt32());
     decl->setLocation("test.c", 5, 3);
 
     EXPECT_EQ(decl->sourceFile, "test.c");

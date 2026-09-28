@@ -186,10 +186,25 @@ static std::string TypeToString(Type* type) {
     if (!type) return "null";
     switch (type->kind) {
         case TypeKind::Void:    return "void";
-        case TypeKind::Int:     return "int";
-        case TypeKind::Float:   return "float";
-        case TypeKind::Double:  return "double";
         case TypeKind::Char:    return "char";
+        case TypeKind::Bool:    return "bool";
+        case TypeKind::Int8:    return "int8";
+        case TypeKind::Int16:   return "int16";
+        case TypeKind::Int32:   return "int32";
+        case TypeKind::Int64:   return "int64";
+        case TypeKind::Int128:  return "int128";
+        case TypeKind::UInt8:   return "uint8";
+        case TypeKind::UInt16:  return "uint16";
+        case TypeKind::UInt32:  return "uint32";
+        case TypeKind::UInt64:  return "uint64";
+        case TypeKind::UInt128: return "uint128";
+        case TypeKind::ISize:   return "isize";
+        case TypeKind::USize:   return "usize";
+        case TypeKind::Float32: return "float32";
+        case TypeKind::Float64: return "float64";
+        case TypeKind::Float16: return "float16";
+        case TypeKind::Float128:return "float128";
+        case TypeKind::Enum:    return "enum";
         case TypeKind::Pointer: return TypeToString(type->base) + "*";
         default:                return "unknown";
     }

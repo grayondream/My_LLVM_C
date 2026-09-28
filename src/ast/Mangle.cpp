@@ -19,9 +19,6 @@ std::string typeToMangled(Type* type) {
     if (!type) return "unknown";
     switch (type->kind) {
         case TypeKind::Void: return "void";
-        case TypeKind::Int: return "int";
-        case TypeKind::Float: return "float";
-        case TypeKind::Double: return "double";
         case TypeKind::Char: return "char";
         case TypeKind::Pointer: {
             std::string base = typeToMangled(type->base);
@@ -43,7 +40,7 @@ std::string typeToMangled(Type* type) {
             auto* u = static_cast<UnionType*>(type);
             return u->name;
         }
-        case TypeKind::Enum: return "int";
+        case TypeKind::Enum: return "int32";
         case TypeKind::Bool: return "bool";
         case TypeKind::Int8: return "int8";
         case TypeKind::Int16: return "int16";
