@@ -23,15 +23,15 @@
 
 ```smc
 namespace geometry {        // 声明
-    struct Point { int x; int y; }
+    struct Point { int32 x; int32 y; }
 }
 
 namespace geometry.ops {    // 嵌套
-    int dot(Point a, Point b) { ... }
+    int32 dot(Point a, Point b) { ... }
 }
 
 namespace geometry {        // 开放命名空间：可再次进入
-    struct Circle { Point c; int r; }
+    struct Circle { Point c; int32 r; }
 }
 ```
 

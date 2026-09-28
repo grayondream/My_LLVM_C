@@ -2,7 +2,7 @@
 
 > 对应 TODO：**TYP-19 ~ TYP-24**、**TYP-20**、**DEC-06/07**
 > 状态：`[impl]` 以 `src/sema/SemanticAnalyzer.cpp`、`src/ast/Symbol.cpp`、`src/codegen/CodegenContext.cpp` 为准；`[plan]` 为目标。
-> 设计原则：与 C 的内存模型/转换语义对齐，但去掉隐式危险转换（如 enum↔int、指针↔int 的静默）。
+> 设计原则：与 C 的内存模型/转换语义对齐，但去掉隐式危险转换（如 enum↔int32、指针↔int32 的静默）。
 
 ## 1. 类型等价 `[impl]`
 
@@ -26,7 +26,7 @@
 | 同 kind | ✅ |
 | 任意算术 → 任意算术 | ✅（`enum` 除外，见 TYP-20） |
 | 指针 ↔ 指针 | ✅ |
-| 指针 ↔ `int` | ✅（含 0 空指针） |
+| 指针 ↔ `int32` | ✅（含 0 空指针） |
 | 数组 ↔ 指针 | ✅（退化） |
 | `enum E` ↔ `enum E` | ✅（同一枚举类型） |
 | `enum` ↔ 整数/浮点/其它 `enum` | ❌（须显式转换，TYP-20） |
@@ -34,30 +34,30 @@
 `getCommonType`（`[impl]`，TYP-22）：两个算术操作数按整数提升 + 常规算术转换取公共类型（见 §3）；非算术按同 kind 或取左。
 
 > `enum` 的强类型（TYP-20）与名义相等已落地：赋值/初始化/实参/返回中的 `enum ↔ int` 报错，须用 `(T)` / `static_cast` / `reinterpret_cast`。
-> 常规算术转换（TYP-22）已落地；**隐式窄化**仍被当作兼容（`int → int8` 不报错），属 TYP-23 待定。
+> 常规算术转换（TYP-22）已落地；**隐式窄化**仍被当作兼容（`int32 → int8` 不报错），属 TYP-23 待定。
 
 ## 3. 整数提升与常规算术转换 `[impl]`（TYP-22）
 
 实现于 `usualArithmeticType` / `promoteArithmeticType`（`src/ast/Symbol.cpp`），被语义分析与代码生成共享：
 
-1. **整数提升**：`bool`、`char`、`int8/16`、`uint8/16`（以及底层窄于 `int` 的 `enum`）→ `int`。
+1. **整数提升**：`bool`、`char`、`int8/16`、`uint8/16`（以及底层窄于 `int32` 的 `enum`）→ `int32`。
 2. **常规算术转换**（二元算术/比较/位运算，对操作数取公共类型）：
    - 若任一为浮点：`float32 < float64`，浮点胜过整数。
    - 否则（提升后同为整数）：
      - 符号性相同 → 取 rank 较高者。
      - 不同符号性：无符号 rank ≥ 有符号 → 无符号；有符号 rank 更高则取有符号（可覆盖无符号全部值）。
-3. 转换等级（rank，由低到高）：`bool < char/int8/uint8 < int16/uint16 < int/uint32 < int64/uint64/isize/usize < int128/uint128`；同宽度有/无符号同 rank。
+3. 转换等级（rank，由低到高）：`bool < char/int8/uint8 < int16/uint16 < int32/uint32 < int64/uint64/isize/usize < int128/uint128`；同宽度有/无符号同 rank。
 
 | kind | 位宽（`integerRank`） |
 |---|---|
 | bool | 0 |
 | char/int8/uint8 | 1 |
 | int16/uint16 | 2 |
-| int/int32/uint32/enum | 3 |
+| int32/uint32/enum | 3 |
 | int64/uint64/isize/usize | 4 |
 | int128/uint128 | 5 |
-| float/float32 | 32 位 |
-| double/float64 | 64 位 |
+| float32 | 32 位 |
+| float64 | 64 位 |
 
 ## 4. 转换矩阵 `[plan]`（TYP-23）
 
@@ -72,13 +72,13 @@
 | 指针 | 显 | 显 | — | ✗ | 隐(≠0) | 隐(同类型)/显 | 显 |
 | enum | 显 | 显 | 显 | 显 | 显 | ✗ | 隐 |
 
-> `enum` 与整数**必须显式转换**（TYP-20）——已实现：`typesCompatible` / `conversionRank` / `checkAssignmentTypes` 对 `enum ↔ 非同类 enum / 整数 / 浮点` 判为不兼容；而算术、位运算与比较运算符仍按整数提升把枚举操作数提升为 `int`（`e + 1`、`e == 4`、`switch(e)` 合法）。
+> `enum` 与整数**必须显式转换**（TYP-20）——已实现：`typesCompatible` / `conversionRank` / `checkAssignmentTypes` 对 `enum ↔ 非同类 enum / 整数 / 浮点` 判为不兼容；而算术、位运算与比较运算符仍按整数提升把枚举操作数提升为 `int32`（`e + 1`、`e == 4`、`switch(e)` 合法）。
 
 ## 5. 显式转换 `[impl]/[plan]`
 
-- `[impl]` C 风格 `(T)x`：`parseUnary` 先试探性解析完整类型并要求立即 `)`，否则回退为括号表达式；因此支持指针、限定符与命名类型，如 `(int*)p`、`(struct S*)p`、`(void*)h`（P0-02 / MEM-10）。窄化只告警不报错（`CastExprAST` 检查）。
+- `[impl]` C 风格 `(T)x`：`parseUnary` 先试探性解析完整类型并要求立即 `)`，否则回退为括号表达式；因此支持指针、限定符与命名类型，如 `(int32*)p`、`(struct S*)p`、`(void*)h`（P0-02 / MEM-10）。窄化只告警不报错（`CastExprAST` 检查）。
 - `[impl]` `static_cast<T>(x)`（LEX-11 / PAR-18 / DEC-18）：允许算术↔算术（含 enum，按整数）、指针/数组↔指针/数组；但**不**允许指针↔整数（须用 `reinterpret_cast`）。不兼容时报错。代码生成走 `castValue`（值转换）。
-- `[impl]` `reinterpret_cast<T>(x)`：任何标量↔标量（按位重解释）。同宽标量（尤其 `float`↔`int`）用 `bitcast` 重解释位模式；指针↔指针用 `bitcast`、指针↔整数用 `ptrtoint`/`inttoptr`。不兼容时报错。
+- `[impl]` `reinterpret_cast<T>(x)`：任何标量↔标量（按位重解释）。同宽标量（尤其 `float32`↔`int32`）用 `bitcast` 重解释位模式；指针↔指针用 `bitcast`、指针↔整数用 `ptrtoint`/`inttoptr`。不兼容时报错。
 - `[impl]` 三者为**上下文关键字**：`static_cast`/`reinterpret_cast` 仍是普通标识符，仅在紧跟 `<类型>` 时按转换运算符解析，否则按普通名字处理。
 - `[impl]` 指针 ↔ 整数的显式转换：`castValue` 对 `Int↔Ptr` 做位宽适配（`ptrtoint`/`inttoptr` 的整数扩展/截断）；指针真值经 `ICmpNE null`（TYP-24 / BASE-06）。
 - `[impl]` `enum ↔ int` 及其它标量的**显式**规则（TYP-20）：`(T)x` / `static_cast` / `reinterpret_cast` 均可；隐式赋值/初始化/实参/返回报错（E2003 等）。算术/比较/位运算仍按整数提升处理枚举操作数（`e + 1`、`e == 4`、`switch(e)` 合法）。
@@ -92,7 +92,7 @@
 | 浮点→整数 | `fptosi` |
 | 浮点→更宽/更窄 | `fpext` / `fptrunc` |
 | 指针→指针 | `bitcast` |
-| `reinterpret_cast` 同宽标量（`float`↔`int` 等） | `bitcast` |
+| `reinterpret_cast` 同宽标量（`float32`↔`int32` 等） | `bitcast` |
 | `reinterpret_cast` 指针↔整数 | `ptrtoint` / `inttoptr` |
 
 > `castValue` 提供带源 AST 类型的重载（`castValue(val, fromAST, target)`），按源的有/无符号选择 `zext`/`uitofp`；赋值、初始化、实参、返回与二元运算均走该重载（TYP-22）。
@@ -141,12 +141,12 @@
 
 | 源类型 | 目标 | 指令 |
 |---|---|---|
-| `float` / `float32` | `double` | `fpext` |
-| `bool` | `int` | `zext` |
-| `int8` / `int16` / `char` | `int` | `sext` |
-| `uint8` / `uint16` | `int` | `zext` |
+| `float32` | `float64` | `fpext` |
+| `bool` | `int32` | `zext` |
+| `int8` / `int16` / `char` | `int32` | `sext` |
+| `uint8` / `uint16` | `int32` | `zext` |
 | `enum`（窄底层） | 按底层类型的提升 | 递归 |
 
 - 固定形参仍按 `resolvedParamTypes` 做常规转换（§5）。
 - 任意标量（含指针）以外的类型不提升，原样传递。
-- 这是 C ABI 正确性要求：窄类型在寄存器/栈槽中按 `int` 宽度传递，否则 `printf("%d", x)` 读到未定义的高位。
+- 这是 C ABI 正确性要求：窄类型在寄存器/栈槽中按 `int32` 宽度传递，否则 `printf("%d", x)` 读到未定义的高位。

@@ -32,8 +32,8 @@ P0-05（STD-01 / STD-12 / STD-23 / STD-27）与 DEC-21。
 - 类型为 `void`。
 
 ```smc
-int main() {
-    int x = compute();
+int32 main() {
+    int32 x = compute();
     assert(x > 0);   // 失败: foo.smc:3: assertion failed
     return x;
 }
@@ -77,9 +77,9 @@ namespace 前缀，`namespace std { void abort() { abort(); } }` 会自递归，
 
 | 名字 | 签名 | 说明 |
 |---|---|---|
-| `std::min` | `constexpr int min(int, int)` | 较小值 |
-| `std::max` | `constexpr int max(int, int)` | 较大值 |
-| `std::clamp` | `int clamp(int v, int lo, int hi)` | 区间截断 |
+| `std::min` | `constexpr int32 min(int32, int32)` | 较小值 |
+| `std::max` | `constexpr int32 max(int32, int32)` | 较大值 |
+| `std::clamp` | `int32 clamp(int32 v, int32 lo, int32 hi)` | 区间截断 |
 
 ## 7. `std.io` `[impl]`
 
@@ -87,10 +87,10 @@ namespace 前缀，`namespace std { void abort() { abort(); } }` 会自递归，
 
 | 组 | 名字 | 签名 |
 |---|---|---|
-| stdout | `std::print_int` / `std::print_char` / `std::print_str` / `std::print_bool` | `void (int)` / `void (char)` / `void (char*)` / `void (int)` |
-| stderr | `std::print_err_str` / `std::print_err_int` | `void (char*)` / `void (int)` |
-| stdin | `std::read_char` / `std::read_int` / `std::read_line` | `int ()` / `int ()` / `int (char*, int)` |
-| 文件 | `std::file_open` / `std::file_close` | `void* (char*, char*)` / `int (void*)` |
+| stdout | `std::print_int` / `std::print_char` / `std::print_str` / `std::print_bool` | `void (int32)` / `void (char)` / `void (char*)` / `void (int32)` |
+| stderr | `std::print_err_str` / `std::print_err_int` | `void (char*)` / `void (int32)` |
+| stdin | `std::read_char` / `std::read_int` / `std::read_line` | `int32 ()` / `int32 ()` / `int32 (char*, int32)` |
+| 文件 | `std::file_open` / `std::file_close` | `void* (char*, char*)` / `int32 (void*)` |
 | 文件 | `std::file_read` / `std::file_write` | `usize (void*, void*, usize)` |
 | 文件 | `std::file_read_line` / `std::file_read_char` / `std::file_write_char` / `std::file_write_str` | 见 `libs/std/io.smc` |
 

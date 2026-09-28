@@ -11,13 +11,13 @@
 | `void` | `void` | — | — | `[impl]` | |
 | `bool` | `i1` | 1 | 1B | `[impl]` | 存储按 1 字节 |
 | `char` | `i8` | 8 | 1 | `[impl]` | |
-| `int` | `i32` | 32 | 4 | `[impl]` | 平台默认 |
+| `int32` | `i32` | 32 | 4 | `[impl]` | 平台默认 |
 | `int8/16/32/64/128` | `i8/i16/i32/i64/i128` | 8…128 | 1…16 | `[impl]` | |
 | `uint8…uint128` | `i8…i128` | 同上 | 同上 | `[impl]` | 无符号仅为语义 |
 | `isize` | `i64` | 64 | 8 | `[impl]` | **目标**：绑定目标指针宽度（TYP-03） |
 | `usize` | `i64` | 64 | 8 | `[impl]` | 同上；Slice 长度也用 `i64` |
-| `float` / `float32` | `float` | 32 | 4 | `[impl]` | |
-| `double` / `float64` | `double` | 64 | 8 | `[impl]` | |
+| `float32` | `float` | 32 | 4 | `[impl]` | |
+| `float64` | `double` | 64 | 8 | `[impl]` | |
 | `f16` | — | 16 | 2 | `[plan]` | TYP-04，含软件兜底 |
 | `f128` | — | 128 | 16 | `[plan]` | TYP-04 |
 | `enum` | 底层类型（默认 `i32`） | 见底层 | 见底层 | `[impl]` | 显式底层类型 `:uint8` 等（TYP-09/TYP-25） |
@@ -45,10 +45,10 @@
 - 不跟踪活跃成员（C 风格，AGG-17）。
 
 ### 2.4 enum `[impl]`
-- 默认底层类型为 `int`（`i32`）；可用 `enum E : uint8 { ... }` 显式指定任意整型底层类型，LLVM 层即该底层类型（TYP-09/TYP-25）。
+- 默认底层类型为 `int32`（`i32`）；可用 `enum E : uint8 { ... }` 显式指定任意整型底层类型，LLVM 层即该底层类型（TYP-09/TYP-25）。
 - 枚举常量为编译期整数常量，参与常量折叠；固定大小由底层类型决定。
-- 传参/返回按底层类型；窄于 `int` 的枚举作可变参数时经 C 默认实参提升（见 `conversions.md` §9）。
-- `enum ↔ int` 不隐式转换的强制检查（TYP-09/20）仍为 `[plan]`。
+- 传参/返回按底层类型；窄于 `int32` 的枚举作可变参数时经 C 默认实参提升（见 `conversions.md` §9）。
+- `enum ↔ int32` 不隐式转换的强制检查（TYP-09/20）仍为 `[plan]`。
 
 ### 2.5 位域 `[plan]`
 - 尚未实现；布局对齐哪个 C ABI（System V / MSVC）与 `[[packed]]`/`[[align]]` 交互见 **DEC-08**（AGG-06 / CG-09）。
@@ -78,12 +78,12 @@
 
 | 类型 | 编码 | 类型 | 编码 |
 |---|---|---|---|
-| `void/int/float/double/char/bool` | `void/int/float/double/char/bool` | `T*` | `<T>ptr` |
+| `void/int32/float32/float64/char/bool` | `void/int32/float32/float64/char/bool` | `T*` | `<T>ptr` |
 | `int8..int128` | 同名 | `uint8..uint128` | 同名 |
 | `isize/usize` | 同名 | `float32/float64` | 同名 |
 | `A[N]` | `<A>arr` | `T[]` | `<T>slice` |
 | `T?` | `<T>opt` | `Result<T,E>` | `<T>res<E>` |
-| struct/class/union | 类型名 | enum | `int` |
+| struct/class/union | 类型名 | enum | `int32` |
 | typedef | 展开到底层 | | |
 
 **目标（MOD-15）**：需补充 `static` 成员、namespace、模板单态化符号的规范编码，并保证与 C ABI / FFI 的边界清晰（MEM-12/ACC-05）。命名必须稳定、可复现（INF-07）。
