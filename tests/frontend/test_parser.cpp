@@ -1096,6 +1096,20 @@ TEST_F(ParserDeclTest, DoubleVarDecl) {
     EXPECT_EQ(var->type->kind, TypeKind::Float64);
 }
 
+TEST_F(ParserDeclTest, Float16AndFloat128Types) {
+    auto tu = parse("float16 h; float128 q;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 2u);
+    auto h = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    auto q = dynamic_cast<VarDeclAST*>(tu->declarations[1].get());
+    ASSERT_NE(h, nullptr);
+    ASSERT_NE(q, nullptr);
+    EXPECT_EQ(h->name, "h");
+    EXPECT_EQ(h->type->kind, TypeKind::Float16);
+    EXPECT_EQ(q->name, "q");
+    EXPECT_EQ(q->type->kind, TypeKind::Float128);
+}
+
 TEST_F(ParserDeclTest, CharVarDecl) {
     auto tu = parse("char c;");
     ASSERT_NE(tu, nullptr);

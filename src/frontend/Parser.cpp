@@ -1361,6 +1361,8 @@ bool Parser::isTypeStart() const {
         case TokenType::TOKEN_USIZE:
         case TokenType::TOKEN_FLOAT32:
         case TokenType::TOKEN_FLOAT64:
+        case TokenType::TOKEN_FLOAT16:
+        case TokenType::TOKEN_FLOAT128:
             return true;
         case TokenType::TOKEN_IDENTIFIER: {
             // A possibly `::`-qualified typedef/class/struct name (lookahead so
@@ -1515,6 +1517,14 @@ Type* Parser::parseBaseType() {
         case TokenType::TOKEN_FLOAT64: {
             advance();
             return TypeContext::instance().getFloat64();
+        }
+        case TokenType::TOKEN_FLOAT16: {
+            advance();
+            return TypeContext::instance().getFloat16();
+        }
+        case TokenType::TOKEN_FLOAT128: {
+            advance();
+            return TypeContext::instance().getFloat128();
         }
         case TokenType::TOKEN_STRUCT: {
             advance(); // consume 'struct'

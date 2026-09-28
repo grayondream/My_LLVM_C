@@ -339,3 +339,14 @@ TEST(ClassKeywordTest, ClassKeywordNotIdentifier) {
     EXPECT_EQ(tokens[0].type, TokenType::TOKEN_CLASS);
     EXPECT_NE(tokens[0].type, TokenType::TOKEN_IDENTIFIER);
 }
+
+TEST(LexerKeywordTest, Float16AndFloat128Keywords) {
+    Lexer lexer("test.c", "float16 float128");
+    auto tokens = lexer.tokenize();
+
+    ASSERT_EQ(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::TOKEN_FLOAT16);
+    EXPECT_EQ(tokens[0].lexeme, "float16");
+    EXPECT_EQ(tokens[1].type, TokenType::TOKEN_FLOAT128);
+    EXPECT_EQ(tokens[1].lexeme, "float128");
+}

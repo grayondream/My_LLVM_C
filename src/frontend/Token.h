@@ -71,6 +71,8 @@ enum class TokenType : int32_t {
     TOKEN_USIZE,
     TOKEN_FLOAT32,
     TOKEN_FLOAT64,
+    TOKEN_FLOAT16,
+    TOKEN_FLOAT128,
 
     // 运算符
     TOKEN_PLUS,         // +

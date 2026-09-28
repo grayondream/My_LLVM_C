@@ -33,6 +33,8 @@ enum class TypeKind {
     USize,
     Float32,
     Float64,
+    Float16,
+    Float128,
     Slice,
     Optional,
     Result,
@@ -220,6 +222,8 @@ public:
     Type* getUSize();
     Type* getFloat32();
     Type* getFloat64();
+    Type* getFloat16();
+    Type* getFloat128();
     SliceType* getSliceType(Type* elementType);
     OptionalType* getOptionalType(Type* elementType);
     ResultType* getResultType(Type* successType, Type* errorType);

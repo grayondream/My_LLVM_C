@@ -605,6 +605,11 @@ TEST_F(CodegenContextTest, GetLLVMTypePointer) {
     EXPECT_TRUE(t->isPointerTy());
 }
 
+TEST_F(CodegenContextTest, LLVMTypeFloat16AndFloat128) {
+    EXPECT_TRUE(ctx->getLLVMType(typeCtx->getFloat16())->isHalfTy());
+    EXPECT_TRUE(ctx->getLLVMType(typeCtx->getFloat128())->isFP128Ty());
+}
+
 // ============================================================
 // Constexpr/Const Variable Codegen Tests
 // ============================================================

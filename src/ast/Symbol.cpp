@@ -74,10 +74,12 @@ static int integerWidth(TypeKind kind) {
 
 static int floatWidth(TypeKind kind) {
     switch (kind) {
+        case TypeKind::Float16:  return 16;
         case TypeKind::Float:
         case TypeKind::Float32:  return 32;
         case TypeKind::Double:
         case TypeKind::Float64:  return 64;
+        case TypeKind::Float128: return 128;
         default:                 return 0;
     }
 }

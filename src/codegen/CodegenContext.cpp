@@ -393,6 +393,8 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
         case TypeKind::USize:  return llvm::Type::getInt64Ty(*context);
         case TypeKind::Float32:return llvm::Type::getFloatTy(*context);
         case TypeKind::Float64:return llvm::Type::getDoubleTy(*context);
+        case TypeKind::Float16:return llvm::Type::getHalfTy(*context);
+        case TypeKind::Float128:return llvm::Type::getFP128Ty(*context);
         case TypeKind::Pointer: {
             auto* pointee = getLLVMType(type->base);
             return llvm::PointerType::get(*context, 0);

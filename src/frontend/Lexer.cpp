@@ -107,7 +107,9 @@ static const std::unordered_map<std::string, TokenType> keywordMap = {
 
     // ===== 新增浮点类型 =====
     {"float32", TokenType::TOKEN_FLOAT32},
-    {"float64", TokenType::TOKEN_FLOAT64}
+    {"float64", TokenType::TOKEN_FLOAT64},
+    {"float16", TokenType::TOKEN_FLOAT16},
+    {"float128", TokenType::TOKEN_FLOAT128}
 };
 
 Lexer::Lexer(const std::string& filename, const std::string& source)

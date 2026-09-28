@@ -68,6 +68,8 @@ static std::string TokenTypeToString(TokenType type) {
         case TokenType::TOKEN_USIZE:      return "usize";
         case TokenType::TOKEN_FLOAT32:    return "float32";
         case TokenType::TOKEN_FLOAT64:    return "float64";
+        case TokenType::TOKEN_FLOAT16:    return "float16";
+        case TokenType::TOKEN_FLOAT128:   return "float128";
         case TokenType::TOKEN_PLUS:       return "+";
         case TokenType::TOKEN_MINUS:      return "-";
         case TokenType::TOKEN_STAR:       return "*";

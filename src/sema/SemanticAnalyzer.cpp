@@ -291,6 +291,8 @@ std::string SemanticAnalyzer::typeToString(Type* type) const {
         case TypeKind::USize: return "usize";
         case TypeKind::Float32: return "float32";
         case TypeKind::Float64: return "float64";
+        case TypeKind::Float16: return "float16";
+        case TypeKind::Float128: return "float128";
         case TypeKind::Slice: return "slice";
         case TypeKind::Optional: return "optional";
         case TypeKind::Result: return "result";

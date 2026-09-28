@@ -225,6 +225,20 @@ Type* TypeContext::getFloat64() {
     return m_types[TypeKind::Float64];
 }
 
+Type* TypeContext::getFloat16() {
+    if (m_types.find(TypeKind::Float16) == m_types.end()) {
+        m_types[TypeKind::Float16] = new Type(TypeKind::Float16);
+    }
+    return m_types[TypeKind::Float16];
+}
+
+Type* TypeContext::getFloat128() {
+    if (m_types.find(TypeKind::Float128) == m_types.end()) {
+        m_types[TypeKind::Float128] = new Type(TypeKind::Float128);
+    }
+    return m_types[TypeKind::Float128];
+}
+
 SliceType* TypeContext::getSliceType(Type* elementType) {
     // 切片类型不需要缓存，因为每个切片类型都有不同的元素类型
     return new SliceType(elementType);
