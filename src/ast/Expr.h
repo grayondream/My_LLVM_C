@@ -5,6 +5,7 @@
 #include <vector>
 #include "Type.h"
 #include "PrintFormat.h"
+#include "support/LiteralKind.h"
 
 #include "llvm/IR/Value.h"
 
@@ -87,15 +88,21 @@ public:
 
 class NumberExprAST : public ExprAST {
 public:
-    int value;
+    long long value;
+    // LEX-15: suffix/default kind of the literal, used by sema/codegen to pick
+    // the fixed-width type instead of a fixed `int`/`i32`.
+    LiteralKind literalKind{LiteralKind::Int};
     explicit NumberExprAST(int val) : value(val) {}
+    NumberExprAST(long long val, LiteralKind kind) : value(val), literalKind(kind) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
 class FloatExprAST : public ExprAST {
 public:
     double value;
+    LiteralKind literalKind{LiteralKind::Float64};
     explicit FloatExprAST(double val) : value(val) {}
+    FloatExprAST(double val, LiteralKind kind) : value(val), literalKind(kind) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 

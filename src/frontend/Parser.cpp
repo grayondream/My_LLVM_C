@@ -511,17 +511,16 @@ std::unique_ptr<ExprAST> Parser::parsePrimaryImpl() {
     // Number literal
     if (token->type == TokenType::TOKEN_NUMBER) {
         advance();
-        // LEX-15: the token carries the full 64-bit value; the AST node is
-        // widened to carry it whole in a later step, so narrow here for now.
-        long long val = std::get<long long>(token->value);
-        return std::make_unique<NumberExprAST>(static_cast<int>(val));
+        // LEX-15: carry the full 64-bit value and the literal kind into the AST.
+        return std::make_unique<NumberExprAST>(std::get<long long>(token->value),
+                                               token->literalKind);
     }
 
     // Float literal
     if (token->type == TokenType::TOKEN_FLOAT) {
         advance();
-        double val = std::get<double>(token->value);
-        return std::make_unique<FloatExprAST>(val);
+        return std::make_unique<FloatExprAST>(std::get<double>(token->value),
+                                              token->literalKind);
     }
 
     // Char literal

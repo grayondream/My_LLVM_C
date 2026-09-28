@@ -61,6 +61,30 @@ TEST_F(ParserTest, ZeroLiteral) {
     EXPECT_EQ(num->value, 0);
 }
 
+// LEX-15: the parser must carry the literal's suffix/default kind into the AST
+// so later stages can pick the fixed-width type instead of a fixed int/i32.
+TEST_F(ParserTest, LiteralKindIsCarriedIntoAst) {
+    auto n = dynamic_cast<NumberExprAST*>(parseExpr("42u"));
+    ASSERT_NE(n, nullptr);
+    EXPECT_EQ(n->literalKind, LiteralKind::UInt);
+
+    auto l = dynamic_cast<NumberExprAST*>(parseExpr("42l"));
+    ASSERT_NE(l, nullptr);
+    EXPECT_EQ(l->literalKind, LiteralKind::Long);
+
+    auto i = dynamic_cast<NumberExprAST*>(parseExpr("42"));
+    ASSERT_NE(i, nullptr);
+    EXPECT_EQ(i->literalKind, LiteralKind::Int);
+
+    auto f = dynamic_cast<FloatExprAST*>(parseExpr("1.5f"));
+    ASSERT_NE(f, nullptr);
+    EXPECT_EQ(f->literalKind, LiteralKind::Float32);
+
+    auto d = dynamic_cast<FloatExprAST*>(parseExpr("1.5"));
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->literalKind, LiteralKind::Float64);
+}
+
 // ========== Identifiers ==========
 
 TEST_F(ParserTest, Identifier) {
