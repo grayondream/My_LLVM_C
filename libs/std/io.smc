@@ -5,26 +5,26 @@
 // private; only the helpers are exported (P0-04 / MOD-05).
 module std.io;
 
-extern int    printf(char* format, ...);
-extern int    putchar(int c);
-extern int    getchar();
-extern int    dprintf(int fd, char* format, ...);
-extern int    scanf(char* format, ...);
+extern int32    printf(char* format, ...);
+extern int32    putchar(int32 c);
+extern int32    getchar();
+extern int32    dprintf(int32 fd, char* format, ...);
+extern int32    scanf(char* format, ...);
 
 extern void*  fopen(char* path, char* mode);
-extern int    fclose(void* stream);
+extern int32    fclose(void* stream);
 extern usize  fread(void* ptr, usize size, usize count, void* stream);
 extern usize  fwrite(void* ptr, usize size, usize count, void* stream);
-extern char*  fgets(char* str, int n, void* stream);
-extern int    fputs(char* s, void* stream);
-extern int    fgetc(void* stream);
-extern int    fputc(int c, void* stream);
+extern char*  fgets(char* str, int32 n, void* stream);
+extern int32    fputs(char* s, void* stream);
+extern int32    fgetc(void* stream);
+extern int32    fputc(int32 c, void* stream);
 
 export namespace std {
 
 // ----- stdout -----
 
-void print_int(int v) {
+void print_int(int32 v) {
     printf("%d", v);
 }
 
@@ -36,7 +36,7 @@ void print_str(char* s) {
     printf("%s", s);
 }
 
-void print_bool(int b) {
+void print_bool(int32 b) {
     if (b) {
         printf("true");
     } else {
@@ -52,32 +52,32 @@ void print_err_str(char* s) {
     dprintf(2, "%s", s);
 }
 
-void print_err_int(int v) {
+void print_err_int(int32 v) {
     dprintf(2, "%d", v);
 }
 
 // ----- stdin -----
 
 // Returns the next byte from stdin (0..255), or -1 at end of input.
-int read_char() {
+int32 read_char() {
     return getchar();
 }
 
 // Reads a decimal integer from stdin. Returns the parsed value, or 0 when the
 // input is not a valid integer (mirrors `atoi`; there is no separate error
 // channel because SafeModern C has no exceptions).
-int read_int() {
-    int v = 0;
+int32 read_int() {
+    int32 v = 0;
     scanf("%d", &v);
     return v;
 }
 
 // Reads one line from stdin into `buf` (capacity `cap`), excluding the
 // newline. Returns the number of bytes stored. Always NUL-terminates.
-int read_line(char* buf, int cap) {
-    int i = 0;
+int32 read_line(char* buf, int32 cap) {
+    int32 i = 0;
     while (i < cap - 1) {
-        int c = getchar();
+        int32 c = getchar();
         if (c == -1 || c == '\n') break;
         buf[i] = (char)c;
         i = i + 1;
@@ -93,7 +93,7 @@ void* file_open(char* path, char* mode) {
     return fopen(path, mode);
 }
 
-int file_close(void* f) {
+int32 file_close(void* f) {
     return fclose(f);
 }
 
@@ -109,19 +109,19 @@ usize file_write(void* f, void* buf, usize n) {
 
 // Reads one line (including the newline, if any) into `buf`; returns `buf`
 // on success, or null at end of file.
-char* file_read_line(char* buf, int cap, void* f) {
+char* file_read_line(char* buf, int32 cap, void* f) {
     return fgets(buf, cap, f);
 }
 
-int file_read_char(void* f) {
+int32 file_read_char(void* f) {
     return fgetc(f);
 }
 
-int file_write_char(void* f, int c) {
+int32 file_write_char(void* f, int32 c) {
     return fputc(c, f);
 }
 
-int file_write_str(void* f, char* s) {
+int32 file_write_str(void* f, char* s) {
     return fputs(s, f);
 }
 

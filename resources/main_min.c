@@ -1,3 +1,3 @@
-int main() {
+int32 main() {
     return 1 + 3;
 }

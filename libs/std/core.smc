@@ -5,17 +5,17 @@ module std.core;
 
 export namespace std {
 
-constexpr int min(int a, int b) {
+constexpr int32 min(int32 a, int32 b) {
     if (a < b) return a;
     return b;
 }
 
-constexpr int max(int a, int b) {
+constexpr int32 max(int32 a, int32 b) {
     if (a > b) return a;
     return b;
 }
 
-int clamp(int v, int lo, int hi) {
+int32 clamp(int32 v, int32 lo, int32 hi) {
     if (v < lo) return lo;
     if (v > hi) return hi;
     return v;

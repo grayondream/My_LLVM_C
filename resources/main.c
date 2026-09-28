@@ -16,39 +16,39 @@ enum Color {
 
 // ===== 结构体 / 联合体 =====
 struct Point {
-    int x;
-    int y;
+    int32 x;
+    int32 y;
 };
 
 union Data {
-    int i;
-    float f;
+    int32 i;
+    float32 f;
     char str[20];
 };
 
 // ===== 全局变量 =====
-static int global_var = 10;
-extern int external_var;
+static int32 global_var = 10;
+extern int32 external_var;
 
 // ===== 函数声明 =====
-int add(int a, int b);
-void pointer_demo(int* p);
+int32 add(int32 a, int32 b);
+void pointer_demo(int32* p);
 
 // ===== 函数定义 =====
-int add(int a, int b) {
+int32 add(int32 a, int32 b) {
     return a + b;
 }
 
 // ===== 指针 / 地址 / 解引用 =====
-void pointer_demo(int* p) {
-    int local = 42;
-    int* ptr = &local;   // 取地址 &
+void pointer_demo(int32* p) {
+    int32 local = 42;
+    int32* ptr = &local;   // 取地址 &
     *ptr = *ptr + 1;     // 解引用 *
     p = ptr;
 }
 
 // ===== 控制流 =====
-void control_flow(int n) {
+void control_flow(int32 n) {
     if (n > 0) {
         println("positive");
     } else if (n == 0) {
@@ -67,12 +67,12 @@ void control_flow(int n) {
             break;
     }
 
-    for (int i = 0; i < n; i++) {
+    for (int32 i = 0; i < n; i++) {
         if (i == 5) continue;
         if (i == 8) break;
     }
 
-    int i = 0;
+    int32 i = 0;
     while (i < n) {
         i++;
     }
@@ -84,78 +84,78 @@ void control_flow(int n) {
 
 // ===== 数组 / 指针算术 =====
 void array_demo() {
-    int arr[5] = {1,2,3,4,5};
-    int* p = arr;
+    int32 arr[5] = {1,2,3,4,5};
+    int32* p = arr;
 
-    for (int i = 0; i < 5; i++) {
+    for (int32 i = 0; i < 5; i++) {
         println("{}", *(p + i));
     }
 }
 
 // ===== 函数指针 =====
-int mul(int a, int b) {
+int32 mul(int32 a, int32 b) {
     return a * b;
 }
 
 void function_pointer_demo() {
-    int (*fp)(int, int) = mul;
-    int result = fp(2, 3);
+    int32 (*fp)(int32, int32) = mul;
+    int32 result = fp(2, 3);
 }
 
 // ===== 递归 =====
-int factorial(int n) {
+int32 factorial(int32 n) {
     if (n <= 1) return 1;
     return n * factorial(n - 1);
 }
 
 // ===== 运算符覆盖（Pratt Parser重点）=====
 void operator_demo() {
-    int a = 5, b = 3;
+    int32 a = 5, b = 3;
 
-    int c = a + b * 2;
-    int d = (a + b) * 2;
+    int32 c = a + b * 2;
+    int32 d = (a + b) * 2;
 
-    int e = a & b;
-    int f = a | b;
-    int g = a ^ b;
+    int32 e = a & b;
+    int32 f = a | b;
+    int32 g = a ^ b;
 
-    int h = a << 1;
-    int i = a >> 1;
+    int32 h = a << 1;
+    int32 i = a >> 1;
 
-    int j = (a > b) ? a : b;
+    int32 j = (a > b) ? a : b;
 
-    int k = ++a;
-    int l = b--;
+    int32 k = ++a;
+    int32 l = b--;
 
-    int m = (a += b);
+    int32 m = (a += b);
 
-    int n = !a;
-    int o = ~b;
+    int32 n = !a;
+    int32 o = ~b;
 }
 
 // ===== sizeof / 类型 =====
 void sizeof_demo() {
-    int x = 10;
+    int32 x = 10;
     println("{}", sizeof(x));
-    println("{}", sizeof(int));
+    println("{}", sizeof(int32));
 }
 
 // ===== 主函数 =====
-int main() {
+int32 main() {
     struct Point p = {10, 20};
     union Data d;
 
     d.i = 10;
     d.f = 3.14f;
 
-    int result = add(3, 4);
+    int32 result = add(3, 4);
 
     pointer_demo(&result);
     control_flow(result);
     array_demo();
     function_pointer_demo();
 
-    int fact = factorial(5);
+    int32 fact = factorial(5);
 
     operator_demo();
     sizeof_demo();

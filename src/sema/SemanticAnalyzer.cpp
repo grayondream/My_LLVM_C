@@ -1775,19 +1775,13 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
     // Validate constexpr function constraints
     if (node.isConstexpr) {
         // Return type must be arithmetic (literal type)
-        if (node.returnType->kind != TypeKind::Int &&
-            node.returnType->kind != TypeKind::Float &&
-            node.returnType->kind != TypeKind::Double &&
-            node.returnType->kind != TypeKind::Char) {
+        if (!isIntegerType(node.returnType) && !isFloatType(node.returnType)) {
             emitError("constexpr function '" + node.name + "' must have literal return type", node);
         }
 
         // All parameters must be arithmetic types
         for (auto& param : node.params) {
-            if (param->type->kind != TypeKind::Int &&
-                param->type->kind != TypeKind::Float &&
-                param->type->kind != TypeKind::Double &&
-                param->type->kind != TypeKind::Char) {
+            if (!isIntegerType(param->type) && !isFloatType(param->type)) {
                 emitError("constexpr function '" + node.name + "' parameter '" + param->name + "' must have literal type", node);
             }
         }
