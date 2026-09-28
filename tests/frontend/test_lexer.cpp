@@ -198,6 +198,13 @@ TEST(LexerNumberSuffixTest, LiteralKindNameMappingTable) {
     EXPECT_STREQ(literalKindName(LiteralKind::Float128), "float128");
 }
 
+// LEX-15: the enum and literalKindName() must be reachable through the support
+// layer (no ast -> frontend dependency).
+TEST(LexerLiteralKindTest, NameIsAvailableFromSupportHeader) {
+    EXPECT_STREQ(literalKindName(LiteralKind::None), "none");
+    EXPECT_STREQ(literalKindName(LiteralKind::Int), "int"); // Task 10 改为 "int32"
+}
+
 // LEX-17: a digit separator '_' is only valid between two digits.
 TEST(LexerSeparatorTest, ValidSeparatorsProduceNoDiagnostics) {
     Lexer lexer("ok.c", "1_000 0xFF_FF 0b1010_1010 0o7_7 1_000.000_1");

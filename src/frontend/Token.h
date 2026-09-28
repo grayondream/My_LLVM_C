@@ -5,6 +5,8 @@
 
 #include <cstdint>
 
+#include "support/LiteralKind.h"
+
 enum class TokenType : int32_t {
     TOKEN_UNKNOWN,        // 未知的 token
     // 基本标识符与字面量
@@ -127,24 +129,6 @@ enum class TokenType : int32_t {
     // 文件结尾
     TOKEN_EOS
 };
-
-// LEX-15: lexical kind of a numeric literal, derived from its suffix (or the
-// unsuffixed default). This is lexer-level metadata; the base type is exposed
-// through literalKindName() and consumed by later pipeline stages.
-enum class LiteralKind : int32_t {
-    None,      // not a numeric literal
-    Int,       // unsuffixed integer       -> int
-    UInt,      // 'u'                      -> uint32
-    Long,      // 'l'                      -> int64
-    ULong,     // 'ul' / 'lu'              -> uint64
-    Float16,   // 'f16'                    -> float16
-    Float32,   // 'f' / 'F' / 'f32'        -> float32
-    Float64,   // unsuffixed / 'f64' / 'l' -> float64
-    Float128,  // 'f128'                   -> float128
-};
-
-// Base language type name for a literal kind (LEX-15 mapping table).
-const char* literalKindName(LiteralKind kind);
 
 using TokenValue = std::variant<std::monostate, int, double, char, std::string>;
 class Token {

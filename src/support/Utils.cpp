@@ -1,7 +1,25 @@
 #include "Utils.h"
 #include "ast/Decl.h"
 #include "frontend/Token.h"
+#include "support/LiteralKind.h"
 #include <sstream>
+
+// LEX-15: base language type name for a numeric literal kind. Moved here from
+// frontend/Token.cpp so frontend/ and ast/ can share it.
+const char* literalKindName(LiteralKind kind) {
+    switch (kind) {
+        case LiteralKind::Int:      return "int";
+        case LiteralKind::UInt:     return "uint32";
+        case LiteralKind::Long:     return "int64";
+        case LiteralKind::ULong:    return "uint64";
+        case LiteralKind::Float16:  return "float16";
+        case LiteralKind::Float32:  return "float32";
+        case LiteralKind::Float64:  return "float64";
+        case LiteralKind::Float128: return "float128";
+        case LiteralKind::None:     break;
+    }
+    return "none";
+}
 
 static std::string TokenTypeToString(TokenType type) {
     switch (type) {
