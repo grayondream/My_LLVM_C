@@ -430,7 +430,7 @@ Token Lexer::scanNumber(){
                 if(!isDigitForRadix(c, radix)) break;
                 addDigit(value, radix, digitValue(c));
             }
-            Token token = makeToken(TokenType::TOKEN_NUMBER, lexName, static_cast<int>(value));
+            Token token = makeToken(TokenType::TOKEN_NUMBER, lexName, static_cast<long long>(value));
             token.literalKind = kind;
             return token;
         }
@@ -513,7 +513,7 @@ Token Lexer::scanNumber(){
         if(!isDigitForRadix(c, 10)) break;
         addDigit(value, 10, digitValue(c));
     }
-    Token token = makeToken(TokenType::TOKEN_NUMBER, lexName, static_cast<int>(value));
+    Token token = makeToken(TokenType::TOKEN_NUMBER, lexName, static_cast<long long>(value));
     token.literalKind = kind;
     return token;
 }

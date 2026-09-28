@@ -130,7 +130,7 @@ enum class TokenType : int32_t {
     TOKEN_EOS
 };
 
-using TokenValue = std::variant<std::monostate, int, double, char, std::string>;
+using TokenValue = std::variant<std::monostate, long long, double, char, std::string>;
 class Token {
 public:
     TokenType type{}; 

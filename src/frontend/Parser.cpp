@@ -511,8 +511,10 @@ std::unique_ptr<ExprAST> Parser::parsePrimaryImpl() {
     // Number literal
     if (token->type == TokenType::TOKEN_NUMBER) {
         advance();
-        int val = std::get<int>(token->value);
-        return std::make_unique<NumberExprAST>(val);
+        // LEX-15: the token carries the full 64-bit value; the AST node is
+        // widened to carry it whole in a later step, so narrow here for now.
+        long long val = std::get<long long>(token->value);
+        return std::make_unique<NumberExprAST>(static_cast<int>(val));
     }
 
     // Float literal
@@ -2192,7 +2194,7 @@ std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string
         advance();
         int size = 0;
         if (auto numTok = match(TokenType::TOKEN_NUMBER)) {
-            size = std::get<int>(numTok->value);
+            size = static_cast<int>(std::get<long long>(numTok->value));
         }
         if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after array size")) {
             return nullptr;
@@ -2357,7 +2359,7 @@ Type* Parser::parseMemberArraySuffix(Type* base) {
     int size = 1;
     if (check(TokenType::TOKEN_NUMBER)) {
         auto numTok = advance();
-        size = std::get<int>(numTok->value);
+        size = static_cast<int>(std::get<long long>(numTok->value));
     }
     expect(TokenType::TOKEN_RBRACKET, "expected ']' after array size");
     return new ArrayType(base, size);

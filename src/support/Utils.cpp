@@ -8,7 +8,7 @@
 // frontend/Token.cpp so frontend/ and ast/ can share it.
 const char* literalKindName(LiteralKind kind) {
     switch (kind) {
-        case LiteralKind::Int:      return "int";
+        case LiteralKind::Int:      return "int32";
         case LiteralKind::UInt:     return "uint32";
         case LiteralKind::Long:     return "int64";
         case LiteralKind::ULong:    return "uint64";
@@ -141,7 +141,7 @@ static std::string TokenTypeToString(TokenType type) {
 
 static std::string TokenValueToString(const TokenValue& value) {
     if (std::holds_alternative<std::monostate>(value)) return "null";
-    if (std::holds_alternative<int>(value)) return std::to_string(std::get<int>(value));
+    if (std::holds_alternative<long long>(value)) return std::to_string(std::get<long long>(value));
     if (std::holds_alternative<double>(value)) return std::to_string(std::get<double>(value));
     if (std::holds_alternative<char>(value)) return std::string(1, std::get<char>(value));
     if (std::holds_alternative<std::string>(value)) return std::get<std::string>(value);

@@ -6,6 +6,8 @@
 #include "frontend/Lexer.h"
 #include "sema/Diagnostic.h"
 
+#include <spdlog/spdlog.h>
+
 namespace {
 
 const Diagnostic* findDiag(const std::vector<Diagnostic>& diags, DiagnosticCode code) {
@@ -169,7 +171,7 @@ TEST(LexerNumberSuffixTest, IntegerSuffixesAreRecognizedOnAllRadixes) {
     EXPECT_EQ(tokens[8].literalKind, LiteralKind::UInt);
     EXPECT_EQ(tokens[9].literalKind, LiteralKind::Long);
     EXPECT_EQ(tokens[10].literalKind, LiteralKind::UInt);
-    EXPECT_EQ(std::get<int>(tokens[0].value), 1);
+    EXPECT_EQ(std::get<long long>(tokens[0].value), 1);
 }
 
 TEST(LexerNumberSuffixTest, FloatSuffixesMapToKinds) {
@@ -188,7 +190,7 @@ TEST(LexerNumberSuffixTest, FloatSuffixesMapToKinds) {
 }
 
 TEST(LexerNumberSuffixTest, LiteralKindNameMappingTable) {
-    EXPECT_STREQ(literalKindName(LiteralKind::Int), "int");
+    EXPECT_STREQ(literalKindName(LiteralKind::Int), "int32");
     EXPECT_STREQ(literalKindName(LiteralKind::UInt), "uint32");
     EXPECT_STREQ(literalKindName(LiteralKind::Long), "int64");
     EXPECT_STREQ(literalKindName(LiteralKind::ULong), "uint64");
@@ -202,7 +204,7 @@ TEST(LexerNumberSuffixTest, LiteralKindNameMappingTable) {
 // layer (no ast -> frontend dependency).
 TEST(LexerLiteralKindTest, NameIsAvailableFromSupportHeader) {
     EXPECT_STREQ(literalKindName(LiteralKind::None), "none");
-    EXPECT_STREQ(literalKindName(LiteralKind::Int), "int"); // Task 10 改为 "int32"
+    EXPECT_STREQ(literalKindName(LiteralKind::Int), "int32");
 }
 
 // LEX-17: a digit separator '_' is only valid between two digits.
@@ -257,7 +259,7 @@ TEST(LexerSeparatorTest, RecoveryKeepsNumberTokenAndRestOfStream) {
     EXPECT_FALSE(lexer.getDiagnostics().empty());
     ASSERT_EQ(tokens.size(), 10u);
     EXPECT_EQ(tokens[3].type, TokenType::TOKEN_NUMBER);
-    EXPECT_EQ(std::get<int>(tokens[3].value), 10);
+    EXPECT_EQ(std::get<long long>(tokens[3].value), 10);
 }
 
 // LEX-05: floating-point exponents (e/E, optional sign, decimal digits).
@@ -294,7 +296,7 @@ TEST(LexerFloatExponentTest, HexEIsADigitNotAnExponent) {
     ASSERT_EQ(tokens.size(), 1u);
     EXPECT_EQ(tokens[0].type, TokenType::TOKEN_NUMBER);
     EXPECT_EQ(tokens[0].literalKind, LiteralKind::Int);
-    EXPECT_EQ(std::get<int>(tokens[0].value), 0x1e10);
+    EXPECT_EQ(std::get<long long>(tokens[0].value), 0x1e10);
 }
 
 TEST(LexerFloatExponentTest, IncompleteExponentIsLeftAlone) {
@@ -302,7 +304,7 @@ TEST(LexerFloatExponentTest, IncompleteExponentIsLeftAlone) {
     auto tokens = lexer.tokenize();
     ASSERT_EQ(tokens.size(), 6u);
     EXPECT_EQ(tokens[0].type, TokenType::TOKEN_NUMBER);
-    EXPECT_EQ(std::get<int>(tokens[0].value), 1);
+    EXPECT_EQ(std::get<long long>(tokens[0].value), 1);
     EXPECT_EQ(tokens[1].type, TokenType::TOKEN_IDENTIFIER);
     EXPECT_EQ(tokens[1].lexeme, "e");
     EXPECT_EQ(tokens[2].type, TokenType::TOKEN_NUMBER);
@@ -371,4 +373,16 @@ TEST(LexerKeywordTest, LegacyNumericKeywordsAreIdentifiers) {
     EXPECT_EQ(tokens[1].lexeme, "float");
     EXPECT_EQ(tokens[2].type, TokenType::TOKEN_IDENTIFIER);
     EXPECT_EQ(tokens[2].lexeme, "double");
+}
+
+// LEX-15: the token value must retain the full 64-bit range (> INT_MAX).
+TEST(LexerValueWidthTest, LargeIntegerIsNotTruncated) {
+    spdlog::set_level(spdlog::level::off);
+    Lexer lexer("test.c", "4000000000 0xFFFFFFFFFFFFFFFF");
+    auto tokens = lexer.tokenize();
+
+    ASSERT_GE(tokens.size(), 2u);
+    EXPECT_EQ(std::get<long long>(tokens[0].value), 4000000000LL);
+    // 0xFFFFFFFFFFFFFFFF is the two's-complement bit pattern for -1 in int64.
+    EXPECT_EQ(std::get<long long>(tokens[1].value), -1LL);
 }
