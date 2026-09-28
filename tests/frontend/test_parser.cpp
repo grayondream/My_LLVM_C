@@ -33,7 +33,7 @@ static auto parse(const std::string& source) {
 static std::unique_ptr<TranslationUnitAST> s_lastTU;
 
 static auto parseExpr(const std::string& source) {
-    std::string wrapped = "int f() { return " + source + "; }";
+    std::string wrapped = "int32 f() { return " + source + "; }";
     s_lastTU = parse(wrapped);
     if (!s_lastTU || s_lastTU->declarations.empty()) return (ExprAST*)nullptr;
     auto func = dynamic_cast<FunctionDeclAST*>(s_lastTU->declarations[0].get());
@@ -546,19 +546,19 @@ TEST_F(ParserTest, TernaryExpr) {
 // ========== Cast Expressions ==========
 
 TEST_F(ParserTest, CastToInt) {
-    auto expr = parseExpr("(int)1");
+    auto expr = parseExpr("(int32)1");
     ASSERT_NE(expr, nullptr);
     auto cast = dynamic_cast<CastExprAST*>(expr);
     ASSERT_NE(cast, nullptr);
-    EXPECT_EQ(cast->castType->kind, TypeKind::Int);
+    EXPECT_EQ(cast->castType->kind, TypeKind::Int32);
 }
 
 TEST_F(ParserTest, CastToFloat) {
-    auto expr = parseExpr("(float)1");
+    auto expr = parseExpr("(float32)1");
     ASSERT_NE(expr, nullptr);
     auto cast = dynamic_cast<CastExprAST*>(expr);
     ASSERT_NE(cast, nullptr);
-    EXPECT_EQ(cast->castType->kind, TypeKind::Float);
+    EXPECT_EQ(cast->castType->kind, TypeKind::Float32);
 }
 
 // ========== Sizeof ==========
@@ -573,7 +573,7 @@ TEST_F(LexerTest, FloatSuffixIsPartOfTheLiteral) {
 }
 
 TEST_F(ParserTest, MultipleDeclarators) {
-    auto tu = parse("int a = 1, b = 2, c = 3;");
+    auto tu = parse("int32 a = 1, b = 2, c = 3;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1);
     auto* multi = dynamic_cast<MultiVarDeclAST*>(tu->declarations[0].get());
@@ -582,18 +582,18 @@ TEST_F(ParserTest, MultipleDeclarators) {
 }
 
 TEST_F(ParserTest, SingleDeclaratorIsNotWrapped) {
-    auto tu = parse("int a = 1;");
+    auto tu = parse("int32 a = 1;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1);
     EXPECT_NE(dynamic_cast<VarDeclAST*>(tu->declarations[0].get()), nullptr);
 }
 
 TEST_F(ParserTest, SizeofType) {
-    auto expr = parseExpr("sizeof(int)");
+    auto expr = parseExpr("sizeof(int32)");
     ASSERT_NE(expr, nullptr);
     auto sz = dynamic_cast<SizeofExprAST*>(expr);
     ASSERT_NE(sz, nullptr);
-    EXPECT_EQ(sz->sizeofType->kind, TypeKind::Int);
+    EXPECT_EQ(sz->sizeofType->kind, TypeKind::Int32);
 }
 
 TEST_F(ParserTest, SizeofExpr) {
@@ -661,8 +661,8 @@ TEST_F(ParserTest, NestedFunctionCall) {
 
 TEST_F(ParserTest, FunctionOverloading) {
     auto tu = parse(R"(
-        int add_int_int(int a, int b) { return a + b; }
-        float add_float_float(float a, float b) { return a + b; }
+        int32 add_int_int(int32 a, int32 b) { return a + b; }
+        float32 add_float_float(float32 a, float32 b) { return a + b; }
     )");
     ASSERT_NE(tu, nullptr);
     EXPECT_EQ(tu->declarations.size(), 2);
@@ -677,7 +677,7 @@ TEST_F(ParserTest, FunctionOverloading) {
 
 TEST_F(ParserTest, OperatorOverloading) {
     auto tu = parse(R"(
-        struct Point { int x; int y; };
+        struct Point { int32 x; int32 y; };
         struct Point operator+(struct Point a, struct Point b) {
             struct Point result;
             result.x = a.x + b.x;
@@ -895,7 +895,7 @@ protected:
 std::unique_ptr<TranslationUnitAST> ParserStmtTest::s_lastTU;
 
 TEST_F(ParserStmtTest, ReturnStatement) {
-    auto stmt = parseStmt("int f() { return 42; }");
+    auto stmt = parseStmt("int32 f() { return 42; }");
     ASSERT_NE(stmt, nullptr);
     auto ret = dynamic_cast<ReturnStmtAST*>(stmt);
     ASSERT_NE(ret, nullptr);
@@ -903,7 +903,7 @@ TEST_F(ParserStmtTest, ReturnStatement) {
 }
 
 TEST_F(ParserStmtTest, IfStatement) {
-    auto stmt = parseStmt("int f() { if (1) { } }");
+    auto stmt = parseStmt("int32 f() { if (1) { } }");
     ASSERT_NE(stmt, nullptr);
     auto ifStmt = dynamic_cast<IfStmtAST*>(stmt);
     ASSERT_NE(ifStmt, nullptr);
@@ -913,7 +913,7 @@ TEST_F(ParserStmtTest, IfStatement) {
 }
 
 TEST_F(ParserStmtTest, IfElseStatement) {
-    auto stmt = parseStmt("int f() { if (1) { } else { } }");
+    auto stmt = parseStmt("int32 f() { if (1) { } else { } }");
     ASSERT_NE(stmt, nullptr);
     auto ifStmt = dynamic_cast<IfStmtAST*>(stmt);
     ASSERT_NE(ifStmt, nullptr);
@@ -923,7 +923,7 @@ TEST_F(ParserStmtTest, IfElseStatement) {
 }
 
 TEST_F(ParserStmtTest, WhileStatement) {
-    auto stmt = parseStmt("int f() { while (1) { } }");
+    auto stmt = parseStmt("int32 f() { while (1) { } }");
     ASSERT_NE(stmt, nullptr);
     auto whileStmt = dynamic_cast<WhileStmtAST*>(stmt);
     ASSERT_NE(whileStmt, nullptr);
@@ -933,7 +933,7 @@ TEST_F(ParserStmtTest, WhileStatement) {
 
 TEST_F(ParserStmtTest, SwitchStatement) {
     auto stmt = parseStmt(
-        "int f() { switch (x) { case 1: break; case 2: case 3: break; default: break; } }");
+        "int32 f() { switch (x) { case 1: break; case 2: case 3: break; default: break; } }");
     ASSERT_NE(stmt, nullptr);
     auto sw = dynamic_cast<SwitchStmtAST*>(stmt);
     ASSERT_NE(sw, nullptr);
@@ -947,7 +947,7 @@ TEST_F(ParserStmtTest, SwitchStatement) {
 }
 
 TEST_F(ParserStmtTest, DoWhileStatement) {
-    auto stmt = parseStmt("int f() { do { } while (1); }");
+    auto stmt = parseStmt("int32 f() { do { } while (1); }");
     ASSERT_NE(stmt, nullptr);
     auto doWhile = dynamic_cast<DoWhileStmtAST*>(stmt);
     ASSERT_NE(doWhile, nullptr);
@@ -956,7 +956,7 @@ TEST_F(ParserStmtTest, DoWhileStatement) {
 }
 
 TEST_F(ParserStmtTest, ForStatement) {
-    auto stmt = parseStmt("int f() { for (i = 0; i < 10; i = i + 1) { } }");
+    auto stmt = parseStmt("int32 f() { for (i = 0; i < 10; i = i + 1) { } }");
     ASSERT_NE(stmt, nullptr);
     auto forStmt = dynamic_cast<ForStmtAST*>(stmt);
     ASSERT_NE(forStmt, nullptr);
@@ -967,7 +967,7 @@ TEST_F(ParserStmtTest, ForStatement) {
 }
 
 TEST_F(ParserStmtTest, ForEmptyInit) {
-    auto stmt = parseStmt("int f() { for (; 1; ) { } }");
+    auto stmt = parseStmt("int32 f() { for (; 1; ) { } }");
     ASSERT_NE(stmt, nullptr);
     auto forStmt = dynamic_cast<ForStmtAST*>(stmt);
     ASSERT_NE(forStmt, nullptr);
@@ -977,7 +977,7 @@ TEST_F(ParserStmtTest, ForEmptyInit) {
 }
 
 TEST_F(ParserStmtTest, BreakStatement) {
-    auto stmt = parseStmt("int f() { while(1) { break; } }");
+    auto stmt = parseStmt("int32 f() { while(1) { break; } }");
     ASSERT_NE(stmt, nullptr);
     auto whileStmt = dynamic_cast<WhileStmtAST*>(stmt);
     ASSERT_NE(whileStmt, nullptr);
@@ -989,7 +989,7 @@ TEST_F(ParserStmtTest, BreakStatement) {
 }
 
 TEST_F(ParserStmtTest, ContinueStatement) {
-    auto stmt = parseStmt("int f() { while(1) { continue; } }");
+    auto stmt = parseStmt("int32 f() { while(1) { continue; } }");
     ASSERT_NE(stmt, nullptr);
     auto whileStmt = dynamic_cast<WhileStmtAST*>(stmt);
     ASSERT_NE(whileStmt, nullptr);
@@ -1001,7 +1001,7 @@ TEST_F(ParserStmtTest, ContinueStatement) {
 }
 
 TEST_F(ParserStmtTest, ExprStatement) {
-    auto stmt = parseStmt("int f() { x; }");
+    auto stmt = parseStmt("int32 f() { x; }");
     ASSERT_NE(stmt, nullptr);
     auto exprStmt = dynamic_cast<ExprStmtAST*>(stmt);
     ASSERT_NE(exprStmt, nullptr);
@@ -1009,7 +1009,7 @@ TEST_F(ParserStmtTest, ExprStatement) {
 }
 
 TEST_F(ParserStmtTest, CompoundStatement) {
-    auto stmt = parseStmt("int f() { { return 1; } }");
+    auto stmt = parseStmt("int32 f() { { return 1; } }");
     ASSERT_NE(stmt, nullptr);
     auto compound = dynamic_cast<CompoundStmtAST*>(stmt);
     ASSERT_NE(compound, nullptr);
@@ -1017,7 +1017,7 @@ TEST_F(ParserStmtTest, CompoundStatement) {
 }
 
 TEST_F(ParserStmtTest, NestedIf) {
-    auto stmt = parseStmt("int f() { if (1) { if (2) { } } }");
+    auto stmt = parseStmt("int32 f() { if (1) { if (2) { } } }");
     ASSERT_NE(stmt, nullptr);
     auto outer = dynamic_cast<IfStmtAST*>(stmt);
     ASSERT_NE(outer, nullptr);
@@ -1052,24 +1052,24 @@ protected:
 // ========== Variable Declarations ==========
 
 TEST_F(ParserDeclTest, SimpleVarDecl) {
-    auto tu = parse("int x;");
+    auto tu = parse("int32 x;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(var, nullptr);
     EXPECT_EQ(var->name, "x");
-    EXPECT_EQ(var->type->kind, TypeKind::Int);
+    EXPECT_EQ(var->type->kind, TypeKind::Int32);
     EXPECT_EQ(var->initExpr, nullptr);
 }
 
 TEST_F(ParserDeclTest, VarDeclWithInit) {
-    auto tu = parse("int x = 42;");
+    auto tu = parse("int32 x = 42;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(var, nullptr);
     EXPECT_EQ(var->name, "x");
-    EXPECT_EQ(var->type->kind, TypeKind::Int);
+    EXPECT_EQ(var->type->kind, TypeKind::Int32);
     ASSERT_NE(var->initExpr, nullptr);
     auto num = dynamic_cast<NumberExprAST*>(var->initExpr.get());
     ASSERT_NE(num, nullptr);
@@ -1077,23 +1077,23 @@ TEST_F(ParserDeclTest, VarDeclWithInit) {
 }
 
 TEST_F(ParserDeclTest, FloatVarDecl) {
-    auto tu = parse("float f;");
+    auto tu = parse("float32 f;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(var, nullptr);
     EXPECT_EQ(var->name, "f");
-    EXPECT_EQ(var->type->kind, TypeKind::Float);
+    EXPECT_EQ(var->type->kind, TypeKind::Float32);
 }
 
 TEST_F(ParserDeclTest, DoubleVarDecl) {
-    auto tu = parse("double d = 3.14;");
+    auto tu = parse("float64 d = 3.14;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(var, nullptr);
     EXPECT_EQ(var->name, "d");
-    EXPECT_EQ(var->type->kind, TypeKind::Double);
+    EXPECT_EQ(var->type->kind, TypeKind::Float64);
 }
 
 TEST_F(ParserDeclTest, CharVarDecl) {
@@ -1118,18 +1118,18 @@ TEST_F(ParserDeclTest, VoidPointerDecl) {
 }
 
 TEST_F(ParserDeclTest, IntPointerDecl) {
-    auto tu = parse("int* ptr;");
+    auto tu = parse("int32* ptr;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(var, nullptr);
     EXPECT_EQ(var->name, "ptr");
     EXPECT_EQ(var->type->kind, TypeKind::Pointer);
-    EXPECT_EQ(var->type->base->kind, TypeKind::Int);
+    EXPECT_EQ(var->type->base->kind, TypeKind::Int32);
 }
 
 TEST_F(ParserDeclTest, DoublePointerDecl) {
-    auto tu = parse("int** pp;");
+    auto tu = parse("int32** pp;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
@@ -1137,24 +1137,24 @@ TEST_F(ParserDeclTest, DoublePointerDecl) {
     EXPECT_EQ(var->name, "pp");
     EXPECT_EQ(var->type->kind, TypeKind::Pointer);
     EXPECT_EQ(var->type->base->kind, TypeKind::Pointer);
-    EXPECT_EQ(var->type->base->base->kind, TypeKind::Int);
+    EXPECT_EQ(var->type->base->base->kind, TypeKind::Int32);
 }
 
 // ========== Array Declarations ==========
 
 TEST_F(ParserDeclTest, ArrayDecl) {
-    auto tu = parse("int arr[10];");
+    auto tu = parse("int32 arr[10];");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto arr = dynamic_cast<ArrayDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(arr, nullptr);
     EXPECT_EQ(arr->name, "arr");
-    EXPECT_EQ(arr->elementType->kind, TypeKind::Int);
+    EXPECT_EQ(arr->elementType->kind, TypeKind::Int32);
     EXPECT_EQ(arr->size, 10);
 }
 
 TEST_F(ParserDeclTest, ArrayDeclWithInit) {
-    auto tu = parse("int arr[5] = {1, 2, 3};");
+    auto tu = parse("int32 arr[5] = {1, 2, 3};");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto arr = dynamic_cast<ArrayDeclAST*>(tu->declarations[0].get());
@@ -1167,30 +1167,30 @@ TEST_F(ParserDeclTest, ArrayDeclWithInit) {
 // ========== Function Declarations ==========
 
 TEST_F(ParserDeclTest, FunctionDeclNoParams) {
-    auto tu = parse("int main() { return 0; }");
+    auto tu = parse("int32 main() { return 0; }");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto func = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(func, nullptr);
     EXPECT_EQ(func->name, "main");
-    EXPECT_EQ(func->returnType->kind, TypeKind::Int);
+    EXPECT_EQ(func->returnType->kind, TypeKind::Int32);
     EXPECT_TRUE(func->params.empty());
     EXPECT_NE(func->body, nullptr);
 }
 
 TEST_F(ParserDeclTest, FunctionDeclWithParams) {
-    auto tu = parse("int add(int a, int b) { return a + b; }");
+    auto tu = parse("int32 add(int32 a, int32 b) { return a + b; }");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto func = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(func, nullptr);
     EXPECT_EQ(func->name, "add");
-    EXPECT_EQ(func->returnType->kind, TypeKind::Int);
+    EXPECT_EQ(func->returnType->kind, TypeKind::Int32);
     EXPECT_EQ(func->params.size(), 2u);
     EXPECT_EQ(func->params[0]->name, "a");
-    EXPECT_EQ(func->params[0]->type->kind, TypeKind::Int);
+    EXPECT_EQ(func->params[0]->type->kind, TypeKind::Int32);
     EXPECT_EQ(func->params[1]->name, "b");
-    EXPECT_EQ(func->params[1]->type->kind, TypeKind::Int);
+    EXPECT_EQ(func->params[1]->type->kind, TypeKind::Int32);
 }
 
 TEST_F(ParserDeclTest, FunctionDeclVoidReturn) {
@@ -1204,34 +1204,34 @@ TEST_F(ParserDeclTest, FunctionDeclVoidReturn) {
 }
 
 TEST_F(ParserDeclTest, FunctionDeclForwardDecl) {
-    auto tu = parse("int foo(int x);");
+    auto tu = parse("int32 foo(int32 x);");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto func = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(func, nullptr);
     EXPECT_EQ(func->name, "foo");
-    EXPECT_EQ(func->returnType->kind, TypeKind::Int);
+    EXPECT_EQ(func->returnType->kind, TypeKind::Int32);
     EXPECT_EQ(func->params.size(), 1u);
     EXPECT_EQ(func->body, nullptr);
 }
 
 TEST_F(ParserDeclTest, FunctionDeclPointerParam) {
-    auto tu = parse("void swap(int* a, int* b) { }");
+    auto tu = parse("void swap(int32* a, int32* b) { }");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto func = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(func, nullptr);
     EXPECT_EQ(func->params.size(), 2u);
     EXPECT_EQ(func->params[0]->type->kind, TypeKind::Pointer);
-    EXPECT_EQ(func->params[0]->type->base->kind, TypeKind::Int);
+    EXPECT_EQ(func->params[0]->type->base->kind, TypeKind::Int32);
     EXPECT_EQ(func->params[1]->type->kind, TypeKind::Pointer);
-    EXPECT_EQ(func->params[1]->type->base->kind, TypeKind::Int);
+    EXPECT_EQ(func->params[1]->type->base->kind, TypeKind::Int32);
 }
 
 // ========== Struct Declarations ==========
 
 TEST_F(ParserDeclTest, StructDecl) {
-    auto tu = parse("struct Point { int x; int y; };");
+    auto tu = parse("struct Point { int32 x; int32 y; };");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto strct = dynamic_cast<StructDeclAST*>(tu->declarations[0].get());
@@ -1239,9 +1239,9 @@ TEST_F(ParserDeclTest, StructDecl) {
     EXPECT_EQ(strct->name, "Point");
     EXPECT_EQ(strct->fields.size(), 2u);
     EXPECT_EQ(strct->fields[0].first, "x");
-    EXPECT_EQ(strct->fields[0].second->kind, TypeKind::Int);
+    EXPECT_EQ(strct->fields[0].second->kind, TypeKind::Int32);
     EXPECT_EQ(strct->fields[1].first, "y");
-    EXPECT_EQ(strct->fields[1].second->kind, TypeKind::Int);
+    EXPECT_EQ(strct->fields[1].second->kind, TypeKind::Int32);
 }
 
 TEST_F(ParserDeclTest, StructVarDecl) {
@@ -1265,7 +1265,7 @@ TEST_F(ParserDeclTest, StructForwardDecl) {
 }
 
 TEST_F(ParserDeclTest, StructWithPointerField) {
-    auto tu = parse("struct Node { int data; struct Node* next; };");
+    auto tu = parse("struct Node { int32 data; struct Node* next; };");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto strct = dynamic_cast<StructDeclAST*>(tu->declarations[0].get());
@@ -1278,7 +1278,7 @@ TEST_F(ParserDeclTest, StructWithPointerField) {
 // ========== Union Declarations ==========
 
 TEST_F(ParserDeclTest, UnionDecl) {
-    auto tu = parse("union Data { int i; float f; };");
+    auto tu = parse("union Data { int32 i; float32 f; };");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto un = dynamic_cast<UnionDeclAST*>(tu->declarations[0].get());
@@ -1286,9 +1286,9 @@ TEST_F(ParserDeclTest, UnionDecl) {
     EXPECT_EQ(un->name, "Data");
     EXPECT_EQ(un->members.size(), 2u);
     EXPECT_EQ(un->members[0].first, "i");
-    EXPECT_EQ(un->members[0].second->kind, TypeKind::Int);
+    EXPECT_EQ(un->members[0].second->kind, TypeKind::Int32);
     EXPECT_EQ(un->members[1].first, "f");
-    EXPECT_EQ(un->members[1].second->kind, TypeKind::Float);
+    EXPECT_EQ(un->members[1].second->kind, TypeKind::Float32);
 }
 
 TEST_F(ParserDeclTest, UnionVarDecl) {
@@ -1302,7 +1302,7 @@ TEST_F(ParserDeclTest, UnionVarDecl) {
 }
 
 TEST_F(ParserDeclTest, StructArrayMember) {
-    auto tu = parse("struct S { int n; char name[20]; };");
+    auto tu = parse("struct S { int32 n; char name[20]; };");
     ASSERT_NE(tu, nullptr);
     auto strct = dynamic_cast<StructDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(strct, nullptr);
@@ -1314,7 +1314,7 @@ TEST_F(ParserDeclTest, StructArrayMember) {
 }
 
 TEST_F(ParserDeclTest, UnionArrayMember) {
-    auto tu = parse("union U { int i; char buf[8]; };");
+    auto tu = parse("union U { int32 i; char buf[8]; };");
     ASSERT_NE(tu, nullptr);
     auto un = dynamic_cast<UnionDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(un, nullptr);
@@ -1326,7 +1326,7 @@ TEST_F(ParserDeclTest, UnionArrayMember) {
 }
 
 TEST_F(ParserDeclTest, FunctionPointerDeclarator) {
-    auto tu = parse("int (*fp)(int, int);");
+    auto tu = parse("int32 (*fp)(int32, int32);");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
@@ -1382,17 +1382,17 @@ TEST_F(ParserDeclTest, EnumVarDecl) {
 // ========== Typedef Declarations ==========
 
 TEST_F(ParserDeclTest, TypedefDecl) {
-    auto tu = parse("typedef int Integer;");
+    auto tu = parse("typedef int32 Integer;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto td = dynamic_cast<TypedefDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(td, nullptr);
     EXPECT_EQ(td->name, "Integer");
-    EXPECT_EQ(td->aliasedType->kind, TypeKind::Int);
+    EXPECT_EQ(td->aliasedType->kind, TypeKind::Int32);
 }
 
 TEST_F(ParserDeclTest, TypedefStruct) {
-    auto tu = parse("typedef struct { int x; int y; } Point;");
+    auto tu = parse("typedef struct { int32 x; int32 y; } Point;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto td = dynamic_cast<TypedefDeclAST*>(tu->declarations[0].get());
@@ -1402,7 +1402,7 @@ TEST_F(ParserDeclTest, TypedefStruct) {
 }
 
 TEST_F(ParserDeclTest, TypedefUsage) {
-    auto tu = parse("typedef int Integer; Integer x = 5;");
+    auto tu = parse("typedef int32 Integer; Integer x = 5;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 2u);
     auto var = dynamic_cast<VarDeclAST*>(tu->declarations[1].get());
@@ -1414,7 +1414,7 @@ TEST_F(ParserDeclTest, TypedefUsage) {
 // ========== Multiple Declarations ==========
 
 TEST_F(ParserDeclTest, MultipleVarDecls) {
-    auto tu = parse("int x; float y; char z;");
+    auto tu = parse("int32 x; float32 y; char z;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 3u);
     EXPECT_NE(dynamic_cast<VarDeclAST*>(tu->declarations[0].get()), nullptr);
@@ -1423,7 +1423,7 @@ TEST_F(ParserDeclTest, MultipleVarDecls) {
 }
 
 TEST_F(ParserDeclTest, MixedDeclarations) {
-    auto tu = parse("int x; int add(int a, int b) { return a + b; } float y;");
+    auto tu = parse("int32 x; int32 add(int32 a, int32 b) { return a + b; } float32 y;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 3u);
     EXPECT_NE(dynamic_cast<VarDeclAST*>(tu->declarations[0].get()), nullptr);
@@ -1434,7 +1434,7 @@ TEST_F(ParserDeclTest, MixedDeclarations) {
 // ========== Const and Volatile Qualifiers ==========
 
 TEST_F(ParserDeclTest, ConstVarDecl) {
-    auto tu = parse("const int x = 10;");
+    auto tu = parse("const int32 x = 10;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
@@ -1444,7 +1444,7 @@ TEST_F(ParserDeclTest, ConstVarDecl) {
 }
 
 TEST_F(ParserDeclTest, VolatileVarDecl) {
-    auto tu = parse("volatile int x;");
+    auto tu = parse("volatile int32 x;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
@@ -1453,7 +1453,7 @@ TEST_F(ParserDeclTest, VolatileVarDecl) {
 }
 
 TEST_F(ParserDeclTest, ConstPointerDecl) {
-    auto tu = parse("const int* p;");
+    auto tu = parse("const int32* p;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
@@ -1466,7 +1466,7 @@ TEST_F(ParserDeclTest, ConstPointerDecl) {
 // ========== Additional Edge Case Tests ==========
 
 TEST_F(ParserDeclTest, FunctionDeclVarArgs) {
-    auto tu = parse("int printf(const char* fmt, ...);");
+    auto tu = parse("int32 printf(const char* fmt, ...);");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto func = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
@@ -1491,7 +1491,7 @@ TEST_F(ParserDeclTest, FunctionDeclVoidParams) {
 }
 
 TEST_F(ParserDeclTest, NestedStructDecl) {
-    auto tu = parse("struct Outer { struct Inner { int x; } inner; int y; };");
+    auto tu = parse("struct Outer { struct Inner { int32 x; } inner; int32 y; };");
     ASSERT_NE(tu, nullptr);
     ASSERT_GE(tu->declarations.size(), 1u);
     auto strct = dynamic_cast<StructDeclAST*>(tu->declarations[0].get());
@@ -1501,7 +1501,7 @@ TEST_F(ParserDeclTest, NestedStructDecl) {
     EXPECT_EQ(strct->fields[0].first, "inner");
     EXPECT_EQ(strct->fields[0].second->kind, TypeKind::Struct);
     EXPECT_EQ(strct->fields[1].first, "y");
-    EXPECT_EQ(strct->fields[1].second->kind, TypeKind::Int);
+    EXPECT_EQ(strct->fields[1].second->kind, TypeKind::Int32);
 }
 
 TEST_F(ParserDeclTest, EnumForwardDecl) {
@@ -1532,7 +1532,7 @@ TEST_F(ParserDeclTest, EnumDeclWithMixedValues) {
 }
 
 TEST_F(ParserDeclTest, TypedefStructForward) {
-    auto tu = parse("typedef struct Node Node; struct Node { int data; Node* next; };");
+    auto tu = parse("typedef struct Node Node; struct Node { int32 data; Node* next; };");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 2u);
     auto td = dynamic_cast<TypedefDeclAST*>(tu->declarations[0].get());
@@ -1542,7 +1542,7 @@ TEST_F(ParserDeclTest, TypedefStructForward) {
 }
 
 TEST_F(ParserDeclTest, ConstVolatileDecl) {
-    auto tu = parse("const volatile int x;");
+    auto tu = parse("const volatile int32 x;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
@@ -1552,7 +1552,7 @@ TEST_F(ParserDeclTest, ConstVolatileDecl) {
 }
 
 TEST_F(ParserDeclTest, MultiplePointersDecl) {
-    auto tu = parse("int** const p;");
+    auto tu = parse("int32** const p;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
@@ -1561,11 +1561,11 @@ TEST_F(ParserDeclTest, MultiplePointersDecl) {
     EXPECT_TRUE(var->type->isConst);
     EXPECT_EQ(var->type->base->kind, TypeKind::Pointer);
     EXPECT_FALSE(var->type->base->isConst);
-    EXPECT_EQ(var->type->base->base->kind, TypeKind::Int);
+    EXPECT_EQ(var->type->base->base->kind, TypeKind::Int32);
 }
 
 TEST_F(ParserDeclTest, ArrayOfPointersDecl) {
-    auto tu = parse("int* arr[10];");
+    auto tu = parse("int32* arr[10];");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto arr = dynamic_cast<ArrayDeclAST*>(tu->declarations[0].get());
@@ -1573,35 +1573,35 @@ TEST_F(ParserDeclTest, ArrayOfPointersDecl) {
     EXPECT_EQ(arr->name, "arr");
     EXPECT_EQ(arr->size, 10);
     EXPECT_EQ(arr->elementType->kind, TypeKind::Pointer);
-    EXPECT_EQ(arr->elementType->base->kind, TypeKind::Int);
+    EXPECT_EQ(arr->elementType->base->kind, TypeKind::Int32);
 }
 
 TEST_F(ParserDeclTest, StructWithArrayField) {
-    auto tu = parse("struct Buffer { int size; int* data; };");
+    auto tu = parse("struct Buffer { int32 size; int32* data; };");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto strct = dynamic_cast<StructDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(strct, nullptr);
     EXPECT_EQ(strct->fields.size(), 2u);
     EXPECT_EQ(strct->fields[0].first, "size");
-    EXPECT_EQ(strct->fields[0].second->kind, TypeKind::Int);
+    EXPECT_EQ(strct->fields[0].second->kind, TypeKind::Int32);
     EXPECT_EQ(strct->fields[1].first, "data");
     EXPECT_EQ(strct->fields[1].second->kind, TypeKind::Pointer);
 }
 
 TEST_F(ParserDeclTest, FunctionDeclPointerReturn) {
-    auto tu = parse("int* getPointer(void) { return 0; }");
+    auto tu = parse("int32* getPointer(void) { return 0; }");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto func = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(func, nullptr);
     EXPECT_EQ(func->returnType->kind, TypeKind::Pointer);
-    EXPECT_EQ(func->returnType->base->kind, TypeKind::Int);
+    EXPECT_EQ(func->returnType->base->kind, TypeKind::Int32);
     EXPECT_NE(func->body, nullptr);
 }
 
 TEST_F(ParserDeclTest, TypedefPointer) {
-    auto tu = parse("typedef int* IntPtr; IntPtr p;");
+    auto tu = parse("typedef int32* IntPtr; IntPtr p;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 2u);
     auto var = dynamic_cast<VarDeclAST*>(tu->declarations[1].get());
@@ -1611,7 +1611,7 @@ TEST_F(ParserDeclTest, TypedefPointer) {
 }
 
 TEST_F(ParserDeclTest, TypedefArray) {
-    auto tu = parse("typedef int IntArr[10]; IntArr a;");
+    auto tu = parse("typedef int32 IntArr[10]; IntArr a;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 2u);
     auto var = dynamic_cast<VarDeclAST*>(tu->declarations[1].get());
@@ -1621,7 +1621,7 @@ TEST_F(ParserDeclTest, TypedefArray) {
 }
 
 TEST_F(ParserDeclTest, ConstexprVarDecl) {
-    auto tu = parse("constexpr int x = 42;");
+    auto tu = parse("constexpr int32 x = 42;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto* varDecl = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
@@ -1631,7 +1631,7 @@ TEST_F(ParserDeclTest, ConstexprVarDecl) {
 }
 
 TEST_F(ParserDeclTest, ConstexprWithInit) {
-    auto tu = parse("constexpr int y = 20;");
+    auto tu = parse("constexpr int32 y = 20;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto* varDecl = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
@@ -1641,7 +1641,7 @@ TEST_F(ParserDeclTest, ConstexprWithInit) {
 }
 
 TEST_F(ParserDeclTest, ConstexprFunctionDeclaration) {
-    auto tu = parse("constexpr int square(int x) { return x * x; }");
+    auto tu = parse("constexpr int32 square(int32 x) { return x * x; }");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
     auto& func = dynamic_cast<FunctionDeclAST&>(*tu->declarations[0]);
@@ -1671,13 +1671,13 @@ protected:
 };
 
 TEST_F(ParserErrorTest, MissingSemicolonAfterReturnReportsError) {
-    auto [tu, errors] = parseWithErrors("int f() { return 1 }");
+    auto [tu, errors] = parseWithErrors("int32 f() { return 1 }");
     ASSERT_FALSE(errors.empty());
     EXPECT_NE(errors[0].message.find("expected ';'"), std::string::npos);
 }
 
 TEST_F(ParserErrorTest, MissingClosingParenReportsError) {
-    auto [tu, errors] = parseWithErrors("int f() { if (1 { } }");
+    auto [tu, errors] = parseWithErrors("int32 f() { if (1 { } }");
     ASSERT_FALSE(errors.empty());
     bool found = false;
     for (const auto& err : errors) {
@@ -1690,7 +1690,7 @@ TEST_F(ParserErrorTest, MissingClosingParenReportsError) {
 }
 
 TEST_F(ParserErrorTest, MissingOpeningBraceReportsError) {
-    auto [tu, errors] = parseWithErrors("int f() return 1; }");
+    auto [tu, errors] = parseWithErrors("int32 f() return 1; }");
     ASSERT_FALSE(errors.empty());
     bool found = false;
     for (const auto& err : errors) {
@@ -1703,7 +1703,7 @@ TEST_F(ParserErrorTest, MissingOpeningBraceReportsError) {
 }
 
 TEST_F(ParserErrorTest, ErrorHasFileAndLineInfo) {
-    auto [tu, errors] = parseWithErrors("int f() { return 1 }");
+    auto [tu, errors] = parseWithErrors("int32 f() { return 1 }");
     ASSERT_FALSE(errors.empty());
     EXPECT_EQ(errors[0].file, "test.c");
     EXPECT_GT(errors[0].line, 0);
@@ -1711,12 +1711,12 @@ TEST_F(ParserErrorTest, ErrorHasFileAndLineInfo) {
 }
 
 TEST_F(ParserErrorTest, MultipleErrorsReported) {
-    auto [tu, errors] = parseWithErrors("int f() { return 1 } int g() { return 2 }");
+    auto [tu, errors] = parseWithErrors("int32 f() { return 1 } int32 g() { return 2 }");
     EXPECT_GE(errors.size(), 1u);
 }
 
 TEST_F(ParserErrorTest, ErrorFormatContainsFileLineColumn) {
-    auto [tu, errors] = parseWithErrors("int f() { return 1 }");
+    auto [tu, errors] = parseWithErrors("int32 f() { return 1 }");
     ASSERT_FALSE(errors.empty());
     std::string formatted = errors[0].format();
     EXPECT_NE(formatted.find("error:"), std::string::npos);
@@ -1724,7 +1724,7 @@ TEST_F(ParserErrorTest, ErrorFormatContainsFileLineColumn) {
 }
 
 TEST_F(ParserErrorTest, MissingClosingBraceReportsError) {
-    auto [tu, errors] = parseWithErrors("int f() { return 1;");
+    auto [tu, errors] = parseWithErrors("int32 f() { return 1;");
     ASSERT_FALSE(errors.empty());
     bool found = false;
     for (const auto& err : errors) {
@@ -1737,7 +1737,7 @@ TEST_F(ParserErrorTest, MissingClosingBraceReportsError) {
 }
 
 TEST_F(ParserErrorTest, MissingWhileAfterDoReportsError) {
-    auto [tu, errors] = parseWithErrors("int f() { do { } 1; }");
+    auto [tu, errors] = parseWithErrors("int32 f() { do { } 1; }");
     ASSERT_FALSE(errors.empty());
     bool found = false;
     for (const auto& err : errors) {
@@ -1750,7 +1750,7 @@ TEST_F(ParserErrorTest, MissingWhileAfterDoReportsError) {
 }
 
 TEST_F(ParserErrorTest, MissingSemicolonAfterBreakReportsError) {
-    auto [tu, errors] = parseWithErrors("int f() { while(1) { break } }");
+    auto [tu, errors] = parseWithErrors("int32 f() { while(1) { break } }");
     ASSERT_FALSE(errors.empty());
     bool found = false;
     for (const auto& err : errors) {
@@ -1763,12 +1763,12 @@ TEST_F(ParserErrorTest, MissingSemicolonAfterBreakReportsError) {
 }
 
 TEST_F(ParserErrorTest, UnexpectedTokenAfterSemicolon) {
-    auto [tu, errors] = parseWithErrors("int f() { return 1 ; }");
+    auto [tu, errors] = parseWithErrors("int32 f() { return 1 ; }");
     ASSERT_TRUE(errors.empty());
 }
 
 TEST_F(ParserErrorTest, MissingSemicolonAfterContinueReportsError) {
-    auto [tu, errors] = parseWithErrors("int f() { while(1) { continue } }");
+    auto [tu, errors] = parseWithErrors("int32 f() { while(1) { continue } }");
     ASSERT_FALSE(errors.empty());
     bool found = false;
     for (const auto& err : errors) {
@@ -1782,7 +1782,7 @@ TEST_F(ParserErrorTest, MissingSemicolonAfterContinueReportsError) {
 
 
 TEST_F(ParserErrorTest, MissingClosingParenInFuncCallReportsError) {
-    auto [tu, errors] = parseWithErrors("int f() { foo(1; }");
+    auto [tu, errors] = parseWithErrors("int32 f() { foo(1; }");
     ASSERT_FALSE(errors.empty());
     bool found = false;
     for (const auto& err : errors) {
@@ -1795,7 +1795,7 @@ TEST_F(ParserErrorTest, MissingClosingParenInFuncCallReportsError) {
 }
 
 TEST_F(ParserErrorTest, MissingClosingBracketReportsError) {
-    auto [tu, errors] = parseWithErrors("int f() { int arr[10; }");
+    auto [tu, errors] = parseWithErrors("int32 f() { int32 arr[10; }");
     ASSERT_FALSE(errors.empty());
     bool found = false;
     for (const auto& err : errors) {
@@ -1808,54 +1808,54 @@ TEST_F(ParserErrorTest, MissingClosingBracketReportsError) {
 }
 
 TEST_F(ParserErrorTest, MultipleErrorsCollected) {
-    auto [tu, errors] = parseWithErrors("int f() { return 1 } int g() { return 2 }");
+    auto [tu, errors] = parseWithErrors("int32 f() { return 1 } int32 g() { return 2 }");
     EXPECT_GE(errors.size(), 1u);
 }
 
 TEST_F(ParserErrorTest, ErrorHasCorrectFile) {
-    auto [tu, errors] = parseWithErrors("int f() { return 1 }");
+    auto [tu, errors] = parseWithErrors("int32 f() { return 1 }");
     ASSERT_FALSE(errors.empty());
     EXPECT_EQ(errors[0].file, "test.c");
 }
 
 TEST_F(ParserErrorTest, ErrorHasPositiveLine) {
-    auto [tu, errors] = parseWithErrors("int f() { return 1 }");
+    auto [tu, errors] = parseWithErrors("int32 f() { return 1 }");
     ASSERT_FALSE(errors.empty());
     EXPECT_GT(errors[0].line, 0);
 }
 
 TEST_F(ParserErrorTest, ErrorHasPositiveColumn) {
-    auto [tu, errors] = parseWithErrors("int f() { return 1 }");
+    auto [tu, errors] = parseWithErrors("int32 f() { return 1 }");
     ASSERT_FALSE(errors.empty());
     EXPECT_GT(errors[0].column, 0);
 }
 
 TEST_F(ParserErrorTest, FormatShowsSeverityPrefix) {
-    auto [tu, errors] = parseWithErrors("int f() { return 1 }");
+    auto [tu, errors] = parseWithErrors("int32 f() { return 1 }");
     ASSERT_FALSE(errors.empty());
     std::string formatted = errors[0].format();
     EXPECT_NE(formatted.find("error:"), std::string::npos);
 }
 
 TEST_F(ParserErrorTest, FormatShowsFileLocation) {
-    auto [tu, errors] = parseWithErrors("int f() { return 1 }");
+    auto [tu, errors] = parseWithErrors("int32 f() { return 1 }");
     ASSERT_FALSE(errors.empty());
     std::string formatted = errors[0].format();
     EXPECT_NE(formatted.find("test.c:"), std::string::npos);
 }
 
 TEST_F(ParserErrorTest, MissingEqualsInArrayInitReportsError) {
-    auto [tu, errors] = parseWithErrors("int f() { int arr[10] {1,2,3}; }");
+    auto [tu, errors] = parseWithErrors("int32 f() { int32 arr[10] {1,2,3}; }");
     ASSERT_TRUE(errors.empty() || !errors.empty());
 }
 
 TEST_F(ParserErrorTest, UnexpectedTokenInExpression) {
-    auto [tu, errors] = parseWithErrors("int f() { return ; }");
+    auto [tu, errors] = parseWithErrors("int32 f() { return ; }");
     ASSERT_TRUE(errors.empty() || !errors.empty());
 }
 
 TEST_F(ParserErrorTest, NestedCompoundStmtError) {
-    auto [tu, errors] = parseWithErrors("int f() { { return 1 } }");
+    auto [tu, errors] = parseWithErrors("int32 f() { { return 1 } }");
     ASSERT_FALSE(errors.empty());
     bool found = false;
     for (const auto& err : errors) {
@@ -1890,9 +1890,9 @@ protected:
 TEST_F(ParserClassTest, ClassWithMethods) {
     std::string source = R"(
         class Foo {
-            int x;
-            void setX(int v) { this->x = v; }
-            int getX() { return this->x; }
+            int32 x;
+            void setX(int32 v) { this->x = v; }
+            int32 getX() { return this->x; }
         };
     )";
     auto tokens = lex(source);
@@ -1909,8 +1909,8 @@ TEST_F(ParserClassTest, ClassWithMethods) {
 
 TEST_F(ParserClassTest, ClassInheritance) {
     std::string source = R"(
-        class Base { int x; };
-        class Derived : public Base { int y; };
+        class Base { int32 x; };
+        class Derived : public Base { int32 y; };
     )";
     auto tokens = lex(source);
     Parser parser(tokens);
@@ -1926,13 +1926,13 @@ TEST_F(ParserClassTest, ClassInheritance) {
 TEST_F(ParserErrorTest, GotoIsRejected) {
     // P0-01 / NG-01: goto is not part of the language; `goto` lexes as an
     // identifier, so this must be a parse error (never a valid statement).
-    auto [tu, errors] = parseWithErrors("int f() { goto label; }");
+    auto [tu, errors] = parseWithErrors("int32 f() { goto label; }");
     EXPECT_FALSE(errors.empty());
 }
 
 TEST_F(ParserErrorTest, PreprocessorDirectiveIsRejected) {
     // P0-01 / NG-02: there is no preprocessor.
-    auto [tu, errors] = parseWithErrors("#include <stdio.h>\nint main() { return 0; }");
+    auto [tu, errors] = parseWithErrors("#include <stdio.h>\nint32 main() { return 0; }");
     ASSERT_FALSE(errors.empty());
     bool found = false;
     for (const auto& err : errors) {

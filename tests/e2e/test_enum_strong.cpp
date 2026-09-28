@@ -110,14 +110,14 @@ static int runSource(const std::string& source, const std::string& file = "enum_
 TEST_F(EnumStrongE2E, EnumToIntInitializationRequiresCast) {
     auto r = analyzeSource(
         "enum E { A };\n"
-        "int main() { enum E e = A; int x = e; return x; }\n");
+        "int32 main() { enum E e = A; int32 x = e; return x; }\n");
     EXPECT_FALSE(r.errors.empty());
 }
 
 TEST_F(EnumStrongE2E, EnumToIntAssignmentRequiresCast) {
     auto r = analyzeSource(
         "enum E { A };\n"
-        "int main() { enum E e = A; int x = 0; x = e; return x; }\n");
+        "int32 main() { enum E e = A; int32 x = 0; x = e; return x; }\n");
     EXPECT_TRUE(r.hasCode(DiagnosticCode::SemIncompatibleAssignment));
     EXPECT_TRUE(r.hasMessage("TYP-20"));
 }
@@ -125,14 +125,14 @@ TEST_F(EnumStrongE2E, EnumToIntAssignmentRequiresCast) {
 TEST_F(EnumStrongE2E, IntToEnumInitializationRequiresCast) {
     auto r = analyzeSource(
         "enum E { A };\n"
-        "int main() { enum E e = 5; return 0; }\n");
+        "int32 main() { enum E e = 5; return 0; }\n");
     EXPECT_FALSE(r.errors.empty());
 }
 
 TEST_F(EnumStrongE2E, IntToEnumAssignmentRequiresCast) {
     auto r = analyzeSource(
         "enum E { A };\n"
-        "int main() { enum E e = A; e = 1; return 0; }\n");
+        "int32 main() { enum E e = A; e = 1; return 0; }\n");
     EXPECT_TRUE(r.hasCode(DiagnosticCode::SemIncompatibleAssignment));
 }
 
@@ -140,30 +140,30 @@ TEST_F(EnumStrongE2E, DistinctEnumsAreNotImplicitlyCompatible) {
     auto r = analyzeSource(
         "enum E { A };\n"
         "enum F { B };\n"
-        "int main() { enum E e = A; enum F f = e; return 0; }\n");
+        "int32 main() { enum E e = A; enum F f = e; return 0; }\n");
     EXPECT_FALSE(r.errors.empty());
 }
 
 TEST_F(EnumStrongE2E, EnumToFloatRequiresCast) {
     auto r = analyzeSource(
         "enum E { A };\n"
-        "int main() { float x = A; return 0; }\n");
+        "int32 main() { float32 x = A; return 0; }\n");
     EXPECT_FALSE(r.errors.empty());
 }
 
 TEST_F(EnumStrongE2E, EnumFunctionArgumentRequiresCast) {
     auto r = analyzeSource(
-        "int takes_int(int v);\n"
+        "int32 takes_int(int32 v);\n"
         "enum E { A };\n"
-        "int main() { return takes_int(A); }\n");
+        "int32 main() { return takes_int(A); }\n");
     EXPECT_FALSE(r.errors.empty());
 }
 
 TEST_F(EnumStrongE2E, EnumReturnFromIntFunctionRequiresCast) {
     auto r = analyzeSource(
         "enum E { A };\n"
-        "int f() { return A; }\n"
-        "int main() { return f(); }\n");
+        "int32 f() { return A; }\n"
+        "int32 main() { return f(); }\n");
     EXPECT_FALSE(r.errors.empty());
 }
 
@@ -174,44 +174,44 @@ TEST_F(EnumStrongE2E, EnumReturnFromIntFunctionRequiresCast) {
 TEST_F(EnumStrongE2E, SameEnumAssignmentAllowed) {
     auto r = analyzeSource(
         "enum E { A, B };\n"
-        "int main() { enum E e = A; enum E f = e; f = B; return 0; }\n");
+        "int32 main() { enum E e = A; enum E f = e; f = B; return 0; }\n");
     EXPECT_TRUE(r.errors.empty());
 }
 
 TEST_F(EnumStrongE2E, ExplicitCastEnumToIntAllowed) {
     EXPECT_EQ(runSource(
         "enum E { A = 3 };\n"
-        "int main() { enum E e = A; return (int)e - 3; }\n"), 0);
+        "int32 main() { enum E e = A; return (int32)e - 3; }\n"), 0);
 }
 
 TEST_F(EnumStrongE2E, ExplicitCastIntToEnumAllowed) {
     EXPECT_EQ(runSource(
         "enum E { A, B, C };\n"
-        "int main() { enum E e = (enum E)2; return e == C ? 0 : 1; }\n"), 0);
+        "int32 main() { enum E e = (enum E)2; return e == C ? 0 : 1; }\n"), 0);
 }
 
 TEST_F(EnumStrongE2E, StaticCastEnumToIntAllowed) {
     EXPECT_EQ(runSource(
         "enum E { A = 7 };\n"
-        "int main() { return static_cast<int>(A) - 7; }\n"), 0);
+        "int32 main() { return static_cast<int32>(A) - 7; }\n"), 0);
 }
 
 TEST_F(EnumStrongE2E, EnumArithmeticPromotesToInt) {
     EXPECT_EQ(runSource(
         "enum E { A = 2, B = 5 };\n"
-        "int main() { return (A + B) - 7; }\n"), 0);
+        "int32 main() { return (A + B) - 7; }\n"), 0);
 }
 
 TEST_F(EnumStrongE2E, EnumComparisonWithIntAllowed) {
     EXPECT_EQ(runSource(
         "enum E { A = 4 };\n"
-        "int main() { enum E e = A; return (e == 4 && e >= 4 && e <= 4) ? 0 : 1; }\n"), 0);
+        "int32 main() { enum E e = A; return (e == 4 && e >= 4 && e <= 4) ? 0 : 1; }\n"), 0);
 }
 
 TEST_F(EnumStrongE2E, EnumSwitchStillWorks) {
     EXPECT_EQ(runSource(R"(
 enum E { A, B, C };
-int main() {
+int32 main() {
     enum E e = B;
     switch (e) {
         case A: return 1;

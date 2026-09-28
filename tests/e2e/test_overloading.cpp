@@ -71,12 +71,12 @@ static int runSource(const std::string& source, const std::string& filename) {
 
 TEST_F(OverloadingE2E, FunctionOverloading) {
     EXPECT_EQ(runSource(R"(
-        int add(int a, int b) { return a + b; }
-        int add(int a, int b, int c) { return a + b + c; }
+        int32 add(int32 a, int32 b) { return a + b; }
+        int32 add(int32 a, int32 b, int32 c) { return a + b + c; }
         
-        int main() {
-            int r1 = add(3, 4);
-            int r2 = add(1, 2, 3);
+        int32 main() {
+            int32 r1 = add(3, 4);
+            int32 r2 = add(1, 2, 3);
             return r1 + r2 - 13;
         }
     )", "test_func_overload.c"), 0);
@@ -84,7 +84,7 @@ TEST_F(OverloadingE2E, FunctionOverloading) {
 
 TEST_F(OverloadingE2E, OperatorOverloading) {
     EXPECT_EQ(runSource(R"(
-        struct Point { int x; int y; };
+        struct Point { int32 x; int32 y; };
         
         struct Point operator+(struct Point a, struct Point b) {
             struct Point result;
@@ -93,7 +93,7 @@ TEST_F(OverloadingE2E, OperatorOverloading) {
             return result;
         }
         
-        int main() {
+        int32 main() {
             struct Point p1;
             p1.x = 1;
             p1.y = 2;

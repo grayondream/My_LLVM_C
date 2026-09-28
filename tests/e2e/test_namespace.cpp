@@ -65,7 +65,7 @@ static int runSource(const std::string& source, const std::string& filename) {
 }
 
 TEST_F(NamespaceE2E, ParsesNamespaceDeclaration) {
-    Lexer lexer("ns.c", "namespace geometry { int f() { return 1; } }");
+    Lexer lexer("ns.c", "namespace geometry { int32 f() { return 1; } }");
     auto tokens = lexer.tokenize();
     Parser parser(tokens);
     auto ast = parser.parse();
@@ -80,43 +80,43 @@ TEST_F(NamespaceE2E, ParsesNamespaceDeclaration) {
 
 TEST_F(NamespaceE2E, QualifiedCallResolves) {
     EXPECT_EQ(runSource(R"(
-namespace A { int f() { return 7; } }
-int main() { return A::f() - 7; }
+namespace A { int32 f() { return 7; } }
+int32 main() { return A::f() - 7; }
 )", "ns_qualified.c"), 0);
 }
 
 TEST_F(NamespaceE2E, UnqualifiedSiblingCallInsideNamespace) {
     EXPECT_EQ(runSource(R"(
 namespace A {
-    int g() { return 1; }
-    int f() { return g() + 1; }
+    int32 g() { return 1; }
+    int32 f() { return g() + 1; }
 }
-int main() { return A::f() - 2; }
+int32 main() { return A::f() - 2; }
 )", "ns_sibling.c"), 0);
 }
 
 TEST_F(NamespaceE2E, NamespacesDoNotCollideWithGlobals) {
     EXPECT_EQ(runSource(R"(
-int f() { return 1; }
-namespace A { int f() { return 2; } }
-int main() { return f() + A::f() - 3; }
+int32 f() { return 1; }
+namespace A { int32 f() { return 2; } }
+int32 main() { return f() + A::f() - 3; }
 )", "ns_collision.c"), 0);
 }
 
 TEST_F(NamespaceE2E, NestedNamespaces) {
     EXPECT_EQ(runSource(R"(
-namespace A.B { int f() { return 9; } }
-int main() { return A::B::f() - 9; }
+namespace A.B { int32 f() { return 9; } }
+int32 main() { return A::B::f() - 9; }
 )", "ns_nested.c"), 0);
 }
 
 TEST_F(NamespaceE2E, QualifiedStructType) {
     EXPECT_EQ(runSource(R"(
 namespace A {
-    struct Point { int x; int y; };
-    int sum(Point* p) { return p->x + p->y; }
+    struct Point { int32 x; int32 y; };
+    int32 sum(Point* p) { return p->x + p->y; }
 }
-int main() {
+int32 main() {
     A::Point p;
     p.x = 3;
     p.y = 4;
@@ -127,8 +127,8 @@ int main() {
 
 TEST_F(NamespaceE2E, QualifiedTypedefType) {
     EXPECT_EQ(runSource(R"(
-namespace A { typedef int Handle; }
-int main() {
+namespace A { typedef int32 Handle; }
+int32 main() {
     A::Handle h = 5;
     return h - 5;
 }
@@ -138,14 +138,14 @@ int main() {
 TEST_F(NamespaceE2E, QualifiedEnumConstant) {
     EXPECT_EQ(runSource(R"(
 namespace A { enum Color { Red, Green }; }
-int main() { return A::Green - 1; }
+int32 main() { return A::Green - 1; }
 )", "ns_type_enum.c"), 0);
 }
 
 TEST_F(NamespaceE2E, NestedQualifiedStructType) {
     EXPECT_EQ(runSource(R"(
-namespace A.B { struct P { int v; }; }
-int main() {
+namespace A.B { struct P { int32 v; }; }
+int32 main() {
     A::B::P p;
     p.v = 9;
     return p.v - 9;

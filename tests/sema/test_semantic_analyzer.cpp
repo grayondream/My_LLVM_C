@@ -615,8 +615,8 @@ TEST_F(SemanticAnalyzerTest, OverloadResolutionNoMatch) {
 TEST(ClassSupport, SemanticAnalysisValidClass) {
     std::string source = R"(
         class Foo {
-            int x;
-            void setX(int v) { this->x = v; }
+            int32 x;
+            void setX(int32 v) { this->x = v; }
         };
     )";
     Lexer lexer("test.c", source);
@@ -632,7 +632,7 @@ TEST(ClassSupport, SemanticAnalysisValidClass) {
 
 TEST(ClassSupport, SemanticAnalysisInvalidBaseClass) {
     std::string source = R"(
-        class Derived : public Nonexistent { int y; };
+        class Derived : public Nonexistent { int32 y; };
     )";
     Lexer lexer("test.c", source);
     auto tokens = lexer.tokenize();
@@ -648,11 +648,11 @@ TEST(ClassSupport, SemanticAnalysisInvalidBaseClass) {
 TEST(ClassSupport, SemanticAnalysisInheritedMethod) {
     std::string source = R"(
         class Base {
-            int x;
-            void setX(int v) { this->x = v; }
+            int32 x;
+            void setX(int32 v) { this->x = v; }
         };
         class Derived : public Base {
-            int y;
+            int32 y;
         };
     )";
     Lexer lexer("test.c", source);
@@ -669,12 +669,12 @@ TEST(ClassSupport, SemanticAnalysisInheritedMethod) {
 TEST(ClassSupport, SemanticAnalysisInheritedFieldAccess) {
     std::string source = R"(
         class Base {
-            int x;
+            int32 x;
         };
         class Derived : public Base {
-            int y;
+            int32 y;
         };
-        int main() {
+        int32 main() {
             Derived d;
             d.x = 5;
             return d.x + d.y;
@@ -693,8 +693,8 @@ TEST(ClassSupport, SemanticAnalysisInheritedFieldAccess) {
 
 TEST(ClassSupport, DuplicateFunctionDefinitionIsAnError) {
     std::string source = R"(
-        int f() { return 1; }
-        int f() { return 2; }
+        int32 f() { return 1; }
+        int32 f() { return 2; }
     )";
     Lexer lexer("test.c", source);
     auto tokens = lexer.tokenize();
@@ -709,8 +709,8 @@ TEST(ClassSupport, DuplicateFunctionDefinitionIsAnError) {
 
 TEST(ClassSupport, SemanticAnalysisCircularInheritance) {
     std::string source = R"(
-        class A : public B { int x; };
-        class B : public A { int y; };
+        class A : public B { int32 x; };
+        class B : public A { int32 y; };
     )";
     Lexer lexer("test.c", source);
     auto tokens = lexer.tokenize();
@@ -740,7 +740,7 @@ bool analyzeOk(const std::string& source) {
 
 TEST(PrintBuiltin, BuildsTypeDirectedFormat) {
     std::string source = R"(
-        int main() {
+        int32 main() {
             print("aa {}", 1);
             return 0;
         }
@@ -769,36 +769,36 @@ TEST(PrintBuiltin, BuildsTypeDirectedFormat) {
 }
 
 TEST(PrintBuiltin, PrintlnAppendsNewline) {
-    EXPECT_TRUE(analyzeOk("int main() { println(\"x={}\", 1); return 0; }"));
+    EXPECT_TRUE(analyzeOk("int32 main() { println(\"x={}\", 1); return 0; }"));
 }
 
 TEST(PrintBuiltin, SupportsScalarTypes) {
     EXPECT_TRUE(analyzeOk(
-        "int main() { print(\"{} {} {} {}\", 1, 1.5, 'a', \"s\"); return 0; }"));
+        "int32 main() { print(\"{} {} {} {}\", 1, 1.5, 'a', \"s\"); return 0; }"));
 }
 
 TEST(PrintBuiltin, RejectsPercentStyle) {
     // `%d` has no {} placeholder, so the extra argument is reported.
-    EXPECT_FALSE(analyzeOk("int main() { int x = 1; print(\"%d\", x); return 0; }"));
+    EXPECT_FALSE(analyzeOk("int32 main() { int32 x = 1; print(\"%d\", x); return 0; }"));
 }
 
 TEST(PrintBuiltin, ReportsMissingArgument) {
-    EXPECT_FALSE(analyzeOk("int main() { print(\"{} {}\", 1); return 0; }"));
+    EXPECT_FALSE(analyzeOk("int32 main() { print(\"{} {}\", 1); return 0; }"));
 }
 
 TEST(PrintBuiltin, UnsupportedTypeNeedsToString) {
     EXPECT_FALSE(analyzeOk(
-        "struct P { int x; }; int main() { struct P p; print(\"{}\", p); return 0; }"));
+        "struct P { int32 x; }; int32 main() { struct P p; print(\"{}\", p); return 0; }"));
 }
 
 TEST(PrintBuiltin, UsesFreeFunctionToString) {
     EXPECT_TRUE(analyzeOk(
-        "struct P { int x; }; char* to_string(struct P p) { return \"P\"; } "
-        "int main() { struct P p; print(\"{}\", p); return 0; }"));
+        "struct P { int32 x; }; char* to_string(struct P p) { return \"P\"; } "
+        "int32 main() { struct P p; print(\"{}\", p); return 0; }"));
 }
 
 TEST(PrintBuiltin, UsesMethodToString) {
     EXPECT_TRUE(analyzeOk(
-        "class C { int x; char* to_string() { return \"C\"; } }; "
-        "int main() { C c; print(\"{}\", c); return 0; }"));
+        "class C { int32 x; char* to_string() { return \"C\"; } }; "
+        "int32 main() { C c; print(\"{}\", c); return 0; }"));
 }

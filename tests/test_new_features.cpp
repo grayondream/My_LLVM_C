@@ -13,7 +13,7 @@ protected:
 
 TEST_F(NewFeaturesTest, NewKeywords) {
     std::string source = R"(
-        int main() {
+        int32 main() {
             bool x = true;
             int32 y = 10;
             uint64 z = 100;
@@ -45,8 +45,8 @@ TEST_F(NewFeaturesTest, NewKeywords) {
 
 TEST_F(NewFeaturesTest, BinaryLiterals) {
     std::string source = R"(
-        int main() {
-            int x = 0b1010;
+        int32 main() {
+            int32 x = 0b1010;
             return x;
         }
     )";
@@ -74,8 +74,8 @@ TEST_F(NewFeaturesTest, BinaryLiterals) {
 
 TEST_F(NewFeaturesTest, OctalLiterals) {
     std::string source = R"(
-        int main() {
-            int x = 0o755;
+        int32 main() {
+            int32 x = 0o755;
             return x;
         }
     )";
@@ -103,8 +103,8 @@ TEST_F(NewFeaturesTest, OctalLiterals) {
 
 TEST_F(NewFeaturesTest, UnderscoreLiterals) {
     std::string source = R"(
-        int main() {
-            int x = 1_000_000;
+        int32 main() {
+            int32 x = 1_000_000;
             return x;
         }
     )";
@@ -133,7 +133,7 @@ TEST_F(NewFeaturesTest, UnderscoreLiterals) {
 TEST_F(NewFeaturesTest, TypeAlias) {
     std::string source = R"(
         using Size = int32;
-        int main() {
+        int32 main() {
             Size x = 10;
             return x;
         }
@@ -150,9 +150,9 @@ TEST_F(NewFeaturesTest, TypeAlias) {
 
 TEST_F(NewFeaturesTest, DeferStatement) {
     std::string source = R"(
-        void close(int fd);
-        int main() {
-            int fd = 5;
+        void close(int32 fd);
+        int32 main() {
+            int32 fd = 5;
             defer close(fd);
             return 0;
         }
@@ -173,7 +173,7 @@ TEST_F(NewFeaturesTest, ModuleSystem) {
         import stdio;
         export main;
         
-        int main() {
+        int32 main() {
             return 0;
         }
     )";
@@ -189,8 +189,8 @@ TEST_F(NewFeaturesTest, ModuleSystem) {
 
 TEST_F(NewFeaturesTest, SliceType) {
     std::string source = R"(
-        int main() {
-            int[] data;
+        int32 main() {
+            int32[] data;
             return 0;
         }
     )";
@@ -206,8 +206,8 @@ TEST_F(NewFeaturesTest, SliceType) {
 
 TEST_F(NewFeaturesTest, OptionalType) {
     std::string source = R"(
-        int main() {
-            int? value;
+        int32 main() {
+            int32? value;
             return 0;
         }
     )";

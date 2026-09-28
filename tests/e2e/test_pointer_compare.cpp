@@ -65,38 +65,38 @@ static int runSource(const std::string& source) {
 }
 
 TEST_F(PointerCompareE2E, NonNullNotEqualToNull) {
-    EXPECT_EQ(runSource("int main() { int x; int* p = &x; return (p == null) ? 1 : 0; }"), 0);
+    EXPECT_EQ(runSource("int32 main() { int32 x; int32* p = &x; return (p == null) ? 1 : 0; }"), 0);
 }
 
 TEST_F(PointerCompareE2E, NonNullNotEqualToNullOperator) {
-    EXPECT_EQ(runSource("int main() { int x; int* p = &x; return (p != null) ? 0 : 1; }"), 0);
+    EXPECT_EQ(runSource("int32 main() { int32 x; int32* p = &x; return (p != null) ? 0 : 1; }"), 0);
 }
 
 TEST_F(PointerCompareE2E, NullPointerEqualsNull) {
-    EXPECT_EQ(runSource("int main() { int* p = null; return (p == null) ? 0 : 1; }"), 0);
+    EXPECT_EQ(runSource("int32 main() { int32* p = null; return (p == null) ? 0 : 1; }"), 0);
 }
 
 TEST_F(PointerCompareE2E, NullOnTheLeft) {
-    EXPECT_EQ(runSource("int main() { int* p = null; return (0 == p) ? 0 : 1; }"), 0);
+    EXPECT_EQ(runSource("int32 main() { int32* p = null; return (0 == p) ? 0 : 1; }"), 0);
 }
 
 TEST_F(PointerCompareE2E, AssignNullThenCompare) {
-    EXPECT_EQ(runSource("int main() { int x; int* p = &x; p = null; return (p == null) ? 0 : 1; }"), 0);
+    EXPECT_EQ(runSource("int32 main() { int32 x; int32* p = &x; p = null; return (p == null) ? 0 : 1; }"), 0);
 }
 
 TEST_F(PointerCompareE2E, PointerConditionalIsNotNull) {
-    EXPECT_EQ(runSource("int main() { int x; int* p = &x; if (p) return 0; return 1; }"), 0);
+    EXPECT_EQ(runSource("int32 main() { int32 x; int32* p = &x; if (p) return 0; return 1; }"), 0);
 }
 
 TEST_F(PointerCompareE2E, NullPointerConditionalIsFalse) {
-    EXPECT_EQ(runSource("int main() { int* p = null; if (p) return 1; return 0; }"), 0);
+    EXPECT_EQ(runSource("int32 main() { int32* p = null; if (p) return 1; return 0; }"), 0);
 }
 
 TEST_F(PointerCompareE2E, LogicalNotOnPointer) {
-    EXPECT_EQ(runSource("int main() { int* p = null; if (!p) return 0; return 1; }"), 0);
+    EXPECT_EQ(runSource("int32 main() { int32* p = null; if (!p) return 0; return 1; }"), 0);
 }
 
 TEST_F(PointerCompareE2E, LogicalNotOnIntegerIsNotBitwise) {
     // `!5` must be 0 (not ~5). `!0` must be 1.
-    EXPECT_EQ(runSource("int main() { if (!5) return 1; if (!0) return 0; return 2; }"), 0);
+    EXPECT_EQ(runSource("int32 main() { if (!5) return 1; if (!0) return 0; return 2; }"), 0);
 }

@@ -72,14 +72,14 @@ static int runSource(const std::string& source, const std::string& filename) {
 TEST_F(ClassE2ETest, BasicClass) {
     EXPECT_EQ(runSource(R"(
         class Foo {
-            int x;
-            void setX(int v) { this->x = v; }
-            int getX() { return this->x; }
+            int32 x;
+            void setX(int32 v) { this->x = v; }
+            int32 getX() { return this->x; }
         };
         
-        int main() {
+        int32 main() {
             Foo f;
-            f.setX(42);
+            f.setX((int32)42);
             return f.getX();
         }
     )", "test_class.c"), 42);
@@ -88,19 +88,19 @@ TEST_F(ClassE2ETest, BasicClass) {
 TEST_F(ClassE2ETest, ClassInheritance) {
     EXPECT_EQ(runSource(R"(
         class Base {
-            int x;
-            void setX(int v) { this->x = v; }
+            int32 x;
+            void setX(int32 v) { this->x = v; }
         };
         
         class Derived : public Base {
-            int y;
-            void setY(int v) { this->y = v; }
+            int32 y;
+            void setY(int32 v) { this->y = v; }
         };
         
-        int main() {
+        int32 main() {
             Derived d;
-            d.setX(10);
-            d.setY(20);
+            d.setX((int32)10);
+            d.setY((int32)20);
             return d.x + d.y;
         }
     )", "test_inherit.c"), 30);
@@ -109,15 +109,15 @@ TEST_F(ClassE2ETest, ClassInheritance) {
 TEST_F(ClassE2ETest, ClassAsFunctionParam) {
     EXPECT_EQ(runSource(R"(
         class Point {
-            int x;
-            int y;
+            int32 x;
+            int32 y;
         };
         
-        int getSum(Point p) {
+        int32 getSum(Point p) {
             return p.x + p.y;
         }
         
-        int main() {
+        int32 main() {
             Point p;
             p.x = 5;
             p.y = 10;

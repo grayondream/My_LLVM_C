@@ -71,13 +71,13 @@ static int runSource(const std::string& source, const std::string& filename) {
 
 TEST_F(ConstexprFunctionE2E, ConstexprFactorial) {
     EXPECT_EQ(runSource(R"(
-constexpr int factorial(int n) {
+constexpr int32 factorial(int32 n) {
     if (n <= 1) return 1;
     return n * factorial(n - 1);
 }
 
-int main() {
-    constexpr int f5 = factorial(5);
+int32 main() {
+    constexpr int32 f5 = factorial(5);
     return f5 - 120;
 }
 )", "test_constexpr_factorial.c"), 0);
@@ -85,12 +85,12 @@ int main() {
 
 TEST_F(ConstexprFunctionE2E, ConstexprSquare) {
     EXPECT_EQ(runSource(R"(
-constexpr int square(int x) {
+constexpr int32 square(int32 x) {
     return x * x;
 }
 
-int main() {
-    constexpr int s5 = square(5);
+int32 main() {
+    constexpr int32 s5 = square(5);
     return s5 - 25;
 }
 )", "test_constexpr_square.c"), 0);

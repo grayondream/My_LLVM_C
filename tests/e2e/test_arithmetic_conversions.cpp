@@ -70,73 +70,73 @@ static int runSource(const std::string& source, const std::string& file = "arith
 
 TEST_F(ArithmeticConversionE2E, UnsignedSmallValuePreservedInArithmetic) {
     // uint8 promotes to int; the value must be zero-extended (200, not -56).
-    EXPECT_EQ(runSource("int main() { uint8 a = 200; return (a + 100) - 300; }"), 0);
+    EXPECT_EQ(runSource("int32 main() { uint8 a = 200; return (a + 100) - 300; }"), 0);
 }
 
 TEST_F(ArithmeticConversionE2E, CharArithmeticPromotesToInt) {
     // char + char yields int; without promotion this would wrap to -56.
     EXPECT_EQ(runSource(
-        "int main() { char a = 100; char b = 100; int c = a + b; return c - 200; }"), 0);
+        "int32 main() { char a = 100; char b = 100; int32 c = a + b; return c - 200; }"), 0);
 }
 
 TEST_F(ArithmeticConversionE2E, MixedSignednessComparisonIsUnsigned) {
     // -1 < 1u is false (the int is converted to unsigned).
     EXPECT_EQ(runSource(
-        "int main() { int a = -1; uint32 b = 1; return (a < b) ? 1 : 0; }"), 0);
+        "int32 main() { int32 a = -1; uint32 b = 1; return (a < b) ? 1 : 0; }"), 0);
 }
 
 TEST_F(ArithmeticConversionE2E, UnsignedDivisionIsUnsigned) {
     // 0xFFFFFFFF / 2 = 2147483647 (udiv, not -1/2).
     EXPECT_EQ(runSource(R"(
-        int main() {
+        int32 main() {
             uint32 p = 1;
             p = p - 2;
-            return (int)(p / 2) - 2147483647;
+            return (int32)(p / 2) - 2147483647;
         }
     )"), 0);
 }
 
 TEST_F(ArithmeticConversionE2E, UnsignedModuloIsUnsigned) {
     EXPECT_EQ(runSource(R"(
-        int main() {
+        int32 main() {
             uint32 p = 1;
             p = p - 2;
-            return (int)(p % 3) - 0;
+            return (int32)(p % 3) - 0;
         }
     )"), 0);
 }
 
 TEST_F(ArithmeticConversionE2E, UnsignedRightShiftIsLogical) {
     EXPECT_EQ(runSource(R"(
-        int main() {
+        int32 main() {
             uint32 x = 1;
             x = x << 31;
-            return (int)(x >> 31) - 1;
+            return (int32)(x >> 31) - 1;
         }
     )"), 0);
 }
 
 TEST_F(ArithmeticConversionE2E, SignedRightShiftIsArithmetic) {
-    EXPECT_EQ(runSource("int main() { int y = -8; return (y >> 1) + 4; }"), 0);
+    EXPECT_EQ(runSource("int32 main() { int32 y = -8; return (y >> 1) + 4; }"), 0);
 }
 
 TEST_F(ArithmeticConversionE2E, UnsignedWidensToSigned64WithZeroExtend) {
     EXPECT_EQ(runSource(R"(
-        int main() {
+        int32 main() {
             uint32 u = 1;
             u = u - 2;
             int64 x = u;
-            return (x > 0 && (int)(x / 2) == 2147483647) ? 0 : 1;
+            return (x > 0 && (int32)(x / 2) == 2147483647) ? 0 : 1;
         }
     )"), 0);
 }
 
 TEST_F(ArithmeticConversionE2E, UnsignedIntToFloatConversion) {
     EXPECT_EQ(runSource(R"(
-        int main() {
+        int32 main() {
             uint32 u = 1;
             u = u - 2;
-            double d = u;
+            float64 d = u;
             return (d > 4000000000.0) ? 0 : 1;
         }
     )"), 0);
@@ -144,14 +144,14 @@ TEST_F(ArithmeticConversionE2E, UnsignedIntToFloatConversion) {
 
 TEST_F(ArithmeticConversionE2E, FloatIntCommonTypeWidens) {
     EXPECT_EQ(runSource(
-        "int main() { float f = 3.5f; int i = 2; double d = f + i; "
-        "return (int)(d * 2.0) - 11; }"), 0);
+        "int32 main() { float32 f = 3.5f; int32 i = 2; float64 d = f + i; "
+        "return (int32)(d * 2.0) - 11; }"), 0);
 }
 
 TEST_F(ArithmeticConversionE2E, PromotionAcrossFunctionCall) {
     EXPECT_EQ(runSource(R"(
         int64 take(int64 v) { return v; }
-        int main() {
+        int32 main() {
             uint32 u = 1;
             u = u - 2;
             return (take(u) > 0) ? 0 : 1;

@@ -103,9 +103,9 @@ static int runWithPrelude(const std::string& source, const std::string& filename
 
 TEST_F(FunctionPointerE2E, FunctionPointerVariable) {
     EXPECT_EQ(runWithPrelude(R"(
-        int add(int a, int b) { return a + b; }
-        int main() {
-            int (*fp)(int, int) = add;
+        int32 add(int32 a, int32 b) { return a + b; }
+        int32 main() {
+            int32 (*fp)(int32, int32) = add;
             return fp(3, 4) - 7;
         }
     )", "fp_var.c"), 0);
@@ -113,9 +113,9 @@ TEST_F(FunctionPointerE2E, FunctionPointerVariable) {
 
 TEST_F(FunctionPointerE2E, FunctionPointerParameter) {
     EXPECT_EQ(runWithPrelude(R"(
-        int apply(int (*cb)(int, int), int a, int b) { return cb(a, b); }
-        int mul(int a, int b) { return a * b; }
-        int main() { return apply(mul, 6, 7) - 42; }
+        int32 apply(int32 (*cb)(int32, int32), int32 a, int32 b) { return cb(a, b); }
+        int32 mul(int32 a, int32 b) { return a * b; }
+        int32 main() { return apply(mul, 6, 7) - 42; }
     )", "fp_param.c"), 0);
 }
 
@@ -123,34 +123,34 @@ TEST_F(FunctionPointerE2E, UnnamedFunctionPointerParameter) {
     // `int (*)(int)` has no name; it may still be declared and the body may
     // ignore it.
     EXPECT_EQ(runWithPrelude(R"(
-        int apply(int (*)(int), int x) { return x + 1; }
-        int main() { return apply(0, 41) - 42; }
+        int32 apply(int32 (*)(int32), int32 x) { return x + 1; }
+        int32 main() { return apply(0, 41) - 42; }
     )", "fp_unnamed.c"), 0);
 }
 
 TEST_F(FunctionPointerE2E, NestedCallback) {
     // A callback that itself takes a callback.
     EXPECT_EQ(runWithPrelude(R"(
-        int twice(int (*f)(int), int x) { return f(f(x)); }
-        int inc(int x) { return x + 1; }
-        int main() { return twice(inc, 5) - 7; }
+        int32 twice(int32 (*f)(int32), int32 x) { return f(f(x)); }
+        int32 inc(int32 x) { return x + 1; }
+        int32 main() { return twice(inc, 5) - 7; }
     )", "fp_nested.c"), 0);
 }
 
 TEST_F(FunctionPointerE2E, LibcQsortCallback) {
     EXPECT_EQ(runWithPrelude(R"(
-        int cmp_int(void* a, void* b) {
-            int* x = (int*)a;
-            int* y = (int*)b;
+        int32 cmp_int(void* a, void* b) {
+            int32* x = (int32*)a;
+            int32* y = (int32*)b;
             if (*x < *y) return -1;
             if (*x > *y) return 1;
             return 0;
         }
-        int main() {
-            int arr[5];
+        int32 main() {
+            int32 arr[5];
             arr[0] = 5; arr[1] = 3; arr[2] = 4; arr[3] = 1; arr[4] = 2;
             qsort(arr, 5, 4, cmp_int);
-            int i = 0;
+            int32 i = 0;
             while (i < 5) {
                 if (arr[i] != i + 1) return 1;
                 i = i + 1;
@@ -162,18 +162,18 @@ TEST_F(FunctionPointerE2E, LibcQsortCallback) {
 
 TEST_F(FunctionPointerE2E, LibcBsearchCallback) {
     EXPECT_EQ(runWithPrelude(R"(
-        int cmp_int(void* a, void* b) {
-            int* x = (int*)a;
-            int* y = (int*)b;
+        int32 cmp_int(void* a, void* b) {
+            int32* x = (int32*)a;
+            int32* y = (int32*)b;
             if (*x < *y) return -1;
             if (*x > *y) return 1;
             return 0;
         }
-        int main() {
-            int arr[5];
+        int32 main() {
+            int32 arr[5];
             arr[0] = 1; arr[1] = 2; arr[2] = 3; arr[3] = 4; arr[4] = 5;
-            int key = 4;
-            int* found = (int*)bsearch(&key, arr, 5, 4, cmp_int);
+            int32 key = 4;
+            int32* found = (int32*)bsearch(&key, arr, 5, 4, cmp_int);
             if (found == null) return 1;
             return *found - 4;
         }
@@ -184,14 +184,14 @@ TEST_F(FunctionPointerE2E, CastRvaluePointerMemberAccess) {
     // `((struct S*)p)->field`: the cast is an rvalue pointer, so member access
     // must not dereference it as if it were an alloca (regression).
     EXPECT_EQ(runWithPrelude(R"(
-        struct Point { int x; int y; };
-        int main() {
+        struct Point { int32 x; int32 y; };
+        int32 main() {
             struct Point pt;
             pt.x = 9; pt.y = 2;
             void* p = &pt;
             struct Point* q = (struct Point*)p;
-            int viaVar = q->x;
-            int viaCast = ((struct Point*)p)->y;
+            int32 viaVar = q->x;
+            int32 viaCast = ((struct Point*)p)->y;
             return viaVar + viaCast - 11;
         }
     )", "fp_cast_member.c"), 0);
@@ -199,10 +199,10 @@ TEST_F(FunctionPointerE2E, CastRvaluePointerMemberAccess) {
 
 TEST_F(FunctionPointerE2E, CastPointerRoundTrip) {
     EXPECT_EQ(runWithPrelude(R"(
-        int main() {
-            int v = 7;
+        int32 main() {
+            int32 v = 7;
             void* p = (void*)&v;
-            int* q = (int*)p;
+            int32* q = (int32*)p;
             return *q - 7;
         }
     )", "fp_cast_roundtrip.c"), 0);

@@ -96,14 +96,14 @@ static int runSource(const std::string& source, const std::string& filename) {
 TEST_F(ClassCodegenE2E, SimpleClass) {
     EXPECT_EQ(runSource(R"(
         class Foo {
-            int x;
-            void setX(int v) { this->x = v; }
-            int getX() { return this->x; }
+            int32 x;
+            void setX(int32 v) { this->x = v; }
+            int32 getX() { return this->x; }
         };
         
-        int main() {
+        int32 main() {
             Foo f;
-            f.setX(42);
+            f.setX((int32)42);
             return f.getX() - 42;
         }
     )", "test_class_simple.c"), 0);
@@ -112,13 +112,13 @@ TEST_F(ClassCodegenE2E, SimpleClass) {
 TEST_F(ClassCodegenE2E, ClassWithMultipleMethods) {
     EXPECT_EQ(runSource(R"(
         class Counter {
-            int count;
+            int32 count;
             void init() { this->count = 0; }
             void increment() { this->count = this->count + 1; }
-            int getCount() { return this->count; }
+            int32 getCount() { return this->count; }
         };
         
-        int main() {
+        int32 main() {
             Counter c;
             c.init();
             c.increment();
@@ -132,21 +132,21 @@ TEST_F(ClassCodegenE2E, ClassWithMultipleMethods) {
 TEST_F(ClassCodegenE2E, ClassWithInheritance) {
     EXPECT_EQ(runSource(R"(
         class Base {
-            int x;
-            void setX(int v) { this->x = v; }
-            int getX() { return this->x; }
+            int32 x;
+            void setX(int32 v) { this->x = v; }
+            int32 getX() { return this->x; }
         };
         
         class Derived : public Base {
-            int y;
-            void setY(int v) { this->y = v; }
-            int getY() { return this->y; }
+            int32 y;
+            void setY(int32 v) { this->y = v; }
+            int32 getY() { return this->y; }
         };
         
-        int main() {
+        int32 main() {
             Derived d;
-            d.setX(10);
-            d.setY(20);
+            d.setX((int32)10);
+            d.setY((int32)20);
             return d.getX() + d.getY() - 30;
         }
     )", "test_class_inherit.c"), 0);
@@ -155,14 +155,14 @@ TEST_F(ClassCodegenE2E, ClassWithInheritance) {
 TEST_F(ClassCodegenE2E, ClassMethodCallFromMain) {
     EXPECT_EQ(runSource(R"(
         class Math {
-            int value;
-            void setValue(int v) { this->value = v; }
-            int doubleIt() { return this->value + this->value; }
+            int32 value;
+            void setValue(int32 v) { this->value = v; }
+            int32 doubleIt() { return this->value + this->value; }
         };
         
-        int main() {
+        int32 main() {
             Math m;
-            m.setValue(21);
+            m.setValue((int32)21);
             return m.doubleIt() - 42;
         }
     )", "test_class_method_call.c"), 0);

@@ -78,7 +78,7 @@ void expectSnapshot(const std::string& name, const std::string& actual) {
 
 TEST_F(DiagnosticSnapshotTest, UndeclaredIdentifier) {
     expectSnapshot("undeclared_identifier", analyzeDiagnostics(R"(
-int main() {
+int32 main() {
     return missing;
 }
 )"));
@@ -86,10 +86,10 @@ int main() {
 
 TEST_F(DiagnosticSnapshotTest, IncompatibleAssignment) {
     expectSnapshot("incompatible_assignment", analyzeDiagnostics(R"(
-struct S { int x; };
-int main() {
+struct S { int32 x; };
+int32 main() {
     struct S s;
-    int a = 1;
+    int32 a = 1;
     a = s;
     return 0;
 }
@@ -98,17 +98,17 @@ int main() {
 
 TEST_F(DiagnosticSnapshotTest, FunctionRedefinition) {
     expectSnapshot("function_redefinition", analyzeDiagnostics(R"(
-int f() { return 1; }
-int f() { return 2; }
+int32 f() { return 1; }
+int32 f() { return 2; }
 )"));
 }
 
 TEST_F(DiagnosticSnapshotTest, IncompatibleCastWarning) {
     expectSnapshot("incompatible_cast", analyzeDiagnostics(R"(
-struct S { int x; };
-int main() {
+struct S { int32 x; };
+int32 main() {
     struct S s;
-    float f = (float)s;
+    float32 f = (float32)s;
     return 0;
 }
 )"));
@@ -117,8 +117,8 @@ int main() {
 TEST_F(DiagnosticSnapshotTest, UninitializedVariableWarning) {
     // SEM-01: `y` is read before any assignment along every path.
     expectSnapshot("uninitialized_variable", analyzeDiagnostics(R"(
-int main() {
-    int y;
+int32 main() {
+    int32 y;
     return y;
 }
 )"));
@@ -126,23 +126,23 @@ int main() {
 
 TEST_F(DiagnosticSnapshotTest, LexicalInvalidCharacter) {
     expectSnapshot("lexical_invalid_character", analyzeDiagnostics(R"(
-int f() { return 0; @ }
+int32 f() { return 0; @ }
 )"));
 }
 
 TEST_F(DiagnosticSnapshotTest, LexicalDigitSeparator) {
     expectSnapshot("lexical_digit_separator", analyzeDiagnostics(R"(
-int f() { return 1__0; }
+int32 f() { return 1__0; }
 )"));
 }
 
 TEST_F(DiagnosticSnapshotTest, BranchInitializationIsPathSensitive) {
     // Assigned on both branches -> no warning; only one branch -> join loses it.
     expectSnapshot("uninitialized_branch", analyzeDiagnostics(R"(
-int main() {
-    int a;
-    int b;
-    int c = 1;
+int32 main() {
+    int32 a;
+    int32 b;
+    int32 c = 1;
     if (c) { a = 1; b = 1; } else { a = 2; }
     return a + b;
 }

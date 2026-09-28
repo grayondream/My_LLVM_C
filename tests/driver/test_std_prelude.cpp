@@ -47,8 +47,8 @@ TEST_F(StdPreludeTest, BuiltinPreludeParsesCleanly) {
 }
 
 TEST_F(StdPreludeTest, PrependDeclarationsPutsPreludeFirst) {
-    auto prelude = smc::parseStdCPrelude("int pre();", "pre");
-    auto target = smc::parseStdCPrelude("int usr();", "usr");
+    auto prelude = smc::parseStdCPrelude("int32 pre();", "pre");
+    auto target = smc::parseStdCPrelude("int32 usr();", "usr");
     ASSERT_NE(prelude, nullptr);
     ASSERT_NE(target, nullptr);
 
@@ -65,7 +65,7 @@ TEST_F(StdPreludeTest, PrependDeclarationsPutsPreludeFirst) {
 
 TEST_F(StdPreludeTest, UserCodeCanResolvePreludeSymbols) {
     // abs() is not declared by the user; the prelude supplies it.
-    auto ast = smc::parseStdCPrelude("int main() { return abs(-5) - 5; }", "user");
+    auto ast = smc::parseStdCPrelude("int32 main() { return abs(-5) - 5; }", "user");
     ASSERT_NE(ast, nullptr);
     auto prelude = smc::parseStdCPrelude(smc::builtinStdCPrelude(), "<std.c>");
     ASSERT_NE(prelude, nullptr);
@@ -79,7 +79,7 @@ TEST_F(StdPreludeTest, UserCodeCanResolvePreludeSymbols) {
 TEST_F(StdPreludeTest, UserCanRedeclarePreludeSymbol) {
     // A matching user prototype must not be reported as a redefinition.
     auto ast = smc::parseStdCPrelude(
-        "extern int abs(int x);\nint main() { return abs(-3) - 3; }", "user");
+        "extern int32 abs(int32 x);\nint32 main() { return abs(-3) - 3; }", "user");
     ASSERT_NE(ast, nullptr);
     auto prelude = smc::parseStdCPrelude(smc::builtinStdCPrelude(), "<std.c>");
     ASSERT_NE(prelude, nullptr);

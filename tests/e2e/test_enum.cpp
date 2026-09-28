@@ -66,39 +66,39 @@ static int runSource(const std::string& source) {
 TEST_F(EnumE2E, ImplicitAndExplicitValues) {
     EXPECT_EQ(runSource(
         "enum Color { RED, GREEN = 5, BLUE };\n"
-        "int main() { return BLUE - 6; }\n"), 0);
+        "int32 main() { return BLUE - 6; }\n"), 0);
 }
 
 TEST_F(EnumE2E, FirstValueIsZero) {
     // TYP-20: enumerators are strongly typed; converting to int is explicit.
     EXPECT_EQ(runSource(
         "enum Color { RED, GREEN };\n"
-        "int main() { return (int)RED; }\n"), 0);
+        "int32 main() { return (int32)RED; }\n"), 0);
 }
 
 TEST_F(EnumE2E, EnumeratorInArithmetic) {
     EXPECT_EQ(runSource(
         "enum E { N = 2 };\n"
-        "int main() { return (N * 3) - 6; }\n"), 0);
+        "int32 main() { return (N * 3) - 6; }\n"), 0);
 }
 
 TEST_F(EnumE2E, EnumTypedVariable) {
     EXPECT_EQ(runSource(
         "enum Color { A, B, C };\n"
-        "int main() { enum Color c = C; return c - 2; }\n"), 0);
+        "int32 main() { enum Color c = C; return c - 2; }\n"), 0);
 }
 
 TEST_F(EnumE2E, EnumeratorIsConstexpr) {
     // TYP-20: enum -> int is explicit, but still a constant expression.
     EXPECT_EQ(runSource(
         "enum E { X = 3 };\n"
-        "int main() { constexpr int k = (int)X; return k - 3; }\n"), 0);
+        "int32 main() { constexpr int32 k = (int32)X; return k - 3; }\n"), 0);
 }
 
 TEST_F(EnumE2E, SwitchOnEnum) {
     EXPECT_EQ(runSource(R"(
 enum E { A, B, C };
-int main() {
+int32 main() {
     enum E e = B;
     switch (e) {
         case A: return 1;

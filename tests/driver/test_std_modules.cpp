@@ -118,14 +118,14 @@ TEST_F(StdModulesTest, ResolvesModulesFromStdDir) {
 
 TEST_F(StdModulesTest, CoreMinMax) {
     EXPECT_EQ(runWithImports(
-        "import std.core;\nint main() { return std::min(3, 5) + std::max(2, 9) - 12; }\n",
+        "import std.core;\nint32 main() { return std::min(3, 5) + std::max(2, 9) - 12; }\n",
         "std_core_minmax.smc"), 0);
 }
 
 TEST_F(StdModulesTest, CoreClamp) {
     EXPECT_EQ(runWithImports(
         "import std.core;\n"
-        "int main() { return std::clamp(42, 0, 10) - 10; }\n",
+        "int32 main() { return std::clamp(42, 0, 10) - 10; }\n",
         "std_core_clamp.smc"), 0);
 }
 
@@ -133,13 +133,13 @@ TEST_F(StdModulesTest, CoreConstexprUse) {
     // std::min is constexpr and folds at compile time.
     EXPECT_EQ(runWithImports(
         "import std.core;\n"
-        "int main() { constexpr int m = std::min(4, 7); return m - 4; }\n",
+        "int32 main() { constexpr int32 m = std::min(4, 7); return m - 4; }\n",
         "std_core_constexpr.smc"), 0);
 }
 
 TEST_F(StdModulesTest, IoPrintInt) {
     EXPECT_EQ(runWithImports(
-        "import std.io;\nint main() { std::print_int(7); return 0; }\n",
+        "import std.io;\nint32 main() { std::print_int(7); return 0; }\n",
         "std_io_print_int.smc"), 0);
 }
 
@@ -148,13 +148,13 @@ TEST_F(StdModulesTest, IoPrintInt) {
 TEST_F(StdModulesTest, AssertTrueRuns) {
     // A satisfied assertion is a no-op; execution continues.
     EXPECT_EQ(runWithImports(
-        "int main() { assert(1 + 1 == 2); return 7; }\n",
+        "int32 main() { assert(1 + 1 == 2); return 7; }\n",
         "assert_true.smc"), 7);
 }
 
 TEST_F(StdModulesTest, AssertFalseEmitsAbortWithLocation) {
     std::string ir = compileToIR(
-        "int main() { int x = 0; assert(x); return 0; }\n",
+        "int32 main() { int32 x = 0; assert(x); return 0; }\n",
         "assert_false.smc");
     ASSERT_FALSE(ir.empty());
     EXPECT_NE(ir.find("@abort"), std::string::npos);
@@ -163,7 +163,7 @@ TEST_F(StdModulesTest, AssertFalseEmitsAbortWithLocation) {
 
 TEST_F(StdModulesTest, PanicEmitsAbortWithLocation) {
     std::string ir = compileToIR(
-        "int main() { panic(\"boom\"); return 0; }\n",
+        "int32 main() { panic(\"boom\"); return 0; }\n",
         "panic.smc");
     ASSERT_FALSE(ir.empty());
     EXPECT_NE(ir.find("@abort"), std::string::npos);
@@ -176,7 +176,7 @@ TEST_F(StdModulesTest, PanicEmitsAbortWithLocation) {
 TEST_F(StdModulesTest, FileWriteReadRoundTrip) {
     EXPECT_EQ(runWithImports(
         "import std.io;\n"
-        "int main() {\n"
+        "int32 main() {\n"
         "    void* f = std::file_open(\"/tmp/smc_std_io_test.txt\", \"w\");\n"
         "    if (f == null) return 1;\n"
         "    char out[4];\n"
@@ -198,14 +198,14 @@ TEST_F(StdModulesTest, FileWriteReadRoundTrip) {
 TEST_F(StdModulesTest, IoReadWriteChar) {
     EXPECT_EQ(runWithImports(
         "import std.io;\n"
-        "int main() {\n"
+        "int32 main() {\n"
         "    void* f = std::file_open(\"/tmp/smc_std_io_char.txt\", \"w\");\n"
         "    if (f == null) return 1;\n"
         "    std::file_write_char(f, 'Z');\n"
         "    std::file_close(f);\n"
         "    void* g = std::file_open(\"/tmp/smc_std_io_char.txt\", \"r\");\n"
         "    if (g == null) return 2;\n"
-        "    int c = std::file_read_char(g);\n"
+        "    int32 c = std::file_read_char(g);\n"
         "    std::file_close(g);\n"
         "    if (c != 'Z') return 3;\n"
         "    return 0;\n"

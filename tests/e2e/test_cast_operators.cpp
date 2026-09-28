@@ -84,19 +84,19 @@ static AnalyzeResult analyzeSource(const std::string& source,
 }
 
 TEST_F(CastOperatorsE2E, StaticCastTruncatesFloat) {
-    EXPECT_EQ(runSource("int main() { int x = static_cast<int>(3.7); return x - 3; }"), 0);
+    EXPECT_EQ(runSource("int32 main() { int32 x = static_cast<int32>(3.7); return x - 3; }"), 0);
 }
 
 TEST_F(CastOperatorsE2E, StaticCastWidensInteger) {
     EXPECT_EQ(runSource(
-        "int main() { int64 x = static_cast<int64>(41); return (int)x - 41; }"), 0);
+        "int32 main() { int64 x = static_cast<int64>(41); return (int32)x - 41; }"), 0);
 }
 
 TEST_F(CastOperatorsE2E, StaticCastPointerToBase) {
     EXPECT_EQ(runSource(R"(
-        struct Base { int b; };
-        struct Derived { int b; int d; };
-        int main() {
+        struct Base { int32 b; };
+        struct Derived { int32 b; int32 d; };
+        int32 main() {
             struct Derived d;
             d.b = 1; d.d = 2;
             struct Derived* dp = &d;
@@ -109,23 +109,23 @@ TEST_F(CastOperatorsE2E, StaticCastPointerToBase) {
 TEST_F(CastOperatorsE2E, ReinterpretCastFloatBits) {
     // 1.0f has bit pattern 0x3F800000 == 1065353216.
     EXPECT_EQ(runSource(
-        "int main() { float f = 1.0f; int bits = reinterpret_cast<int>(f);"
+        "int32 main() { float32 f = 1.0f; int32 bits = reinterpret_cast<int32>(f);"
         " return (bits == 1065353216) ? 0 : 1; }"), 0);
 }
 
 TEST_F(CastOperatorsE2E, ReinterpretCastIntToFloat) {
     EXPECT_EQ(runSource(
-        "int main() { int bits = 1065353216; float f = reinterpret_cast<float>(bits);"
+        "int32 main() { int32 bits = 1065353216; float32 f = reinterpret_cast<float32>(bits);"
         " return (f == 1.0f) ? 0 : 1; }"), 0);
 }
 
 TEST_F(CastOperatorsE2E, ReinterpretCastPointerRoundTrip) {
     EXPECT_EQ(runSource(R"(
-        int main() {
-            int v = 7;
-            int* p = &v;
+        int32 main() {
+            int32 v = 7;
+            int32* p = &v;
             int64 addr = reinterpret_cast<int64>(p);
-            int* q = reinterpret_cast<int*>(addr);
+            int32* q = reinterpret_cast<int32*>(addr);
             return (q == p) ? 0 : 1;
         }
     )"), 0);
@@ -133,27 +133,27 @@ TEST_F(CastOperatorsE2E, ReinterpretCastPointerRoundTrip) {
 
 TEST_F(CastOperatorsE2E, StaticCastIntToPointerIsRejected) {
     AnalyzeResult r = analyzeSource(
-        "int main() { int x = 5; int* p = static_cast<int*>(x); return 0; }");
+        "int32 main() { int32 x = 5; int32* p = static_cast<int32*>(x); return 0; }");
     EXPECT_GT(r.errors, 0);
 }
 
 TEST_F(CastOperatorsE2E, StaticCastToAggregateIsRejected) {
     AnalyzeResult r = analyzeSource(
-        "struct S { int a; };"
-        "int main() { int x = 5; struct S s = static_cast<struct S>(x); return 0; }");
+        "struct S { int32 a; };"
+        "int32 main() { int32 x = 5; struct S s = static_cast<struct S>(x); return 0; }");
     EXPECT_GT(r.errors, 0);
 }
 
 TEST_F(CastOperatorsE2E, ReinterpretCastIntToPointerIsAllowed) {
     AnalyzeResult r = analyzeSource(
-        "int main() { int x = 5; int* p = reinterpret_cast<int*>(x); return 0; }");
+        "int32 main() { int32 x = 5; int32* p = reinterpret_cast<int32*>(x); return 0; }");
     EXPECT_EQ(r.errors, 0);
 }
 
 TEST_F(CastOperatorsE2E, CStyleCastStillWarnsButCompiles) {
     AnalyzeResult r = analyzeSource(
-        "struct S { int a; };"
-        "int main() { int x = 5; struct S s = (struct S)x; return 0; }");
+        "struct S { int32 a; };"
+        "int32 main() { int32 x = 5; struct S s = (struct S)x; return 0; }");
     EXPECT_EQ(r.errors, 0);
     EXPECT_GT(r.warnings, 0);
 }

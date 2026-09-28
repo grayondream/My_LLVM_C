@@ -49,34 +49,34 @@ bool warnedAbout(const Result& r, const std::string& var) {
 } // namespace
 
 TEST_F(InitializationAnalysisTest, WarnsOnUninitializedRead) {
-    auto r = analyze("int main() { int y; return y; }");
+    auto r = analyze("int32 main() { int32 y; return y; }");
     ASSERT_TRUE(r.errors.empty());
     EXPECT_TRUE(warnedAbout(r, "y"));
 }
 
 TEST_F(InitializationAnalysisTest, NoWarningWhenInitialized) {
-    auto r = analyze("int main() { int y = 3; return y; }");
+    auto r = analyze("int32 main() { int32 y = 3; return y; }");
     ASSERT_TRUE(r.errors.empty());
     EXPECT_TRUE(r.warnings.empty());
 }
 
 TEST_F(InitializationAnalysisTest, NoWarningForParameters) {
-    auto r = analyze("int f(int a) { return a + 1; } int main() { return f(2) - 3; }");
+    auto r = analyze("int32 f(int32 a) { return a + 1; } int32 main() { return f(2) - 3; }");
     ASSERT_TRUE(r.errors.empty());
     EXPECT_TRUE(r.warnings.empty());
 }
 
 TEST_F(InitializationAnalysisTest, NoWarningForGlobals) {
-    auto r = analyze("int g; int main() { return g; }");
+    auto r = analyze("int32 g; int32 main() { return g; }");
     ASSERT_TRUE(r.errors.empty());
     EXPECT_TRUE(r.warnings.empty());
 }
 
 TEST_F(InitializationAnalysisTest, BranchesJoinOnBothAssigned) {
     auto r = analyze(R"(
-int main() {
-    int a;
-    int c = 1;
+int32 main() {
+    int32 a;
+    int32 c = 1;
     if (c) { a = 1; } else { a = 2; }
     return a;
 })");
@@ -86,9 +86,9 @@ int main() {
 
 TEST_F(InitializationAnalysisTest, WarnsWhenOnlyOneBranchAssigns) {
     auto r = analyze(R"(
-int main() {
-    int a;
-    int c = 1;
+int32 main() {
+    int32 a;
+    int32 c = 1;
     if (c) { a = 1; }
     return a;
 })");
@@ -99,9 +99,9 @@ int main() {
 TEST_F(InitializationAnalysisTest, LoopIsConservative) {
     // The body may run zero times, so `x` is not definitely assigned.
     auto r = analyze(R"(
-int main() {
-    int x;
-    int c = 0;
+int32 main() {
+    int32 x;
+    int32 c = 0;
     while (c) { x = 1; }
     return x;
 })");
@@ -111,9 +111,9 @@ int main() {
 
 TEST_F(InitializationAnalysisTest, DoWhileAssignsInBody) {
     auto r = analyze(R"(
-int main() {
-    int x;
-    int c = 1;
+int32 main() {
+    int32 x;
+    int32 c = 1;
     do { x = 2; c = 0; } while (c);
     return x;
 })");
@@ -123,9 +123,9 @@ int main() {
 
 TEST_F(InitializationAnalysisTest, AddressTakenSuppressesWarning) {
     auto r = analyze(R"(
-void set(int* p) { *p = 7; }
-int main() {
-    int x;
+void set(int32* p) { *p = 7; }
+int32 main() {
+    int32 x;
     set(&x);
     return x;
 })");
@@ -134,13 +134,13 @@ int main() {
 }
 
 TEST_F(InitializationAnalysisTest, WarnsOnUninitializedPointerDeref) {
-    auto r = analyze("int main() { int* p; return *p; }");
+    auto r = analyze("int32 main() { int32* p; return *p; }");
     ASSERT_TRUE(r.errors.empty());
     EXPECT_TRUE(warnedAbout(r, "p"));
 }
 
 TEST_F(InitializationAnalysisTest, AssignedBeforeReadIsFine) {
-    auto r = analyze("int main() { int y; y = 4; return y; }");
+    auto r = analyze("int32 main() { int32 y; y = 4; return y; }");
     ASSERT_TRUE(r.errors.empty());
     EXPECT_TRUE(r.warnings.empty());
 }

@@ -24,7 +24,7 @@ std::unique_ptr<TranslationUnitAST> g_tu;
 
 ExprAST* parseExpr(const std::string& source) {
     g_tu = nullptr;
-    Parser parser(lex("int f() { return " + source + "; }"));
+    Parser parser(lex("int32 f() { return " + source + "; }"));
     g_tu = parser.parse();
     if (!g_tu || g_tu->declarations.empty()) return nullptr;
     auto* func = dynamic_cast<FunctionDeclAST*>(g_tu->declarations[0].get());

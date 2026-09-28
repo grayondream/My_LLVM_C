@@ -26,7 +26,7 @@ TEST(DummyTest, AlwaysPasses) {
 // the rest of the stream stays usable.
 
 TEST(LexerDiagnosticsTest, ValidSourceProducesNoDiagnostics) {
-    Lexer lexer("ok.c", "int main() { return 0; }");
+    Lexer lexer("ok.c", "int32 main() { return 0; }");
     lexer.tokenize();
     EXPECT_TRUE(lexer.getDiagnostics().empty());
 }
@@ -34,16 +34,16 @@ TEST(LexerDiagnosticsTest, ValidSourceProducesNoDiagnostics) {
 TEST(LexerDiagnosticsTest, BlankAndCommentLinesProduceNoDiagnostics) {
     // Whitespace after a line comment (and between comments) must be skipped as
     // trivia, not diagnosed as an invalid character.
-    Lexer lexer("ok.c", "int x; // trailing\n\n  /* block */\nint y;\n");
+    Lexer lexer("ok.c", "int32 x; // trailing\n\n  /* block */\nint32 y;\n");
     auto tokens = lexer.tokenize();
     EXPECT_TRUE(lexer.getDiagnostics().empty());
     ASSERT_EQ(tokens.size(), 6u);
-    EXPECT_EQ(tokens[3].type, TokenType::TOKEN_INT);
+    EXPECT_EQ(tokens[3].type, TokenType::TOKEN_INT32);
     EXPECT_EQ(tokens[3].line, 4);
 }
 
 TEST(LexerDiagnosticsTest, InvalidCharacterReportsE0001) {
-    Lexer lexer("bad.c", "int @ x;");
+    Lexer lexer("bad.c", "int32 @ x;");
     lexer.tokenize();
     const auto& diags = lexer.getDiagnostics();
     ASSERT_EQ(diags.size(), 1u);
@@ -51,21 +51,21 @@ TEST(LexerDiagnosticsTest, InvalidCharacterReportsE0001) {
     EXPECT_EQ(diagnosticId(diags[0].code), "E0001");
     EXPECT_TRUE(diags[0].isError());
     EXPECT_EQ(diags[0].line, 1);
-    EXPECT_EQ(diags[0].column, 5);
+    EXPECT_EQ(diags[0].column, 7);
 }
 
 TEST(LexerDiagnosticsTest, InvalidCharacterRecoversAndContinuesLexing) {
-    Lexer lexer("bad.c", "int @ x;");
+    Lexer lexer("bad.c", "int32 @ x;");
     auto tokens = lexer.tokenize();
     // The invalid '@' is skipped; the remaining tokens are still produced.
     ASSERT_EQ(tokens.size(), 3u);
-    EXPECT_EQ(tokens[0].type, TokenType::TOKEN_INT);
+    EXPECT_EQ(tokens[0].type, TokenType::TOKEN_INT32);
     EXPECT_EQ(tokens[1].type, TokenType::TOKEN_IDENTIFIER);
     EXPECT_EQ(tokens[2].type, TokenType::TOKEN_SEMICOLON);
 }
 
 TEST(LexerDiagnosticsTest, InvalidCharacterOnLaterLineReportsCorrectLine) {
-    Lexer lexer("bad.c", "int x;\n@ y;");
+    Lexer lexer("bad.c", "int32 x;\n@ y;");
     lexer.tokenize();
     const auto& diags = lexer.getDiagnostics();
     ASSERT_EQ(diags.size(), 1u);
@@ -74,14 +74,14 @@ TEST(LexerDiagnosticsTest, InvalidCharacterOnLaterLineReportsCorrectLine) {
 }
 
 TEST(LexerDiagnosticsTest, UnterminatedStringReportsE0002) {
-    Lexer lexer("bad.c", "int s = \"abc");
+    Lexer lexer("bad.c", "int32 s = \"abc");
     lexer.tokenize();
     const Diagnostic* d =
         findDiag(lexer.getDiagnostics(), DiagnosticCode::LexUnterminatedLiteral);
     ASSERT_NE(d, nullptr);
     EXPECT_EQ(diagnosticId(d->code), "E0002");
     EXPECT_EQ(d->line, 1);
-    EXPECT_EQ(d->column, 9);
+    EXPECT_EQ(d->column, 11);
 }
 
 TEST(LexerDiagnosticsTest, UnterminatedCharReportsE0002) {
@@ -94,7 +94,7 @@ TEST(LexerDiagnosticsTest, UnterminatedCharReportsE0002) {
 }
 
 TEST(LexerDiagnosticsTest, UnterminatedBlockCommentReportsE0002) {
-    Lexer lexer("bad.c", "int x; /* never closed");
+    Lexer lexer("bad.c", "int32 x; /* never closed");
     lexer.tokenize();
     const Diagnostic* d =
         findDiag(lexer.getDiagnostics(), DiagnosticCode::LexUnterminatedLiteral);
@@ -103,7 +103,7 @@ TEST(LexerDiagnosticsTest, UnterminatedBlockCommentReportsE0002) {
 }
 
 TEST(LexerDiagnosticsTest, DecimalLiteralOverflowReportsE0003) {
-    Lexer lexer("bad.c", "int x = 999999999999999999999999;");
+    Lexer lexer("bad.c", "int32 x = 999999999999999999999999;");
     lexer.tokenize();
     const Diagnostic* d = findDiag(lexer.getDiagnostics(), DiagnosticCode::LexIntegerOverflow);
     ASSERT_NE(d, nullptr);
@@ -112,7 +112,7 @@ TEST(LexerDiagnosticsTest, DecimalLiteralOverflowReportsE0003) {
 }
 
 TEST(LexerDiagnosticsTest, HexLiteralOverflowReportsE0003) {
-    Lexer lexer("bad.c", "int x = 0x1FFFFFFFFFFFFFFFFF;");
+    Lexer lexer("bad.c", "int32 x = 0x1FFFFFFFFFFFFFFFFF;");
     lexer.tokenize();
     const Diagnostic* d = findDiag(lexer.getDiagnostics(), DiagnosticCode::LexIntegerOverflow);
     ASSERT_NE(d, nullptr);
@@ -128,11 +128,11 @@ TEST(LexerDiagnosticsTest, LargeDecimalWithin64BitsIsAccepted) {
 }
 
 TEST(LexerDiagnosticsTest, DiagnosticFormatCarriesCodeAndPosition) {
-    Lexer lexer("bad.c", "int @ x;");
+    Lexer lexer("bad.c", "int32 @ x;");
     lexer.tokenize();
     ASSERT_EQ(lexer.getDiagnostics().size(), 1u);
     const std::string formatted = lexer.getDiagnostics()[0].formatWithSeverity();
-    EXPECT_NE(formatted.find("bad.c:1:5"), std::string::npos);
+    EXPECT_NE(formatted.find("bad.c:1:7"), std::string::npos);
     EXPECT_NE(formatted.find("E0001"), std::string::npos);
 }
 
@@ -245,7 +245,7 @@ TEST(LexerSeparatorTest, SeparatorBeforeFractionReportsE0004) {
 }
 
 TEST(LexerSeparatorTest, RecoveryKeepsNumberTokenAndRestOfStream) {
-    Lexer lexer("bad.c", "int x = 1__0; int y = 2;");
+    Lexer lexer("bad.c", "int32 x = 1__0; int32 y = 2;");
     auto tokens = lexer.tokenize();
     EXPECT_FALSE(lexer.getDiagnostics().empty());
     ASSERT_EQ(tokens.size(), 10u);
@@ -321,7 +321,7 @@ TEST(LexerFloatExponentTest, SeparatorsWithinExponentAreValidated) {
 }
 
 TEST(ClassKeywordTest, ClassTokenIsRecognized) {
-    std::string source = "class Foo { int x; };";
+    std::string source = "class Foo { int32 x; };";
     Lexer lexer("test.c", source);
     auto tokens = lexer.tokenize();
 

@@ -110,10 +110,10 @@ bool hasStringContaining(const std::vector<std::string>& errors, const std::stri
 } // namespace
 
 TEST_F(ModuleVisibilityTest, ExportedFunctionIsVisible) {
-    write(dir / "util.smc", "module util;\nexport int helper() { return 5; }\n");
+    write(dir / "util.smc", "module util;\nexport int32 helper() { return 5; }\n");
 
     std::vector<std::string> errors;
-    auto ast = loadMain("import util;\nint main() { return helper() - 5; }\n", errors);
+    auto ast = loadMain("import util;\nint32 main() { return helper() - 5; }\n", errors);
     ASSERT_TRUE(errors.empty()) << (errors.empty() ? "" : errors[0]);
 
     SemanticAnalyzer analyzer;
@@ -123,10 +123,10 @@ TEST_F(ModuleVisibilityTest, ExportedFunctionIsVisible) {
 }
 
 TEST_F(ModuleVisibilityTest, NonExportedFunctionIsHidden) {
-    write(dir / "util.smc", "module util;\nint helper() { return 5; }\n");
+    write(dir / "util.smc", "module util;\nint32 helper() { return 5; }\n");
 
     std::vector<std::string> errors;
-    auto ast = loadMain("import util;\nint main() { return helper(); }\n", errors);
+    auto ast = loadMain("import util;\nint32 main() { return helper(); }\n", errors);
     ASSERT_TRUE(errors.empty());
 
     SemanticAnalyzer analyzer;
@@ -139,11 +139,11 @@ TEST_F(ModuleVisibilityTest, NonExportedFunctionIsHidden) {
 TEST_F(ModuleVisibilityTest, PrivateHelperUsableInsideModule) {
     write(dir / "util.smc",
           "module util;\n"
-          "int helper() { return 7; }\n"
-          "export int compute() { return helper() + 1; }\n");
+          "int32 helper() { return 7; }\n"
+          "export int32 compute() { return helper() + 1; }\n");
 
     std::vector<std::string> errors;
-    auto ast = loadMain("import util;\nint main() { return compute() - 8; }\n", errors);
+    auto ast = loadMain("import util;\nint32 main() { return compute() - 8; }\n", errors);
     ASSERT_TRUE(errors.empty()) << (errors.empty() ? "" : errors[0]);
 
     SemanticAnalyzer analyzer;
@@ -153,10 +153,10 @@ TEST_F(ModuleVisibilityTest, PrivateHelperUsableInsideModule) {
 }
 
 TEST_F(ModuleVisibilityTest, LegacyUnitWithoutModuleDeclIsFullyVisible) {
-    write(dir / "util.smc", "int helper() { return 3; }\n");
+    write(dir / "util.smc", "int32 helper() { return 3; }\n");
 
     std::vector<std::string> errors;
-    auto ast = loadMain("import util;\nint main() { return helper() - 3; }\n", errors);
+    auto ast = loadMain("import util;\nint32 main() { return helper() - 3; }\n", errors);
     ASSERT_TRUE(errors.empty());
 
     SemanticAnalyzer analyzer;
@@ -168,10 +168,10 @@ TEST_F(ModuleVisibilityTest, LegacyUnitWithoutModuleDeclIsFullyVisible) {
 TEST_F(ModuleVisibilityTest, ExportedNamespaceMembersAreVisible) {
     write(dir / "geom.smc",
           "module geom;\n"
-          "export namespace g { int add(int a, int b) { return a + b; } }\n");
+          "export namespace g { int32 add(int32 a, int32 b) { return a + b; } }\n");
 
     std::vector<std::string> errors;
-    auto ast = loadMain("import geom;\nint main() { return g::add(2, 3) - 5; }\n", errors);
+    auto ast = loadMain("import geom;\nint32 main() { return g::add(2, 3) - 5; }\n", errors);
     ASSERT_TRUE(errors.empty()) << (errors.empty() ? "" : errors[0]);
 
     SemanticAnalyzer analyzer;
@@ -182,10 +182,10 @@ TEST_F(ModuleVisibilityTest, ExportedNamespaceMembersAreVisible) {
 
 TEST_F(ModuleVisibilityTest, DottedModuleNameMustMatchPath) {
     write(dir / "lib" / "util.smc",
-          "module lib.util;\nexport int f() { return 9; }\n");
+          "module lib.util;\nexport int32 f() { return 9; }\n");
 
     std::vector<std::string> errors;
-    auto ast = loadMain("import lib.util;\nint main() { return f() - 9; }\n", errors);
+    auto ast = loadMain("import lib.util;\nint32 main() { return f() - 9; }\n", errors);
     ASSERT_TRUE(errors.empty()) << (errors.empty() ? "" : errors[0]);
 
     SemanticAnalyzer analyzer;
@@ -195,9 +195,9 @@ TEST_F(ModuleVisibilityTest, DottedModuleNameMustMatchPath) {
 }
 
 TEST_F(ModuleVisibilityTest, ModuleNameMismatchIsReported) {
-    write(dir / "util.smc", "module other;\nexport int helper() { return 1; }\n");
+    write(dir / "util.smc", "module other;\nexport int32 helper() { return 1; }\n");
 
     std::vector<std::string> errors;
-    auto ast = loadMain("import util;\nint main() { return helper(); }\n", errors);
+    auto ast = loadMain("import util;\nint32 main() { return helper(); }\n", errors);
     EXPECT_TRUE(hasStringContaining(errors, "declares name 'other'"));
 }

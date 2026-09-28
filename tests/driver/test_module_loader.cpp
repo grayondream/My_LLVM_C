@@ -104,11 +104,11 @@ TEST_F(ModuleLoaderTest, ProcessImportsSplicesDeclarations) {
     fs::create_directories(dir);
     {
         std::ofstream out(dir / "util.smc");
-        out << "int helper() { return 5; }\n";
+        out << "int32 helper() { return 5; }\n";
     }
 
     auto ast = smc::parseStdCPrelude(
-        "import util;\nint main() { return helper() - 5; }\n",
+        "import util;\nint32 main() { return helper() - 5; }\n",
         (dir / "main.smc").string());
     ASSERT_NE(ast, nullptr);
 
@@ -138,14 +138,14 @@ TEST_F(ModuleLoaderTest, CyclicImportsReported) {
     fs::create_directories(dir);
     {
         std::ofstream out(dir / "a.smc");
-        out << "import b;\nint fa() { return 1; }\n";
+        out << "import b;\nint32 fa() { return 1; }\n";
     }
     {
         std::ofstream out(dir / "b.smc");
-        out << "import a;\nint fb() { return 2; }\n";
+        out << "import a;\nint32 fb() { return 2; }\n";
     }
 
-    auto ast = smc::parseStdCPrelude("import a;\nint main() { return fa() + fb() - 3; }\n",
+    auto ast = smc::parseStdCPrelude("import a;\nint32 main() { return fa() + fb() - 3; }\n",
                                      (dir / "main.smc").string());
     ASSERT_NE(ast, nullptr);
 

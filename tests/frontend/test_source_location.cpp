@@ -44,21 +44,21 @@ ExprAST* firstReturnExpr(TranslationUnitAST& tu) {
 } // namespace
 
 TEST_F(SourceLocationTest, LexerRecordsTokenStartColumn) {
-    auto tokens = lex("int abc = 1;");
+    auto tokens = lex("int32 abc = 1;");
     ASSERT_GE(tokens.size(), 5u);
-    EXPECT_EQ(tokens[0].lexeme, "int");
+    EXPECT_EQ(tokens[0].lexeme, "int32");
     EXPECT_EQ(tokens[0].column, 1);
     // Multi-character identifier points at its first character, not its last.
     EXPECT_EQ(tokens[1].lexeme, "abc");
-    EXPECT_EQ(tokens[1].column, 5);
+    EXPECT_EQ(tokens[1].column, 7);
     EXPECT_EQ(tokens[2].type, TokenType::TOKEN_ASSIGN);
-    EXPECT_EQ(tokens[2].column, 9);
+    EXPECT_EQ(tokens[2].column, 11);
     EXPECT_EQ(tokens[3].lexeme, "1");
-    EXPECT_EQ(tokens[3].column, 11);
+    EXPECT_EQ(tokens[3].column, 13);
 }
 
 TEST_F(SourceLocationTest, ExpressionGetsStartPosition) {
-    auto tu = parse("int f() {\n    return missing;\n}\n");
+    auto tu = parse("int32 f() {\n    return missing;\n}\n");
     ASSERT_NE(tu, nullptr);
     ExprAST* expr = firstReturnExpr(*tu);
     ASSERT_NE(expr, nullptr);
@@ -68,7 +68,7 @@ TEST_F(SourceLocationTest, ExpressionGetsStartPosition) {
 }
 
 TEST_F(SourceLocationTest, BinaryExpressionAndOperandsAreLocated) {
-    auto tu = parse("int f() {\n    return a + b;\n}\n");
+    auto tu = parse("int32 f() {\n    return a + b;\n}\n");
     ASSERT_NE(tu, nullptr);
     auto* bin = dynamic_cast<BinaryExprAST*>(firstReturnExpr(*tu));
     ASSERT_NE(bin, nullptr);
@@ -80,18 +80,18 @@ TEST_F(SourceLocationTest, BinaryExpressionAndOperandsAreLocated) {
 }
 
 TEST_F(SourceLocationTest, CastOperandIsLocated) {
-    auto tu = parse("int f() {\n    return (int)s;\n}\n");
+    auto tu = parse("int32 f() {\n    return (int32)s;\n}\n");
     ASSERT_NE(tu, nullptr);
     auto* cast = dynamic_cast<CastExprAST*>(firstReturnExpr(*tu));
     ASSERT_NE(cast, nullptr);
     EXPECT_EQ(cast->sourceLine, 2);
     EXPECT_EQ(cast->sourceColumn, 12); // `(`
     ASSERT_NE(cast->expr.get(), nullptr);
-    EXPECT_EQ(cast->expr->sourceColumn, 17); // `s`, via parsePrimary
+    EXPECT_EQ(cast->expr->sourceColumn, 19); // `s`, via parsePrimary
 }
 
 TEST_F(SourceLocationTest, DeclarationGetsStartPosition) {
-    auto tu = parse("\n\nint f() { return 1; }\n");
+    auto tu = parse("\n\nint32 f() { return 1; }\n");
     ASSERT_NE(tu, nullptr);
     ASSERT_FALSE(tu->declarations.empty());
     const DeclAST* decl = tu->declarations[0].get();
