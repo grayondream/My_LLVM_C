@@ -1,1 +1,1 @@
-int main() { return 42; }
+int32 main() { return 42; }

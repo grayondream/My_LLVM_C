@@ -1957,3 +1957,16 @@ TEST_F(ParserErrorTest, PreprocessorDirectiveIsRejected) {
     }
     EXPECT_TRUE(found);
 }
+
+// TYP: `int`/`float`/`double` are no longer type keywords. A statement that
+// tries to declare with `int` must not silently parse as a declaration.
+TEST_F(ParserErrorTest, LegacyIntKeywordIsNotAType) {
+    auto [tu, errors] = parseWithErrors("int32 main() { int x = 1; return 0; }");
+    EXPECT_FALSE(errors.empty());
+}
+
+// The same words are ordinary identifiers now, so they may name variables.
+TEST_F(ParserErrorTest, LegacyKeywordNamesAreUsableAsIdentifiers) {
+    auto [tu, errors] = parseWithErrors("int32 main() { int32 int = 5; return int; }");
+    EXPECT_TRUE(errors.empty());
+}

@@ -36,7 +36,7 @@ TEST_F(TokenStreamTest, ExpectValidToken) {
 
 TEST_F(TokenStreamTest, ExpectInvalidTokenThrows) {
     auto stream = makeStream("1 + 2");
-    EXPECT_THROW(stream.expect(TokenType::TOKEN_INT), std::runtime_error);
+    EXPECT_THROW(stream.expect(TokenType::TOKEN_INT32), std::runtime_error);
 }
 
 TEST_F(TokenStreamTest, MatchAndConsume) {
@@ -48,7 +48,7 @@ TEST_F(TokenStreamTest, MatchAndConsume) {
 
 TEST_F(TokenStreamTest, MatchFailsNoConsume) {
     auto stream = makeStream("1 + 2");
-    EXPECT_FALSE(stream.match(TokenType::TOKEN_INT));
+    EXPECT_FALSE(stream.match(TokenType::TOKEN_INT32));
     const auto& tok = stream.peek();
     EXPECT_EQ(tok.type, TokenType::TOKEN_NUMBER);
 }

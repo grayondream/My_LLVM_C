@@ -196,9 +196,7 @@ std::string Parser::tokenTypeName(TokenType type) const {
         case TokenType::TOKEN_NUMBER:        return "number";
         case TokenType::TOKEN_STRING:        return "string literal";
         case TokenType::TOKEN_CHAR:          return "character literal";
-        case TokenType::TOKEN_INT:           return "'int'";
         case TokenType::TOKEN_FLOAT:         return "'float'";
-        case TokenType::TOKEN_DOUBLE:        return "'double'";
         case TokenType::TOKEN_CHAR_KW:       return "'char'";
         case TokenType::TOKEN_VOID:          return "'void'";
         case TokenType::TOKEN_IF:            return "'if'";
@@ -1337,9 +1335,6 @@ bool Parser::check(TokenType type) const {
 bool Parser::isTypeStart() const {
     if (eof()) return false;
     switch (peek()->type) {
-        case TokenType::TOKEN_INT:
-        case TokenType::TOKEN_FLOAT:
-        case TokenType::TOKEN_DOUBLE:
         case TokenType::TOKEN_CHAR_KW:
         case TokenType::TOKEN_VOID:
         case TokenType::TOKEN_BOOL:
@@ -1438,18 +1433,6 @@ Type* Parser::parseBaseType() {
     if (!tok) return nullptr;
 
     switch (tok->type) {
-        case TokenType::TOKEN_INT: {
-            advance();
-            return TypeContext::instance().getInt32();
-        }
-        case TokenType::TOKEN_FLOAT: {
-            advance();
-            return TypeContext::instance().getFloat32();
-        }
-        case TokenType::TOKEN_DOUBLE: {
-            advance();
-            return TypeContext::instance().getFloat64();
-        }
         case TokenType::TOKEN_CHAR_KW: {
             advance();
             return TypeContext::instance().getChar();

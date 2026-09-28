@@ -350,3 +350,18 @@ TEST(LexerKeywordTest, Float16AndFloat128Keywords) {
     EXPECT_EQ(tokens[1].type, TokenType::TOKEN_FLOAT128);
     EXPECT_EQ(tokens[1].lexeme, "float128");
 }
+
+// TYP: only fixed-width type spellings exist; `int`/`float`/`double` are no
+// longer keywords and must lex as ordinary identifiers.
+TEST(LexerKeywordTest, LegacyNumericKeywordsAreIdentifiers) {
+    Lexer lexer("test.c", "int float double");
+    auto tokens = lexer.tokenize();
+
+    ASSERT_EQ(tokens.size(), 3u);
+    EXPECT_EQ(tokens[0].type, TokenType::TOKEN_IDENTIFIER);
+    EXPECT_EQ(tokens[0].lexeme, "int");
+    EXPECT_EQ(tokens[1].type, TokenType::TOKEN_IDENTIFIER);
+    EXPECT_EQ(tokens[1].lexeme, "float");
+    EXPECT_EQ(tokens[2].type, TokenType::TOKEN_IDENTIFIER);
+    EXPECT_EQ(tokens[2].lexeme, "double");
+}

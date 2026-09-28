@@ -18,10 +18,10 @@ const char* builtinStdCPrelude() {
     return R"PRELUDE(
 // ===== std.c — built-in libc binding layer (MOD-09 / STD-23) =====
 // Declarations only: the linker resolves them against the C library.
-extern int    printf(char* format, ...);
-extern int    puts(char* s);
-extern int    putchar(int c);
-extern int    getchar();
+extern int32  printf(char* format, ...);
+extern int32  puts(char* s);
+extern int32  putchar(int32 c);
+extern int32  getchar();
 
 extern void*  malloc(usize size);
 extern void*  calloc(usize count, usize size);
@@ -29,40 +29,40 @@ extern void*  realloc(void* ptr, usize size);
 extern void   free(void* ptr);
 
 extern usize  strlen(char* s);
-extern int    strcmp(char* a, char* b);
-extern int    strncmp(char* a, char* b, usize n);
+extern int32  strcmp(char* a, char* b);
+extern int32  strncmp(char* a, char* b, usize n);
 extern char*  strcpy(char* dst, char* src);
 extern void*  memcpy(void* dst, void* src, usize n);
-extern void*  memset(void* dst, int value, usize n);
+extern void*  memset(void* dst, int32 value, usize n);
 extern void*  memmove(void* dst, void* src, usize n);
-extern int    memcmp(void* a, void* b, usize n);
+extern int32  memcmp(void* a, void* b, usize n);
 
-extern int    abs(int x);
-extern void   exit(int status);
+extern int32  abs(int32 x);
+extern void   exit(int32 status);
 extern void   abort();
 
 // stderr without exposing the `FILE` type: dprintf(2, ...) writes to stderr.
-extern int    dprintf(int fd, char* format, ...);
+extern int32  dprintf(int32 fd, char* format, ...);
 
 // Buffered file I/O. A `FILE*` is passed around as an opaque `void*`.
 extern void*  fopen(char* path, char* mode);
-extern int    fclose(void* stream);
+extern int32  fclose(void* stream);
 extern usize  fread(void* ptr, usize size, usize count, void* stream);
 extern usize  fwrite(void* ptr, usize size, usize count, void* stream);
-extern char*  fgets(char* str, int n, void* stream);
-extern int    fputs(char* s, void* stream);
-extern int    fgetc(void* stream);
-extern int    fputc(int c, void* stream);
-extern int    fprintf(void* stream, char* format, ...);
+extern char*  fgets(char* str, int32 n, void* stream);
+extern int32  fputs(char* s, void* stream);
+extern int32  fgetc(void* stream);
+extern int32  fputc(int32 c, void* stream);
+extern int32  fprintf(void* stream, char* format, ...);
 
 // Formatted input from stdin.
-extern int    scanf(char* format, ...);
+extern int32  scanf(char* format, ...);
 
 // Callback-taking libc APIs (MEM-10). Function-pointer parameters are supported
 // in `extern` declarations, so a user function can be passed directly.
-extern void   qsort(void* base, usize count, usize size, int (*compare)(void*, void*));
-extern void*  bsearch(void* key, void* base, usize count, usize size, int (*compare)(void*, void*));
-extern int    atexit(void (*func)(void));
+extern void   qsort(void* base, usize count, usize size, int32 (*compare)(void*, void*));
+extern void*  bsearch(void* key, void* base, usize count, usize size, int32 (*compare)(void*, void*));
+extern int32  atexit(void (*func)(void));
 )PRELUDE";
 }
 

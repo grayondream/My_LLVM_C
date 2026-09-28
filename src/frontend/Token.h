@@ -14,9 +14,7 @@ enum class TokenType : int32_t {
     TOKEN_CHAR,         // 字符字面量
   
     // 关键字
-    TOKEN_INT,
-    TOKEN_FLOAT,
-    TOKEN_DOUBLE,
+    TOKEN_FLOAT,        // 浮点字面量（`float` 不再是关键字）
     TOKEN_CHAR_KW,      // 避免和 TOKEN_CHAR 冲突
     TOKEN_VOID,
     TOKEN_IF,

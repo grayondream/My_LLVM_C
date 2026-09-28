@@ -31,9 +31,9 @@ unsigned digitValue(char c) {
 
 static const std::unordered_map<std::string, TokenType> keywordMap = {
     // ===== 基本类型 =====
-    {"int", TokenType::TOKEN_INT},
-    {"float", TokenType::TOKEN_FLOAT},
-    {"double", TokenType::TOKEN_DOUBLE},
+    // `int`/`float`/`double` are no longer keywords: only fixed-width spellings
+    // (`int32`, `float32`, ...) name types. `TOKEN_FLOAT` still exists as the
+    // float-literal token, but the word `float` itself is an identifier.
     {"char", TokenType::TOKEN_CHAR_KW},
     {"void", TokenType::TOKEN_VOID},
 

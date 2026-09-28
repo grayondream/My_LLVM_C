@@ -10,9 +10,7 @@ static std::string TokenTypeToString(TokenType type) {
         case TokenType::TOKEN_NUMBER:     return "NUMBER";
         case TokenType::TOKEN_STRING:     return "STRING";
         case TokenType::TOKEN_CHAR:       return "CHAR";
-        case TokenType::TOKEN_INT:        return "int";
         case TokenType::TOKEN_FLOAT:      return "float";
-        case TokenType::TOKEN_DOUBLE:     return "double";
         case TokenType::TOKEN_CHAR_KW:    return "char";
         case TokenType::TOKEN_VOID:       return "void";
         case TokenType::TOKEN_IF:         return "if";

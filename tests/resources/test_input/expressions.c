@@ -1,1 +1,1 @@
-int main() { int a = 10; int b = 20; int c = a + b * 3; return c; }
+int32 main() { int32 a = 10; int32 b = 20; int32 c = a + b * 3; return c; }
