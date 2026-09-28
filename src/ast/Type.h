@@ -5,9 +5,6 @@
 
 enum class TypeKind {
     Void,
-    Int,
-    Float,
-    Double,
     Char,
     Bool,
     Pointer,
@@ -184,9 +181,6 @@ public:
     static TypeContext& instance();
     ~TypeContext();
 
-    Type* getInt();
-    Type* getFloat();
-    Type* getDouble();
     Type* getChar();
     Type* getVoid();
 
