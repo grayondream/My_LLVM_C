@@ -51,7 +51,7 @@ binary-digits       = binary-digit , { [ '_' ] , binary-digit } ;
 octal-literal       = '0' , ( 'o' | 'O' ) , octal-digits ;
 octal-digits        = octal-digit , { [ '_' ] , octal-digit } ;
 integer-suffix      = [ 'u' | 'l' | 'ul' | 'lu' ] ;
-(* [impl] LEX-15 后缀 → 基础类型：无→int；u→uint32；l→int64；ul/lu→uint64（大小写不敏感）*)
+(* [impl] LEX-15 后缀 → 基础类型：无→int32；u→uint32；l→int64；ul/lu→uint64（大小写不敏感）*)
 
 (* --- 浮点字面量 LEX-05 / TYP-04 --- *)
 float-literal       = decimal-digits , '.' , [ decimal-digits ] , [ exponent ] , [ float-suffix ]
@@ -140,7 +140,7 @@ bit-field-decl      = type , identifier , ':' , const-expr ;
 enum-decl           = 'enum' , identifier , [ ':' , type ]
                       [ '{' , enumerator , { ',' , enumerator } , [ ',' ] , '}' ] , ';' ;
 (* [impl] 底层类型 ':uint8' 等已实现（默认 i32；TYP-09/TYP-25）
-   [impl] TYP-25 / AGG-14：枚举常量为编译期 int，可参与运算与 constexpr；
+   [impl] TYP-25 / AGG-14：枚举常量为编译期 int32，可参与运算与 constexpr；
           作为 switch 标签；namespace 内支持限定访问 A::Red *)
 enumerator          = identifier , [ '=' , const-expr ] ;
 
@@ -183,11 +183,10 @@ base-type           = primitive-type | named-type | record-body | enum-body
 (* [plan] restrict/atomic 语义见 MEM-04 / CON-01 / DEC-11 *)
 
 primitive-type      = 'void' | 'bool' | 'char'
-                    | 'int' | 'float' | 'double'
                     | 'int8' | 'int16' | 'int32' | 'int64' | 'int128'
                     | 'uint8' | 'uint16' | 'uint32' | 'uint64' | 'uint128'
                     | 'isize' | 'usize'
-                    | 'float32' | 'float64'
+                    | 'float16' | 'float32' | 'float64' | 'float128'
                     | 'f16' | 'f32' | 'f64' | 'f128' ;             (* [plan] f16/f128 TYP-04 *)
 
 named-type          = qualified-name ;

@@ -7,7 +7,7 @@
 > - 提交时在 message 中引用 ID，例如 `feat(LEX-04): ...`
 > - 所有特性必须映射到可预测的 C 内存模型与 ABI；无隐藏分配/控制流；comptime 无运行时开销
 
-> **进度快照（2026-09-27）**：P0-01 ~ P0-08 全部完成；转换系统 **TYP-09/20/22/25、AGG-14/15** 完成（enum 显式底层类型、enum 强类型、整数提升 + 常规算术转换）；**LEX-13/17** 词法诊断（E0001 非法字符、E0002 未闭合字面量、E0003 整型溢出、E0004 分隔符位置）与错误恢复完成，**LEX-15** 字面量后缀与默认/基础类型映射在词法层完成，**LEX-05** 浮点指数完成；**P1-08** 部分（`static_cast`/`reinterpret_cast` 已完成，内联 `asm` 待定）。当前全量 **715** 测试通过，工作区干净。
+> **进度快照（2026-09-28）**：P0-01 ~ P0-08 全部完成；转换系统 **TYP-09/20/22/25、AGG-14/15** 完成（enum 显式底层类型、enum 强类型、整数提升 + 常规算术转换）；**LEX-13/17** 词法诊断（E0001 非法字符、E0002 未闭合字面量、E0003 整型溢出、E0004 分隔符位置）与错误恢复完成，**LEX-15** 字面量后缀与默认/基础类型映射在词法层完成，**LEX-05** 浮点指数完成；**P1-08** 部分（`static_cast`/`reinterpret_cast` 已完成，内联 `asm` 待定）。数值类型已统一为定宽集合：删除 `int`/`float`/`double` 关键字与 `TypeKind::Int/Float/Double`，新增 `float16`/`float128`，规范见 `docs/spec/fixed-width-types.md`。当前全量 **721** 测试通过，工作区干净。
 
 ---
 
@@ -60,7 +60,7 @@
 - `[ ]` **LEX-12** 内联汇编 `asm` token。
 - `[x]` **LEX-13** 错误恢复与词法诊断（非法字符、未闭合字面量、整型溢出）。已实现：`Lexer::getDiagnostics()` 产出 E0001（非法字符，跳过并继续）、E0002（未闭合字符串/字符/块注释，含原始字符串）、E0003（整型字面量超过 64 位）；`skipTrivia` 统一跳过空白与注释（修复行注释后空行被误判）；诊断在 `CompilerDriver`/`ModuleLoader`/`StdPrelude` 中上报并使编译失败（`tests/frontend/test_lexer.cpp`、`tests/driver/test_compiler_driver.cpp`、`tests/diagnostics/snapshots/lexical_invalid_character.txt`）。
 - `[~]` **LEX-14** `(新)` **关键字/保留字总表落地**（配合 INF-11）：`register`/`cast`/`typeof` 已按 DEC-18 移除 token；`namespace` 关键字与 `::` token 已新增；`template`/`typename`/`this` 待补。
-- `[~]` **LEX-15** `(新)` **字面量默认类型与后缀映射**：无后缀整型/浮点的默认类型，`u`/`l`/`f16`…后缀 → 底层类型表。**词法层已完成**：`Token::literalKind`（`Int/UInt/Long/ULong/Float16/Float32/Float64/Float128`）+ `literalKindName` 映射表；识别 `u`/`l`/`ul`/`lu`（各进制通用）与 `f`/`f16`/`f32`/`f64`/`f128`（兼容 `l`/`L`）；无后缀默认 `int`/`float64`；规范见 `docs/spec/grammar.ebnf`、`conversions.md §7`（`tests/frontend/test_lexer.cpp`）。**待补**：AST/sema/codegen 按字面量类型参与推导与 codegen（当前 `NumberExprAST`/`FloatExprAST` 仍固定 `int`/`double`，>int 值会被截断）。
+- `[~]` **LEX-15** `(新)` **字面量默认类型与后缀映射**：无后缀整型/浮点的默认类型，`u`/`l`/`f16`…后缀 → 底层类型表。**词法层已完成**：`Token::literalKind`（`Int/UInt/Long/ULong/Float16/Float32/Float64/Float128`）+ `literalKindName` 映射表；识别 `u`/`l`/`ul`/`lu`（各进制通用）与 `f`/`f16`/`f32`/`f64`/`f128`（兼容 `l`/`L`）；无后缀默认 `int32`/`float64`；规范见 `docs/spec/grammar.ebnf`、`conversions.md §7`（`tests/frontend/test_lexer.cpp`）。**待补**：AST/sema/codegen 按字面量类型参与推导与 codegen（LEX-15 消费端；当前 `NumberExprAST`/`FloatExprAST` 仍固定 Int32/Float64，大整数会被截断）。
 - `[ ]` **LEX-16** `(新)` **转义字符全集、原始字符串与多行字符串**的精确词法规则（细化 LEX-06）。
 - `[x]` **LEX-17** `(新)` **数字分隔符位置规则、进制前缀、整型字面量溢出诊断**（细化 LEX-04/13）。二/八/十六/十进制均按 64 位无符号累加并检测溢出，超 64 位报 **E0003**；分隔符 `_` 仅可位于两个数字之间，前导/结尾/连续/紧邻进制前缀或小数点均报 **E0004**（`src/frontend/Lexer.cpp`；`docs/spec/grammar.ebnf`）。
 - `[ ]` **LEX-18** `(新)` **标识符 UTF-8/Unicode 规则**：允许范围、NFC 规范化、与关键字冲突处理。

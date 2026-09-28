@@ -17,11 +17,11 @@
 | `void` | `[impl]` | |
 | `bool` | `[impl]` | |
 | `char` | `[impl]` | token `TOKEN_CHAR_KW` |
-| `int` / `float` / `double` | `[impl]` | 平台默认宽度 |
+| `int` / `float` / `double` | `[removed]` | 已移除：仅保留定宽拼写；`int`→`int32`、`float`→`float32`、`double`→`float64` |
 | `int8` `int16` `int32` `int64` `int128` | `[impl]` | 有符号定宽 |
 | `uint8` `uint16` `uint32` `uint64` `uint128` | `[impl]` | 无符号定宽 |
 | `isize` / `usize` | `[impl]` | 平台指针宽度（TYP-03） |
-| `float32` / `float64` | `[impl]` | |
+| `float16` / `float32` / `float64` / `float128` | `[impl]` | 定宽浮点 |
 | `f16` / `f32` / `f64` / `f128` | `[plan]` | 目标浮点类型，见 TYP-04；作为字面量后缀的**词法识别已实现**（LEX-15，`f`/`l` 为兼容写法） |
 | `str` / `String` | 非关键字 | 标准库类型（FMT-01/02），不在词法层保留 |
 
