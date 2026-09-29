@@ -17,7 +17,8 @@ class SemanticAnalyzer {
 public:
     struct ConstValue {
         enum Type { INT, DOUBLE, CHAR } type;
-        union { int intVal; double doubleVal; char charVal; };
+        // LEX-15: integer constants keep the full 64-bit literal range.
+        union { long long intVal; double doubleVal; char charVal; };
     };
 
     SemanticAnalyzer();
@@ -36,6 +37,8 @@ public:
     Type* checkFunctionCall(const std::string& name, const std::vector<std::unique_ptr<ExprAST>>& args, ExprAST& node, FunctionType** outFuncType = nullptr);
 
     Type* getExprType(ExprAST& expr);
+    // LEX-15: fixed-width base type for a numeric literal kind (nullptr for None).
+    Type* typeForLiteralKind(LiteralKind kind);
     std::optional<ConstValue> evaluateConstexpr(ExprAST* expr);
     const std::unordered_map<std::string, ConstValue>& getConstexprValues() const { return constexprValues; }
 

@@ -532,6 +532,22 @@ Type* SemanticAnalyzer::checkFunctionCall(const std::string& name, const std::ve
     return funcType->returnType;
 }
 
+Type* SemanticAnalyzer::typeForLiteralKind(LiteralKind kind) {
+    // LEX-15: suffix/default -> fixed-width base type.
+    switch (kind) {
+        case LiteralKind::Int:      return typeCtx->getInt32();
+        case LiteralKind::UInt:     return typeCtx->getUInt32();
+        case LiteralKind::Long:     return typeCtx->getInt64();
+        case LiteralKind::ULong:    return typeCtx->getUInt64();
+        case LiteralKind::Float16:  return typeCtx->getFloat16();
+        case LiteralKind::Float32:  return typeCtx->getFloat32();
+        case LiteralKind::Float64:  return typeCtx->getFloat64();
+        case LiteralKind::Float128: return typeCtx->getFloat128();
+        case LiteralKind::None:     break;
+    }
+    return nullptr;
+}
+
 Type* SemanticAnalyzer::getExprType(ExprAST& expr) {
     visit(expr);
     return expr.type;
@@ -819,12 +835,16 @@ SemanticAnalyzer::evalConstexprStmt(StmtAST* stmt, ConstEnv& env, int depth) {
 }
 
 void SemanticAnalyzer::visit(NumberExprAST& node) {
-    node.type = typeCtx->getInt32();
+    // LEX-15: the literal kind chooses the fixed-width type; fall back to int32.
+    node.type = typeForLiteralKind(node.literalKind);
+    if (!node.type) node.type = typeCtx->getInt32();
     node.isLValue = false;
 }
 
 void SemanticAnalyzer::visit(FloatExprAST& node) {
-    node.type = typeCtx->getFloat32();
+    // LEX-15: unsuffixed floats default to float64.
+    node.type = typeForLiteralKind(node.literalKind);
+    if (!node.type) node.type = typeCtx->getFloat64();
     node.isLValue = false;
 }
 

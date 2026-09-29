@@ -802,3 +802,30 @@ TEST(PrintBuiltin, UsesMethodToString) {
         "class C { int32 x; char* to_string() { return \"C\"; } }; "
         "int32 main() { C c; print(\"{}\", c); return 0; }"));
 }
+
+// LEX-15: literal suffix/default kinds map to fixed-width base types.
+TEST_F(SemanticAnalyzerTest, LiteralKindsMapToFixedWidthTypes) {
+    auto intKind = [&](LiteralKind k) {
+        NumberExprAST n(42, k);
+        return analyzer->getExprType(n)->kind;
+    };
+    EXPECT_EQ(intKind(LiteralKind::Int), TypeKind::Int32);
+    EXPECT_EQ(intKind(LiteralKind::UInt), TypeKind::UInt32);
+    EXPECT_EQ(intKind(LiteralKind::Long), TypeKind::Int64);
+    EXPECT_EQ(intKind(LiteralKind::ULong), TypeKind::UInt64);
+
+    auto floatKind = [&](LiteralKind k) {
+        FloatExprAST f(1.5, k);
+        return analyzer->getExprType(f)->kind;
+    };
+    EXPECT_EQ(floatKind(LiteralKind::Float16), TypeKind::Float16);
+    EXPECT_EQ(floatKind(LiteralKind::Float32), TypeKind::Float32);
+    EXPECT_EQ(floatKind(LiteralKind::Float64), TypeKind::Float64);
+    EXPECT_EQ(floatKind(LiteralKind::Float128), TypeKind::Float128);
+
+    // Unsuffixed defaults: integer -> int32, float -> float64.
+    NumberExprAST defInt(42);
+    EXPECT_EQ(analyzer->getExprType(defInt)->kind, TypeKind::Int32);
+    FloatExprAST defFloat(1.5);
+    EXPECT_EQ(analyzer->getExprType(defFloat)->kind, TypeKind::Float64);
+}
