@@ -761,3 +761,38 @@ TEST_F(CodegenContextTest, ConstexprGlobalVariable) {
     EXPECT_EQ(initVal->getSExtValue(), 42);
     intType->isConst = false;
 }
+
+// LEX-15: literal constants are emitted at their own width/signedness, and
+// floats use the semantics of their fixed-width type.
+TEST_F(CodegenContextTest, LiteralCodegenUsesTypeWidth) {
+    auto i = std::make_unique<NumberExprAST>(1LL, LiteralKind::Long);
+    i->type = typeCtx->getInt64();
+    auto* ci = llvm::dyn_cast<llvm::ConstantInt>(i->codegen(*ctx));
+    ASSERT_NE(ci, nullptr);
+    EXPECT_EQ(ci->getType()->getIntegerBitWidth(), 64u);
+
+    auto u = std::make_unique<NumberExprAST>(4000000000LL, LiteralKind::UInt);
+    u->type = typeCtx->getUInt32();
+    auto* cu = llvm::dyn_cast<llvm::ConstantInt>(u->codegen(*ctx));
+    ASSERT_NE(cu, nullptr);
+    EXPECT_EQ(cu->getType()->getIntegerBitWidth(), 32u);
+    EXPECT_EQ(cu->getZExtValue(), 4000000000ULL);
+
+    auto f = std::make_unique<FloatExprAST>(1.5, LiteralKind::Float32);
+    f->type = typeCtx->getFloat32();
+    auto* cf = llvm::dyn_cast<llvm::ConstantFP>(f->codegen(*ctx));
+    ASSERT_NE(cf, nullptr);
+    EXPECT_TRUE(cf->getType()->isFloatTy());
+
+    auto h = std::make_unique<FloatExprAST>(1.5, LiteralKind::Float16);
+    h->type = typeCtx->getFloat16();
+    auto* ch = llvm::dyn_cast<llvm::ConstantFP>(h->codegen(*ctx));
+    ASSERT_NE(ch, nullptr);
+    EXPECT_TRUE(ch->getType()->isHalfTy());
+
+    // No sema type: fall back to i32.
+    auto d = std::make_unique<NumberExprAST>(1);
+    auto* cd = llvm::dyn_cast<llvm::ConstantInt>(d->codegen(*ctx));
+    ASSERT_NE(cd, nullptr);
+    EXPECT_EQ(cd->getType()->getIntegerBitWidth(), 32u);
+}

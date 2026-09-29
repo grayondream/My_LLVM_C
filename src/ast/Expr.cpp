@@ -96,11 +96,50 @@ static llvm::Value* promotePrintArg(CodegenContext& ctx, llvm::Value* v, PrintAr
 }
 
 llvm::Value* NumberExprAST::codegen(CodegenContext& ctx) {
-    return llvm::ConstantInt::get(ctx.getContext(), llvm::APInt(32, value, true));
+    // LEX-15: emit the integer constant at the literal's own width and
+    // signedness (from sema), instead of always truncating to i32.
+    llvm::Type* ty = type ? ctx.getLLVMType(type)
+                          : llvm::Type::getInt32Ty(ctx.getContext());
+    unsigned bits = ty->getIntegerBitWidth();
+
+    bool isSigned = true;
+    if (type) {
+        switch (type->kind) {
+            case TypeKind::UInt8:
+            case TypeKind::UInt16:
+            case TypeKind::UInt32:
+            case TypeKind::UInt64:
+            case TypeKind::UInt128:
+            case TypeKind::USize:
+                isSigned = false;
+                break;
+            default:
+                break;
+        }
+    }
+    return llvm::ConstantInt::get(
+        ctx.getContext(), llvm::APInt(bits, static_cast<uint64_t>(value), isSigned));
 }
 
 llvm::Value* FloatExprAST::codegen(CodegenContext& ctx) {
-    return llvm::ConstantFP::get(ctx.getContext(), llvm::APFloat(value));
+    // LEX-15: pick the APFloat semantics from the literal's fixed-width type.
+    // Build at double precision, then convert to the target semantics.
+    llvm::APFloat ap(value);
+    if (type) {
+        const llvm::fltSemantics* sem = nullptr;
+        switch (type->kind) {
+            case TypeKind::Float16:  sem = &llvm::APFloat::IEEEhalf();   break;
+            case TypeKind::Float32:  sem = &llvm::APFloat::IEEEsingle(); break;
+            case TypeKind::Float64:  sem = &llvm::APFloat::IEEEdouble(); break;
+            case TypeKind::Float128: sem = &llvm::APFloat::IEEEquad();   break;
+            default: break;
+        }
+        if (sem && sem != &ap.getSemantics()) {
+            bool losesInfo = false;
+            ap.convert(*sem, llvm::APFloat::rmNearestTiesToEven, &losesInfo);
+        }
+    }
+    return llvm::ConstantFP::get(ctx.getContext(), ap);
 }
 
 llvm::Value* CharExprAST::codegen(CodegenContext& ctx) {

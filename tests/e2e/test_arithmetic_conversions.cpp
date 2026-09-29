@@ -158,3 +158,13 @@ TEST_F(ArithmeticConversionE2E, PromotionAcrossFunctionCall) {
         }
     )"), 0);
 }
+
+// LEX-15: a literal larger than INT_MAX must not be truncated in codegen.
+TEST_F(ArithmeticConversionE2E, LargeUnsignedLiteralIsNotTruncated) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            uint64 v = 4000000000ul;
+            return (v / 1000000000ul) == 4 ? 0 : 1;
+        }
+    )"), 0);
+}
