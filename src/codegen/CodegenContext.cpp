@@ -476,11 +476,16 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
         }
         // 新增类型
         case TypeKind::Slice: {
-            // 切片类型表示为 { pointer, length } 结构体
-            std::vector<llvm::Type*> fieldTypes;
-            fieldTypes.push_back(llvm::PointerType::get(*context, 0)); // pointer
-            fieldTypes.push_back(llvm::Type::getInt64Ty(*context));    // length
-            return llvm::StructType::create(*context, fieldTypes, "Slice");
+            // TYP-12: all slices share ONE canonical named struct {ptr, i64};
+            // the element type does not affect the LLVM shape. Per-call
+            // create() split the type into "Slice", "Slice.0", ... breaking
+            // type identity when slices cross function boundaries.
+            auto* st = llvm::StructType::getTypeByName(*context, "Slice");
+            return st ? st
+                      : llvm::StructType::create(*context,
+                            {llvm::PointerType::get(*context, 0),
+                             llvm::Type::getInt64Ty(*context)},
+                            "Slice");
         }
         case TypeKind::Optional: {
             // 可选类型表示为 { value, has_value } 结构体
