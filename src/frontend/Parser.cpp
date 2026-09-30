@@ -9,8 +9,7 @@ namespace {
 
 // Mangle a (possibly qualified) type name to a symbol-table key:
 // `A::B::T` / `A.B.T` -> `A_B_T`.
-std::string mangleQualifiedTypeName(const std::string& name) {
-    std::string out;
+std::string mangleQualifiedTypeName(const std::string& name) {    std::string out;
     out.reserve(name.size());
     for (size_t i = 0; i < name.size(); ++i) {
         if (name[i] == ':' && i + 1 < name.size() && name[i + 1] == ':') {
@@ -318,6 +317,31 @@ AssignOp Parser::tokenTypeToAssignOp(TokenType type) const {
 }
 
 // ========== Unary Operators ==========
+
+// AGG-03: true if `t` is an anonymous (unnamed) struct or union type — the
+// shape produced by parseType's inline-definition path for `union { ... };`.
+static bool isAnonymousAggregate(Type* t) {
+    if (!t) return false;
+    if (t->kind == TypeKind::Struct) return static_cast<StructType*>(t)->name.empty();
+    if (t->kind == TypeKind::Union) return static_cast<UnionType*>(t)->name.empty();
+    return false;
+}
+
+// AGG-03: promote the fields/members of an anonymous struct/union into `out`
+// (C11 member promotion). Returns false on a member-name collision.
+static bool promoteAnonymousMembers(std::vector<std::pair<std::string, Type*>>& out, Type* agg) {
+    const std::vector<std::pair<std::string, Type*>>* src = nullptr;
+    if (agg->kind == TypeKind::Struct) src = &static_cast<StructType*>(agg)->fields;
+    else if (agg->kind == TypeKind::Union) src = &static_cast<UnionType*>(agg)->members;
+    if (!src) return false;
+    for (const auto& m : *src) {
+        for (const auto& existing : out) {
+            if (existing.first == m.first) return false;
+        }
+        out.push_back(m);
+    }
+    return true;
+}
 
 static bool isUnaryOp(TokenType type) {
     switch (type) {
@@ -2253,7 +2277,19 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
         Type* fieldType = parseType();
         if (!fieldType) break;
 
-        if (!check(TokenType::TOKEN_IDENTIFIER)) break;
+        if (!check(TokenType::TOKEN_IDENTIFIER)) {
+            // AGG-03: an anonymous struct/union member promotes its
+            // fields/members into the enclosing struct. The trailing ';' was
+            // already consumed by parseType's inline-definition path.
+            if (isAnonymousAggregate(fieldType)) {
+                if (!promoteAnonymousMembers(fields, fieldType)) {
+                    error("duplicate member name in anonymous struct/union", *peek());
+                    return nullptr;
+                }
+                continue;
+            }
+            break;
+        }
         std::string fieldName = advance()->lexeme;
         fieldType = parseMemberArraySuffix(fieldType);
 
@@ -2334,6 +2370,15 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                         methods.push_back(std::move(func));
                     }
                 }
+            } else if (isAnonymousAggregate(declType)) {
+                // AGG-03: an anonymous struct/union member promotes its
+                // fields/members into the enclosing aggregate. The trailing
+                // ';' was already consumed by parseType's inline-definition
+                // path, so nothing else to skip here.
+                if (!promoteAnonymousMembers(fields, declType)) {
+                    error("duplicate member name in anonymous struct/union", *peek());
+                    return nullptr;
+                }
             } else {
                 m_currentTokenPos = savedPos;
                 break;
@@ -2381,7 +2426,18 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
         Type* memberType = parseType();
         if (!memberType) break;
 
-        if (!check(TokenType::TOKEN_IDENTIFIER)) break;
+        if (!check(TokenType::TOKEN_IDENTIFIER)) {
+            // AGG-03: an anonymous struct/union inside a union body promotes
+            // its members; parseType already consumed the trailing ';'.
+            if (isAnonymousAggregate(memberType)) {
+                if (!promoteAnonymousMembers(members, memberType)) {
+                    error("duplicate member name in anonymous struct/union", *peek());
+                    return nullptr;
+                }
+                continue;
+            }
+            break;
+        }
         std::string memberName = advance()->lexeme;
         memberType = parseMemberArraySuffix(memberType);
 

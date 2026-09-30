@@ -873,57 +873,69 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
     llvm::Type* objType = nullptr;
     unsigned fieldIndex = 0;
 
+    // Typedefs to aggregates resolve to the underlying type for member access
+    // (AGG-17): `typedef union U2 U2; U2 v; v.i` must behave like `U2 v`.
+    auto stripTypedefsOf = [](Type* t) -> Type* {
+        while (t && t->kind == TypeKind::Typedef) {
+            t = static_cast<TypedefType*>(t)->aliasedType;
+        }
+        return t;
+    };
+    Type* valType = stripTypedefsOf(object->type);
+    Type* valBase =
+        (valType && valType->kind == TypeKind::Pointer) ? stripTypedefsOf(valType->base) : nullptr;
+
     // Union members all live at offset 0: GEP to field 0 gives the address of
     // the requested member regardless of which member it is.
-    if (object->type && object->type->kind == TypeKind::Union) {
-        llvm::Type* unionLLVM = ctx.getLLVMType(object->type);
+    if (valType && valType->kind == TypeKind::Union) {
+        llvm::Type* unionLLVM = ctx.getLLVMType(valType);
         if (!unionLLVM) return nullptr;
         return builder.CreateStructGEP(unionLLVM, objVal, 0, "unionmember");
     }
-    if (object->type && object->type->kind == TypeKind::Pointer &&
-        object->type->base && object->type->base->kind == TypeKind::Union) {
+    if (valType && valType->kind == TypeKind::Pointer &&
+        valBase && valBase->kind == TypeKind::Union) {
         if (object->isLValue) {
             objVal = builder.CreateLoad(llvm::PointerType::get(ctx.getContext(), 0), objVal, "deref");
         }
-        llvm::Type* unionLLVM = ctx.getLLVMType(object->type->base);
+        llvm::Type* unionLLVM = ctx.getLLVMType(valBase);
         if (!unionLLVM) return nullptr;
         return builder.CreateStructGEP(unionLLVM, objVal, 0, "unionmember");
     }
 
-    if (object->type && object->type->kind == TypeKind::Struct) {
-        auto* structType = static_cast<StructType*>(object->type);
+    if (valType && valType->kind == TypeKind::Struct) {
+        auto* structType = static_cast<StructType*>(valType);
         for (size_t i = 0; i < structType->fields.size(); ++i) {
             if (structType->fields[i].first == memberName) {
                 fieldIndex = i;
                 break;
             }
         }
-        objType = ctx.getLLVMType(object->type);
-    } else if (object->type && object->type->kind == TypeKind::Class) {
-        auto* classType = static_cast<ClassType*>(object->type);
+        objType = ctx.getLLVMType(valType);
+    } else if (valType && valType->kind == TypeKind::Class) {
+        auto* classType = static_cast<ClassType*>(valType);
         if (auto* gep = emitClassFieldGEP(ctx, classType, objVal, memberName)) {
             return gep;
         }
-        objType = ctx.getLLVMType(object->type);
-    } else if (object->type && object->type->kind == TypeKind::Pointer &&
-               object->type->base && object->type->base->kind == TypeKind::Struct) {
-        auto* structType = static_cast<StructType*>(object->type->base);
+        objType = ctx.getLLVMType(valType);
+    } else if (valType && valType->kind == TypeKind::Pointer &&
+               valBase && valBase->kind == TypeKind::Struct) {
+        auto* structType = static_cast<StructType*>(valBase);
         for (size_t i = 0; i < structType->fields.size(); ++i) {
             if (structType->fields[i].first == memberName) {
                 fieldIndex = i;
                 break;
             }
         }
-        objType = ctx.getLLVMType(object->type->base);
+        objType = ctx.getLLVMType(valBase);
         // Load the pointer unless the object already produced a pointer value
         // (a cast, a call result, `&x`, ...); only lvalue objects are addresses
         // of a variable that stores the pointer (MEM-10).
         if (object->isLValue) {
             objVal = builder.CreateLoad(llvm::PointerType::get(ctx.getContext(), 0), objVal, "deref");
         }
-    } else if (object->type && object->type->kind == TypeKind::Pointer &&
-               object->type->base && object->type->base->kind == TypeKind::Class) {
-        auto* classType = static_cast<ClassType*>(object->type->base);
+    } else if (valType && valType->kind == TypeKind::Pointer &&
+               valBase && valBase->kind == TypeKind::Class) {
+        auto* classType = static_cast<ClassType*>(valBase);
         // Load the pointer unless the object already produced a pointer value.
         if (object->isLValue) {
             objVal = builder.CreateLoad(llvm::PointerType::get(ctx.getContext(), 0), objVal, "deref");
@@ -931,9 +943,9 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
         if (auto* gep = emitClassFieldGEP(ctx, classType, objVal, memberName)) {
             return gep;
         }
-        objType = ctx.getLLVMType(object->type->base);
-    } else if (object->type && object->type->kind == TypeKind::Pointer) {
-        objType = ctx.getLLVMType(object->type->base);
+        objType = ctx.getLLVMType(valBase);
+    } else if (valType && valType->kind == TypeKind::Pointer) {
+        objType = ctx.getLLVMType(valBase);
     }
 
     if (!objType) {

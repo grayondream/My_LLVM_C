@@ -1332,30 +1332,52 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
     }
 
     Type* memberBaseType = nullptr;
+    // Typedefs to aggregates resolve to the underlying type (AGG-17).
+    Type* strippedObj = nullptr;
+    Type* strippedBase = nullptr;
+    {
+        Type* t = objType;
+        while (t && t->kind == TypeKind::Typedef) {
+            t = static_cast<TypedefType*>(t)->aliasedType;
+        }
+        strippedObj = t;
+        if (t && t->kind == TypeKind::Pointer) {
+            Type* b = t->base;
+            while (b && b->kind == TypeKind::Typedef) {
+                b = static_cast<TypedefType*>(b)->aliasedType;
+            }
+            strippedBase = b;
+        }
+    }
+    if (!strippedObj || (strippedObj->kind == TypeKind::Pointer && !strippedBase)) {
+        node.type = nullptr;
+        node.isLValue = false;
+        return;
+    }
     if (node.accessKind == MemberAccessKind::Arrow) {
-        if (objType->kind != TypeKind::Pointer) {
+        if (strippedObj->kind != TypeKind::Pointer) {
             emitError("member access with '->' requires pointer to struct/class, but got '" + typeToString(objType) + "'", node);
             node.type = nullptr;
             node.isLValue = false;
             return;
         }
-        if (objType->base->kind != TypeKind::Struct && objType->base->kind != TypeKind::Class &&
-            objType->base->kind != TypeKind::Union) {
+        if (strippedBase->kind != TypeKind::Struct && strippedBase->kind != TypeKind::Class &&
+            strippedBase->kind != TypeKind::Union) {
             emitError("member access with '->' requires pointer to struct/class/union, but '" + typeToString(objType) + "' points to '" + typeToString(objType->base) + "'", node);
             node.type = nullptr;
             node.isLValue = false;
             return;
         }
-        memberBaseType = objType->base;
+        memberBaseType = strippedBase;
     } else {
-        if (objType->kind != TypeKind::Struct && objType->kind != TypeKind::Class &&
-            objType->kind != TypeKind::Union) {
+        if (strippedObj->kind != TypeKind::Struct && strippedObj->kind != TypeKind::Class &&
+            strippedObj->kind != TypeKind::Union) {
             emitError("member access with '.' requires struct/class/union type, but got '" + typeToString(objType) + "'", node);
             node.type = nullptr;
             node.isLValue = false;
             return;
         }
-        memberBaseType = objType;
+        memberBaseType = strippedObj;
     }
 
     if (memberBaseType->kind == TypeKind::Struct) {
