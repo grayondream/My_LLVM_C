@@ -129,7 +129,7 @@
 - `[x]` **TYP-09** `enum` 强类型：底层类型 `:uint8`、固定大小、不隐式转换。底层类型/固定大小、名义相等与 `enum ↔ int` 强制显式转换（TYP-20）均已实现。
 - `[ ]` **TYP-10** `union`：C 风格布局、初始化、访问。
 - `[ ]` **TYP-11** 固定数组 `i32[32]`；VLA（可变长度数组）；多维数组。
-- `[ ]` **TYP-12** `Slice`：`{ptr, length}`，不拥有、零拷贝；数组↔Slice 退化规则。
+- `[x]` **TYP-12** `Slice`：`{ptr, length}`，不拥有、零拷贝。**已完成**：下标读写、`.len`、数组→slice 单向零拷贝退化（传参/赋值/初始化）、零初始化 `{null,0}`、规范 LLVM 单例类型、slice 元素类型严格比较。范围外（spec `docs/superpowers/specs/2026-09-30-slice-design.md` §8）：范围切片、显式构造、边界检查、字符串退化；遗留：MethodCall 传参退化（sema resolveMethod 不支持）、`return` 退化待形参数组语法（TYP-11）、全局变量 codegen 缺口（`int32 g;` 不生成符号，通用问题）。
 - `[ ]` **TYP-13** `Optional<T>`：`{ bool valid; T value; }`；显式访问（**无 `?` 传播算子**）。
 - `[ ]` **TYP-14** `Result<T,E>`：布局与 `.error`/`.value` 语义；显式访问。
 - `[ ]` **TYP-15** 指针类型：`T*`、函数指针、多级指针。
@@ -508,7 +508,7 @@
 - `[x]` **P0-08** `(新)` **namespace 支持**（PAR-22、MOD-12、DEC-17）——现有 `libsafec` 已依赖，属刚需。函数/变量、嵌套、限定访问、限定类型名均已实现。
 
 ### P1：核心现代能力
-- `[ ]` **P1-01** class / enum / union / 数组 / Slice（AGG、TYP-11/12）。enum 相关（AGG-14/15、TYP-09/20/25）已完成；class/union/数组/Slice 待补。
+- `[~]` **P1-01** class / enum / union / 数组 / Slice（AGG、TYP-11/12）。enum、class 访问段（DEC-01）、union（AGG-03/17）、Slice（TYP-12）已完成；剩余：数组形参/多维数组（TYP-11）、static 成员（AGG-10）、嵌套类型（AGG-11）。
 - `[ ]` **P1-02** Optional / Result 显式访问（TYP-13/14/STD-02）。
 - `[ ]` **P1-03** **泛型 + CRTP**（GEN、INH-05、PAR-17/18、CG-07/08）。
 - `[ ]` **P1-04** `compile_time` 与反射（CT；取代 type_info/static_assert）。

@@ -176,7 +176,7 @@ type                = [ 'const' | 'volatile' | 'restrict' | 'atomic' ] , base-ty
                       , { pointer-suffix }
                       , [ slice-suffix | optional-suffix ] ;
 pointer-suffix      = '*' , { 'const' | 'volatile' | 'restrict' } ;
-slice-suffix        = '[' , ']' ;                                   (* [impl] SliceType *)
+slice-suffix        = '[' , ']' ;                                   (* [impl] SliceType; 可叠加: T[][] = slice of slice *)
 optional-suffix     = '?' ;                                         (* [impl] OptionalType *)
 
 base-type           = primitive-type | named-type | record-body | enum-body
