@@ -883,3 +883,32 @@ TEST(SemanticAnalyzerAccessTest, StructFieldsDefaultPublic) {
     EXPECT_TRUE(analyzeOk(
         "struct SE { int32 v; }; int32 main() { SE s; s.v = 1; return 0; }"));
 }
+
+// TYP-12 Task 2: subscript on slice yields the element type and is an lvalue.
+TEST(SliceSemTest, SubscriptOnSliceAccepted) {
+    EXPECT_TRUE(analyzeOk(
+        "int32 pick(int32[] s) { return s[0]; } "
+        "int32 main() { return 0; }"));
+}
+
+TEST(SliceSemTest, SubscriptOnIntRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { int32 x = 1; return x[0]; }"));
+}
+
+// Review Focus #5: nested slices parse and type-check through one layer.
+// (Explicit pipeline: analyzeOk() ignores parser errors, which masked the
+// fact that `[][]` did not parse at all before TYP-12.)
+TEST(SliceSemTest, NestedSliceSubscriptAccepted) {
+    Lexer lexer("test.c",
+        "int32 pick(int32[][] grid) { return grid[0][0]; } "
+        "int32 main() { return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_TRUE(ast != nullptr);
+    EXPECT_TRUE(parser.getErrors().empty());
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    EXPECT_TRUE(analyzer.getErrors().empty());
+}

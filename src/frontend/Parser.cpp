@@ -1723,12 +1723,17 @@ Type* Parser::parseType() {
         baseType = ptrType;
     }
 
-    // 新增：支持切片类型 T[]
-    if (check(TokenType::TOKEN_LBRACKET)) {
+    // 新增：支持切片类型 T[]（可叠加：T[][] = slice of slice，TYP-12）。
+    // 非 `[]` 后缀（如声明符侧的 `T[3]`）不在此消耗。
+    while (check(TokenType::TOKEN_LBRACKET)) {
+        size_t save = m_currentTokenPos;
         advance(); // 消耗 '['
         if (check(TokenType::TOKEN_RBRACKET)) {
             advance(); // 消耗 ']'
-            return TypeContext::instance().getSliceType(baseType);
+            baseType = TypeContext::instance().getSliceType(baseType);
+        } else {
+            m_currentTokenPos = save; // restore: not a slice suffix
+            break;
         }
     }
 

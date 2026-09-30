@@ -826,6 +826,14 @@ llvm::Value* ArrayAccessExprAST::codegen(CodegenContext& ctx) {
     } else if (arrType && arrType->kind == TypeKind::Pointer) {
         if (arrType->base) elemTy = ctx.getLLVMType(arrType->base);
         arrVal = emitRValue(ctx, *array, arrVal);
+    } else if (arrType && arrType->kind == TypeKind::Slice) {
+        // TYP-12: load the {ptr, len} view, then index through its pointer.
+        auto* st = static_cast<SliceType*>(arrType);
+        auto* sliceTy = ctx.getLLVMType(arrType);
+        auto& builder = ctx.getBuilder();
+        if (array->isLValue) arrVal = builder.CreateLoad(sliceTy, arrVal);
+        if (st->elementType) elemTy = ctx.getLLVMType(st->elementType);
+        arrVal = builder.CreateExtractValue(arrVal, {0}, "slice.ptr");
     }
 
     auto& builder = ctx.getBuilder();

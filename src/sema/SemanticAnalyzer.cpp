@@ -1315,8 +1315,11 @@ void SemanticAnalyzer::visit(ArrayAccessExprAST& node) {
         node.type = static_cast<ArrayType*>(arrayType)->elementType;
     } else if (arrayType && arrayType->kind == TypeKind::Pointer) {
         node.type = arrayType->base;
+    } else if (arrayType && arrayType->kind == TypeKind::Slice) {
+        // TYP-12: subscripting a slice yields an lvalue of the element type.
+        node.type = static_cast<SliceType*>(arrayType)->elementType;
     } else {
-        emitError("subscripted value is neither array nor pointer, but '" + typeToString(arrayType) + "'", node);
+        emitError("subscripted value is neither array, slice nor pointer, but '" + typeToString(arrayType) + "'", node);
         node.type = nullptr;
     }
     node.isLValue = true;
