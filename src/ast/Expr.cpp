@@ -874,6 +874,21 @@ static llvm::Value* emitClassFieldGEP(CodegenContext& ctx, ClassType* classType,
 }
 
 llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
+    // TYP-12: slice `.len` extracts the length field of the {ptr, len} view.
+    {
+        Type* st = object->type;
+        while (st && st->kind == TypeKind::Typedef)
+            st = static_cast<TypedefType*>(st)->aliasedType;
+        if (st && st->kind == TypeKind::Slice && memberName == "len") {
+            llvm::Value* sliceVal = object->codegen(ctx);
+            if (!sliceVal) return nullptr;
+            auto& builder = ctx.getBuilder();
+            if (object->isLValue)
+                sliceVal = builder.CreateLoad(ctx.getLLVMType(st), sliceVal);
+            return builder.CreateExtractValue(sliceVal, {1}, "slice.len");
+        }
+    }
+
     llvm::Value* objVal = object->codegen(ctx);
     if (!objVal) return nullptr;
 

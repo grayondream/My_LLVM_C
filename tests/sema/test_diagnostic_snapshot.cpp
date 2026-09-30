@@ -84,6 +84,15 @@ int32 main() {
 )"));
 }
 
+TEST_F(DiagnosticSnapshotTest, SliceMemberError) {
+    expectSnapshot("slice_member_error", analyzeDiagnostics(R"(
+int32 main() {
+    int32[] s;
+    return s.ptr;
+}
+)"));
+}
+
 TEST_F(DiagnosticSnapshotTest, PrivateMemberAccess) {
     expectSnapshot("private_member_access", analyzeDiagnostics(R"(
 class C {

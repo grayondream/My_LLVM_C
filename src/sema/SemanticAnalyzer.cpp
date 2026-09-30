@@ -1373,6 +1373,18 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
         }
         memberBaseType = strippedBase;
     } else {
+        // TYP-12: `.len` is the only member of a slice (D1: no `.ptr`).
+        if (strippedObj->kind == TypeKind::Slice) {
+            if (node.memberName == "len") {
+                node.type = TypeContext::instance().getInt64();
+                node.isLValue = false;
+                return;
+            }
+            emitError("no member named '" + node.memberName + "' in slice", node);
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
+        }
         if (strippedObj->kind != TypeKind::Struct && strippedObj->kind != TypeKind::Class &&
             strippedObj->kind != TypeKind::Union) {
             emitError("member access with '.' requires struct/class/union type, but got '" + typeToString(objType) + "'", node);

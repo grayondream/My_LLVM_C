@@ -912,3 +912,21 @@ TEST(SliceSemTest, NestedSliceSubscriptAccepted) {
     analyzer.analyze(*ast);
     EXPECT_TRUE(analyzer.getErrors().empty());
 }
+
+// TYP-12 Task 3: slice .len member; the only member allowed on a slice.
+TEST(SliceSemTest, LenMemberAccepted) {
+    EXPECT_TRUE(analyzeOk(
+        "int64 n(int32[] s) { return s.len; } "
+        "int32 main() { return 0; }"));
+}
+
+TEST(SliceSemTest, LenOnNonSliceRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { int32 x = 1; return x.len; }"));
+}
+
+TEST(SliceSemTest, SliceOtherMemberRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int64 n(int32[] s) { return s.ptr; } "
+        "int32 main() { return 0; }"));
+}
