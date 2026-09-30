@@ -1884,12 +1884,20 @@ TEST_F(ParserErrorTest, FormatShowsFileLocation) {
 
 TEST_F(ParserErrorTest, MissingEqualsInArrayInitReportsError) {
     auto [tu, errors] = parseWithErrors("int32 f() { int32 arr[10] {1,2,3}; }");
-    ASSERT_TRUE(errors.empty() || !errors.empty());
+    ASSERT_FALSE(errors.empty());
 }
 
 TEST_F(ParserErrorTest, UnexpectedTokenInExpression) {
     auto [tu, errors] = parseWithErrors("int32 f() { return ; }");
-    ASSERT_TRUE(errors.empty() || !errors.empty());
+    ASSERT_FALSE(errors.empty());
+    bool found = false;
+    for (const auto& err : errors) {
+        if (err.message.find("expected expression") != std::string::npos) {
+            found = true;
+            break;
+        }
+    }
+    ASSERT_TRUE(found);
 }
 
 TEST_F(ParserErrorTest, NestedCompoundStmtError) {
