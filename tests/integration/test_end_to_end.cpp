@@ -443,6 +443,27 @@ TEST_F(EndToEndTest, PrintFormatsMixedTypes) {
     EXPECT_EQ(testing::internal::GetCapturedStdout(), "42 1.5 A str 7");
 }
 
+// TYP-04: float16/float128 accept the full print specifier set; values are
+// promoted to double (float16 losslessly, float128 truncated to double).
+TEST_F(EndToEndTest, PrintFormatsHalfAndQuad) {
+    testing::internal::CaptureStdout();
+    EXPECT_EQ(runSource(
+        R"(int32 main() { print("{} {} {:f} {:.2f} {:e}", 1.5f16, 2.5f128, 1.5f16, 1.5f128, 1.5f16); return 0; })",
+        "print_f16_f128.c"), 0);
+    EXPECT_EQ(testing::internal::GetCapturedStdout(),
+              "1.5 2.5 1.500000 1.50 1.500000e+00");
+}
+
+// TYP-04: float16 varargs follow C23 default argument promotions (-> double).
+TEST_F(EndToEndTest, Float16VarargPromotesToDouble) {
+    testing::internal::CaptureStdout();
+    EXPECT_EQ(runSource(
+        R"(extern int32 printf(char* format, ...);
+int32 main() { printf("%f\n", 1.5f16); return 0; })",
+        "vararg_f16.c"), 0);
+    EXPECT_EQ(testing::internal::GetCapturedStdout(), "1.500000\n");
+}
+
 TEST_F(EndToEndTest, PrintFormatsBool) {
     testing::internal::CaptureStdout();
     EXPECT_EQ(runSource(

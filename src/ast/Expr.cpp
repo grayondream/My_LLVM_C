@@ -46,6 +46,11 @@ static llvm::Value* promoteVarArg(CodegenContext& ctx, llvm::Value* v, Type* t) 
         }
         case TypeKind::Float32:
             return ctx.castValue(v, llvm::Type::getDoubleTy(c));
+        // TYP-04 / C23 default argument promotions: _Float16 promotes to
+        // double in variadic calls; __float128 is passed unchanged (the
+        // x86-64 ABI has native quad support).
+        case TypeKind::Float16:
+            return ctx.castValue(v, llvm::Type::getDoubleTy(c));
         default:
             return v;
     }
@@ -85,7 +90,12 @@ static llvm::Value* promotePrintArg(CodegenContext& ctx, llvm::Value* v, PrintAr
             return builder.CreateZExtOrTrunc(v, llvm::Type::getInt64Ty(c), "promo");
         case PrintArgKind::Float:
             if (ty->isDoubleTy()) return v;
-            if (ty->isFloatTy()) return builder.CreateFPExt(v, llvm::Type::getDoubleTy(c), "promo");
+            // TYP-04: float16 promotes losslessly; float128 truncates to
+            // double precision for printing.
+            if (ty->isFloatTy() || ty->isHalfTy())
+                return builder.CreateFPExt(v, llvm::Type::getDoubleTy(c), "promo");
+            if (ty->isFP128Ty())
+                return builder.CreateFPTrunc(v, llvm::Type::getDoubleTy(c), "promo");
             return v;
         case PrintArgKind::CString:
         case PrintArgKind::Pointer:

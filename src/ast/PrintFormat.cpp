@@ -94,7 +94,11 @@ bool builtinPrintKind(Type* type, PrintArgKind& outKind) {
         case TypeKind::UInt64:
         case TypeKind::USize:   outKind = PrintArgKind::UInt64;  return true;
         case TypeKind::Float32:
-        case TypeKind::Float64: outKind = PrintArgKind::Float;   return true;
+        case TypeKind::Float64:
+        // TYP-04: float16/float128 print through the same path, promoted to
+        // double (float16 losslessly, float128 truncated).
+        case TypeKind::Float16:
+        case TypeKind::Float128: outKind = PrintArgKind::Float;   return true;
         case TypeKind::Enum:    outKind = PrintArgKind::Int32;   return true;
         case TypeKind::Pointer:
             outKind = (type->base && type->base->kind == TypeKind::Char)

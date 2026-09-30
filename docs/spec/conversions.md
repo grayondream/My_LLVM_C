@@ -142,11 +142,19 @@
 | 源类型 | 目标 | 指令 |
 |---|---|---|
 | `float32` | `float64` | `fpext` |
+| `float16` | `float64` | `fpext`（TYP-04，对齐 C23 `_Float16` 提升） |
 | `bool` | `int32` | `zext` |
 | `int8` / `int16` / `char` | `int32` | `sext` |
 | `uint8` / `uint16` | `int32` | `zext` |
 | `enum`（窄底层） | 按底层类型的提升 | 递归 |
 
 - 固定形参仍按 `resolvedParamTypes` 做常规转换（§5）。
-- 任意标量（含指针）以外的类型不提升，原样传递。
+- 任意标量（含指针）以外的类型不提升，原样传递。`float128` 不提升（对齐 C23 `__float128`；x86-64 ABI 原生支持四精度传递）。
 - 这是 C ABI 正确性要求：窄类型在寄存器/栈槽中按 `int32` 宽度传递，否则 `printf("%d", x)` 读到未定义的高位。
+
+### 9.1 `print`/`println` 对浮点的格式化 `[impl]`（TYP-04）
+
+`float16`/`float128` 可与 `float32`/`float64` 一样使用 `print`/`println` 的**全部格式说明符**（`{}`、`{:f}`、`{:.2f}`、`{:e}`、`{:08.3f}` 等）：实参在 codegen 阶段统一提升为 `float64` 后走既有格式化路径——
+
+- `float16` → `float64`：**无损**（half 是 double 的子集）。
+- `float128` → `float64`：**精度截断**到 double（约 17 位十进制有效数字；值域超出 double 时按 IEEE 754 溢出为 `±inf`）。113 位尾数的精确十进制输出挂靠 FMT-13。
