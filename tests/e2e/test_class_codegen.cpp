@@ -96,6 +96,7 @@ static int runSource(const std::string& source, const std::string& filename) {
 TEST_F(ClassCodegenE2E, SimpleClass) {
     EXPECT_EQ(runSource(R"(
         class Foo {
+            public:
             int32 x;
             void setX(int32 v) { this->x = v; }
             int32 getX() { return this->x; }
@@ -112,6 +113,7 @@ TEST_F(ClassCodegenE2E, SimpleClass) {
 TEST_F(ClassCodegenE2E, ClassWithMultipleMethods) {
     EXPECT_EQ(runSource(R"(
         class Counter {
+            public:
             int32 count;
             void init() { this->count = 0; }
             void increment() { this->count = this->count + 1; }
@@ -132,12 +134,14 @@ TEST_F(ClassCodegenE2E, ClassWithMultipleMethods) {
 TEST_F(ClassCodegenE2E, ClassWithInheritance) {
     EXPECT_EQ(runSource(R"(
         class Base {
+            public:
             int32 x;
             void setX(int32 v) { this->x = v; }
             int32 getX() { return this->x; }
         };
         
         class Derived : public Base {
+            public:
             int32 y;
             void setY(int32 v) { this->y = v; }
             int32 getY() { return this->y; }
@@ -155,6 +159,7 @@ TEST_F(ClassCodegenE2E, ClassWithInheritance) {
 TEST_F(ClassCodegenE2E, ClassMethodCallFromMain) {
     EXPECT_EQ(runSource(R"(
         class Math {
+            public:
             int32 value;
             void setValue(int32 v) { this->value = v; }
             int32 doubleIt() { return this->value + this->value; }

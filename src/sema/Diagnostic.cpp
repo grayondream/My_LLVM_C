@@ -21,6 +21,7 @@ const DiagnosticInfo kRegistry[] = {
     {DiagnosticCode::SemIncompatibleCast,        "E2006", "incompatible cast"},
     {DiagnosticCode::SemUnresolvedCall,          "E2007", "unresolved call"},
     {DiagnosticCode::SemAmbiguousCall,           "E2008", "ambiguous call"},
+    {DiagnosticCode::SemPrivateMemberAccess,     "E2009", "private member access"},
 
     {DiagnosticCode::WarnUninitializedVariable,  "W3001", "variable may be uninitialized"},
     {DiagnosticCode::WarnUnusedVariable,         "W3002", "unused variable"},

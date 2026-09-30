@@ -171,6 +171,7 @@ private:
     std::unique_ptr<Scope> globalScope;
     Scope* currentScope;
     FunctionDeclAST* currentFunction;
+    ClassType* currentClass = nullptr; // SEM-04: class whose method is being analyzed
     TypeContext* typeCtx;
     std::unordered_map<std::string, ConstValue> constexprValues;
     std::unordered_set<std::string> definedFunctions;

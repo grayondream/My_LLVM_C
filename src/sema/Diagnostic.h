@@ -24,6 +24,7 @@ enum class DiagnosticCode {
     SemIncompatibleCast,
     SemUnresolvedCall,
     SemAmbiguousCall,
+    SemPrivateMemberAccess,
 
     WarnUninitializedVariable,
     WarnUnusedVariable,

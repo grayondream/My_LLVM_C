@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <optional>
+#include <unordered_map>
 #include "Stmt.h"
 
 struct FoldedValue {
@@ -114,6 +115,11 @@ public:
     std::vector<std::pair<std::string, Type*>> fields;
     std::vector<std::unique_ptr<FunctionDeclAST>> methods;
     std::string baseClass;
+
+    // PAR-04/DEC-01: explicit access levels recorded by the parser (class
+    // declarations record every member; structs leave this empty -> Public).
+    std::unordered_map<std::string, AccessLevel> memberAccess;
+    bool isClassDecl = false;
 
     StructDeclAST(const std::string& n, std::vector<std::pair<std::string, Type*>> flds)
         : name(n), fields(std::move(flds)) {}

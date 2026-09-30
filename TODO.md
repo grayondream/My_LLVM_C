@@ -7,7 +7,7 @@
 > - 提交时在 message 中引用 ID，例如 `feat(LEX-04): ...`
 > - 所有特性必须映射到可预测的 C 内存模型与 ABI；无隐藏分配/控制流；comptime 无运行时开销
 
-> **进度快照（2026-09-28）**：P0-01 ~ P0-08 全部完成；转换系统 **TYP-09/20/22/25、AGG-14/15** 完成（enum 显式底层类型、enum 强类型、整数提升 + 常规算术转换）；**LEX-13/17** 词法诊断（E0001 非法字符、E0002 未闭合字面量、E0003 整型溢出、E0004 分隔符位置）与错误恢复完成，**LEX-15** 字面量后缀与默认/基础类型映射在词法层完成，**LEX-05** 浮点指数完成；**P1-08** 部分（`static_cast`/`reinterpret_cast` 已完成，内联 `asm` 待定）。数值类型已统一为定宽集合：删除 `int`/`float`/`double` 关键字与 `TypeKind::Int/Float/Double`，新增 `float16`/`float128`，规范见 `docs/spec/fixed-width-types.md`。**TYP-04** 部分完成：f16/f128 在 x86-64 上全语义可用，print 全格式接入，varargs 提升对齐 C23。**AGG-17/AGG-03** union 补齐：匿名成员提升、typedef 聚合成员访问修复、行为基线固化。当前全量 **743** 测试通过，工作区干净。
+> **进度快照（2026-09-28）**：P0-01 ~ P0-08 全部完成；转换系统 **TYP-09/20/22/25、AGG-14/15** 完成（enum 显式底层类型、enum 强类型、整数提升 + 常规算术转换）；**LEX-13/17** 词法诊断（E0001 非法字符、E0002 未闭合字面量、E0003 整型溢出、E0004 分隔符位置）与错误恢复完成，**LEX-15** 字面量后缀与默认/基础类型映射在词法层完成，**LEX-05** 浮点指数完成；**P1-08** 部分（`static_cast`/`reinterpret_cast` 已完成，内联 `asm` 待定）。数值类型已统一为定宽集合：删除 `int`/`float`/`double` 关键字与 `TypeKind::Int/Float/Double`，新增 `float16`/`float128`，规范见 `docs/spec/fixed-width-types.md`。**TYP-04** 部分完成：f16/f128 在 x86-64 上全语义可用，print 全格式接入，varargs 提升对齐 C23。**AGG-17/AGG-03** union 补齐：匿名成员提升、typedef 聚合成员访问修复、行为基线固化。**PAR-04/SEM-04/DEC-01** class 访问段落地：默认 private/public 冻结、E2009 访问诊断、既有测试迁移。当前全量 **751** 测试通过，工作区干净。
 
 ---
 
@@ -72,7 +72,7 @@
 - `[ ]` **PAR-01** `(已实现)` 顶层声明：变量/函数/struct/class/enum/union/`typedef`/`using`/`type`。
 - `[ ]` **PAR-02** `(改)` 函数声明与定义：**C 风格**，不使用 `fn`；覆盖 `extern/static/inline`、成员函数。
 - `[ ]` **PAR-03** `(已实现)` 方法定义语法 `Vector::length()`；补嵌套/`static` 成员。
-- `[ ]` **PAR-04** class 成员：`public/private/protected` 段、成员变量/函数、`static` 成员、嵌套类型。
+- `[ ]` **PAR-04** class 成员：`public/private/protected` 段、成员变量/函数、`static` 成员、嵌套类型。**部分完成**：访问段解析与访问级别记录（DEC-01）已实现，段后成员不再丢失。**待补**：`static` 成员（AGG-10）、嵌套类型（AGG-11）。
 - `[ ]` **PAR-05** 类型语法：基础类型、指针 `T*`、数组 `T[N]`、Slice `T[]`、模板实例 `Box<i32>`。
 - `[ ]` **PAR-06** `(新)` 指针限定符：`const/volatile/restrict/atomic`。
 - `[ ]` **PAR-07** `(新)` 注解挂载点：类型/字段/函数/参数/变量/模块。
@@ -170,7 +170,7 @@
 - `[x]` **SEM-01** 变量未初始化检查：数据流分析、分支合并、循环。已实现 definite-assignment 分析（if/else 取交集、循环保守、do-while 至少一次、地址取址假定已初始化），产出 W3001 警告（`SemanticAnalyzer::checkInitialization`）。
 - `[x]` **SEM-02** 指针未初始化检查；解引用前必须赋值。同一分析覆盖指针（`int* p; *p` → W3001）。
 - `[ ]` **SEM-03** 指针对空性检查：`[[nonnull]]`、可选运行时非空断言。
-- `[ ]` **SEM-04** 访问控制检查：`public/private/protected`（单继承链）。
+- `[ ]` **SEM-04** 访问控制检查：`public/private/protected`（单继承链）。**部分完成**（PAR-04/DEC-01 轮次）：class 默认 private / struct 默认 public，访问段解析修复（不再截断类体），类外访问 private/protected 成员与方法报 **E2009**（`SemanticAnalyzer`，快照 `tests/diagnostics/snapshots/private_member_access.txt`）；类内方法经 `this->` 可访问。**待补**：protected 在派生类内放开（随 INH 单继承链）、友元。
 - `[ ]` **SEM-05** 类型检查：表达式/赋值/调用/返回/字段访问。
 - `[ ]` **SEM-06** 泛型实例化检查（GEN-06）。
 - `[ ]` **SEM-07** `compile_time` 条件求值与死代码消除。
@@ -199,7 +199,7 @@
 - `[ ]` **AGG-06** `(新)` 位域字段布局与 codegen。
 
 ### class
-- `[ ]` **AGG-07** `class` 声明与 `public/private/protected` 段。
+- `[ ]` **AGG-07** `class` 声明与 `public/private/protected` 段。**部分完成**：访问段 + 默认 private（DEC-01）+ E2009 访问诊断已实现；`static` 成员/嵌套类型待 AGG-10/11。
 - `[ ]` **AGG-08** 成员变量、成员函数声明/实现、隐式 `self`。
 - `[ ]` **AGG-09** 成员函数编译为 `Vector_length(Vector* self)`；方法调用 `v.length()`。
 - `[ ]` **AGG-10** `static` 成员函数（无 `self`）与 `static` 成员变量。
@@ -453,7 +453,7 @@
 
 ## 20. 待定决策（DEC）
 
-- `[ ]` **DEC-01** class 默认访问级别：默认 `public` 还是 `private`。
+- `[x]` **DEC-01** class 默认访问级别：**class 默认 private，struct 默认 public**（C++ 惯例）；`public:`/`private:`/`protected:` 段切换（`protected` 为上下文关键字，继承落地前 ≡ private，见 SEM-04/INH）。实现见 `src/frontend/Parser.cpp`（记录）与 `SemanticAnalyzer`（检查，E2009）。
 - `[x]` **DEC-02** `import math;` 后符号访问语法：**直接非限定访问**（`add`）。模块是物理边界，不引入 `math.add` 式运算符；限定名由模块内 `namespace` 提供。
 - `[ ]` **DEC-03** `Result<T,E>` 精确布局与 `.error`/`.value` 语义（显式访问，无 `?`）。
 - `[ ]` **DEC-04** 默认参数范围；**确认不做**命名参数。

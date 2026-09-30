@@ -2333,8 +2333,35 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
 
     std::vector<std::pair<std::string, Type*>> fields;
     std::vector<std::unique_ptr<FunctionDeclAST>> methods;
+    std::unordered_map<std::string, AccessLevel> memberAccess;
+    // DEC-01: class members default to private; `public:`/`private:`/
+    // `protected:` sections change the level for the members that follow.
+    AccessLevel currentAccess = AccessLevel::Private;
+    auto accessFromLexeme = [](const std::string& s) -> AccessLevel {
+        if (s == "public") return AccessLevel::Public;
+        if (s == "protected") return AccessLevel::Protected;
+        return AccessLevel::Private;
+    };
 
     while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
+        // Access specifier section: `public:` / `private:` / `protected:`.
+        // `public`/`private` are keywords; `protected` is contextual, so it
+        // only counts when directly followed by ':'.
+        const bool isSpecifier =
+            check(TokenType::TOKEN_PUBLIC) || check(TokenType::TOKEN_PRIVATE) ||
+            (check(TokenType::TOKEN_IDENTIFIER) && peek() &&
+             (peek()->lexeme == "public" || peek()->lexeme == "private" ||
+              peek()->lexeme == "protected") &&
+             m_currentTokenPos + 1 < m_tokens.size() &&
+             m_tokens[m_currentTokenPos + 1].type == TokenType::TOKEN_COLON);
+        if (isSpecifier) {
+            std::string lexeme = peek()->lexeme;
+            currentAccess = accessFromLexeme(lexeme);
+            advance(); // consume specifier
+            expect(TokenType::TOKEN_COLON, "expected ':' after access specifier");
+            continue;
+        }
+
         // Check if this looks like a member function declaration:
         // type identifier '(' ... or operator symbol '('
         size_t savedPos = m_currentTokenPos;
@@ -2351,11 +2378,13 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                     auto func = parseFunctionDecl(declType, memberName);
                     if (func) {
                         methods.push_back(std::move(func));
+                        memberAccess[memberName] = currentAccess;
                     }
                 } else {
                     // Field declaration
                     declType = parseMemberArraySuffix(declType);
                     fields.push_back({memberName, declType});
+                    memberAccess[memberName] = currentAccess;
                     match(TokenType::TOKEN_SEMICOLON);
                 }
             } else if (check(TokenType::TOKEN_OPERATOR)) {
@@ -2375,9 +2404,13 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                 // fields/members into the enclosing aggregate. The trailing
                 // ';' was already consumed by parseType's inline-definition
                 // path, so nothing else to skip here.
+                size_t before = fields.size();
                 if (!promoteAnonymousMembers(fields, declType)) {
                     error("duplicate member name in anonymous struct/union", *peek());
                     return nullptr;
+                }
+                for (size_t i = before; i < fields.size(); ++i) {
+                    memberAccess[fields[i].first] = currentAccess;
                 }
             } else {
                 m_currentTokenPos = savedPos;
@@ -2394,6 +2427,8 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
     auto decl = std::make_unique<StructDeclAST>(name, std::move(fields));
     decl->methods = std::move(methods);
     decl->baseClass = std::move(baseClass);
+    decl->memberAccess = std::move(memberAccess);
+    decl->isClassDecl = true;
     return decl;
 }
 

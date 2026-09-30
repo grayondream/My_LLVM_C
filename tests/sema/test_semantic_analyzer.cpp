@@ -632,7 +632,7 @@ TEST(ClassSupport, SemanticAnalysisValidClass) {
 
 TEST(ClassSupport, SemanticAnalysisInvalidBaseClass) {
     std::string source = R"(
-        class Derived : public Nonexistent { int32 y; };
+        class Derived : public Nonexistent { public: int32 y; };
     )";
     Lexer lexer("test.c", source);
     auto tokens = lexer.tokenize();
@@ -648,10 +648,12 @@ TEST(ClassSupport, SemanticAnalysisInvalidBaseClass) {
 TEST(ClassSupport, SemanticAnalysisInheritedMethod) {
     std::string source = R"(
         class Base {
+            public:
             int32 x;
             void setX(int32 v) { this->x = v; }
         };
         class Derived : public Base {
+            public:
             int32 y;
         };
     )";
@@ -669,9 +671,11 @@ TEST(ClassSupport, SemanticAnalysisInheritedMethod) {
 TEST(ClassSupport, SemanticAnalysisInheritedFieldAccess) {
     std::string source = R"(
         class Base {
+            public:
             int32 x;
         };
         class Derived : public Base {
+            public:
             int32 y;
         };
         int32 main() {
@@ -799,7 +803,7 @@ TEST(PrintBuiltin, UsesFreeFunctionToString) {
 
 TEST(PrintBuiltin, UsesMethodToString) {
     EXPECT_TRUE(analyzeOk(
-        "class C { int32 x; char* to_string() { return \"C\"; } }; "
+        "class C { public: int32 x; public: char* to_string() { return \"C\"; } }; "
         "int32 main() { C c; print(\"{}\", c); return 0; }"));
 }
 
@@ -835,4 +839,47 @@ TEST_F(SemanticAnalyzerTest, TrailingDotFloatLiteralsAreAccepted) {
     EXPECT_TRUE(analyzeOk(
         "int32 main() { float64 x = 1.; float32 y = 1.f32; "
         "float64 z = 1.e3; return 0; }"));
+}
+
+// DEC-01/SEM-04: class members default to private; outside access is denied
+// with a dedicated diagnostic (E2009), not "no member".
+TEST(SemanticAnalyzerAccessTest, ClassPrivateDefaultDeniedOutside) {
+    EXPECT_FALSE(analyzeOk(
+        "class CA { int32 x; }; int32 main() { CA c; c.x = 1; return 0; }"));
+}
+
+TEST(SemanticAnalyzerAccessTest, PrivateAccessDiagnosticCode) {
+    Lexer lexer("t.c", "class CA { int32 x; }; int32 main() { CA c; c.x = 1; return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_TRUE(ast != nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_FALSE(analyzer.getErrors().empty());
+    bool found = false;
+    for (const auto& e : analyzer.getErrors()) {
+        if (e.code == DiagnosticCode::SemPrivateMemberAccess) found = true;
+    }
+    EXPECT_TRUE(found);
+}
+
+// In-class method bodies may reach private members through `this->`.
+TEST(SemanticAnalyzerAccessTest, ClassMethodAccessesPrivateViaThis) {
+    EXPECT_TRUE(analyzeOk(
+        "class CC { int32 x; int32 get() { return this->x; } }; "
+        "int32 main() { CC c; return 0; }"));
+}
+
+// Members in an explicit `public:` section stay accessible (no truncation).
+TEST(SemanticAnalyzerAccessTest, PublicSectionMemberAccessible) {
+    EXPECT_TRUE(analyzeOk(
+        "class CD { private: int32 s; public: int32 o; }; "
+        "int32 main() { CD c; c.o = 1; return 0; }"));
+}
+
+// struct members remain public by default (DEC-01).
+TEST(SemanticAnalyzerAccessTest, StructFieldsDefaultPublic) {
+    EXPECT_TRUE(analyzeOk(
+        "struct SE { int32 v; }; int32 main() { SE s; s.v = 1; return 0; }"));
 }

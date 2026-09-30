@@ -491,7 +491,7 @@ TEST_F(EndToEndTest, PrintUsesFreeFunctionToString) {
 TEST_F(EndToEndTest, PrintUsesMethodToString) {
     testing::internal::CaptureStdout();
     EXPECT_EQ(runSource(
-        "class C { int32 x; char* to_string() { return \"C!\"; } };"
+        "class C { public: int32 x; public: char* to_string() { return \"C!\"; } };"
         "int32 main() { C c; print(\"{}\", c); return 0; }",
         "print_method_to_string.c"), 0);
     EXPECT_EQ(testing::internal::GetCapturedStdout(), "C!");

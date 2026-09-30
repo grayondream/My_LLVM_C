@@ -1393,18 +1393,37 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
     } else if (memberBaseType->kind == TypeKind::Class) {
         auto* classType = static_cast<ClassType*>(memberBaseType);
         const std::string className = classType->name;
+        ClassType* definingClass = nullptr;
         // Search this class and its base classes for the field.
         while (classType) {
             for (auto& field : classType->fields) {
                 if (field.first == node.memberName) {
                     node.type = field.second;
                     node.isLValue = true;
-                    return;
+                    definingClass = classType;
+                    break;
                 }
             }
+            if (definingClass) break;
             Type* baseType = classType->base;
             if (!baseType || baseType->kind != TypeKind::Class) break;
             classType = static_cast<ClassType*>(baseType);
+        }
+        // SEM-04/DEC-01: non-public members are only reachable from inside
+        // the defining class (protected ≡ private until INH lands).
+        if (definingClass) {
+            AccessLevel level = definingClass->memberAccessLevel(node.memberName);
+            if (level != AccessLevel::Public && currentClass != definingClass) {
+                emitError(DiagnosticCode::SemPrivateMemberAccess,
+                          "cannot access " +
+                              std::string(level == AccessLevel::Private ? "private" : "protected") +
+                              " member '" + node.memberName + "' of class '" + definingClass->name +
+                              "' outside the class; make it public or add an accessor",
+                          node);
+                node.type = nullptr;
+                node.isLValue = false;
+            }
+            return;
         }
         emitError("no member named '" + node.memberName + "' in class '" + className + "'", node);
     } else if (memberBaseType->kind == TypeKind::Union) {
@@ -1456,6 +1475,24 @@ void SemanticAnalyzer::visit(MethodCallExprAST& node) {
         node.type = nullptr;
         node.isLValue = false;
         return;
+    }
+
+    // SEM-04/DEC-01: non-public methods are only callable from inside the
+    // defining class (protected ≡ private until INH lands).
+    {
+        AccessLevel level = classType->memberAccessLevel(node.methodName);
+        if (level != AccessLevel::Public && currentClass != classType) {
+            emitError(DiagnosticCode::SemPrivateMemberAccess,
+                      "cannot call " +
+                          std::string(level == AccessLevel::Private ? "private" : "protected") +
+                          " method '" + node.methodName + "' of class '" + classType->name +
+                          "' outside the class; make it public or add a public wrapper",
+                      node);
+            node.type = nullptr;
+            node.isLValue = false;
+            delete method;
+            return;
+        }
     }
 
     auto* funcType = static_cast<FunctionType*>(method->type);
@@ -1674,7 +1711,9 @@ void SemanticAnalyzer::visit(ArrayDeclAST& node) {
 }
 
 void SemanticAnalyzer::visit(StructDeclAST& node) {
-    bool isClass = !node.methods.empty() || !node.baseClass.empty();
+    // PAR-04/DEC-01: `class` declarations are classes even without methods —
+    // their members default to private and carry access levels.
+    bool isClass = node.isClassDecl || !node.methods.empty() || !node.baseClass.empty();
 
     if (isClass) {
         auto* classType = typeCtx->getOrCreateClass(node.name);
@@ -1719,11 +1758,19 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
 
         typeCtx->addClass(node.name, classType);
 
+        // PAR-04/DEC-01: carry the parser-recorded access levels into the type.
+        for (const auto& kv : node.memberAccess) {
+            classType->setMemberAccess(kv.first, kv.second);
+        }
+
         for (auto& method : node.methods) {
             auto* thisType = new Type(TypeKind::Pointer, classType);
             auto thisParam = std::make_unique<ParamDeclAST>("this", thisType);
             method->params.insert(method->params.begin(), std::move(thisParam));
+            ClassType* savedClass = currentClass;
+            currentClass = classType;
             visit(*method);
+            currentClass = savedClass;
         }
     } else {
         auto* structType = new StructType(node.name);

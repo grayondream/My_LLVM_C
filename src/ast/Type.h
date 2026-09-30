@@ -3,6 +3,15 @@
 #include <string>
 #include <vector>
 
+// PAR-04/SEM-04/DEC-01: member access levels. `class` members default to
+// Private, `struct` members to Public (unrecorded members fall back to
+// Public, which keeps the struct path unchanged).
+enum class AccessLevel {
+    Public,
+    Private,
+    Protected, // equivalent to Private until INH (inheritance) lands
+};
+
 enum class TypeKind {
     Void,
     Char,
@@ -150,8 +159,20 @@ public:
     std::vector<std::pair<std::string, FunctionType*>> methods;
     std::string baseClass;
 
+    // DEC-01: per-member access levels; absent -> Public (struct path).
+    std::unordered_map<std::string, AccessLevel> memberAccess;
+
     ClassType(const std::string& n)
         : Type(TypeKind::Class), name(n) {}
+
+    void setMemberAccess(const std::string& memberName, AccessLevel level) {
+        memberAccess[memberName] = level;
+    }
+
+    AccessLevel memberAccessLevel(const std::string& memberName) const {
+        auto it = memberAccess.find(memberName);
+        return it == memberAccess.end() ? AccessLevel::Public : it->second;
+    }
 
     void addField(const std::string& fieldName, Type* fieldType) {
         fields.push_back({fieldName, fieldType});

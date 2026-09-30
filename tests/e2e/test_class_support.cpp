@@ -72,6 +72,7 @@ static int runSource(const std::string& source, const std::string& filename) {
 TEST_F(ClassE2ETest, BasicClass) {
     EXPECT_EQ(runSource(R"(
         class Foo {
+            public:
             int32 x;
             void setX(int32 v) { this->x = v; }
             int32 getX() { return this->x; }
@@ -88,11 +89,13 @@ TEST_F(ClassE2ETest, BasicClass) {
 TEST_F(ClassE2ETest, ClassInheritance) {
     EXPECT_EQ(runSource(R"(
         class Base {
+            public:
             int32 x;
             void setX(int32 v) { this->x = v; }
         };
         
         class Derived : public Base {
+            public:
             int32 y;
             void setY(int32 v) { this->y = v; }
         };
@@ -109,6 +112,7 @@ TEST_F(ClassE2ETest, ClassInheritance) {
 TEST_F(ClassE2ETest, ClassAsFunctionParam) {
     EXPECT_EQ(runSource(R"(
         class Point {
+            public:
             int32 x;
             int32 y;
         };
@@ -124,4 +128,35 @@ TEST_F(ClassE2ETest, ClassAsFunctionParam) {
             return getSum(p);
         }
     )", "test_class_param.c"), 15);
+}
+
+// PAR-04/SEM-04 + DEC-01: access sections must not truncate the class body,
+// and private members are reachable from methods via `this->`.
+TEST_F(ClassE2ETest, AccessSectionsAndPrivateViaThis) {
+    EXPECT_EQ(runSource(R"(
+        class C {
+        private:
+            int32 secret;
+        public:
+            int32 get() { return this->secret; }
+            void set(int32 v) { this->secret = v; }
+        };
+        int32 main() {
+            C c;
+            c.set(5);
+            return c.get() == 5 ? 0 : 1;
+        }
+    )", "test_class_access.c"), 0);
+}
+
+// DEC-01: struct members default to public.
+TEST_F(ClassE2ETest, StructFieldsDefaultPublic) {
+    EXPECT_EQ(runSource(R"(
+        struct S { int32 v; };
+        int32 main() {
+            S s;
+            s.v = 4;
+            return s.v == 4 ? 0 : 1;
+        }
+    )", "test_struct_public.c"), 0);
 }

@@ -84,6 +84,21 @@ int32 main() {
 )"));
 }
 
+TEST_F(DiagnosticSnapshotTest, PrivateMemberAccess) {
+    expectSnapshot("private_member_access", analyzeDiagnostics(R"(
+class C {
+private:
+    int32 secret;
+};
+
+int32 main() {
+    C c;
+    c.secret = 1;
+    return 0;
+}
+)"));
+}
+
 TEST_F(DiagnosticSnapshotTest, IncompatibleAssignment) {
     expectSnapshot("incompatible_assignment", analyzeDiagnostics(R"(
 struct S { int32 x; };
