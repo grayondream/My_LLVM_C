@@ -329,6 +329,68 @@ TEST(LexerFloatExponentTest, SeparatorsWithinExponentAreValidated) {
     EXPECT_EQ(d->column, 3);
 }
 
+// LEX-05: trailing-dot forms `1.` / `1.e3` (grammar allows an empty fraction
+// after the decimal point).
+TEST(LexerTrailingDotFloatTest, BareTrailingDotIsFloat) {
+    Lexer lexer("f.c", "1.");
+    auto tokens = lexer.tokenize();
+    ASSERT_EQ(tokens.size(), 1u);
+    EXPECT_EQ(tokens[0].type, TokenType::TOKEN_FLOAT);
+    EXPECT_EQ(tokens[0].literalKind, LiteralKind::Float64);
+    EXPECT_DOUBLE_EQ(std::get<double>(tokens[0].value), 1.0);
+    EXPECT_TRUE(lexer.getDiagnostics().empty());
+}
+
+TEST(LexerTrailingDotFloatTest, TrailingDotWithExponent) {
+    Lexer lexer("f.c", "1.e3 1.e-3");
+    auto tokens = lexer.tokenize();
+    ASSERT_EQ(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::TOKEN_FLOAT);
+    EXPECT_EQ(tokens[0].literalKind, LiteralKind::Float64);
+    EXPECT_DOUBLE_EQ(std::get<double>(tokens[0].value), 1000.0);
+    EXPECT_NEAR(std::get<double>(tokens[1].value), 0.001, 1e-12);
+    EXPECT_TRUE(lexer.getDiagnostics().empty());
+}
+
+TEST(LexerTrailingDotFloatTest, TrailingDotWithSuffix) {
+    Lexer lexer("f.c", "1.f32 2.f128");
+    auto tokens = lexer.tokenize();
+    ASSERT_EQ(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::TOKEN_FLOAT);
+    EXPECT_EQ(tokens[0].literalKind, LiteralKind::Float32);
+    EXPECT_DOUBLE_EQ(std::get<double>(tokens[0].value), 1.0);
+    EXPECT_EQ(tokens[1].literalKind, LiteralKind::Float128);
+    EXPECT_TRUE(lexer.getDiagnostics().empty());
+}
+
+TEST(LexerTrailingDotFloatTest, DotFollowedByIdentifierSplitsAsFloat) {
+    // Grammar-consistent (Rust-style): `1.foo` = FLOAT(`1.f`) + IDENT(`oo`).
+    // Same effect class as the pre-existing `1.5.foo` -> FLOAT + IDENT split.
+    Lexer lexer("f.c", "1.foo");
+    auto tokens = lexer.tokenize();
+    ASSERT_EQ(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::TOKEN_FLOAT);
+    EXPECT_EQ(tokens[0].literalKind, LiteralKind::Float32);
+    EXPECT_EQ(tokens[1].type, TokenType::TOKEN_IDENTIFIER);
+    EXPECT_EQ(tokens[1].lexeme, "oo");
+}
+
+TEST(LexerTrailingDotFloatTest, SeparatorsAroundTrailingDotReportE0004) {
+    Lexer trailing("bad.c", "1_.");
+    trailing.tokenize();
+    const Diagnostic* d1 = findDiag(
+        trailing.getDiagnostics(), DiagnosticCode::LexInvalidDigitSeparator);
+    ASSERT_NE(d1, nullptr);
+    EXPECT_EQ(d1->column, 2);
+
+    Lexer afterDot("bad.c", "1._5");
+    afterDot.tokenize();
+    const Diagnostic* d2 = findDiag(
+        afterDot.getDiagnostics(), DiagnosticCode::LexInvalidDigitSeparator);
+    ASSERT_NE(d2, nullptr);
+    EXPECT_EQ(d2->column, 3);
+}
+
 TEST(ClassKeywordTest, ClassTokenIsRecognized) {
     std::string source = "class Foo { int32 x; };";
     Lexer lexer("test.c", source);

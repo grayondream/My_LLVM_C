@@ -59,8 +59,9 @@ float-literal       = decimal-digits , '.' , [ decimal-digits ] , [ exponent ] ,
 exponent            = ( 'e' | 'E' ) , [ '+' | '-' ] , decimal-digits ;
 float-suffix        = 'f' | 'f16' | 'f32' | 'f64' | 'f128' | 'l' ;
 (* [impl] LEX-15 后缀 → 基础类型：无→float64；f/f32→float32；f64→float64；f16/f128→对应类型；l 为 float64 旧写法 *)
-(* [impl] LEX-05 指数 e/E（可带 +/-，数字间允许 '_'）已实现；小数形式要求小数点后至少一位数字，
-   即 `1.` / `1.e3` 这类“结尾点”形式暂未接受（相对上方产生式的 [ decimal-digits ] 为已知实现差异）。*)
+(* [impl] LEX-05 指数 e/E（可带 +/-，数字间允许 '_'）已实现；小数点后允许空尾数，
+   即 `1.` / `1.e3` 这类“结尾点”形式已接受（LEX-05 收尾）。数字后紧跟 '.' 一律进入小数部分：
+   `1.foo` 词法化为 FLOAT(`1.f`) + IDENT(`oo`)，与 `1.5.foo` 的既有切分同类。 *)
 
 (* --- 字符/字符串字面量 LEX-06 / LEX-16 --- *)
 char-literal        = "'" , ( char-char | escape-sequence ) , "'" ;

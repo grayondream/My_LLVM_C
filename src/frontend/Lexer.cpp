@@ -442,7 +442,11 @@ Token Lexer::scanNumber(){
     }
 
     bool hasFraction = false;
-    if(peek() == '.' and isDigitForRadix(peekNext(), 10)) {
+    // LEX-05: the grammar allows an empty fraction after the decimal point
+    // (`1.` / `1.e3`), so a '.' directly following decimal digits always
+    // begins the fraction part. A following '_' is consumed here too so the
+    // existing LEX-17 separator validation can point at it (E0004).
+    if(peek() == '.') {
         hasFraction = true;
         advance(); // 小数点
         while(isDigitForRadix(peek(), 10) || peek() == '_') {

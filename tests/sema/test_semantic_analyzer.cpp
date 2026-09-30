@@ -829,3 +829,10 @@ TEST_F(SemanticAnalyzerTest, LiteralKindsMapToFixedWidthTypes) {
     FloatExprAST defFloat(1.5);
     EXPECT_EQ(analyzer->getExprType(defFloat)->kind, TypeKind::Float64);
 }
+
+// LEX-05: trailing-dot float literals flow through lexer -> parser -> sema.
+TEST_F(SemanticAnalyzerTest, TrailingDotFloatLiteralsAreAccepted) {
+    EXPECT_TRUE(analyzeOk(
+        "int32 main() { float64 x = 1.; float32 y = 1.f32; "
+        "float64 z = 1.e3; return 0; }"));
+}
