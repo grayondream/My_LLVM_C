@@ -5,6 +5,37 @@
 #include "support/Log.h"
 #include "Mangle.h"
 
+// TYP-12: build the {ptr, len} view over a statically-sized array (zero-copy;
+// the elements are never duplicated). Array operands already yield the
+// address of their first element.
+static Type* stripTypedefsT12(Type* t) {
+    while (t && t->kind == TypeKind::Typedef)
+        t = static_cast<TypedefType*>(t)->aliasedType;
+    return t;
+}
+
+static llvm::Value* emitArrayToSliceDecay(CodegenContext& ctx,
+                                          llvm::Value* arrayAddr,
+                                          ArrayType* arrayType) {
+    auto& builder = ctx.getBuilder();
+    llvm::Type* sliceLLVM = ctx.getLLVMType(
+        TypeContext::instance().getSliceType(arrayType->elementType));
+    llvm::Value* v = llvm::Constant::getNullValue(sliceLLVM);
+    v = builder.CreateInsertValue(v, arrayAddr, {0});
+    return builder.CreateInsertValue(
+        v, llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.getContext()),
+                                  static_cast<uint64_t>(arrayType->size)), {1});
+}
+
+// TYP-12: strip typedefs, then report whether the value is an array being
+// passed where a slice view is expected.
+static bool isArrayToSliceArg(Type* argType, Type* paramType) {
+    argType = stripTypedefsT12(argType);
+    paramType = stripTypedefsT12(paramType);
+    return argType && paramType && argType->kind == TypeKind::Array &&
+           paramType->kind == TypeKind::Slice;
+}
+
 static llvm::Value* emitLoad(CodegenContext& ctx, llvm::Value* ptr, Type* astType = nullptr) {
     return ctx.loadValue(ptr, astType);
 }
@@ -583,8 +614,15 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
             argVal = emitLoad(ctx, argVal, args[i]->type);
         }
         if (i < resolvedParamTypes.size()) {
-            argVal = ctx.castValue(argVal, args[i]->type,
-                                   ctx.getLLVMType(resolvedParamTypes[i]));
+            if (isArrayToSliceArg(args[i]->type, resolvedParamTypes[i])) {
+                // TYP-12: array -> slice view; no element copy.
+                argVal = emitArrayToSliceDecay(
+                    ctx, argVal,
+                    static_cast<ArrayType*>(stripTypedefsT12(args[i]->type)));
+            } else {
+                argVal = ctx.castValue(argVal, args[i]->type,
+                                       ctx.getLLVMType(resolvedParamTypes[i]));
+            }
         } else if (calleeFn->isVarArg()) {
             // C default argument promotions for the variadic tail.
             argVal = promoteVarArg(ctx, argVal, args[i]->type);

@@ -35,6 +35,12 @@ bool typesEqual(Type* a, Type* b) {
             auto* tb = static_cast<TypedefType*>(b);
             return typesEqual(ta->aliasedType, tb->aliasedType);
         }
+        case TypeKind::Slice: {
+            // TYP-12: slices match by element type (int32[] != float64[]).
+            auto* sa = static_cast<SliceType*>(a);
+            auto* sb = static_cast<SliceType*>(b);
+            return typesEqual(sa->elementType, sb->elementType);
+        }
         case TypeKind::Function: {
             auto* fa = static_cast<FunctionType*>(a);
             auto* fb = static_cast<FunctionType*>(b);
@@ -201,6 +207,11 @@ int conversionRank(Type* from, Type* to) {
 
     // Arrays decay to a pointer to their first element.
     if (from->kind == TypeKind::Array && to->kind == TypeKind::Pointer) return 1;
+
+    // TYP-12: an array decays to a slice view of itself (zero-copy).
+    if (from->kind == TypeKind::Array && to->kind == TypeKind::Slice &&
+        typesEqual(static_cast<ArrayType*>(from)->elementType,
+                   static_cast<SliceType*>(to)->elementType)) return 1;
 
     // Enum types are strongly typed (TYP-09 / TYP-20): enum <-> integer/float
     // and enum <-> other enum require an explicit conversion. Exact-same-enum

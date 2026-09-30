@@ -79,3 +79,16 @@ TEST_F(SliceE2ETest, SlicePassingVerifierClean) {
         }
     )", "test_slice_canonical.c"), 0);
 }
+
+// TYP-12 Task 4: writes through a decayed slice are visible to the caller
+// (the slice views the original array, no copy).
+TEST_F(SliceE2ETest, DecayedSliceIsZeroCopy) {
+    EXPECT_EQ(runSource(R"(
+        void bump(int32[] s) { s[0] = s[0] + 100; }
+        int32 main() {
+            int32 arr[2] = {1, 2};
+            bump(arr);
+            return arr[0] == 101 ? 0 : 1;
+        }
+    )", "test_slice_decay.c"), 0);
+}

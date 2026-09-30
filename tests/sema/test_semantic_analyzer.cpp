@@ -930,3 +930,16 @@ TEST(SliceSemTest, SliceOtherMemberRejected) {
         "int64 n(int32[] s) { return s.ptr; } "
         "int32 main() { return 0; }"));
 }
+
+// TYP-12 Task 4: T[N] decays to T[] at call sites (zero-copy).
+TEST(SliceSemTest, ArrayDecaysToSliceParam) {
+    EXPECT_TRUE(analyzeOk(
+        "int32 total(int32[] s) { return 0; } "
+        "int32 main() { int32 arr[3] = {1,2,3}; return total(arr); }"));
+}
+
+TEST(SliceSemTest, CrossElementDecayRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int64 total(float64[] s) { return 0; } "
+        "int32 main() { int32 arr[3] = {1,2,3}; return total(arr); }"));
+}
