@@ -241,6 +241,14 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
     }
     
     llvm::AllocaInst* alloca = ctx.getBuilder().CreateAlloca(llvmType, nullptr, name);
+
+    // TYP-12 D3: uninitialized slices are the empty slice {null, 0}.
+    {
+        Type* st = stripTypedefs(type);
+        if (st && st->kind == TypeKind::Slice && !initExpr && !isConstexpr) {
+            ctx.getBuilder().CreateStore(llvm::Constant::getNullValue(llvmType), alloca);
+        }
+    }
     
     if (isConstexpr && foldedValue) {
         llvm::Value* constVal = foldToConstant(ctx, *foldedValue);
