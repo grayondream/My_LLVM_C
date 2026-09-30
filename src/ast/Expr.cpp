@@ -14,19 +14,6 @@ static Type* stripTypedefsT12(Type* t) {
     return t;
 }
 
-static llvm::Value* emitArrayToSliceDecay(CodegenContext& ctx,
-                                          llvm::Value* arrayAddr,
-                                          ArrayType* arrayType) {
-    auto& builder = ctx.getBuilder();
-    llvm::Type* sliceLLVM = ctx.getLLVMType(
-        TypeContext::instance().getSliceType(arrayType->elementType));
-    llvm::Value* v = llvm::Constant::getNullValue(sliceLLVM);
-    v = builder.CreateInsertValue(v, arrayAddr, {0});
-    return builder.CreateInsertValue(
-        v, llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.getContext()),
-                                  static_cast<uint64_t>(arrayType->size)), {1});
-}
-
 // TYP-12: strip typedefs, then report whether the value is an array being
 // passed where a slice view is expected.
 static bool isArrayToSliceArg(Type* argType, Type* paramType) {
@@ -616,9 +603,9 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
         if (i < resolvedParamTypes.size()) {
             if (isArrayToSliceArg(args[i]->type, resolvedParamTypes[i])) {
                 // TYP-12: array -> slice view; no element copy.
-                argVal = emitArrayToSliceDecay(
-                    ctx, argVal,
-                    static_cast<ArrayType*>(stripTypedefsT12(args[i]->type)));
+                argVal = ctx.emitArrayToSliceDecay(
+                    static_cast<ArrayType*>(stripTypedefsT12(args[i]->type)),
+                    argVal);
             } else {
                 argVal = ctx.castValue(argVal, args[i]->type,
                                        ctx.getLLVMType(resolvedParamTypes[i]));
@@ -736,8 +723,16 @@ llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
     // designators or '&x' are already the stored value.
     llvm::Value* result = rhs->isLValue ? emitLoad(ctx, rhsVal, rhs->type) : rhsVal;
 
-    if (lhs->type) {
-        result = ctx.castValue(result, rhs->type, ctx.getLLVMType(lhs->type));
+    // TYP-12: array RHS decays to a slice view when assigned to a slice LHS.
+    {
+        Type* lt = stripTypedefsT12(lhs->type);
+        Type* rt = stripTypedefsT12(rhs->type);
+        if (lt && rt && lt->kind == TypeKind::Slice && rt->kind == TypeKind::Array &&
+            op == AssignOp::Assign) {
+            result = ctx.emitArrayToSliceDecay(static_cast<ArrayType*>(rt), result);
+        } else if (lhs->type) {
+            result = ctx.castValue(result, rhs->type, ctx.getLLVMType(lhs->type));
+        }
     }
 
     if (op != AssignOp::Assign) {

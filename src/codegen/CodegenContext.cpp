@@ -362,6 +362,21 @@ llvm::Value* CodegenContext::castValue(llvm::Value* val, Type* fromAST, llvm::Ty
     return castValue(val, targetLLVMType);
 }
 
+llvm::Value* CodegenContext::emitArrayToSliceDecay(ArrayType* arrayType,
+                                                   llvm::Value* arrayAddr) {
+    // TYP-12: build the {ptr, len} view over a statically-sized array
+    // (zero-copy; the elements are never duplicated). Array operands already
+    // yield the address of their first element.
+    auto& builder = getBuilder();
+    llvm::Type* sliceLLVM = getLLVMType(
+        TypeContext::instance().getSliceType(arrayType->elementType));
+    llvm::Value* v = llvm::Constant::getNullValue(sliceLLVM);
+    v = builder.CreateInsertValue(v, arrayAddr, {0});
+    return builder.CreateInsertValue(
+        v, llvm::ConstantInt::get(llvm::Type::getInt64Ty(getContext()),
+                                  static_cast<uint64_t>(arrayType->size)), {1});
+}
+
 llvm::Type* CodegenContext::getLLVMType(Type* type) {
     if (!type) return llvm::Type::getVoidTy(*context);
 

@@ -266,6 +266,16 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
                     initVal = ctx.loadValue(initVal, initExpr->type);
                 }
                 initVal = ctx.castValue(initVal, initExpr->type, llvmType);
+                // TYP-12: array initializer decays to a slice view.
+                {
+                    Type* it = stripTypedefs(initExpr->type);
+                    Type* vt = stripTypedefs(type);
+                    if (it && it->kind == TypeKind::Array && vt &&
+                        vt->kind == TypeKind::Slice) {
+                        initVal = ctx.emitArrayToSliceDecay(
+                            static_cast<ArrayType*>(it), initVal);
+                    }
+                }
                 ctx.getBuilder().CreateStore(initVal, alloca);
             }
         }

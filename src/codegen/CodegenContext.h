@@ -80,6 +80,10 @@ public:
     // `uitofp`) instead of the signed variants.
     llvm::Value* castValue(llvm::Value* val, Type* fromAST, llvm::Type* targetLLVMType);
 
+    // TYP-12: build the {ptr, len} slice view over a statically-sized array
+    // (zero-copy; the elements are never duplicated).
+    llvm::Value* emitArrayToSliceDecay(ArrayType* arrayType, llvm::Value* arrayAddr);
+
 private:
     std::unique_ptr<llvm::LLVMContext> context;
     llvm::IRBuilder<> builder;

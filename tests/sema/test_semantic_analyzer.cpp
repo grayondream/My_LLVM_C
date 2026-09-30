@@ -943,3 +943,20 @@ TEST(SliceSemTest, CrossElementDecayRejected) {
         "int64 total(float64[] s) { return 0; } "
         "int32 main() { int32 arr[3] = {1,2,3}; return total(arr); }"));
 }
+
+// TYP-12 Task 5: array->slice decay in assignment/init/return; cross-element
+// slice compatibility is rejected (Review Focus #1).
+TEST(SliceSemTest, ArrayToSliceAssignmentAccepted) {
+    EXPECT_TRUE(analyzeOk(
+        "int32 main() { int32 arr[3] = {1,2,3}; int32[] s = arr; return 0; }"));
+}
+
+TEST(SliceSemTest, SliceToArrayRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { int32[] s; int32 arr[3] = {1,2,3}; arr = s; return 0; }"));
+}
+
+TEST(SliceSemTest, CrossElementSliceAssignmentRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { int32[] a; float64[] b = a; return 0; }"));
+}

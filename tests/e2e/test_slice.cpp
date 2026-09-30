@@ -92,3 +92,26 @@ TEST_F(SliceE2ETest, DecayedSliceIsZeroCopy) {
         }
     )", "test_slice_decay.c"), 0);
 }
+
+// TYP-12 Task 5: subscript read + write through a decayed slice.
+TEST_F(SliceE2ETest, SubscriptReadWrite) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            int32 arr[3] = {7, 8, 9};
+            int32[] s = arr;
+            return s[1] == 8 ? 0 : 1;
+        }
+    )", "test_slice_subscript.c"), 0);
+}
+
+// TYP-12 Task 5: decay through plain assignment too.
+TEST_F(SliceE2ETest, DecayThroughAssignment) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            int32 arr[3] = {7, 8, 9};
+            int32[] s = arr;
+            s[2] = 42;
+            return arr[2] == 42 && s[0] == 7 ? 0 : 1;
+        }
+    )", "test_slice_assign.c"), 0);
+}

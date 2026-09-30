@@ -244,6 +244,14 @@ bool SemanticAnalyzer::typesCompatible(Type* left, Type* right) const {
         return left->kind == TypeKind::Enum && right->kind == TypeKind::Enum &&
                static_cast<EnumType*>(left)->name == static_cast<EnumType*>(right)->name;
     }
+    // TYP-12: slices match by element type only (int32[] != float64[]);
+    // arrays decay to slice views. Checked before the generic same-kind rule.
+    if (left->kind == TypeKind::Slice && right->kind == TypeKind::Slice)
+        return typesEqual(static_cast<SliceType*>(left)->elementType,
+                          static_cast<SliceType*>(right)->elementType);
+    if (left->kind == TypeKind::Slice && right->kind == TypeKind::Array)
+        return typesEqual(static_cast<SliceType*>(left)->elementType,
+                          static_cast<ArrayType*>(right)->elementType);
     if (left->kind == right->kind) return true;
     if (isArithmeticType(left) && isArithmeticType(right)) return true;
     if (left->kind == TypeKind::Pointer && right->kind == TypeKind::Pointer) return true;
@@ -458,6 +466,15 @@ Type* SemanticAnalyzer::checkAssignmentTypes(Type* lhs, Type* rhs, ExprAST& node
     }
 
     if (isArithmeticType(lhsS) && isArithmeticType(rhsS)) return lhsRaw;
+    // TYP-12: slice targets must match by element type; arrays decay to
+    // slice views (zero-copy). Tightens the generic same-kind rule that
+    // silently accepted int32[] = float64[].
+    if (lhsS->kind == TypeKind::Slice && rhsS->kind == TypeKind::Slice)
+        return typesEqual(static_cast<SliceType*>(lhsS)->elementType,
+                          static_cast<SliceType*>(rhsS)->elementType) ? lhsRaw : nullptr;
+    if (lhsS->kind == TypeKind::Slice && rhsS->kind == TypeKind::Array)
+        return typesEqual(static_cast<SliceType*>(lhsS)->elementType,
+                          static_cast<ArrayType*>(rhsS)->elementType) ? lhsRaw : nullptr;
     if (lhsS->kind == rhsS->kind) return lhsRaw;
     if (isPointerOrArray(lhsS) && isPointerOrArray(rhsS)) return lhsRaw;
     if (isPointerOrArray(lhsS) && isIntegerType(rhsS)) return lhsRaw;
