@@ -329,3 +329,11 @@
 - Rulings（执行中）：①MethodCall 传参退化不做（resolveMethod/mangle 以 arg->type 匹配，sema 不支持退化，单改 codegen 前后端不一致）→ TODO；②`int32 arr[2]` 形参语法不解析（TYP-11 缺口）且返回局部数组为悬垂 UB → 删该用例、退化分支保留；③typesCompatible 的 slice 分支须置于 kind==kind 早退之前；④全局变量 codegen 缺口（`int32 g;` 不生成符号，CLI 实证通用问题）→ 移除全局用例、挂 TODO。
 - 终审：subagent 评审两次失败（R7/R7b 沿袭）→ 作者自审：无 Critical/Important；deferred minor 2 条（嵌套 slice codegen e2e 缺口、stripTypedefs 重复）。
 - 遗留：MethodCall 退化、形参数组语法（TYP-11）、全局变量 codegen 缺口、范围切片/显式构造（YAGNI）——均挂 TODO。
+
+## 2026-10-01 全局变量 codegen 缺口修复
+
+- 根因：`VarDeclAST::codegen` 全局分支把 `InitVal=nullptr` 传给 `GlobalVariable`，LLVM 视为 external 声明（不分配存储）→ `int32 g;` 链接 undefined reference；有初始化器则正常（TYP-12 轮实证残留项）。
+- 修复：`src/ast/Decl.cpp` 全局无初始化器时回退 `Constant::getNullValue`（零初始化定义，对齐 C tentative definition）；`extern` 变量语义范围外（语言无该标志，YAGNI）。
+- 测试：新建 `tests/e2e/test_globals.cpp`（GlobalsE2E 4 项，含恢复的 TYP-12 全局 slice `{null,0}` 用例）；RED（3 FAIL/1 OK 精确预测）→ GREEN；全量 **772/772**。
+- 验证：CLI 复现用例 `int32 g2;` 编译链接运行 exit=0。
+- 遗留：MethodCall 传参退化、`return` 退化待 TYP-11 形参数组语法（见 TODO.md）。
