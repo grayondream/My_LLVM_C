@@ -967,3 +967,46 @@ TEST(SliceSemTest, DanglingLocalArrayReturnRejected) {
         "int32[] bad() { int32 a[2] = {1,2}; return a; } "
         "int32 main() { return 0; }"));
 }
+
+// TYP-11 D2: T name[N] parameter desugars to slice T[].
+TEST(SliceSemTest, ArrayParamAccepted) {
+    EXPECT_TRUE(analyzeOk(
+        "int32 APSum(int32 a[2]) { return a[0] + a[1]; } "
+        "int32 main() { int32 arr[2] = {3,4}; return APSum(arr); }"));
+}
+
+TEST(SliceSemTest, CrossElementArrayParamRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int64 APF(float64 a[2]) { return 0; } "
+        "int32 main() { int32 arr[2] = {3,4}; return APF(arr); }"));
+}
+
+TEST(SliceSemTest, FunctionPointerArrayParamDesugared) {
+    EXPECT_TRUE(analyzeOk(
+        "int32 APUse(int32 cb(int32 a[2])) { return 0; } "
+        "int32 main() { return 0; }"));
+}
+
+// analyzeOk ignores parse errors — use the explicit pipeline to pin the
+// parse-level rejection.
+TEST(SliceSemTest, MultiDimArrayParamRejected) {
+    Lexer lexer("test.c",
+        "int32 main() { return 0; } "
+        "int32 APBad(int32 a[2][3]) { return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_TRUE(ast != nullptr);
+    EXPECT_FALSE(parser.getErrors().empty());
+}
+
+TEST(SliceSemTest, UnnamedArrayParamRejected) {
+    Lexer lexer("test.c",
+        "int32 main() { return 0; } "
+        "int32 APAnon(int32[2]) { return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_TRUE(ast != nullptr);
+    EXPECT_FALSE(parser.getErrors().empty());
+}

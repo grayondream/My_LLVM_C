@@ -2260,6 +2260,22 @@ std::unique_ptr<ParamDeclAST> Parser::parseParamDecl() {
 
     if (check(TokenType::TOKEN_IDENTIFIER)) {
         name = advance()->lexeme;
+
+        // TYP-11 D2: `T name[N]` 参数语法去糖为 slice `T[]`（[N] 为文档性
+        // 标注，长度不静态检查——slice 长度本就动态，见
+        // docs/superpowers/specs/2026-10-01-typ11-array-params-design.md）。
+        if (check(TokenType::TOKEN_LBRACKET)) {
+            advance();
+            match(TokenType::TOKEN_NUMBER);
+            if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after array parameter size")) {
+                return nullptr;
+            }
+            type = TypeContext::instance().getSliceType(type);
+            if (check(TokenType::TOKEN_LBRACKET)) {
+                errorUnexpected("multi-dimensional array parameters are not supported");
+                return nullptr;
+            }
+        }
     }
 
     return std::make_unique<ParamDeclAST>(name, type);
