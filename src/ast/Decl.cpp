@@ -230,6 +230,12 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
             initConstant = llvm::dyn_cast_or_null<llvm::Constant>(
                 ctx.castValue(initConstant, initExpr ? initExpr->type : nullptr, llvmType));
         }
+        // 全局无初始化器时必须是零初始化**定义**：InitVal=nullptr 会让 LLVM
+        // 视为 external 声明（@g = external global T），不分配存储，链接时
+        // undefined reference。对齐 C 的 tentative definition 语义。
+        if (!initConstant) {
+            initConstant = llvm::Constant::getNullValue(llvmType);
+        }
         
         llvm::GlobalVariable::LinkageTypes linkage = type->isConst 
             ? llvm::GlobalVariable::PrivateLinkage 
