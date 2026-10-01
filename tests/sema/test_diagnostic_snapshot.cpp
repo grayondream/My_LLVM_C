@@ -84,6 +84,15 @@ int32 main() {
 )"));
 }
 
+TEST_F(DiagnosticSnapshotTest, LocalArrayReturnDangling) {
+    expectSnapshot("local_array_return_dangling", analyzeDiagnostics(R"(
+int32[] bad() {
+    int32 a[2] = {1, 2};
+    return a;
+}
+)"));
+}
+
 TEST_F(DiagnosticSnapshotTest, SliceMemberError) {
     expectSnapshot("slice_member_error", analyzeDiagnostics(R"(
 int32 main() {

@@ -1587,6 +1587,19 @@ void SemanticAnalyzer::visit(ReturnStmtAST& node) {
     if (node.value) {
         Type* retValType = getExprType(*node.value);
         if (currentFunction && retValType) {
+            // TYP-11 D4: 返回局部数组的 slice 视图是悬垂 UB（栈帧随 return
+            // 消亡）。当前所有 ArrayType 值均为局部变量，保守拒绝。
+            Type* fnRet = currentFunction->returnType;
+            while (fnRet && fnRet->kind == TypeKind::Typedef)
+                fnRet = static_cast<TypedefType*>(fnRet)->aliasedType;
+            Type* val = retValType;
+            while (val && val->kind == TypeKind::Typedef)
+                val = static_cast<TypedefType*>(val)->aliasedType;
+            if (fnRet && val && fnRet->kind == TypeKind::Slice &&
+                val->kind == TypeKind::Array) {
+                emitError("cannot return a slice view of a local array (dangling view)", node);
+                return;
+            }
             if (!typesCompatible(currentFunction->returnType, retValType)) {
                 emitError("return type mismatch in function '" + std::string(currentFunction->name) + "': expected '" 
                     + typeToString(currentFunction->returnType) + "', got '" + typeToString(retValType) + "'", node);

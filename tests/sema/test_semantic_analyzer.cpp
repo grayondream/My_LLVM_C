@@ -960,3 +960,10 @@ TEST(SliceSemTest, CrossElementSliceAssignmentRejected) {
     EXPECT_FALSE(analyzeOk(
         "int32 main() { int32[] a; float64[] b = a; return 0; }"));
 }
+
+// TYP-11 D4: returning a view of a local array dangles — rejected.
+TEST(SliceSemTest, DanglingLocalArrayReturnRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int32[] bad() { int32 a[2] = {1,2}; return a; } "
+        "int32 main() { return 0; }"));
+}
