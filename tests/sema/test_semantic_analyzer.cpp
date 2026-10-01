@@ -981,10 +981,22 @@ TEST(SliceSemTest, CrossElementArrayParamRejected) {
         "int32 main() { int32 arr[2] = {3,4}; return APF(arr); }"));
 }
 
+// Function-pointer parameters share parseParamDecl: `(*cb)(int32 a[2])`
+// desugars too. (A bare function-type parameter `int32 cb(int32 a[2])` is a
+// pre-existing parser gap — not pinned here.) analyzeOk ignores parse
+// errors, so use the explicit pipeline.
 TEST(SliceSemTest, FunctionPointerArrayParamDesugared) {
-    EXPECT_TRUE(analyzeOk(
-        "int32 APUse(int32 cb(int32 a[2])) { return 0; } "
-        "int32 main() { return 0; }"));
+    Lexer lexer("test.c",
+        "int32 APUse(int32 (*cb)(int32 a[2])) { return 0; } "
+        "int32 main() { return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_TRUE(ast != nullptr);
+    EXPECT_TRUE(parser.getErrors().empty());
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    EXPECT_TRUE(analyzer.getErrors().empty());
 }
 
 // analyzeOk ignores parse errors — use the explicit pipeline to pin the
@@ -997,7 +1009,12 @@ TEST(SliceSemTest, MultiDimArrayParamRejected) {
     Parser parser(tokens);
     auto ast = parser.parse();
     ASSERT_TRUE(ast != nullptr);
-    EXPECT_FALSE(parser.getErrors().empty());
+    ASSERT_FALSE(parser.getErrors().empty());
+    bool hasMultiDim = false;
+    for (auto& e : parser.getErrors())
+        if (e.message.find("multi-dimensional") != std::string::npos)
+            hasMultiDim = true;
+    EXPECT_TRUE(hasMultiDim);
 }
 
 TEST(SliceSemTest, UnnamedArrayParamRejected) {
@@ -1009,4 +1026,11 @@ TEST(SliceSemTest, UnnamedArrayParamRejected) {
     auto ast = parser.parse();
     ASSERT_TRUE(ast != nullptr);
     EXPECT_FALSE(parser.getErrors().empty());
+}
+
+// Minor 3 (review): empty brackets desugar too — `T name[]` == `T name[N]`.
+TEST(SliceSemTest, EmptyBracketsArrayParamDesugared) {
+    EXPECT_TRUE(analyzeOk(
+        "int32 APSum2(int32 a[]) { return a[0] + a[1]; } "
+        "int32 main() { int32 arr[2] = {3,4}; return APSum2(arr); }"));
 }

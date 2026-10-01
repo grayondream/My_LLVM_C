@@ -1597,7 +1597,7 @@ void SemanticAnalyzer::visit(ReturnStmtAST& node) {
                 val = static_cast<TypedefType*>(val)->aliasedType;
             if (fnRet && val && fnRet->kind == TypeKind::Slice &&
                 val->kind == TypeKind::Array) {
-                emitError("cannot return a slice view of a local array (dangling view)", node);
+                emitError("cannot return a slice view of an array with local storage (dangling view)", node);
                 return;
             }
             if (!typesCompatible(currentFunction->returnType, retValType)) {

@@ -1,1 +1,1 @@
-snapshot.c:4:5: error: cannot return a slice view of a local array (dangling view)
+snapshot.c:4:5: error: cannot return a slice view of an array with local storage (dangling view)

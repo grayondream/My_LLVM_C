@@ -163,7 +163,9 @@
 
 `T[N]` 到 `T[]` 的退化为**单向、零拷贝**：slice 仅持有 `{首元素指针, 长度}` 视图，不复制元素、不管理生命周期。写入经 slice 视图直达原数组。
 
-**发生位置**：函数传参、赋值、变量初始化（形参数组 `T name[N]` 已去糖为 slice（TYP-11），形参位置不存在 ArrayType；`return` 局部数组被拒绝（悬垂 D4））。
+**发生位置**：函数传参、赋值、变量初始化。形参数组 `T name[N]`（含空括号 `T name[]`，TYP-11）已去糖为 slice，形参位置不存在 ArrayType。
+
+`return` 局部数组被拒绝（悬垂 D4，"cannot return a slice view of an array with local storage"）。当前所有 ArrayType 值均具局部存储，故全局数组同样被保守拒绝；待全局/堆数组语义明确后按需放开。
 
 **表示与初始化**：slice 的 LLVM 形状为规范命名结构体 `{ptr(0), i64}`（所有元素类型共用单例）。声明未初始化的 slice 变量零初始化为**空切片** `{null, 0}`。
 

@@ -36,7 +36,7 @@
 
 ### 3.2 `visit(ReturnStmtAST)`（`src/sema/SemanticAnalyzer.cpp`）
 
-在现有返回类型检查前加守卫：若 `currentFunction->returnType`（去 typedef）为 Slice 且返回表达式类型（去 typedef）为 ArrayType → `emitError`（无码通道，与 struct no-member 一致）："cannot return a slice view of a local array (dangling)"，node.type = nullptr。
+在现有返回类型检查前加守卫：若 `currentFunction->returnType`（去 typedef）为 Slice 且返回表达式类型（去 typedef）为 ArrayType → `emitError`（无码通道，与 struct no-member 一致）："cannot return a slice view of an array with local storage (dangling view)"。（实现备注：`ReturnStmtAST` 无 type 字段，守卫仅报错；当前所有 ArrayType 值均具局部存储，全局数组被保守拒绝。）
 
 该守卫同时移除 TYP-12 Task 5 遗留的隐患：`typesCompatible` 的 Slice/Array 分支从 return 路径不可达（赋值/初始化路径不受影响）。
 

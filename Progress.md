@@ -337,3 +337,13 @@
 - 测试：新建 `tests/e2e/test_globals.cpp`（GlobalsE2E 4 项，含恢复的 TYP-12 全局 slice `{null,0}` 用例）；RED（3 FAIL/1 OK 精确预测）→ GREEN；全量 **772/772**。
 - 验证：CLI 复现用例 `int32 g2;` 编译链接运行 exit=0。
 - 遗留：MethodCall 传参退化、`return` 退化待 TYP-11 形参数组语法（见 TODO.md）。
+
+## 2026-10-01 TYP-11 数组形参去糖 分支评审（subagent）
+
+- 评审包：`.superpowers/sdd/2026-10-01-typ11-array-params/review-1639446..0c51cd0.diff`（4 commits，HEAD=0c51cd0，工作树一致）。
+- 实证验证：e2e 4 项 + 快照绿；全量 ctest 计数 **783**；CLI 复核 `int32 a[]` 空括号去糖、多维诊断、悬垂拒绝（含全局数组同拒）均正确。
+- 结论：实现本身无 Critical/Important 缺陷（D1–D4 一致，守卫 typedef 剥离正确，回归面干净）。
+- **Important 1**：`FunctionPointerArrayParamDesugared` 空转通过——`int32 cb(int32 a[2])` 直接函数类型形参 parser 根本不支持（CLI 实证 `expected ')'`），analyzeOk 忽略 parse 错误 → AST 只剩 main → 恒真；Review Focus 4 未被真正钉住。真实共用路径（函数指针 `int32 (*cb)(int32 a[2])`，经 `parseFunctionPointerType`→`parseParamDecl`）去糖正确但无任何测试。
+- **Important 2**：多维形参诊断文案（"multi-dimensional array parameters are not supported"）无测试断言，`MultiDimArrayParamRejected` 改前改后均绿，Review Focus 2 的差异化行为未被验证。
+- Minor：诊断文案 spec/plan 不一致（"(dangling)" vs "(dangling view)"）且对全局数组同样报 "local array"；TODO.md P1-01（:511）未按 Task 3 Step 4 同步（"数组形参"已完成仍列为剩余）；`T name[]` 空括号去糖属未记录扩展（spec/测试未提）；spec §3.2 "node.type = nullptr" 与实现不符（ReturnStmtAST 无该字段）。
+- 下一步：作者修复两个 Important（改显式管线 + 函数指针拼写；补文案断言）与 Minor 文档项。
