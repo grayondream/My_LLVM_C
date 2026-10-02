@@ -356,3 +356,13 @@
 - 测试：sema 5 项 + e2e 2 项（`tests/e2e/test_method_args.cpp`，MethodArgsE2E）；全量 **791/791**（基线 784）。
 - 裁定：RED 表现为段错误（未实现通道 calleeFn 空解引用，既有缺陷）——按 crash=RED 继续；方法声明但未定义仍崩溃（现状即如此）挂遗留。
 - 遗留：calleeFn 为 null 时无防护（既有）；重载最优匹配打分（YAGNI）。
+
+## 2026-10-02 MethodCall 传参退化 分支评审（subagent）
+
+- 评审包：`.superpowers/sdd/2026-10-02-methodcall-decay/review-4b346c7..7e5aa72.diff`（4 commits，HEAD=7e5aa72）。
+- 实证验证：构建 + 全量 ctest **791/791**（3 连绿；首跑 1 次 `EnumStrongE2E.ExplicitCastIntToEnumAllowed` 偶发 SegFault，与本分支无关）；CLI 探针 5 项：null argType（`m.g(nosuchvar)`）正确拒绝不崩溃、跨类精确匹配仍胜过派生类 rank 候选、数组→指针形参新放行可用、继承链数组实参写穿透正确。
+- 结论：实现无 Critical 缺陷；D1–D5 一致，resolveMethod 阶段 1 原样保留（精确等价），基类方法先拷入派生类方法表保证 phase 1 先于 phase 2 覆盖基类精确匹配。
+- **Important 1**：D4 null-argType 守卫分支（SemanticAnalyzer.cpp:2140 `!argTypes[i]`）零测试覆盖——`MethodNullArgGuard` 实际只测 arity 失配（`m.g()` 时 argTypes 为空，循环体不执行）；Review Focus 5 的真实场景无防护。
+- **Important 2**：Review Focus 3 的 codegen 主张（resolvedParamTypes 为基类声明形参 → mangle 命中基类定义）仅有 sema 级测试，test_method_args.cpp 无继承 e2e（plan 自身映射缺口）。
+- Minor：phase 2 放行面为 conversionRank 全谱系（加宽/指针/null→指针），文档口径偏窄为"数组→slice"；spec D5"arg->type 非空时"括号限定未按字面实现（不可达，castValue 自身容错）；EnumStrongE2E 偶发 SegFault 建议另行跟踪。
+- 下一步：作者补 null-argType sema 测试与继承 e2e 各 1 项；Minor 文档口径可选。
