@@ -656,19 +656,26 @@ llvm::Value* MethodCallExprAST::codegen(CodegenContext& ctx) {
         className = structType->name;
     }
 
-    // Build argument types: this pointer first, then explicit args
+    // Prefer the parameter types chosen by semantic analysis (incl. this) so
+    // decayed arguments mangle against the definition site. Mirror of
+    // CallExprAST::codegen.
     std::vector<Type*> argTypes;
-    Type* thisType = new Type(TypeKind::Pointer, objType);
-    argTypes.push_back(thisType);
-    for (auto& arg : args) {
-        argTypes.push_back(arg->type);
+    if (!resolvedParamTypes.empty()) {
+        argTypes = resolvedParamTypes;
+    } else {
+        Type* thisType = new Type(TypeKind::Pointer, objType);
+        argTypes.push_back(thisType);
+        for (auto& arg : args) {
+            argTypes.push_back(arg->type);
+        }
     }
 
     std::string mangledName = mangleFunction(methodName, argTypes);
 
     llvm::Function* calleeFn = ctx.getModule().getFunction(mangledName);
-    if (!calleeFn) {
-        // Walk inheritance chain to find the declaring class
+    if (!calleeFn && resolvedParamTypes.empty()) {
+        // Walk inheritance chain to find the declaring class (fallback only:
+        // sema already resolved through the chain into resolvedParamTypes).
         ClassType* searchType = classType;
         while (!calleeFn && searchType && !searchType->baseClass.empty()) {
             ClassType* baseType = TypeContext::instance().getClass(searchType->baseClass);
@@ -693,11 +700,23 @@ llvm::Value* MethodCallExprAST::codegen(CodegenContext& ctx) {
     std::vector<llvm::Value*> argsV;
     // Pass object pointer as the this argument
     argsV.push_back(objVal);
-    for (auto& arg : args) {
-        llvm::Value* argVal = arg->codegen(ctx);
+    for (size_t i = 0; i < args.size(); ++i) {
+        llvm::Value* argVal = args[i]->codegen(ctx);
         if (!argVal) return nullptr;
-        if (arg->isLValue) {
-            argVal = emitLoad(ctx, argVal, arg->type);
+        if (args[i]->isLValue) {
+            argVal = emitLoad(ctx, argVal, args[i]->type);
+        }
+        // resolvedParamTypes[0] is this — explicit argument i maps to [i+1].
+        if (i + 1 < resolvedParamTypes.size()) {
+            if (isArrayToSliceArg(args[i]->type, resolvedParamTypes[i + 1])) {
+                // TYP-12: array -> slice view; no element copy.
+                argVal = ctx.emitArrayToSliceDecay(
+                    static_cast<ArrayType*>(stripTypedefsT12(args[i]->type)),
+                    argVal);
+            } else {
+                argVal = ctx.castValue(argVal, args[i]->type,
+                                       ctx.getLLVMType(resolvedParamTypes[i + 1]));
+            }
         }
         argsV.push_back(argVal);
     }
