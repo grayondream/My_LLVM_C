@@ -347,3 +347,12 @@
 - **Important 2**：多维形参诊断文案（"multi-dimensional array parameters are not supported"）无测试断言，`MultiDimArrayParamRejected` 改前改后均绿，Review Focus 2 的差异化行为未被验证。
 - Minor：诊断文案 spec/plan 不一致（"(dangling)" vs "(dangling view)"）且对全局数组同样报 "local array"；TODO.md P1-01（:511）未按 Task 3 Step 4 同步（"数组形参"已完成仍列为剩余）；`T name[]` 空括号去糖属未记录扩展（spec/测试未提）；spec §3.2 "node.type = nullptr" 与实现不符（ReturnStmtAST 无该字段）。
 - 下一步：作者修复两个 Important（改显式管线 + 函数指针拼写；补文案断言）与 Minor 文档项。
+
+## 2026-10-02 MethodCall 传参退化（TYP-12 遗留）
+
+- 流程：brainstorming → spec（`docs/superpowers/specs/2026-10-02-methodcall-decay-design.md`，`4b346c7`，D1–D5）→ plan（`docs/superpowers/plans/2026-10-02-methodcall-decay.md`，`208d173`）→ Native 3 任务。
+- 根因：①sema `resolveMethod` 按 Type* 指针同一性匹配（数组实参对 slice 形参必失配）；②codegen 按实参类型 mangle（定义点按声明类型）。
+- 实现：`MethodCallExprAST::resolvedParamTypes`（含 this）；`resolveMethod` 两阶段（先精确后 conversionRank>=0，null argType 淘汰）；codegen 按 resolvedParamTypes mangle + `emitArrayToSliceDecay` 退化 + `castValue`。
+- 测试：sema 5 项 + e2e 2 项（`tests/e2e/test_method_args.cpp`，MethodArgsE2E）；全量 **791/791**（基线 784）。
+- 裁定：RED 表现为段错误（未实现通道 calleeFn 空解引用，既有缺陷）——按 crash=RED 继续；方法声明但未定义仍崩溃（现状即如此）挂遗留。
+- 遗留：calleeFn 为 null 时无防护（既有）；重载最优匹配打分（YAGNI）。

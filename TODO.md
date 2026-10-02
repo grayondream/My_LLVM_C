@@ -129,7 +129,7 @@
 - `[x]` **TYP-09** `enum` 强类型：底层类型 `:uint8`、固定大小、不隐式转换。底层类型/固定大小、名义相等与 `enum ↔ int` 强制显式转换（TYP-20）均已实现。
 - `[ ]` **TYP-10** `union`：C 风格布局、初始化、访问。
 - `[~]` **TYP-11** 固定数组 `i32[32]`；VLA（可变长度数组）；多维数组。**部分完成**（2026-10-01）：一维数组形参 `T name[N]` 去糖为 slice（spec `docs/superpowers/specs/2026-10-01-typ11-array-params-design.md`，D1 仅一维/D2 parser 层去糖/D3 [N] 文档性/D4 悬垂封堵——return 局部数组视图被拒绝）；待补：多维数组本体、多维形参、VLA。
-- `[x]` **TYP-12** `Slice`：`{ptr, length}`，不拥有、零拷贝。**已完成**：下标读写、`.len`、数组→slice 单向零拷贝退化（传参/赋值/初始化）、零初始化 `{null,0}`、规范 LLVM 单例类型、slice 元素类型严格比较。范围外（spec `docs/superpowers/specs/2026-09-30-slice-design.md` §8）：范围切片、显式构造、边界检查、字符串退化；遗留：MethodCall 传参退化（sema resolveMethod 不支持）。全局变量 codegen 缺口已修复（无初始化器全局现为零初始化定义）；`T name[N]` 形参已去糖（TYP-11），return 局部数组被拒绝（悬垂 D4）。
+- `[x]` **TYP-12** `Slice`：`{ptr, length}`，不拥有、零拷贝。**已完成**：下标读写、`.len`、数组→slice 单向零拷贝退化（传参/赋值/初始化）、零初始化 `{null,0}`、规范 LLVM 单例类型、slice 元素类型严格比较。范围外（spec `docs/superpowers/specs/2026-09-30-slice-design.md` §8）：范围切片、显式构造、边界检查、字符串退化；遗留：无（MethodCall 传参退化已完成，2026-10-02——resolveMethod 两阶段匹配 + resolvedParamTypes，spec docs/superpowers/specs/2026-10-02-methodcall-decay-design.md）。全局变量 codegen 缺口已修复（无初始化器全局现为零初始化定义）；`T name[N]` 形参已去糖（TYP-11），return 局部数组被拒绝（悬垂 D4）。
 - `[ ]` **TYP-13** `Optional<T>`：`{ bool valid; T value; }`；显式访问（**无 `?` 传播算子**）。
 - `[ ]` **TYP-14** `Result<T,E>`：布局与 `.error`/`.value` 语义；显式访问。
 - `[ ]` **TYP-15** 指针类型：`T*`、函数指针、多级指针。
