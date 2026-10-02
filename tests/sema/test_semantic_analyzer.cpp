@@ -1034,3 +1034,41 @@ TEST(SliceSemTest, EmptyBracketsArrayParamDesugared) {
         "int32 APSum2(int32 a[]) { return a[0] + a[1]; } "
         "int32 main() { int32 arr[2] = {3,4}; return APSum2(arr); }"));
 }
+
+// TYP-12 legacy: a method with a slice parameter accepts an array argument
+// (zero-copy decay), mirroring plain function calls.
+TEST(SliceSemTest, MethodSliceParamAcceptsArray) {
+    EXPECT_TRUE(analyzeOk(
+        "class MCBox { public: void bump(int32[] s) { s[0] = s[0] + 100; } }; "
+        "int32 main() { MCBox b; int32 arr[2] = {1,2}; b.bump(arr); return 0; }"));
+}
+
+// Exact-match resolution must stay equivalent to the previous behaviour.
+TEST(SliceSemTest, MethodExactMatchUnchanged) {
+    EXPECT_TRUE(analyzeOk(
+        "class MCCnt { public: int32 x; void setX(int32 v) { this->x = v; } }; "
+        "int32 main() { MCCnt c; c.setX(42); return 0; }"));
+}
+
+// Cross-element decay must not slip through rank-based matching.
+TEST(SliceSemTest, MethodCrossElementRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "class MCF { public: void f(float64[] s) { } }; "
+        "int32 main() { MCF m; int32 arr[2] = {1,2}; m.f(arr); return 0; }"));
+}
+
+// Resolution through the inheritance chain stores the base class's declared
+// parameter types (incl. base this) for codegen mangling.
+TEST(SliceSemTest, MethodInheritedSliceParamAccepted) {
+    EXPECT_TRUE(analyzeOk(
+        "class MCB { public: void bump(int32[] s) { s[0] = s[0] + 1; } }; "
+        "class MCD : public MCB { public: int32 y; }; "
+        "int32 main() { MCD d; int32 arr[2] = {1,2}; d.bump(arr); return 0; }"));
+}
+
+// Missing/invalid arguments must neither crash nor resolve.
+TEST(SliceSemTest, MethodNullArgGuard) {
+    EXPECT_FALSE(analyzeOk(
+        "class MCG { public: void g(int32[] s) { } }; "
+        "int32 main() { MCG m; m.g(); return 0; }"));
+}

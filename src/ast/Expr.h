@@ -273,6 +273,10 @@ public:
     std::string methodName;
     std::vector<std::unique_ptr<ExprAST>> args;
 
+    // Declared parameter types (incl. this at index 0) filled by sema so
+    // codegen mangles against the definition site. Mirror of CallExprAST.
+    std::vector<Type*> resolvedParamTypes;
+
     MethodCallExprAST(std::unique_ptr<ExprAST> obj, const std::string& method,
                       std::vector<std::unique_ptr<ExprAST>> arguments)
         : object(std::move(obj)), methodName(method), args(std::move(arguments)) {}

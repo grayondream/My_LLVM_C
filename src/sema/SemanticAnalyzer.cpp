@@ -1528,6 +1528,9 @@ void SemanticAnalyzer::visit(MethodCallExprAST& node) {
     }
 
     auto* funcType = static_cast<FunctionType*>(method->type);
+    // Store the declared parameter types (incl. this) so codegen mangles
+    // against the definition site — required for decayed arguments.
+    node.resolvedParamTypes = funcType->paramTypes;
     node.type = funcType->returnType;
     node.isLValue = false;
     delete method;
@@ -2121,6 +2124,28 @@ Symbol* SemanticAnalyzer::resolveMethod(ClassType* classType, const std::string&
                     return sym;
                 }
             }
+        }
+    }
+
+    // Phase 2: decay/implicit conversions — first candidate (declaration
+    // order) where every argument converts to the declared parameter type
+    // (conversionRank >= 0). A null argument type disqualifies the candidate
+    // (the error was already reported when resolving the argument).
+    for (auto& method : classType->methods) {
+        if (method.first != methodName) continue;
+        auto* funcType = method.second;
+        if (funcType->paramTypes.size() - 1 != argTypes.size()) continue;
+        bool match = true;
+        for (size_t i = 0; i < argTypes.size(); ++i) {
+            if (!argTypes[i] ||
+                conversionRank(argTypes[i], funcType->paramTypes[i + 1]) < 0) {
+                match = false;
+                break;
+            }
+        }
+        if (match) {
+            Symbol* sym = new Symbol(methodName, funcType);
+            return sym;
         }
     }
 
