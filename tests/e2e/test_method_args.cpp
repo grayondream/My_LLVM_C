@@ -99,3 +99,25 @@ TEST_F(MethodArgsE2E, MethodArrayParamReturnValue) {
         }
     )", "test_mc_retval.c"), 0);
 }
+
+// Review Focus 3: resolution through the inheritance chain must store the
+// base class's declared parameter types (incl. base this) so codegen mangles
+// against the base class definition.
+TEST_F(MethodArgsE2E, MethodInheritedArrayParam) {
+    EXPECT_EQ(runSource(R"(
+        class BaseBox {
+            public:
+            void bump(int32[] s) { s[0] = s[0] + 42; }
+        };
+        class DerivedBox : public BaseBox {
+            public:
+            int32 y;
+        };
+        int32 main() {
+            DerivedBox d;
+            int32 arr[2] = {0, 9};
+            d.bump(arr);
+            return (arr[0] == 42 && arr[1] == 9) ? 0 : 1;
+        }
+    )", "test_mc_inherited.c"), 0);
+}

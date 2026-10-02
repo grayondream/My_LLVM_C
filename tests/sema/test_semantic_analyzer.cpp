@@ -1072,3 +1072,12 @@ TEST(SliceSemTest, MethodNullArgGuard) {
         "class MCG { public: void g(int32[] s) { } }; "
         "int32 main() { MCG m; m.g(); return 0; }"));
 }
+
+// Review Focus 5: an argument whose type fails to resolve (undeclared
+// variable) must be disqualified by the null-argType guard, not fed to
+// conversionRank. Arity matches so phase 2's loop body actually runs.
+TEST(SliceSemTest, MethodNullArgTypeGuardRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "class MCG { public: void g(int32[] s) { } }; "
+        "int32 main() { MCG m; m.g(nosuch); return 0; }"));
+}
