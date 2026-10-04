@@ -366,3 +366,11 @@
 - **Important 2**：Review Focus 3 的 codegen 主张（resolvedParamTypes 为基类声明形参 → mangle 命中基类定义）仅有 sema 级测试，test_method_args.cpp 无继承 e2e（plan 自身映射缺口）。
 - Minor：phase 2 放行面为 conversionRank 全谱系（加宽/指针/null→指针），文档口径偏窄为"数组→slice"；spec D5"arg->type 非空时"括号限定未按字面实现（不可达，castValue 自身容错）；EnumStrongE2E 偶发 SegFault 建议另行跟踪。
 - 下一步：作者补 null-argType sema 测试与继承 e2e 各 1 项；Minor 文档口径可选。
+
+## 2026-10-03 多维数组本体（TYP-11 剩余之一）
+
+- 流程：brainstorming → spec（docs/superpowers/specs/2026-10-03-multidim-arrays-design.md，6652f2f，D1–D5）→ plan（docs/superpowers/plans/2026-10-03-multidim-arrays.md，8bc8490）→ Native 3 任务。
+- 冻结决策：D1 嵌套 ArrayType（[2 x [3 x i32]]）；D2 parser 维度链从右向左（parseVariableDecl + parseMemberArraySuffix，sema 零改动）；D3 首维推断；D4 codegen 零改动（六条递归通路复用）；D5 整体多维→slice 不放行/悬垂守卫自动覆盖。
+- 实现外发现：全局数组带初始化器为既有缺口（一维亦崩、无测试覆盖）——ArrayDeclAST::codegen 补全局分支（镜像 VarDeclAST），一维全局顺带修复。
+- 测试：sema 6 项 + e2e 4 项（tests/e2e/test_multidim.cpp，MultiDimE2E）；全量 **803/803**（基线 793）。
+- 遗留：多维形参（语义待定：行 slice 的 slice / 扁平化）、VLA；行级初始化长度校验（范围外，1-D 亦无）。
