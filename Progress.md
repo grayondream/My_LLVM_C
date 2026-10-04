@@ -374,3 +374,15 @@
 - 实现外发现：全局数组带初始化器为既有缺口（一维亦崩、无测试覆盖）——ArrayDeclAST::codegen 补全局分支（镜像 VarDeclAST），一维全局顺带修复。
 - 测试：sema 6 项 + e2e 4 项（tests/e2e/test_multidim.cpp，MultiDimE2E）；全量 **803/803**（基线 793）。
 - 遗留：多维形参（语义待定：行 slice 的 slice / 扁平化）、VLA；行级初始化长度校验（范围外，1-D 亦无）。
+
+## 2026-10-04 多维数组本体 分支评审（subagent）
+
+- 评审包：`.superpowers/sdd/2026-10-03-multidim-arrays/review-6652f2f..5e1afda.diff`（4 commits，HEAD=5e1afda）。
+- 实证验证：构建 + 全量 ctest **803/803**；IR 探针 3 项：`[2][3]` 建为 `[2 x [3 x i32]]`（维度顺序正确）、3-D `[2][3][2]` 初始化行主序且 `sizeof==48` 常量折叠正确、`a[2][]` 缺省内层维度被静默接受为 `[2 x [0 x i32]]`（OOB GEP）、`int32 g[2] = 5;` 全局被静默零初始化（`= 5` 丢弃，IR `zeroinitializer` 证实）。
+- 结论：核心实现（D1–D5、维度右向左、1-D 等价、全局分支）无 Critical 缺陷；Review Focus 1–4 全部有布局敏感测试钉住。
+- **Important 1**：非首维缺省维度被静默接受（`a[2][]`→`[2 x [0 x i32]]`，成员侧缺省为 1）——OOB 误码无诊断。
+- **Important 2**：ArrayDeclAST::codegen 全局分支（Decl.cpp:407-415）静默丢弃非列表初始化器；sema :1741 以 elementType（而非数组类型）比对实参使 `g[2] = 5` 通过。
+- **Important 3**：Review Focus 5 成员字段多维仅 sema 级验收，成员字段多维读写 codegen 无 e2e。
+- Minor：全局 const 数组 ExternalLinkage 与 VarDeclAST const 标量 PrivateLinkage 不一致（镜像不完整）；parseVariableDecl 逆序循环 `i>=1` 依赖隐式保证；parseMemberArraySuffix 忽略 expect 失败（既有）；局部多维 sizeof / 3-D / 全局首维推断无回归钉；buildAggregateConstant 非常量元素静默补零（既有，VarDecl 同）。
+- 下一步：作者补 1 个成员字段多维 e2e；Important 1/2 建议本分支或紧随轮修复（各 1 个拒绝用例 + 全局分支兜底）。
+- 评审修复（dbcb685）：非首维缺省拒绝（防零长度行+越界 GEP）、数组标量初始化拒绝（防静默丢值）、成员字段多维 e2e。全量 806/806。
