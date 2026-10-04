@@ -399,6 +399,27 @@ llvm::Value* ArrayDeclAST::codegen(CodegenContext& ctx) {
     }
 
     llvm::ArrayType* arrType = llvm::ArrayType::get(elemLLVMType, effectiveSize);
+
+    // Global arrays mirror VarDeclAST's global branch: a definition with
+    // storage. The zero-init fallback keeps it a definition (InitVal=nullptr
+    // would make LLVM treat it as an external declaration). Nested
+    // initializer lists recurse through buildAggregateConstant.
+    if (ctx.isGlobalScope()) {
+        llvm::Constant* initConstant = nullptr;
+        if (initList) {
+            Type* astArrayType = new ArrayType(elementType, effectiveSize);
+            initConstant = buildAggregateConstant(ctx, astArrayType, initList);
+        }
+        if (!initConstant) {
+            initConstant = llvm::Constant::getNullValue(arrType);
+        }
+        llvm::GlobalVariable* global = new llvm::GlobalVariable(
+            ctx.getModule(), arrType, elementType->isConst,
+            llvm::GlobalVariable::ExternalLinkage, initConstant, name);
+        ctx.declareVariable(name, global, new ArrayType(elementType, effectiveSize));
+        return global;
+    }
+
     llvm::AllocaInst* alloca = ctx.getBuilder().CreateAlloca(arrType, nullptr, name);
 
     if (initList) {
