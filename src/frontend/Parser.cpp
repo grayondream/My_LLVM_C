@@ -2287,17 +2287,41 @@ std::unique_ptr<ParamDeclAST> Parser::parseParamDecl() {
         // TYP-11 D2: `T name[N]` 参数语法去糖为 slice `T[]`（[N] 为文档性
         // 标注，长度不静态检查——slice 长度本就动态，见
         // docs/superpowers/specs/2026-10-01-typ11-array-params-design.md）。
+        // 多维扩展：`T name[][K]` 去糖为行 slice `Slice<ArrayType(T, K)>`，
+        // 仅首维可缺省（内维缺省拒绝），见
+        // docs/superpowers/specs/2026-10-04-multidim-array-params-design.md。
         if (check(TokenType::TOKEN_LBRACKET)) {
-            advance();
-            match(TokenType::TOKEN_NUMBER);
-            if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after array parameter size")) {
-                return nullptr;
+            std::vector<int> dims;
+            std::vector<bool> explicitDim;
+            while (check(TokenType::TOKEN_LBRACKET)) {
+                advance();
+                int dimSize = 0;
+                bool hasNumber = false;
+                if (auto numTok = match(TokenType::TOKEN_NUMBER)) {
+                    dimSize = static_cast<int>(std::get<long long>(numTok->value));
+                    hasNumber = true;
+                }
+                if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after array parameter size")) {
+                    return nullptr;
+                }
+                dims.push_back(dimSize); // 首维数值仅文档性；内维数值构成行类型
+                explicitDim.push_back(hasNumber);
             }
-            type = TypeContext::instance().getSliceType(type);
-            if (check(TokenType::TOKEN_LBRACKET)) {
-                errorUnexpected("multi-dimensional array parameters are not supported");
-                return nullptr;
+            // C 约束：仅首维可缺省（由初始化器/实参推断）。内维缺省会静默
+            // 产生零长度行与越界下标，解析期拒绝。
+            for (size_t i = 1; i < dims.size(); ++i) {
+                if (!explicitDim[i]) {
+                    errorUnexpected("expected array dimension: only the first dimension may be empty");
+                    return nullptr;
+                }
             }
+            // 从右向左：`T name[][3]` = Slice<ArrayType(T, 3)>（C 语义，
+            // 与 parseVariableDecl 的声明维度链同构）。
+            Type* elemType = type;
+            for (size_t i = dims.size() - 1; i >= 1; --i) {
+                elemType = new ArrayType(elemType, dims[i]);
+            }
+            type = TypeContext::instance().getSliceType(elemType);
         }
     }
 

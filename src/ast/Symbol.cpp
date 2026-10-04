@@ -5,8 +5,15 @@ bool typesEqual(Type* a, Type* b) {
     if (a->kind != b->kind) return false;
     switch (a->kind) {
         case TypeKind::Pointer:
-        case TypeKind::Array:
             return typesEqual(a->base, b->base);
+        case TypeKind::Array: {
+            // Array types carry their length and element type: int32[2] !=
+            // int32[3], and int32[2] != float64[2] (C semantics). Note
+            // ArrayType stores its element in `elementType`, not `base`.
+            auto* aa = static_cast<ArrayType*>(a);
+            auto* ab = static_cast<ArrayType*>(b);
+            return aa->size == ab->size && typesEqual(aa->elementType, ab->elementType);
+        }
         case TypeKind::Struct: {
             auto* sa = static_cast<StructType*>(a);
             auto* sb = static_cast<StructType*>(b);

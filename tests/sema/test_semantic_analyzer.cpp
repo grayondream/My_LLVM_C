@@ -1001,7 +1001,10 @@ TEST(SliceSemTest, FunctionPointerArrayParamDesugared) {
 
 // analyzeOk ignores parse errors — use the explicit pipeline to pin the
 // parse-level rejection.
-TEST(SliceSemTest, MultiDimArrayParamRejected) {
+// TYP-11 2026-10-04: multi-dimensional array parameters are now supported —
+// this former rejection pin became a parse-level acceptance pin (row-slice
+// desugar); semantic acceptance is covered by MDPExplicitFirstDimAccepted.
+TEST(SliceSemTest, MultiDimArrayParamParses) {
     Lexer lexer("test.c",
         "int32 main() { return 0; } "
         "int32 APBad(int32 a[2][3]) { return 0; }");
@@ -1009,12 +1012,7 @@ TEST(SliceSemTest, MultiDimArrayParamRejected) {
     Parser parser(tokens);
     auto ast = parser.parse();
     ASSERT_TRUE(ast != nullptr);
-    ASSERT_FALSE(parser.getErrors().empty());
-    bool hasMultiDim = false;
-    for (auto& e : parser.getErrors())
-        if (e.message.find("multi-dimensional") != std::string::npos)
-            hasMultiDim = true;
-    EXPECT_TRUE(hasMultiDim);
+    EXPECT_TRUE(parser.getErrors().empty());
 }
 
 TEST(SliceSemTest, UnnamedArrayParamRejected) {
@@ -1135,4 +1133,47 @@ TEST(SliceSemTest, NonFirstDimDefaultRejected) {
 TEST(SliceSemTest, GlobalArrayScalarInitRejected) {
     EXPECT_FALSE(analyzeOk(
         "int32 g[2] = 5; int32 main() { return 0; }"));
+}
+
+// TYP-11: multi-dimensional array parameters desugar to row slices.
+// Spec: docs/superpowers/specs/2026-10-04-multidim-array-params-design.md
+
+// D1': f(a) with a: int32[2][3], param int32 m[][3].
+TEST(SliceSemTest, MDP2DParamAccepted) {
+    EXPECT_TRUE(analyzeOk(
+        "int32 MDPF(int32 m[][3]) { return m[1][2]; } "
+        "int32 main() { int32 a[2][3] = {{1,2,3},{4,5,6}}; return MDPF(a); }"));
+}
+
+// D3': row type mismatch is rejected at compile time.
+TEST(SliceSemTest, MDPRowTypeMismatchRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int32 MDPF(int32 m[][3]) { return m[0][0]; } "
+        "int32 main() { int32 b[2][4] = {{1,2,3,4},{5,6,7,8}}; return MDPF(b); }"));
+}
+
+// D2': only the first dimension may be empty — pin the parse level
+// explicitly (analyzeOk ignores parse errors).
+TEST(SliceSemTest, MDPNonFirstDimRejected) {
+    Lexer lexer("test.c",
+        "int32 MDPF(int32 m[3][]) { return 0; } int32 main() { return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_TRUE(ast != nullptr);
+    EXPECT_FALSE(parser.getErrors().empty());
+}
+
+// D2': explicit first dimension is documentation, identical to [].
+TEST(SliceSemTest, MDPExplicitFirstDimAccepted) {
+    EXPECT_TRUE(analyzeOk(
+        "int32 MDPG(int32 m[2][3]) { return m[1][2]; } "
+        "int32 main() { int32 a[2][3] = {{1,2,3},{4,5,6}}; return MDPG(a); }"));
+}
+
+// D1': chained subscript inside the callee body.
+TEST(SliceSemTest, MDPParamSubscript) {
+    EXPECT_TRUE(analyzeOk(
+        "int32 MDPGet(int32 m[][3]) { return m[1][2] + m[0][0]; } "
+        "int32 main() { int32 a[2][3] = {{1,2,3},{4,5,6}}; return MDPGet(a); }"));
 }
