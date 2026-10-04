@@ -2217,15 +2217,21 @@ std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string
 
     std::unique_ptr<ExprAST> init;
 
-    // Check for array declaration: name[size]
+    // Check for array declaration: name[size][size]... (TYP-11: the dimension
+    // chain builds a nested ArrayType right-to-left — `T a[2][3]` is an
+    // array of 2 arrays of 3 T, matching C and LLVM [2 x [3 x T]]).
     if (check(TokenType::TOKEN_LBRACKET)) {
-        advance();
-        int size = 0;
-        if (auto numTok = match(TokenType::TOKEN_NUMBER)) {
-            size = static_cast<int>(std::get<long long>(numTok->value));
-        }
-        if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after array size")) {
-            return nullptr;
+        std::vector<int> dims;
+        while (check(TokenType::TOKEN_LBRACKET)) {
+            advance();
+            int size = 0;
+            if (auto numTok = match(TokenType::TOKEN_NUMBER)) {
+                size = static_cast<int>(std::get<long long>(numTok->value));
+            }
+            if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after array size")) {
+                return nullptr;
+            }
+            dims.push_back(size);
         }
 
         // Check for initializer. Parse an assignment-expression (minPrec 2) so
@@ -2236,7 +2242,11 @@ std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string
             init = parseExpr(2);
         }
 
-        return std::make_unique<ArrayDeclAST>(name, type, size, std::move(init));
+        Type* elemType = type;
+        for (size_t i = dims.size() - 1; i >= 1; --i) {
+            elemType = new ArrayType(elemType, dims[i]);
+        }
+        return std::make_unique<ArrayDeclAST>(name, elemType, dims[0], std::move(init));
     }
 
     // Check for initializer: = expr
@@ -2455,14 +2465,23 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
 
 Type* Parser::parseMemberArraySuffix(Type* base) {
     if (!base || !check(TokenType::TOKEN_LBRACKET)) return base;
-    advance(); // consume '['
-    int size = 1;
-    if (check(TokenType::TOKEN_NUMBER)) {
-        auto numTok = advance();
-        size = static_cast<int>(std::get<long long>(numTok->value));
+    std::vector<int> dims;
+    while (check(TokenType::TOKEN_LBRACKET)) {
+        advance(); // consume '['
+        int size = 1;
+        if (check(TokenType::TOKEN_NUMBER)) {
+            auto numTok = advance();
+            size = static_cast<int>(std::get<long long>(numTok->value));
+        }
+        expect(TokenType::TOKEN_RBRACKET, "expected ']' after array size");
+        dims.push_back(size);
     }
-    expect(TokenType::TOKEN_RBRACKET, "expected ']' after array size");
-    return new ArrayType(base, size);
+    // Right-to-left: `T g[2][3]` = array of 2 arrays of 3 T (C semantics).
+    Type* result = base;
+    for (size_t i = dims.size(); i-- > 0;) {
+        result = new ArrayType(result, dims[i]);
+    }
+    return result;
 }
 
 std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {

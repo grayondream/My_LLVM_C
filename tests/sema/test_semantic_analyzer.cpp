@@ -1081,3 +1081,38 @@ TEST(SliceSemTest, MethodNullArgTypeGuardRejected) {
         "class MCG { public: void g(int32[] s) { } }; "
         "int32 main() { MCG m; m.g(nosuch); return 0; }"));
 }
+
+// TYP-11: multi-dimensional array declarations.
+TEST(SliceSemTest, MultiDimDeclAccepted) {
+    EXPECT_TRUE(analyzeOk(
+        "int32 main() { int32 a[2][3] = {{1,2,3},{4,5,6}}; return a[1][2]; }"));
+}
+
+TEST(SliceSemTest, MultiDimFirstDimInferred) {
+    EXPECT_TRUE(analyzeOk(
+        "int32 main() { int32 a[][3] = {{1,2,3},{4,5,6}}; return a[1][2]; }"));
+}
+
+TEST(SliceSemTest, MultiDimSubscriptTypes) {
+    EXPECT_TRUE(analyzeOk(
+        "int32 MDSum(int32[] s) { return s[0] + s[1] + s[2]; } "
+        "int32 main() { int32 a[2][3] = {{1,2,3},{4,5,6}}; return MDSum(a[1]); }"));
+}
+
+TEST(SliceSemTest, MultiDimWholeToSliceRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int32 MDSum(int32[] s) { return s[0]; } "
+        "int32 main() { int32 a[2][3] = {{1,2,3},{4,5,6}}; return MDSum(a); }"));
+}
+
+TEST(SliceSemTest, MultiDimDanglingReturnRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int32[] MDBad() { int32 a[2][3] = {{1,2,3},{4,5,6}}; return a; } "
+        "int32 main() { return 0; }"));
+}
+
+TEST(SliceSemTest, MultiDimMemberFieldAccepted) {
+    EXPECT_TRUE(analyzeOk(
+        "class MDBox { public: int32 g[2][3]; int32 last() { return this->g[1][2]; } }; "
+        "int32 main() { MDBox b; return 0; }"));
+}
