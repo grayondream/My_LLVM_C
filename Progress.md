@@ -386,3 +386,11 @@
 - Minor：全局 const 数组 ExternalLinkage 与 VarDeclAST const 标量 PrivateLinkage 不一致（镜像不完整）；parseVariableDecl 逆序循环 `i>=1` 依赖隐式保证；parseMemberArraySuffix 忽略 expect 失败（既有）；局部多维 sizeof / 3-D / 全局首维推断无回归钉；buildAggregateConstant 非常量元素静默补零（既有，VarDecl 同）。
 - 下一步：作者补 1 个成员字段多维 e2e；Important 1/2 建议本分支或紧随轮修复（各 1 个拒绝用例 + 全局分支兜底）。
 - 评审修复（dbcb685）：非首维缺省拒绝（防零长度行+越界 GEP）、数组标量初始化拒绝（防静默丢值）、成员字段多维 e2e。全量 806/806。
+
+## 2026-10-04 多维数组形参（TYP-11 剩余之二）
+
+- 流程：brainstorming（方案 A 行 slice，用户选定）→ spec（docs/superpowers/specs/2026-10-04-multidim-array-params-design.md，6f6acbe，D1'–D5'）→ plan（docs/superpowers/plans/2026-10-04-multidim-array-params.md，5c1c6e9）→ Native 执行。
+- 语义：`T name[][3]` / `T name[2][3]` → `Slice<int32[3]>`；首维文档性、内维显式、行类型编译期严格比较；return 多维仍拒绝。
+- 实现外发现：typesEqual 数组分支用恒 null 的 base 且不比长度——所有数组两两相等；修复为 size+elementType 比较（Symbol.cpp）。
+- 测试：sema 5 项（MDP 前缀）+ 1 项旧 pin 改写（MultiDimParamParses）+ e2e 3 项；全量 **814/814**（基线 806）。
+- 遗留：VLA（TYP-11 最后一项）；裸函数类型形参（parser 既有缺口，另立项）。
