@@ -1737,11 +1737,11 @@ void SemanticAnalyzer::visit(ArrayDeclAST& node) {
             initList->isLValue = false;
             for (auto& e : initList->initializers) getExprType(*e);
         } else {
-            Type* initType = getExprType(*node.initExpr);
-            if (initType && !typesCompatible(node.elementType, initType)) {
-                emitError("type mismatch in initialization of array '" + node.name + "': expected '" 
-                    + typeToString(node.elementType) + "', got '" + typeToString(initType) + "'", node);
-            }
+            // A non-list initializer cannot populate an array: at global scope
+            // it was silently zero-filled, locally it stored a scalar into an
+            // array alloca. Require a brace list ( elementType checks happen
+            // per element during aggregate initialization).
+            emitError("array initializer must be a brace-enclosed list", node);
         }
     }
     if (!declare(node.name, arrayType)) {

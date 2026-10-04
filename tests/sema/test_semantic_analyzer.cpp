@@ -1116,3 +1116,23 @@ TEST(SliceSemTest, MultiDimMemberFieldAccepted) {
         "class MDBox { public: int32 g[2][3]; int32 last() { return this->g[1][2]; } }; "
         "int32 main() { MDBox b; return 0; }"));
 }
+
+// Review fix: C requires every dimension except the first to be present —
+// `a[2][]` must not silently become a zero-length inner array (OOB GEP).
+// analyzeOk ignores parse errors, so pin the parse level explicitly.
+TEST(SliceSemTest, NonFirstDimDefaultRejected) {
+    Lexer lexer("test.c",
+        "int32 main() { int32 a[2][] = {{1,2,3},{4,5,6}}; return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_TRUE(ast != nullptr);
+    EXPECT_FALSE(parser.getErrors().empty());
+}
+
+// Review fix: a scalar (non-brace-list) initializer for an array passed sema
+// before (compared against elementType) and was silently dropped or crashed.
+TEST(SliceSemTest, GlobalArrayScalarInitRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int32 g[2] = 5; int32 main() { return 0; }"));
+}

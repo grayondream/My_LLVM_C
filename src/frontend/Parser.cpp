@@ -2222,16 +2222,29 @@ std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string
     // array of 2 arrays of 3 T, matching C and LLVM [2 x [3 x T]]).
     if (check(TokenType::TOKEN_LBRACKET)) {
         std::vector<int> dims;
+        std::vector<bool> explicitDim;
         while (check(TokenType::TOKEN_LBRACKET)) {
             advance();
             int size = 0;
+            bool hasNumber = false;
             if (auto numTok = match(TokenType::TOKEN_NUMBER)) {
                 size = static_cast<int>(std::get<long long>(numTok->value));
+                hasNumber = true;
             }
             if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after array size")) {
                 return nullptr;
             }
             dims.push_back(size);
+            explicitDim.push_back(hasNumber);
+        }
+        // C constraint: only the first dimension may be omitted (inferred
+        // from the initializer). A missing inner dimension would silently
+        // produce a zero-length row and out-of-bounds subscripts.
+        for (size_t i = 1; i < dims.size(); ++i) {
+            if (!explicitDim[i]) {
+                errorUnexpected("expected array dimension: only the first dimension may be empty");
+                return nullptr;
+            }
         }
 
         // Check for initializer. Parse an assignment-expression (minPrec 2) so
@@ -2466,15 +2479,25 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
 Type* Parser::parseMemberArraySuffix(Type* base) {
     if (!base || !check(TokenType::TOKEN_LBRACKET)) return base;
     std::vector<int> dims;
+    std::vector<bool> explicitDim;
     while (check(TokenType::TOKEN_LBRACKET)) {
         advance(); // consume '['
         int size = 1;
+        bool hasNumber = false;
         if (check(TokenType::TOKEN_NUMBER)) {
             auto numTok = advance();
             size = static_cast<int>(std::get<long long>(numTok->value));
+            hasNumber = true;
         }
         expect(TokenType::TOKEN_RBRACKET, "expected ']' after array size");
         dims.push_back(size);
+        explicitDim.push_back(hasNumber);
+    }
+    for (size_t i = 1; i < dims.size(); ++i) {
+        if (!explicitDim[i]) {
+            errorUnexpected("expected array dimension: only the first dimension may be empty");
+            return nullptr;
+        }
     }
     // Right-to-left: `T g[2][3]` = array of 2 arrays of 3 T (C semantics).
     Type* result = base;

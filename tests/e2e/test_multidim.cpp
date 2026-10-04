@@ -116,3 +116,21 @@ TEST_F(MultiDimE2E, MultiDimGlobalConstAndSizeof) {
         }
     )", "test_md_global.c"), 0);
 }
+
+// Review Focus 5: member-field multi-dim arrays through field load + nested
+// GEP — write and read via method and direct subscript.
+TEST_F(MultiDimE2E, MultiDimMemberField) {
+    EXPECT_EQ(runSource(R"(
+        class MDCell {
+            public:
+            int32 g[2][3];
+            void set(int32 v) { this->g[1][2] = v; }
+            int32 get() { return this->g[1][2]; }
+        };
+        int32 main() {
+            MDCell c;
+            c.set(77);
+            return (c.get() == 77 && c.g[1][2] == 77) ? 0 : 1;
+        }
+    )", "test_md_member.c"), 0);
+}
