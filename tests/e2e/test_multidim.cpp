@@ -134,3 +134,49 @@ TEST_F(MultiDimE2E, MultiDimMemberField) {
         }
     )", "test_md_member.c"), 0);
 }
+
+// Review Focus 1: aggregate-element lvalue re-subscript + zero-copy
+// write-through to the caller's storage. Sum: 21 - 4 + 100 = 117.
+TEST_F(MultiDimE2E, MultiDimParamRowSumWriteThrough) {
+    EXPECT_EQ(runSource(R"(
+        int32 MDSum(int32 m[][3]) {
+            m[1][0] = 100;
+            int32 s = 0;
+            for (int32 i = 0; i < m.len; i = i + 1)
+                for (int32 j = 0; j < 3; j = j + 1)
+                    s = s + m[i][j];
+            return s;
+        }
+        int32 main() {
+            int32 a[2][3] = {{1, 2, 3}, {4, 5, 6}};
+            int32 r = MDSum(a);
+            return (r == 117 && a[1][0] == 100 && a[0][0] == 1) ? 0 : 1;
+        }
+    )", "test_mdp_writethrough.c"), 0);
+}
+
+// Review Focus 5: MethodCall with a 2-D array argument to a row-slice param.
+TEST_F(MultiDimE2E, MultiDimParamMethodCall) {
+    EXPECT_EQ(runSource(R"(
+        class MDPMat {
+            public:
+            int32 rowSum(int32 m[][3]) { return m[1][2]; }
+        };
+        int32 main() {
+            MDPMat obj;
+            int32 a[2][3] = {{1, 2, 3}, {4, 5, 6}};
+            return obj.rowSum(a) == 6 ? 0 : 1;
+        }
+    )", "test_mdp_method.c"), 0);
+}
+
+// D1': slice length on a row-slice param = row count.
+TEST_F(MultiDimE2E, MultiDimParamLen) {
+    EXPECT_EQ(runSource(R"(
+        int32 MDRows(int32 m[][3]) { return m.len; }
+        int32 main() {
+            int32 a[2][3] = {{1, 2, 3}, {4, 5, 6}};
+            return MDRows(a) == 2 ? 0 : 1;
+        }
+    )", "test_mdp_len.c"), 0);
+}
