@@ -2356,10 +2356,37 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
     std::string bareName = parseQualifiedTypeName();
     std::string name = qualifyTypeDeclName(bareName);
 
+    // INH-01/DS2: optional single public inheritance — `struct D : [public] B`.
+    // The specifier defaults to public; private/protected inheritance is
+    // diagnosed as unsupported (INH-02-style diagnostic, no silent ignore).
+    std::string baseClass;
+    if (match(TokenType::TOKEN_COLON)) {
+        if (check(TokenType::TOKEN_PUBLIC) || check(TokenType::TOKEN_PRIVATE) ||
+            check(TokenType::TOKEN_IDENTIFIER)) {
+            std::string access = peek()->lexeme;
+            if (access == "public" || access == "private" || access == "protected") {
+                advance();
+                if (access != "public") {
+                    error("private/protected inheritance is not supported; use public inheritance",
+                          *peek());
+                    return nullptr;
+                }
+            }
+        }
+        baseClass = qualifyTypeDeclName(parseQualifiedTypeName());
+        // INH-02: single inheritance only — a ',' after the base name would
+        // otherwise be silently mis-parsed as a forward declaration.
+        if (check(TokenType::TOKEN_COMMA)) {
+            error("multiple inheritance is not supported; use single inheritance", *peek());
+            return nullptr;
+        }
+    }
+
     if (!check(TokenType::TOKEN_LBRACE)) {
         // Forward declaration
         auto fwd = std::make_unique<StructDeclAST>(name, std::vector<std::pair<std::string, Type*>>{});
         fwd->bareName = bareName;
+        fwd->baseClass = std::move(baseClass);
         return fwd;
     }
 
@@ -2499,6 +2526,7 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
 
     auto decl = std::make_unique<StructDeclAST>(name, std::move(fields));
     decl->bareName = bareName;
+    decl->baseClass = std::move(baseClass);
     decl->staticMembers = std::move(staticMembers);
     decl->nestedTypes = std::move(nestedTypes);
     return decl;
@@ -2570,6 +2598,9 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
     std::string name = qualifyTypeDeclName(bareName);
 
     // Parse optional inheritance: : public BaseName
+    // INH-01/DS2: the specifier defaults to public (bare `class D : B` is
+    // public here — deliberate deviation from C++, where it means private
+    // inheritance); private/protected inheritance is diagnosed unsupported.
     std::string baseClass;
     if (match(TokenType::TOKEN_COLON)) {
         // Skip optional access specifier (public/private/protected)
@@ -2577,9 +2608,20 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
             std::string access = peek()->lexeme;
             if (access == "public" || access == "private" || access == "protected") {
                 advance();
+                if (access != "public") {
+                    error("private/protected inheritance is not supported; use public inheritance",
+                          *peek());
+                    return nullptr;
+                }
             }
         }
         baseClass = qualifyTypeDeclName(parseQualifiedTypeName());
+        // INH-02: single inheritance only — a ',' after the base name would
+        // otherwise be silently mis-parsed as a forward declaration.
+        if (check(TokenType::TOKEN_COMMA)) {
+            error("multiple inheritance is not supported; use single inheritance", *peek());
+            return nullptr;
+        }
     }
 
     if (!check(TokenType::TOKEN_LBRACE)) {

@@ -1570,3 +1570,76 @@ TEST(SliceSemTest, NTPrivateNestedArrayRejected) {
         "class NTP4 { private: struct Secret { int32 x; }; }; "
         "int32 main() { NTP4::Secret arr[3]; return 0; }"));
 }
+
+// ========== INH: inheritance — parser ==========
+
+TEST(SliceSemTest, INHStructInheritParses) {
+    // 解析级：struct 继承子句被接受且 baseClass 记录，后续成员不丢。
+    Lexer lexer("test.c",
+        "struct B1 { int32 x; }; struct D1 : public B1 { int32 y; };");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    EXPECT_TRUE(parser.getErrors().empty());
+    // 第二个声明是 D1，baseClass == "B1"，fields 含 y。
+    ASSERT_GE(ast->declarations.size(), 2u);
+    auto* d1 = dynamic_cast<StructDeclAST*>(ast->declarations[1].get());
+    ASSERT_NE(d1, nullptr);
+    EXPECT_EQ(d1->baseClass, "B1");
+    ASSERT_EQ(d1->fields.size(), 1u);
+    EXPECT_EQ(d1->fields[0].first, "y");
+}
+
+TEST(SliceSemTest, INHMultiInheritRejected) {
+    // INH-02：多继承给明确诊断（今天静默误解析为前向声明）。
+    Lexer lexer("test.c",
+        "class A2 { public: int32 x; }; class B2 { public: int32 y; }; "
+        "class C2 : public A2, public B2 { public: int32 z; };");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    EXPECT_FALSE(parser.getErrors().empty());
+}
+
+TEST(SliceSemTest, INHPrivateInheritRejected) {
+    // DS2：private/protected 继承诊断不支持（struct 与 class 两侧）。
+    Lexer lexer("test.c",
+        "class B3 { public: int32 x; }; class D3 : private B3 { public: int32 y; };");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    EXPECT_FALSE(parser.getErrors().empty());
+}
+
+TEST(SliceSemTest, INHProtectedInheritRejected) {
+    Lexer lexer("test.c",
+        "struct B4 { int32 x; }; struct D4 : protected B4 { int32 y; };");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    EXPECT_FALSE(parser.getErrors().empty());
+}
+
+TEST(SliceSemTest, INHClassBareInheritPins) {
+    // DS2：class 缺省说明符 = public，不诊断（用户裁决，偏离 C++ 记文档）。
+    // 端到端 pin（class 继承骨架今天已通，预期 Task 1 期即 PASS）。
+    EXPECT_TRUE(analyzeOk(
+        "class Base5 { public: int32 x; }; class D5 : Base5 { public: int32 y; }; "
+        "int32 main() { D5 d; d.x = 1; d.y = 2; "
+        "return (d.x == 1 && d.y == 2) ? 0 : 1; }"));
+}
+
+TEST(SliceSemTest, INHStructBareInheritParses) {
+    // struct 缺省说明符同样 = public。
+    Lexer lexer("test.c",
+        "struct B6 { int32 x; }; struct D6 : B6 { int32 y; };");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    EXPECT_TRUE(parser.getErrors().empty());
+    auto* d6 = dynamic_cast<StructDeclAST*>(ast->declarations[1].get());
+    ASSERT_NE(d6, nullptr);
+    EXPECT_EQ(d6->baseClass, "B6");
+}
