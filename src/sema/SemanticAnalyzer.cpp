@@ -1856,6 +1856,22 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
             classType->setMemberAccess(kv.first, kv.second);
         }
 
+        // AGG-10/DS2+DS3: static data members become globals under the
+        // desugared key; the in-class initializer is their definition.
+        // Declared BEFORE method bodies are analyzed so method bodies can
+        // reference them (declaration order matters in this pipeline).
+        for (auto& vd : node.staticMembers) {
+            if (!vd) continue;
+            std::string origName = vd->name;
+            const std::string& clsName = node.bareName.empty() ? node.name : node.bareName;
+            vd->name = mangleNamespaceName(clsName + "::" + origName);
+            staticMemberIndex[scopedName(vd->name)] = {classType, origName};
+            ClassType* savedClass = currentClass;
+            currentClass = classType;
+            visit(*vd);
+            currentClass = savedClass;
+        }
+
         for (auto& method : node.methods) {
             ClassType* savedClass = currentClass;
             currentClass = classType;
@@ -1877,20 +1893,6 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
                 method->params.insert(method->params.begin(), std::move(thisParam));
                 visit(*method);
             }
-            currentClass = savedClass;
-        }
-
-        // AGG-10/DS2+DS3: static data members become globals under the
-        // desugared key; the in-class initializer is their definition.
-        for (auto& vd : node.staticMembers) {
-            if (!vd) continue;
-            std::string origName = vd->name;
-            const std::string& clsName = node.bareName.empty() ? node.name : node.bareName;
-            vd->name = mangleNamespaceName(clsName + "::" + origName);
-            staticMemberIndex[scopedName(vd->name)] = {classType, origName};
-            ClassType* savedClass = currentClass;
-            currentClass = classType;
-            visit(*vd);
             currentClass = savedClass;
         }
     } else {
