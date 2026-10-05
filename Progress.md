@@ -427,3 +427,13 @@
 - 时序要求：staticMembers 声明/生成必须先于方法体分析（sema 与 codegen 两侧同构），否则方法体内引用失败且编译器带病产出坏二进制。
 - 测试：sema 10 项（SM 前缀）+ e2e 4 项（ClassCodegenE2E.SM*）；全量 **834/834**（基线 820）。
 - 遗留：P1-01 仅剩 AGG-11 嵌套类型。
+
+## 2026-10-05 AGG-10 评审修复
+
+- 评审（subagent 整分支）：2 Critical + 2 Important + 6 Minor。
+- C1（流程）：Task 2 的 sema 时序修复漏提交（commit 漏 add）→ HEAD 自带 e2e 必 FAIL；补提交 151e052。教训：commit 前 git status 核对；Ruling 声称两侧同构时两侧改动须同一 commit。
+- C2：struct 仅含 static 成员时整个定义被解析器前向声明回退分支吞掉（泄漏为裸名全局、类型空注册、非常量初始化器可致编译器 SIGSEGV）——回退条件补 staticMembers/methods 判空；补 sema 2 项 + e2e 1 项。
+- I1：同名 static/实例成员共享 memberAccess 裸名键后写覆盖 → E2009 误报——static 成员改独立键 "static:<name>"（parser 方法与变量两分支 + checkStaticMemberAccess）；补 2 项。
+- I2：static 方法无法调用声明在其后的同类 static 方法——两遍处理：先统一改名+索引+declare 预注册（原型容忍），再统一分析体；补 1 项。
+- 全量 **840/840**（834 + 6）。
+- Deferred minors：static 数组成员诊断误导；半限定拼写拒绝未钉；protected static 经 Base:: 拒绝（已记 AGG-10 条目）；static+匿名聚合组合丢 static；Decl.cpp 注释与幂等事实不符；static 初始化器引用后声明成员（与全局一致）。

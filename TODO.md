@@ -203,7 +203,7 @@
 - `[ ]` **AGG-07** `class` 声明与 `public/private/protected` 段。**部分完成**：访问段 + 默认 private（DEC-01）+ E2009 访问诊断已实现；`static` 成员/嵌套类型待 AGG-10/11。
 - `[ ]` **AGG-08** 成员变量、成员函数声明/实现、隐式 `self`。
 - `[ ]` **AGG-09** 成员函数编译为 `Vector_length(Vector* self)`；方法调用 `v.length()`。
-- `[x]` **AGG-10** `static` 成员函数（无 `self`）与 `static` 成员变量。**完成**（2026-10-05，spec `docs/superpowers/specs/2026-10-05-static-members-design.md`）：方案 A 类前缀全局符号去糖（`Class::member` → `Class_member`，与 namespace 拍平同构）；仅类名限定访问（实例路径拒绝）；类内初始化器=全局定义（零初始化默认），不占对象布局；无 `this`；访问控制复用 DEC-01（E2009）；abi.md §4 补编码规范。struct 支持 static 变量（无方法通路）。
+- `[x]` **AGG-10** `static` 成员函数（无 `self`）与 `static` 成员变量。**完成**（2026-10-05，spec `docs/superpowers/specs/2026-10-05-static-members-design.md`）：方案 A 类前缀全局符号去糖（`Class::member` → `Class_member`，与 namespace 拍平同构）；仅类名限定访问（实例路径拒绝）；类内初始化器=全局定义（零初始化默认），不占对象布局；无 `this`；访问控制复用 DEC-01（E2009）；abi.md §4 补编码规范。struct 支持 static 变量（无方法通路；评审 C2 修复：仅含 static 成员的 struct 定义不再落入前向声明回退分支）。评审 I1 修复：static 成员访问级别独立键（`static:<name>`），同名实例成员级别不受覆盖。评审 I2 修复：static 方法先注册后分析体，可后向引用同类 static 方法。已知限制（随 INH-06 复查）：protected static 经 `Base::p` 从派生类访问被拒（比 C++ 严格）。
 - `[ ]` **AGG-11** 嵌套类型、前向声明。
 - `[ ]` **AGG-12** 不生成 vtable/构造/析构/GC；生命周期由用户控制（栈/`malloc`/`free`）。
 - `[ ]` **AGG-13** 布局等价 struct；`[[repr(C)]]` 下 ABI 稳定。
