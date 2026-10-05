@@ -231,3 +231,68 @@ TEST_F(ClassCodegenE2E, SMStructStaticE2E) {
         int32 main() { return SMS3::v == 4 ? 0 : 1; }
     )", "test_sm_struct.c"), 0);
 }
+
+// ========== AGG-11: nested types e2e ==========
+
+TEST_F(ClassCodegenE2E, NTStructFieldE2E) {
+    EXPECT_EQ(runSource(R"(
+        class NTE1 { public: struct Inner { int32 x; }; };
+        int32 main() {
+            NTE1::Inner obj; obj.x = 3;
+            return obj.x == 3 ? 0 : 1;
+        }
+    )", "test_nt_struct.c"), 0);
+}
+
+TEST_F(ClassCodegenE2E, NTEnumConstantE2E) {
+    EXPECT_EQ(runSource(R"(
+        class NTE2 { public: enum Color { Red, Green }; };
+        int32 main() { NTE2::Color c = NTE2::Green; return c == 1 ? 0 : 1; }
+    )", "test_nt_enum.c"), 0);
+}
+
+TEST_F(ClassCodegenE2E, NTStaticE2E) {
+    // 注：嵌套带方法的类型用 class（struct 无方法通路，Task 2 Ruling）。
+    EXPECT_EQ(runSource(R"(
+        class NTE3 { public: class S {
+            private: static int32 count = 0;
+            public: static int32 next() { NTE3::S::count = NTE3::S::count + 1; return NTE3::S::count; }
+        }; };
+        int32 main() { NTE3::S::next(); return NTE3::S::next() == 2 ? 0 : 1; }
+    )", "test_nt_static.c"), 0);
+}
+
+TEST_F(ClassCodegenE2E, NTMethodE2E) {
+    EXPECT_EQ(runSource(R"(
+        class NTE4 { public: class S { public: int32 f(int32 x) { return x; } }; };
+        int32 main() { NTE4::S obj; return obj.f(7) == 7 ? 0 : 1; }
+    )", "test_nt_method.c"), 0);
+}
+
+TEST_F(ClassCodegenE2E, NTDeepE2E) {
+    EXPECT_EQ(runSource(R"(
+        class NTE5 { public: struct A { struct B { int32 v; }; }; };
+        int32 main() { NTE5::A::B obj; obj.v = 2; return obj.v == 2 ? 0 : 1; }
+    )", "test_nt_deep.c"), 0);
+}
+
+TEST_F(ClassCodegenE2E, NTFwdWithNestedE2E) {
+    // Review Focus 2：前向声明+定义时 nestedTypes 仍生成。嵌套类带方法，
+    // 确保既有类型提前 return 分支也执行 nestedTypes 遍历。
+    EXPECT_EQ(runSource(R"(
+        class NTE6;
+        class NTE6 { public: class S { public: int32 f(int32 x) { return x; } }; };
+        int32 main() { NTE6::S obj; return obj.f(6) == 6 ? 0 : 1; }
+    )", "test_nt_fwd.c"), 0);
+}
+
+TEST_F(ClassCodegenE2E, NTSelfRefPtrE2E) {
+    // 前向声明语义钉住（DS6）：自引用指针。
+    EXPECT_EQ(runSource(R"(
+        struct NFNode { int32 v; struct NFNode* next; };
+        int32 main() {
+            struct NFNode n; n.v = 1; n.next = 0;
+            return n.v == 1 ? 0 : 1;
+        }
+    )", "test_nt_selfref.c"), 0);
+}

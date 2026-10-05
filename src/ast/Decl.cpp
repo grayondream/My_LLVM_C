@@ -449,6 +449,12 @@ llvm::Value* MultiVarDeclAST::codegen(CodegenContext& ctx) {
 llvm::Value* StructDeclAST::codegen(CodegenContext& ctx) {
     // Reuse existing struct type if one with this name already exists
     if (auto* existing = llvm::StructType::getTypeByName(ctx.getContext(), name)) {
+        // AGG-11: nested types must still be generated on this path — the
+        // type object exists (e.g. via an earlier forward declaration), but
+        // their statics/methods have never been emitted. Idempotent.
+        for (auto& nested : nestedTypes) {
+            if (nested) nested->codegen(ctx);
+        }
         // AGG-10: static data members must be declared BEFORE method bodies
         // are generated (method bodies may reference them). Idempotent.
         emitStaticMembers(ctx);
@@ -477,6 +483,12 @@ llvm::Value* StructDeclAST::codegen(CodegenContext& ctx) {
 
     llvm::StructType* structType = llvm::StructType::create(ctx.getContext(), fieldTypes, name);
 
+    // AGG-11: nested types first — outer method bodies may reference their
+    // members (same ordering rule as sema: nestedTypes -> statics -> methods).
+    for (auto& nested : nestedTypes) {
+        if (nested) nested->codegen(ctx);
+    }
+
     // AGG-10: static data members before methods — method bodies may
     // reference them (same ordering requirement as sema).
     emitStaticMembers(ctx);
@@ -502,6 +514,11 @@ void StructDeclAST::emitStaticMembers(CodegenContext& ctx) {
 llvm::Value* UnionDeclAST::codegen(CodegenContext& ctx) {
     // The union's LLVM layout depends on its members and is created lazily by
     // CodegenContext::getLLVMType(TypeKind::Union); nothing to emit here.
+    // AGG-11: but nested type declarations must be generated (their members
+    // may carry statics/methods).
+    for (auto& nested : nestedTypes) {
+        if (nested) nested->codegen(ctx);
+    }
     (void)ctx;
     return nullptr;
 }
