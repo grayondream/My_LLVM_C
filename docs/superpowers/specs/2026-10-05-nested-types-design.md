@@ -29,7 +29,7 @@ AGG-11（TODO.md:207）：嵌套类型、前向声明。P1-01 最后一项。
 
 ### 方案 A（选定）：解析期类前缀复用
 
-类/struct/union **体解析期间**压 `m_typeNamespacePrefix += mangleQualifiedTypeName(已限定类名) + "_"`（与 namespace 前缀机制 `Parser.cpp:2756-2779` 完全同构），成员循环识别嵌套类型声明路由到 decl 解析器，收集进 `StructDeclAST::nestedTypes`。
+类/struct/union **体解析期间**压 `m_typeNamespacePrefix += mangleQualifiedTypeName(bareName) + "_"`（**裸类名**，与 namespace 前缀机制同构；实施修订：初稿写"已限定类名"会导致 ns 内双重前缀 `ns_ns_Outer_`，实现与 plan 均以裸名为准），成员循环识别嵌套类型声明路由到 decl 解析器，收集进 `StructDeclAST::nestedTypes`。
 
 关键依据：类型引用在**解析期**查 TypeContext（`lookupNamedType`），类型必须解析期注册
 ——这使 sema 侧统一限定（方案 B）不可行；方案 C（提升为顶层兄弟声明）丢失访问上下文

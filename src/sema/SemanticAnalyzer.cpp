@@ -1773,6 +1773,9 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
 }
 
 void SemanticAnalyzer::visit(ArrayDeclAST& node) {
+    // AGG-11 评审 I2: array declarations are var declarations (DS5) — a
+    // private nested type must not slip through as the element type.
+    checkNestedTypeAccess(node.elementType, node);
     node.name = scopedName(node.name);
     if (auto* initList = dynamic_cast<InitializerListExprAST*>(node.initExpr.get())) {
         if (node.size == 0) {
@@ -1854,8 +1857,13 @@ void SemanticAnalyzer::visitNestedTypeDecls(
 void SemanticAnalyzer::checkNestedTypeAccess(Type* type, const ASTNode& site) {
     if (!type) return;
     Type* t = stripTypedef(type);
-    while (t && t->kind == TypeKind::Pointer) {
-        t = stripTypedef(t->base);
+    // AGG-11 评审 I2: arrays are named-type carriers too (`NTP::Secret a[3]`).
+    while (t && (t->kind == TypeKind::Pointer || t->kind == TypeKind::Array)) {
+        // Array types are ArrayType objects (codebase convention, cf.
+        // typeToString); pointer element is `base`.
+        t = stripTypedef(t->kind == TypeKind::Pointer
+                             ? t->base
+                             : static_cast<ArrayType*>(t)->elementType);
     }
     if (!t) return;
     std::string name;

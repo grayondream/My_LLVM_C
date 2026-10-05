@@ -2391,15 +2391,28 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
                 // IDENTIFIER is an inline member definition with a declarator
                 // (`struct Inner { ... } inner;`) — that stays on the field
                 // path (pre-existing C-style idiom, pinned by tests).
+                // A ';' is a forward declaration (`class D;`, `struct D;`).
+                // `class D : Base` also routes (inherited definition or
+                // forward). `enum E : under` skips the underlying-type spec
+                // before the '{' / ';' check (TYP-09 form).
                 bool isNested = false;
                 if (!nestedName.empty()) {
                     if (check(TokenType::TOKEN_LBRACE)) {
                         size_t afterBody = balancedBraceEnd(m_currentTokenPos);
                         isNested = afterBody >= m_tokens.size() ||
                                    m_tokens[afterBody].type != TokenType::TOKEN_IDENTIFIER;
-                    } else if (kw == TokenType::TOKEN_CLASS) {
-                        isNested = check(TokenType::TOKEN_COLON) ||
-                                   check(TokenType::TOKEN_SEMICOLON);
+                    } else if (check(TokenType::TOKEN_SEMICOLON)) {
+                        isNested = true;
+                    } else if (kw == TokenType::TOKEN_CLASS &&
+                               check(TokenType::TOKEN_COLON)) {
+                        isNested = true;
+                    } else if (kw == TokenType::TOKEN_ENUM &&
+                               check(TokenType::TOKEN_COLON)) {
+                        advance(); // ':'
+                        if (parseType()) {
+                            isNested = check(TokenType::TOKEN_LBRACE) ||
+                                       check(TokenType::TOKEN_SEMICOLON);
+                        }
                     }
                 }
                 m_currentTokenPos = save;
@@ -2407,14 +2420,18 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
                     std::unique_ptr<DeclAST> nested;
                     if (kw == TokenType::TOKEN_ENUM) {
                         nested = parseEnumDecl();
-                        // parseEnumDecl stops at '}' — the trailing ';' belongs
-                        // to the declaration (at top level parseDeclaration's
-                        // caller consumes it; here the member loop owns it).
+                        // parseEnumDecl stops at '}' (or right after the name
+                        // for a forward) — the trailing ';' belongs to the
+                        // declaration; the member loop owns it.
                         match(TokenType::TOKEN_SEMICOLON);
                     }
                     else if (kw == TokenType::TOKEN_UNION) nested = parseUnionDecl();
                     else if (kw == TokenType::TOKEN_CLASS) nested = parseClassDecl();
                     else nested = parseStructDecl();
+                    // Forward declarations of struct/class/union stop before
+                    // the trailing ';' — consume it here too, or it stalls the
+                    // member loop and silently drops the remaining members.
+                    if (kw != TokenType::TOKEN_ENUM) match(TokenType::TOKEN_SEMICOLON);
                     if (!nested) {
                         m_typeNamespacePrefix = savedPrefix;
                         return nullptr;
@@ -2630,15 +2647,28 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                 // IDENTIFIER is an inline member definition with a declarator
                 // (`struct Inner { ... } inner;`) — that stays on the field
                 // path (pre-existing C-style idiom, pinned by tests).
+                // A ';' is a forward declaration (`class D;`, `struct D;`).
+                // `class D : Base` also routes (inherited definition or
+                // forward). `enum E : under` skips the underlying-type spec
+                // before the '{' / ';' check (TYP-09 form).
                 bool isNested = false;
                 if (!nestedName.empty()) {
                     if (check(TokenType::TOKEN_LBRACE)) {
                         size_t afterBody = balancedBraceEnd(m_currentTokenPos);
                         isNested = afterBody >= m_tokens.size() ||
                                    m_tokens[afterBody].type != TokenType::TOKEN_IDENTIFIER;
-                    } else if (kw == TokenType::TOKEN_CLASS) {
-                        isNested = check(TokenType::TOKEN_COLON) ||
-                                   check(TokenType::TOKEN_SEMICOLON);
+                    } else if (check(TokenType::TOKEN_SEMICOLON)) {
+                        isNested = true;
+                    } else if (kw == TokenType::TOKEN_CLASS &&
+                               check(TokenType::TOKEN_COLON)) {
+                        isNested = true;
+                    } else if (kw == TokenType::TOKEN_ENUM &&
+                               check(TokenType::TOKEN_COLON)) {
+                        advance(); // ':'
+                        if (parseType()) {
+                            isNested = check(TokenType::TOKEN_LBRACE) ||
+                                       check(TokenType::TOKEN_SEMICOLON);
+                        }
                     }
                 }
                 m_currentTokenPos = save;
@@ -2646,14 +2676,18 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                     std::unique_ptr<DeclAST> nested;
                     if (kw == TokenType::TOKEN_ENUM) {
                         nested = parseEnumDecl();
-                        // parseEnumDecl stops at '}' — the trailing ';' belongs
-                        // to the declaration (at top level parseDeclaration's
-                        // caller consumes it; here the member loop owns it).
+                        // parseEnumDecl stops at '}' (or right after the name
+                        // for a forward) — the trailing ';' belongs to the
+                        // declaration; the member loop owns it.
                         match(TokenType::TOKEN_SEMICOLON);
                     }
                     else if (kw == TokenType::TOKEN_UNION) nested = parseUnionDecl();
                     else if (kw == TokenType::TOKEN_CLASS) nested = parseClassDecl();
                     else nested = parseStructDecl();
+                    // Forward declarations of struct/class/union stop before
+                    // the trailing ';' — consume it here too, or it stalls the
+                    // member loop and silently drops the remaining members.
+                    if (kw != TokenType::TOKEN_ENUM) match(TokenType::TOKEN_SEMICOLON);
                     if (!nested) {
                         m_typeNamespacePrefix = savedPrefix;
                         return nullptr;
@@ -2842,15 +2876,28 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
                 // IDENTIFIER is an inline member definition with a declarator
                 // (`struct Inner { ... } inner;`) — that stays on the field
                 // path (pre-existing C-style idiom, pinned by tests).
+                // A ';' is a forward declaration (`class D;`, `struct D;`).
+                // `class D : Base` also routes (inherited definition or
+                // forward). `enum E : under` skips the underlying-type spec
+                // before the '{' / ';' check (TYP-09 form).
                 bool isNested = false;
                 if (!nestedName.empty()) {
                     if (check(TokenType::TOKEN_LBRACE)) {
                         size_t afterBody = balancedBraceEnd(m_currentTokenPos);
                         isNested = afterBody >= m_tokens.size() ||
                                    m_tokens[afterBody].type != TokenType::TOKEN_IDENTIFIER;
-                    } else if (kw == TokenType::TOKEN_CLASS) {
-                        isNested = check(TokenType::TOKEN_COLON) ||
-                                   check(TokenType::TOKEN_SEMICOLON);
+                    } else if (check(TokenType::TOKEN_SEMICOLON)) {
+                        isNested = true;
+                    } else if (kw == TokenType::TOKEN_CLASS &&
+                               check(TokenType::TOKEN_COLON)) {
+                        isNested = true;
+                    } else if (kw == TokenType::TOKEN_ENUM &&
+                               check(TokenType::TOKEN_COLON)) {
+                        advance(); // ':'
+                        if (parseType()) {
+                            isNested = check(TokenType::TOKEN_LBRACE) ||
+                                       check(TokenType::TOKEN_SEMICOLON);
+                        }
                     }
                 }
                 m_currentTokenPos = save;
@@ -2858,14 +2905,18 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
                     std::unique_ptr<DeclAST> nested;
                     if (kw == TokenType::TOKEN_ENUM) {
                         nested = parseEnumDecl();
-                        // parseEnumDecl stops at '}' — the trailing ';' belongs
-                        // to the declaration (at top level parseDeclaration's
-                        // caller consumes it; here the member loop owns it).
+                        // parseEnumDecl stops at '}' (or right after the name
+                        // for a forward) — the trailing ';' belongs to the
+                        // declaration; the member loop owns it.
                         match(TokenType::TOKEN_SEMICOLON);
                     }
                     else if (kw == TokenType::TOKEN_UNION) nested = parseUnionDecl();
                     else if (kw == TokenType::TOKEN_CLASS) nested = parseClassDecl();
                     else nested = parseStructDecl();
+                    // Forward declarations of struct/class/union stop before
+                    // the trailing ';' — consume it here too, or it stalls the
+                    // member loop and silently drops the remaining members.
+                    if (kw != TokenType::TOKEN_ENUM) match(TokenType::TOKEN_SEMICOLON);
                     if (!nested) {
                         m_typeNamespacePrefix = savedPrefix;
                         return nullptr;
@@ -2907,6 +2958,7 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
 
     auto decl = std::make_unique<UnionDeclAST>(name, std::move(members));
     decl->nestedTypes = std::move(nestedTypes);
+    decl->bareName = bareName;
     return decl;
 }
 

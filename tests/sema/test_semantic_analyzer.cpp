@@ -1531,3 +1531,42 @@ TEST(SliceSemTest, NTStaticNestedFactory) {
         "int32 probe() { NTF2::S s; s.x = NTF2::S::answer(); return s.x; } }; "
         "int32 main() { NTF2 o; return o.probe() == 42 ? 0 : 1; }"));
 }
+
+// ========== AGG-11 评审修复轮：C1 union bareName / C2 嵌套类前向 / I1 enum 底层类型 / I2 数组绕过 ==========
+
+TEST(SliceSemTest, NTUnionNestedStatic) {
+    // C1：union 定义分支漏记 bareName 导致 union 嵌套 static 符号双侧断裂。
+    EXPECT_TRUE(analyzeOk(
+        "class NTUN { public: union U { struct I { static int32 v = 3; }; }; }; "
+        "int32 main() { return NTUN::U::I::v; }"));
+}
+
+TEST(SliceSemTest, NTUnionNestedNsStatic) {
+    // C1 的 ns 形态：ns_U_I_v 而非 ns_ns_U_I_v。
+    EXPECT_TRUE(analyzeOk(
+        "namespace ntns2 { union NTUN2 { struct I { static int32 v = 3; }; }; } "
+        "int32 main() { return ntns2::NTUN2::I::v; }"));
+}
+
+TEST(SliceSemTest, NTClassFwdInClass) {
+    // C2：嵌套类前向声明 `class D;` 不消费分号 → 成员循环 break 吞掉后续成员。
+    EXPECT_TRUE(analyzeOk(
+        "class NTFC { public: class D; class D { public: int32 y; }; int32 x; }; "
+        "int32 main() { NTFC o; NTFC::D d; d.y = 5; o.x = 6; "
+        "return (d.y == 5 && o.x == 6) ? 0 : 1; }"));
+}
+
+TEST(SliceSemTest, NTEnumUnderlyingInClass) {
+    // I1：成员位置 `enum E : 底层类型 { ... }` 未路由 → 吞成员。
+    EXPECT_TRUE(analyzeOk(
+        "class NTEU { public: enum Color : uint8 { Red, Green }; int32 x; }; "
+        "int32 main() { NTEU o; NTEU::Color c = NTEU::Red; o.x = 1; "
+        "return (c == 0 && o.x == 1) ? 0 : 1; }"));
+}
+
+TEST(SliceSemTest, NTPrivateNestedArrayRejected) {
+    // I2：private 嵌套类型经数组声明绕过 E2009。
+    EXPECT_FALSE(analyzeOk(
+        "class NTP4 { private: struct Secret { int32 x; }; }; "
+        "int32 main() { NTP4::Secret arr[3]; return 0; }"));
+}
