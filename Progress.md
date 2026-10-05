@@ -450,3 +450,18 @@
 - 文档：abi.md §4 第 5 条（嵌套类型扁平编码）；TODO AGG-11/PAR-03/PAR-04/P1-01/AGG-07 勾记。
 - 遗留：self-type 缺口（类体内裸/限定自引用类型，顶层类同样存在，是否立项待定）；
   EnumUnderlyingE2E.Int8EnumNegativeValue 偶发 SEGFAULT（LLJIT flaky 家族，约 2/6 全量频次）。
+
+## 2026-10-05 17:30 — INH 继承链完成（R5 Native）
+- 完成事项：单继承收口——Parser struct/class 继承子句 + INH-02 多继承诊断 +
+  非公有继承诊断（`src/frontend/Parser.cpp`）；方案乙：删基类方法表复制，
+  resolveMethod 沿 base 链查找 + definingClass 附带，方法 E2009 归属精确到
+  定义类，私有基方法洞闭合（`src/sema/SemanticAnalyzer.cpp/.h`）；
+  StructType 补 baseClass/base/isComplete（`src/ast/Type.h`）；codegen
+  emitClassFieldGEP 泛化 + Struct 布局基类首字段（`src/ast/Expr.cpp`、
+  `src/codegen/CodegenContext.cpp`）；`src/ast/Decl.h` 加 isForwardDecl。
+- 验证：全量 ctest 890/890（基线 868 → 890，sema +14、e2e +8）。
+- 提交：spec `b7a5287`，plan `d48f97e`，Task1 `265244a`，Task2 `951b4d0`，Task3 `ae6107c`。
+- 裁决要点：缺省继承一律 public（class 亦然，偏离 C++ 记文档）；访问级别
+  判定式零改动（protected 放宽未做，另立项候选）；struct 带基类复用 parse 期
+  StructType 对象（变量 Type* 同址）；派生自不完整基类诊断（isComplete）。
+- 遗留：INH-05 CRTP 随 GEN；protected 放宽另立项候选；LLJIT flaky 家族。

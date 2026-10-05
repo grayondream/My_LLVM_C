@@ -203,7 +203,7 @@
 - `[ ]` **AGG-07** `class` 声明与 `public/private/protected` 段。**部分完成**：访问段 + 默认 private（DEC-01）+ E2009 访问诊断已实现；`static` 成员/嵌套类型已完成（AGG-10/11，2026-10-05）。
 - `[ ]` **AGG-08** 成员变量、成员函数声明/实现、隐式 `self`。
 - `[ ]` **AGG-09** 成员函数编译为 `Vector_length(Vector* self)`；方法调用 `v.length()`。
-- `[x]` **AGG-10** `static` 成员函数（无 `self`）与 `static` 成员变量。**完成**（2026-10-05，spec `docs/superpowers/specs/2026-10-05-static-members-design.md`）：方案 A 类前缀全局符号去糖（`Class::member` → `Class_member`，与 namespace 拍平同构）；仅类名限定访问（实例路径拒绝）；类内初始化器=全局定义（零初始化默认），不占对象布局；无 `this`；访问控制复用 DEC-01（E2009）；abi.md §4 补编码规范。struct 支持 static 变量（无方法通路；评审 C2 修复：仅含 static 成员的 struct 定义不再落入前向声明回退分支）。评审 I1 修复：static 成员访问级别独立键（`static:<name>`），同名实例成员级别不受覆盖。评审 I2 修复：static 方法先注册后分析体，可后向引用同类 static 方法。已知限制（随 INH-06 复查）：protected static 经 `Base::p` 从派生类访问被拒（比 C++ 严格）。
+- `[x]` **AGG-10** `static` 成员函数（无 `self`）与 `static` 成员变量。**完成**（2026-10-05，spec `docs/superpowers/specs/2026-10-05-static-members-design.md`）：方案 A 类前缀全局符号去糖（`Class::member` → `Class_member`，与 namespace 拍平同构）；仅类名限定访问（实例路径拒绝）；类内初始化器=全局定义（零初始化默认），不占对象布局；无 `this`；访问控制复用 DEC-01（E2009）；abi.md §4 补编码规范。struct 支持 static 变量（无方法通路；评审 C2 修复：仅含 static 成员的 struct 定义不再落入前向声明回退分支）。评审 I1 修复：static 成员访问级别独立键（`static:<name>`），同名实例成员级别不受覆盖。评审 I2 修复：static 方法先注册后分析体，可后向引用同类 static 方法。已知限制（INH-06 已落地 2026-10-05，复查结论）：protected static 经 `Base::p` 从派生类访问仍被拒（比 C++ 严格；放宽另立项，检查点 `checkStaticMemberAccess`）。
 - `[x]` **AGG-11** 嵌套类型、前向声明。**完成**（2026-10-05，spec `docs/superpowers/specs/2026-10-05-nested-types-design.md`）：方案 A 解析期类前缀复用（类/struct/union 体解析压 `m_typeNamespacePrefix += 裸类名_`，与 namespace 同构）；DS1 全种类（enum/struct/class/union）任意深度嵌套，解析期扁平键注册（`Outer::Inner` → `Outer_Inner`）；DS2 成员循环三路判定（keyword+IDENT+`{` → 嵌套声明，平衡括号前瞻排除内联定义+声明符的 C 风格 idiom；keyword+`{` → 匿名内联字段 AGG-03；其余 → 字段）；DS3 引用侧零改动（`mangleQualifiedTypeName` 拍平命中）；DS4 sema `classPathPrefix` 推广 static 去糖公式（`ns::Outer::Inner::v` → `ns_Outer_Inner_v` 双侧严格一致），类嵌套枚举常量注册外层类作用域（`Outer::Red`，不注册裸键防全局泄漏）；DS5 private 嵌套类型访问控制（E2009，检查点 var decl + cast 目标）；DS6 前向声明+定义、自引用指针以测试钉住（codegen 既有类型提前 return 分支同样执行 nestedTypes 遍历）。评审修复：parseDeclaration 空定义回退分支纳入 nestedTypes 判定（防吞后续顶层声明）。已知限制：类体内裸自引用类型（self-type）解析期未注册（顶层类同样存在，含限定名变体）；类体内 unqualified 表达式引用须全限定（单一规则）。
 - `[ ]` **AGG-12** 不生成 vtable/构造/析构/GC；生命周期由用户控制（栈/`malloc`/`free`）。
 - `[ ]` **AGG-13** 布局等价 struct；`[[repr(C)]]` 下 ABI 稳定。
@@ -220,16 +220,16 @@
 
 ## 9. 继承与 CRTP（INH）〔新〕
 
-- `[ ]` **INH-01** **单继承**：`struct D : public B`；`public/private/protected` 说明符。
-- `[ ]` **INH-02** **多继承不支持**：`struct D : B, C` 给出明确诊断。
-- `[ ]` **INH-03** 继承布局：基类子对象为派生类第一个字段（偏移 0）；`[[repr(C)]]` 稳定。
-- `[ ]` **INH-04** 转换：派生→基隐式；基→派生需 `static_cast`。
-- `[ ]` **INH-05** **CRTP 必需项**：
+- `[x]` **INH-01** **单继承**：`struct D : public B`；`public/private/protected` 说明符。**完成**（2026-10-05，spec `docs/superpowers/specs/2026-10-05-inheritance-design.md`）：仅支持公有继承（DS2 用户裁决：缺省一律 public，bare `class D : B` 亦 public——偏离 C++ 的 class 缺省 private 继承，记文档）；`: private B`/`: protected B` 明确诊断不支持；struct 形态补齐（parseStructDecl 继承子句 + StructType::baseClass/base + 布局基类子对象槽 0 + 字段访问沿链）。
+- `[x]` **INH-02** **多继承不支持**：`struct D : B, C` 给出明确诊断。**完成**（2026-10-05）：基类名后遇 `,` 即诊断（此前静默误解析为前向声明）；诊断经 Parser::error（无 E 码，E2xxx 注册归 INF-13）。
+- `[x]` **INH-03** 继承布局：基类子对象为派生类第一个字段（偏移 0）。**完成**（2026-10-05）：ClassType 路径既有实现 pin 测试钉住；StructType 路径本轮补齐（getLLVMType Struct case + StructDeclAST::codegen isClass 路径）；`[[repr(C)]]` 稳定性待 ANN（P1-05）落地后复查。
+- `[x]` **INH-04** 转换：派生→基隐式；基→派生需 `static_cast`。**完成**（2026-10-05）：指针隐式上行、值赋值切片语义、`static_cast<Derived*>` 下行转换均以 e2e pin（此前已可用）。
+- `[ ]` **INH-05** **CRTP 必需项**（随 GEN 模板系统另立一轮；本轮已覆盖 `static_cast<Derived*>` 向下转换——既有 PAR-18）：
   - `this` 关键字与类型（PAR-17）；
   - 基类支持模板实例 `: Shape<Circle>`（现 `baseClass` 仅为 `string`，需改为类型化）；
   - `Shape<Circle>` 的**延迟实例化**（`Circle` 未定义完即可实例化）；
   - `static_cast<Derived*>(this)` 向下转换（PAR-18）。
-- `[ ]` **INH-06** 成员/方法沿单继承链查找；重写（非虚，静默遮蔽规则）。
+- `[x]` **INH-06** 成员/方法沿单继承链查找；重写（非虚，静默遮蔽规则）。**完成**（2026-10-05，方案乙）：删除 sema 基类方法表复制循环，`resolveMethod` 沿 `base` 链查找并经 out-param 返回 definingClass——继承方法保留定义类的访问级别与 E2009 归属；私有基方法经派生实例从类外调用的洞闭合（行为收紧，pin）；派生同名重载不再被复制去重吞掉；字段访问沿链 walk 泛化至 StructType（sema + GEP 两路）。**protected 放宽维持未做**（判定式保持 `currentClass == definingClass`，比 C++ 严格——派生类方法内经 `this->` 访问基类 protected 成员仍拒绝；如需放宽另立项，检查点已收敛于三处）。
 - `[ ]` **INH-07** **不做**（Non-goals）：多继承、虚继承、菱形继承、虚函数/vtable/RTTI。
 
 ---
