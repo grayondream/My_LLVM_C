@@ -73,6 +73,12 @@
 1. 经 `extern` 声明的符号标记为 C 名，**不修饰**（`isCName`）→ 直接 C ABI 链接。
 2. 无参数函数名保持原名（`paramTypes.empty()` 时返回 `name`）。
 3. 其余函数：`name + "_" + typeToMangled(param)...`，例如 `max_int_int`。
+4. **static 成员（AGG-10，2026-10-05）**：类内 `static` 成员去糖为全局符号——
+   `Class::member` → `Class_member`（`mangleNamespaceName` 变换，与 namespace
+   限定名共用编码）；随后按普通函数/全局变量规则叠加参数编码。static 成员
+   函数无 `this` 位。类在 namespace 内时，符号为
+   `<ns前缀>_<类名>_<成员>_<参数编码>`（由 sema `scopedName` 统一附加），
+   与访问侧全限定拼写 `ns::Class::member` 的拍平结果严格一致。
 
 `typeToMangled` 规则：
 
@@ -86,7 +92,7 @@
 | struct/class/union | 类型名 | enum | `int32` |
 | typedef | 展开到底层 | | |
 
-**目标（MOD-15）**：需补充 `static` 成员、namespace、模板单态化符号的规范编码，并保证与 C ABI / FFI 的边界清晰（MEM-12/ACC-05）。命名必须稳定、可复现（INF-07）。
+**目标（MOD-15）**：需补充 namespace（部分已落地：`scopedName` 前缀 + `mangleNamespaceName` 拍平）、模板单态化符号的规范编码，并保证与 C ABI / FFI 的边界清晰（MEM-12/ACC-05）。static 成员编码已完成（§4 第 4 条）。命名必须稳定、可复现（INF-07）。
 
 ## 5. 端序与对齐
 

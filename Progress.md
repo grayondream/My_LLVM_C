@@ -418,3 +418,12 @@
 - 实现：SemanticAnalyzer.cpp `checkAssignmentTypes` 单点，Array LHS → SemIncompatibleAssignment；`p=a`/`slice=a`/struct/union 拷贝不动。
 - 测试：AASG 前缀 4 项（2 拒绝 + 1 退化回归 pin + 1 消息文本 pin）；RED 3 FAIL + 1 pin PASS 后转绿；全量 **820/820**（基线 816）。
 - 遗留：无。下一候选：AGG-10 static 成员、AGG-11 嵌套类型。
+
+## 2026-10-05 AGG-10 static 成员
+
+- 流程：brainstorming（方案 A 类前缀全局符号去糖获批）→ spec（docs/superpowers/specs/2026-10-05-static-members-design.md，87c14ab，DS1-DS5）→ plan（docs/superpowers/plans/2026-10-05-static-members.md，641f7c4）→ Native 执行。
+- 语义：`static T name[= init];` / `static T name(...)`；仅 `Class::member` 限定访问；类内初始化器=全局定义；不占布局；无 this；private 类外访问 E2009。
+- 语义外发现：类体内 static 此前被 parser 静默丢弃；namespace 内类名被 parser 前缀化（与 sema 前缀双叠）——新增 StructDeclAST::bareName 修正。
+- 时序要求：staticMembers 声明/生成必须先于方法体分析（sema 与 codegen 两侧同构），否则方法体内引用失败且编译器带病产出坏二进制。
+- 测试：sema 10 项（SM 前缀）+ e2e 4 项（ClassCodegenE2E.SM*）；全量 **834/834**（基线 820）。
+- 遗留：P1-01 仅剩 AGG-11 嵌套类型。

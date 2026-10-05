@@ -72,7 +72,7 @@
 - `[ ]` **PAR-01** `(已实现)` 顶层声明：变量/函数/struct/class/enum/union/`typedef`/`using`/`type`。
 - `[ ]` **PAR-02** `(改)` 函数声明与定义：**C 风格**，不使用 `fn`；覆盖 `extern/static/inline`、成员函数。
 - `[ ]` **PAR-03** `(已实现)` 方法定义语法 `Vector::length()`；补嵌套/`static` 成员。
-- `[ ]` **PAR-04** class 成员：`public/private/protected` 段、成员变量/函数、`static` 成员、嵌套类型。**部分完成**：访问段解析与访问级别记录（DEC-01）已实现，段后成员不再丢失。**待补**：`static` 成员（AGG-10）、嵌套类型（AGG-11）。
+- `[ ]` **PAR-04** class 成员：`public/private/protected` 段、成员变量/函数、`static` 成员、嵌套类型。**部分完成**：访问段解析与访问级别记录（DEC-01）已实现，段后成员不再丢失。**待补**：嵌套类型（AGG-11）。static 成员已完成（AGG-10，2026-10-05）。
 - `[ ]` **PAR-05** 类型语法：基础类型、指针 `T*`、数组 `T[N]`、Slice `T[]`、模板实例 `Box<i32>`。
 - `[ ]` **PAR-06** `(新)` 指针限定符：`const/volatile/restrict/atomic`。
 - `[ ]` **PAR-07** `(新)` 注解挂载点：类型/字段/函数/参数/变量/模块。
@@ -203,7 +203,7 @@
 - `[ ]` **AGG-07** `class` 声明与 `public/private/protected` 段。**部分完成**：访问段 + 默认 private（DEC-01）+ E2009 访问诊断已实现；`static` 成员/嵌套类型待 AGG-10/11。
 - `[ ]` **AGG-08** 成员变量、成员函数声明/实现、隐式 `self`。
 - `[ ]` **AGG-09** 成员函数编译为 `Vector_length(Vector* self)`；方法调用 `v.length()`。
-- `[ ]` **AGG-10** `static` 成员函数（无 `self`）与 `static` 成员变量。
+- `[x]` **AGG-10** `static` 成员函数（无 `self`）与 `static` 成员变量。**完成**（2026-10-05，spec `docs/superpowers/specs/2026-10-05-static-members-design.md`）：方案 A 类前缀全局符号去糖（`Class::member` → `Class_member`，与 namespace 拍平同构）；仅类名限定访问（实例路径拒绝）；类内初始化器=全局定义（零初始化默认），不占对象布局；无 `this`；访问控制复用 DEC-01（E2009）；abi.md §4 补编码规范。struct 支持 static 变量（无方法通路）。
 - `[ ]` **AGG-11** 嵌套类型、前向声明。
 - `[ ]` **AGG-12** 不生成 vtable/构造/析构/GC；生命周期由用户控制（栈/`malloc`/`free`）。
 - `[ ]` **AGG-13** 布局等价 struct；`[[repr(C)]]` 下 ABI 稳定。
@@ -509,7 +509,7 @@
 - `[x]` **P0-08** `(新)` **namespace 支持**（PAR-22、MOD-12、DEC-17）——现有 `libsafec` 已依赖，属刚需。函数/变量、嵌套、限定访问、限定类型名均已实现。
 
 ### P1：核心现代能力
-- `[~]` **P1-01** class / enum / union / 数组 / Slice（AGG、TYP-11/12）。enum、class 访问段（DEC-01）、union（AGG-03/17）、Slice（TYP-12）已完成；剩余：static 成员（AGG-10）、嵌套类型（AGG-11）。
+- `[~]` **P1-01** class / enum / union / 数组 / Slice（AGG、TYP-11/12）。enum、class 访问段（DEC-01）、union（AGG-03/17）、Slice（TYP-12）已完成；剩余：嵌套类型（AGG-11）。
 - `[ ]` **P1-02** Optional / Result 显式访问（TYP-13/14/STD-02）。
 - `[ ]` **P1-03** **泛型 + CRTP**（GEN、INH-05、PAR-17/18、CG-07/08）。
 - `[ ]` **P1-04** `compile_time` 与反射（CT；取代 type_info/static_assert）。
