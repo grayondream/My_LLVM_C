@@ -1177,3 +1177,37 @@ TEST(SliceSemTest, MDPParamSubscript) {
         "int32 MDPGet(int32 m[][3]) { return m[1][2] + m[0][0]; } "
         "int32 main() { int32 a[2][3] = {{1,2,3},{4,5,6}}; return MDPGet(a); }"));
 }
+
+// VLA is a deliberate non-feature (2026-10-05): runtime-length allocation
+// conflicts with the safety positioning (unbounded stack growth), C23 made
+// VLAs optional, and dynamic lengths belong to Slice. Pin the dedicated
+// diagnostic, not just "some parse error".
+TEST(SliceSemTest, VLALocalDiagnostic) {
+    Lexer lexer("test.c",
+        "int32 main() { int32 n = 3; int32 a[n]; return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_TRUE(ast != nullptr);
+    ASSERT_FALSE(parser.getErrors().empty());
+    bool hasVLA = false;
+    for (auto& e : parser.getErrors())
+        if (e.message.find("variable-length") != std::string::npos)
+            hasVLA = true;
+    EXPECT_TRUE(hasVLA);
+}
+
+TEST(SliceSemTest, VLAParamDiagnostic) {
+    Lexer lexer("test.c",
+        "int32 f(int32 m[n]) { return 0; } int32 main() { return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_TRUE(ast != nullptr);
+    ASSERT_FALSE(parser.getErrors().empty());
+    bool hasVLA = false;
+    for (auto& e : parser.getErrors())
+        if (e.message.find("variable-length") != std::string::npos)
+            hasVLA = true;
+    EXPECT_TRUE(hasVLA);
+}

@@ -2227,6 +2227,13 @@ std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string
             advance();
             int size = 0;
             bool hasNumber = false;
+            if (!check(TokenType::TOKEN_NUMBER) && !check(TokenType::TOKEN_RBRACKET)) {
+                // VLA is a deliberate non-feature: runtime-length allocation
+                // is unbounded stack growth (safety), and dynamic lengths
+                // belong to Slice. C23 made VLAs optional.
+                errorUnexpected("variable-length arrays are not supported: array size must be an integer literal");
+                return nullptr;
+            }
             if (auto numTok = match(TokenType::TOKEN_NUMBER)) {
                 size = static_cast<int>(std::get<long long>(numTok->value));
                 hasNumber = true;
@@ -2297,6 +2304,12 @@ std::unique_ptr<ParamDeclAST> Parser::parseParamDecl() {
                 advance();
                 int dimSize = 0;
                 bool hasNumber = false;
+                if (!check(TokenType::TOKEN_NUMBER) && !check(TokenType::TOKEN_RBRACKET)) {
+                    // Same deliberate non-feature as declarations: a runtime
+                    // parameter size is documentation we cannot check.
+                    errorUnexpected("variable-length arrays are not supported: array size must be an integer literal");
+                    return nullptr;
+                }
                 if (auto numTok = match(TokenType::TOKEN_NUMBER)) {
                     dimSize = static_cast<int>(std::get<long long>(numTok->value));
                     hasNumber = true;
