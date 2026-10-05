@@ -394,3 +394,19 @@
 - 实现外发现：typesEqual 数组分支用恒 null 的 base 且不比长度——所有数组两两相等；修复为 size+elementType 比较（Symbol.cpp）。
 - 测试：sema 5 项（MDP 前缀）+ 1 项旧 pin 改写（MultiDimParamParses）+ e2e 3 项；全量 **814/814**（基线 806）。
 - 遗留：VLA（TYP-11 最后一项）；裸函数类型形参（parser 既有缺口，另立项）。
+
+## 2026-10-04 多维数组形参——整分支评审（subagent）
+
+- 评审包：`.superpowers/sdd/2026-10-04-multidim-array-params/review-6f6acbe..17bb427.diff`（4 commits，HEAD=17bb427）。
+- 实证验证：构建 + 全量 ctest **814/814**（2 项 constexpr skip 属既有）；Review Focus 五条逐条核对均钉住（①写穿透 e2e ②行不匹配 sema ③1-D 既有 4 钉 + dims.size()==1 等价 ④内维缺省解析期拒 ⑤MethodCall e2e）。
+- 裁定核查：a) typesEqual 数组分支修复成立——调用点仅 conversionRank/OverloadSet::resolve/Scope::declare（函数签名判重）与 SemanticAnalyzer 的 slice 元素比较（:250/:473），均无依赖旧"所有数组相等"语义的合法用例；结构化比较 + getSliceType 无缓存，无指针同一性陷阱。b) MultiDimParamParses 正向 pin 成立，语义接受由 MDPExplicitFirstDimAccepted 覆盖。
+- **Important（既有，非本分支引入）**：数组-数组直接赋值 `a = b`（a: int32[2][3]，b: int32[2][4]）静默通过（SemanticAnalyzer.cpp:478 同 kind 兜底，不经 typesEqual），codegen 生成 `store ptr %decay, ptr %a`（把 b 的退化指针写进 a 的存储，覆盖 a[0][0..1]，无任何复制语义）——内存不安全。实测 IR 证实。建议另立项：sema 对 Array↔Array 赋值按形状相等拒绝。
+- Minor：2-D 元素类型不匹配（float64[2][3]→int32[][3]）实测拒绝但无测试钉；3-D 形参无测试；`f(int32[][3])`/`f(int32[][4])` 现为两个可共存重载（typesEqual 修复的可见行为变化，spec 未规定）；MDPNonFirstDimRejected 未钉错误消息文本；`[4294967297]` 维度 int 截断（既有模式）；`m[2][0]` 零长度行接受（与声明侧 a[2][0] 一致）。
+- 结论：核心去糖实现无 Critical 缺陷，裁定 a/b 均成立；数组赋值洞建议紧随轮修复。
+
+## 2026-10-05 VLA 决策：明确不支持（TYP-11 完结）
+
+- 流程：brainstorming → 用户质疑"不支持运行时长度是否更合理" → 技术论证支持 → 用户决策不支持 → 方案 1（专用诊断 + 关闭）。
+- 论证：无界栈增长与安全定位冲突（CERT MSC34-C）；C23 已降为可选；Rust/Zig/Go/Swift 均无 VLA；动态长度由 Slice 承接（未来配合显式堆分配）。
+- 实现：parseVariableDecl + parseParamDecl 两处 `[` 后非 NUMBER/`]` → "variable-length arrays are not supported: array size must be an integer literal"；pin 测试 2 项（VLA 前缀，钉消息文本）。816/816（基线 814）。
+- TYP-11 完结（`[x]`）。遗留相关：数组-数组赋值缺陷（另立项，见 2026-10-04 条目）。
