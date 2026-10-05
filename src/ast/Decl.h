@@ -53,6 +53,9 @@ public:
     std::unique_ptr<CompoundStmtAST> body;
     bool isConstexpr = false;
     bool isVarArg = false;
+    // AGG-10: class-body `static` method — no `this` insertion; sema rewrites
+    // the name to the desugared `Class_method` global symbol.
+    bool isStatic = false;
 
     FunctionDeclAST(const std::string& n, Type* ret,
                     std::vector<std::unique_ptr<ParamDeclAST>>& parameters,
@@ -114,6 +117,15 @@ public:
     std::string name;
     std::vector<std::pair<std::string, Type*>> fields;
     std::vector<std::unique_ptr<FunctionDeclAST>> methods;
+    // AGG-10: static data members — parser-built VarDeclASTs. Never part of
+    // `fields` (no object layout); sema rewrites the name to the desugared
+    // `Class_member` global symbol and codegen emits them as globals.
+    std::vector<std::unique_ptr<VarDeclAST>> staticMembers;
+    // AGG-10: class name before qualifyTypeDeclName's namespace prefixing —
+    // the desugared static-member symbol must combine the BARE class name
+    // with sema's own namespace prefix (scopedName), matching what the fully
+    // qualified access spelling flattens to.
+    std::string bareName;
     std::string baseClass;
 
     // PAR-04/DEC-01: explicit access levels recorded by the parser (class

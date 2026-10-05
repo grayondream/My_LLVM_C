@@ -1246,3 +1246,99 @@ TEST(SliceSemTest, AASGArrayAssignDiagnostic) {
             hasLvalueMsg = true;
     EXPECT_TRUE(hasLvalueMsg);
 }
+
+// AGG-10: static members desugar to class-prefixed global symbols.
+// Spec: docs/superpowers/specs/2026-10-05-static-members-design.md
+
+TEST(SliceSemTest, SMStaticMethodQualifiedCall) {
+    EXPECT_TRUE(analyzeOk(
+        "class SMBox { public: static int32 make() { return 7; } }; "
+        "int32 main() { return SMBox::make(); }"));
+}
+
+TEST(SliceSemTest, SMStaticVarQualifiedAccess) {
+    EXPECT_TRUE(analyzeOk(
+        "class SMCtr { public: static int32 count = 0; }; "
+        "int32 main() { SMCtr::count = 5; return SMCtr::count; }"));
+}
+
+TEST(SliceSemTest, SMPrivateStaticExternalRejected) {
+    // DS5: E2009 (member access), not a parse error — pin the message.
+    Lexer lexer("test.c",
+        "class SMP { private: static int32 secret = 1; }; "
+        "int32 main() { return SMP::secret; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_TRUE(ast != nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_FALSE(analyzer.getErrors().empty());
+    bool hasE2009 = false;
+    for (auto& e : analyzer.getErrors())
+        if (e.message.find("private") != std::string::npos) hasE2009 = true;
+    EXPECT_TRUE(hasE2009);
+}
+
+TEST(SliceSemTest, SMInstancePathRejected) {
+    // DS1: static members are not instance members — pin the "no matching
+    // method" diagnostic (a parse-level rejection would be wrong here).
+    Lexer lexer("test.c",
+        "class SMP2 { public: static int32 make() { return 1; } }; "
+        "int32 main() { SMP2 obj; return obj.make(); }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_TRUE(ast != nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_FALSE(analyzer.getErrors().empty());
+    bool hasNoMethod = false;
+    for (auto& e : analyzer.getErrors())
+        if (e.message.find("no matching method") != std::string::npos) hasNoMethod = true;
+    EXPECT_TRUE(hasNoMethod);
+}
+
+TEST(SliceSemTest, SMStaticInstanceSameName) {
+    EXPECT_TRUE(analyzeOk(
+        "class SMDual { "
+        "public: int32 f(int32 x) { return x; } "
+        "static int32 f() { return 42; } }; "
+        "int32 main() { SMDual obj; return obj.f(1) + SMDual::f(); }"));
+}
+
+TEST(SliceSemTest, SMStaticOverload) {
+    EXPECT_TRUE(analyzeOk(
+        "class SMOvl { public: static int32 g(int32 x) { return x; } "
+        "static int32 g(int32 x, int32 y) { return x + y; } }; "
+        "int32 main() { return SMOvl::g(1) + SMOvl::g(1, 2); }"));
+}
+
+TEST(SliceSemTest, SMStaticVarNoInitZero) {
+    EXPECT_TRUE(analyzeOk(
+        "class SMZ { public: static int32 z; }; "
+        "int32 main() { return SMZ::z; }"));
+}
+
+TEST(SliceSemTest, SMStaticNotInLayout) {
+    // DS2: static variables do not occupy object layout — and the member
+    // must actually exist (reference it so a silent parser drop fails).
+    EXPECT_TRUE(analyzeOk(
+        "class SML { public: static int32 big = 0; int32 a; }; "
+        "int32 main() { return (sizeof(SML) == sizeof(int32) && SML::big == 0) ? 0 : 1; }"));
+}
+
+TEST(SliceSemTest, SMStaticCollisionRejected) {
+    // Review Focus 5: hand-written SMC_v collides with the desugared
+    // SMC::v — a redefinition error, never silent shadowing.
+    EXPECT_FALSE(analyzeOk(
+        "class SMC { public: static int32 v = 0; }; "
+        "int32 SMC_v = 1; int32 main() { return 0; }"));
+}
+
+TEST(SliceSemTest, SMStaticInNamespace) {
+    // Review Focus 1: declaration and access sides must agree on the ns prefix.
+    EXPECT_TRUE(analyzeOk(
+        "namespace smns { class SMN { public: static int32 v = 3; }; } "
+        "int32 main() { return smns::SMN::v; }"));
+}

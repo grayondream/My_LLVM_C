@@ -2344,17 +2344,28 @@ std::unique_ptr<ParamDeclAST> Parser::parseParamDecl() {
 std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
     if (!match(TokenType::TOKEN_STRUCT)) return nullptr;
 
-    std::string name = qualifyTypeDeclName(parseQualifiedTypeName());
+    std::string bareName = parseQualifiedTypeName();
+    std::string name = qualifyTypeDeclName(bareName);
 
     if (!check(TokenType::TOKEN_LBRACE)) {
         // Forward declaration
-        return std::make_unique<StructDeclAST>(name, std::vector<std::pair<std::string, Type*>>{});
+        auto fwd = std::make_unique<StructDeclAST>(name, std::vector<std::pair<std::string, Type*>>{});
+        fwd->bareName = bareName;
+        return fwd;
     }
 
     advance(); // consume '{'
 
     std::vector<std::pair<std::string, Type*>> fields;
+    std::vector<std::unique_ptr<VarDeclAST>> staticMembers;
     while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
+        // AGG-10: `static` storage for the following data member (structs
+        // have no method path, so static applies to variables only).
+        bool memberIsStatic = false;
+        if (check(TokenType::TOKEN_STATIC)) {
+            advance();
+            memberIsStatic = true;
+        }
         Type* fieldType = parseType();
         if (!fieldType) break;
 
@@ -2372,6 +2383,20 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
             break;
         }
         std::string fieldName = advance()->lexeme;
+        if (memberIsStatic) {
+            std::unique_ptr<ExprAST> init = nullptr;
+            if (match(TokenType::TOKEN_ASSIGN)) {
+                init = parseExpr(2);
+                if (!init) return nullptr;
+            }
+            if (!expect(TokenType::TOKEN_SEMICOLON,
+                        "expected ';' after static member declaration")) {
+                return nullptr;
+            }
+            staticMembers.push_back(
+                std::make_unique<VarDeclAST>(fieldName, fieldType, std::move(init)));
+            continue;
+        }
         fieldType = parseMemberArraySuffix(fieldType);
 
         fields.push_back({fieldName, fieldType});
@@ -2382,13 +2407,17 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
     match(TokenType::TOKEN_RBRACE);
     match(TokenType::TOKEN_SEMICOLON);
 
-    return std::make_unique<StructDeclAST>(name, std::move(fields));
+    auto decl = std::make_unique<StructDeclAST>(name, std::move(fields));
+    decl->bareName = bareName;
+    decl->staticMembers = std::move(staticMembers);
+    return decl;
 }
 
 std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
     if (!match(TokenType::TOKEN_CLASS)) return nullptr;
 
-    std::string name = qualifyTypeDeclName(parseQualifiedTypeName());
+    std::string bareName = parseQualifiedTypeName();
+    std::string name = qualifyTypeDeclName(bareName);
 
     // Parse optional inheritance: : public BaseName
     std::string baseClass;
@@ -2407,6 +2436,7 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
         // Forward declaration
         auto decl = std::make_unique<StructDeclAST>(name, std::vector<std::pair<std::string, Type*>>{});
         decl->baseClass = std::move(baseClass);
+        decl->bareName = bareName;
         return decl;
     }
 
@@ -2414,6 +2444,7 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
 
     std::vector<std::pair<std::string, Type*>> fields;
     std::vector<std::unique_ptr<FunctionDeclAST>> methods;
+    std::vector<std::unique_ptr<VarDeclAST>> staticMembers;
     std::unordered_map<std::string, AccessLevel> memberAccess;
     // DEC-01: class members default to private; `public:`/`private:`/
     // `protected:` sections change the level for the members that follow.
@@ -2443,6 +2474,13 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
             continue;
         }
 
+        // AGG-10: `static` storage for the following member (method or data).
+        bool memberIsStatic = false;
+        if (check(TokenType::TOKEN_STATIC)) {
+            advance();
+            memberIsStatic = true;
+        }
+
         // Check if this looks like a member function declaration:
         // type identifier '(' ... or operator symbol '('
         size_t savedPos = m_currentTokenPos;
@@ -2458,9 +2496,26 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                     // Member function declaration
                     auto func = parseFunctionDecl(declType, memberName);
                     if (func) {
+                        func->isStatic = memberIsStatic;
                         methods.push_back(std::move(func));
                         memberAccess[memberName] = currentAccess;
                     }
+                } else if (memberIsStatic) {
+                    // AGG-10: static data member — optional in-class
+                    // initializer becomes the global definition (DS2);
+                    // kept out of `fields` so it takes no object layout.
+                    std::unique_ptr<ExprAST> init = nullptr;
+                    if (match(TokenType::TOKEN_ASSIGN)) {
+                        init = parseExpr(2);
+                        if (!init) return nullptr;
+                    }
+                    if (!expect(TokenType::TOKEN_SEMICOLON,
+                                "expected ';' after static member declaration")) {
+                        return nullptr;
+                    }
+                    staticMembers.push_back(
+                        std::make_unique<VarDeclAST>(memberName, declType, std::move(init)));
+                    memberAccess[memberName] = currentAccess;
                 } else {
                     // Field declaration
                     declType = parseMemberArraySuffix(declType);
@@ -2507,8 +2562,10 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
 
     auto decl = std::make_unique<StructDeclAST>(name, std::move(fields));
     decl->methods = std::move(methods);
+    decl->staticMembers = std::move(staticMembers);
     decl->baseClass = std::move(baseClass);
     decl->memberAccess = std::move(memberAccess);
+    decl->bareName = bareName;
     decl->isClassDecl = true;
     return decl;
 }

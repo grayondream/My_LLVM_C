@@ -172,6 +172,12 @@ private:
     Scope* currentScope;
     FunctionDeclAST* currentFunction;
     ClassType* currentClass = nullptr; // SEM-04: class whose method is being analyzed
+
+    // AGG-10: desugared static-member symbol key -> {defining class, member
+    // name}. Key is mangleNamespaceName of the fully qualified spelling
+    // (namespace prefix included), matching what access sites resolve.
+    std::unordered_map<std::string, std::pair<ClassType*, std::string>> staticMemberIndex;
+    void checkStaticMemberAccess(const std::string& originalName, ExprAST& node);
     TypeContext* typeCtx;
     std::unordered_map<std::string, ConstValue> constexprValues;
     std::unordered_set<std::string> definedFunctions;

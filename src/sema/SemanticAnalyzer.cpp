@@ -139,6 +139,27 @@ std::string SemanticAnalyzer::mangleNamespaceName(const std::string& name) {
     return out;
 }
 
+// AGG-10/DS5: qualified access to a class static member goes through the
+// desugared global symbol; check the declaring class's access level here so
+// private static members stay unreachable from outside (E2009, as instance
+// members). `originalName` is the pre-resolution spelling, e.g. `SMP::secret`.
+void SemanticAnalyzer::checkStaticMemberAccess(const std::string& originalName, ExprAST& node) {
+    if (originalName.find("::") == std::string::npos) return;
+    auto it = staticMemberIndex.find(mangleNamespaceName(originalName));
+    if (it == staticMemberIndex.end()) return;
+    ClassType* definingClass = it->second.first;
+    if (!definingClass) return;
+    AccessLevel level = definingClass->memberAccessLevel(it->second.second);
+    if (level != AccessLevel::Public && currentClass != definingClass) {
+        emitError(DiagnosticCode::SemPrivateMemberAccess,
+                  "cannot access " +
+                      std::string(level == AccessLevel::Private ? "private" : "protected") +
+                      " member '" + it->second.second + "' of class '" + definingClass->name +
+                      "' outside the class; make it public or add an accessor",
+                  node);
+    }
+}
+
 // Candidate symbol-table keys for `name`, innermost namespace first.
 std::vector<std::string> SemanticAnalyzer::namespaceCandidates(const std::string& name) const {
     std::vector<std::string> candidates;
@@ -889,6 +910,10 @@ void SemanticAnalyzer::visit(StringExprAST& node) {
 }
 
 void SemanticAnalyzer::visit(VariableExprAST& node) {
+    // AGG-10/DS5: qualified static-member access — access check against the
+    // declaring class before the ordinary symbol resolution proceeds.
+    checkStaticMemberAccess(node.name, node);
+
     // Enumerator (possibly namespace-qualified, e.g. `A::Red`)?
     for (const auto& candidate : namespaceCandidates(node.name)) {
         auto it = enumConstants.find(candidate);
@@ -1189,6 +1214,10 @@ bool SemanticAnalyzer::tryAnalyzePanicCall(CallExprAST& node) {
 }
 
 void SemanticAnalyzer::visit(CallExprAST& node) {
+    // AGG-10/DS5: qualified static-method call — access check against the
+    // declaring class (uses the pre-resolution callee spelling).
+    checkStaticMemberAccess(node.callee, node);
+
     // Resolve a namespace-qualified or namespace-local callee to its mangled key.
     node.callee = resolveNamespaceName(node.callee);
 
@@ -1805,6 +1834,9 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
         }
 
         for (auto& method : node.methods) {
+            // AGG-10/DS1: static methods are not instance members — they
+            // never enter the class method table, so instance calls reject.
+            if (method->isStatic) continue;
             // Only add if not already present
             if (!classType->getMethod(method->name)) {
                 std::vector<Type*> paramTypes;
@@ -1825,12 +1857,40 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
         }
 
         for (auto& method : node.methods) {
-            auto* thisType = new Type(TypeKind::Pointer, classType);
-            auto thisParam = std::make_unique<ParamDeclAST>("this", thisType);
-            method->params.insert(method->params.begin(), std::move(thisParam));
             ClassType* savedClass = currentClass;
             currentClass = classType;
-            visit(*method);
+            if (method->isStatic) {
+                // AGG-10/DS3+DS4: desugar to a global function symbol
+                // `Class_method`; no `this` parameter is inserted. Qualified
+                // call sites resolve via the existing namespace machinery.
+                // The desugared name uses the BARE class name — scopedName
+                // (applied inside visit) adds the namespace prefix, matching
+                // what the fully qualified access spelling flattens to.
+                std::string origName = method->name;
+                const std::string& clsName = node.bareName.empty() ? node.name : node.bareName;
+                method->name = mangleNamespaceName(clsName + "::" + origName);
+                staticMemberIndex[scopedName(method->name)] = {classType, origName};
+                visit(*method);
+            } else {
+                auto* thisType = new Type(TypeKind::Pointer, classType);
+                auto thisParam = std::make_unique<ParamDeclAST>("this", thisType);
+                method->params.insert(method->params.begin(), std::move(thisParam));
+                visit(*method);
+            }
+            currentClass = savedClass;
+        }
+
+        // AGG-10/DS2+DS3: static data members become globals under the
+        // desugared key; the in-class initializer is their definition.
+        for (auto& vd : node.staticMembers) {
+            if (!vd) continue;
+            std::string origName = vd->name;
+            const std::string& clsName = node.bareName.empty() ? node.name : node.bareName;
+            vd->name = mangleNamespaceName(clsName + "::" + origName);
+            staticMemberIndex[scopedName(vd->name)] = {classType, origName};
+            ClassType* savedClass = currentClass;
+            currentClass = classType;
+            visit(*vd);
             currentClass = savedClass;
         }
     } else {
@@ -1839,6 +1899,14 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
             structType->addField(field.first, field.second);
         }
         typeCtx->addStruct(node.name, structType);
+        // AGG-10: struct static data members — same desugar; no access-level
+        // index (struct members are always public).
+        for (auto& vd : node.staticMembers) {
+            if (!vd) continue;
+            const std::string& clsName = node.bareName.empty() ? node.name : node.bareName;
+            vd->name = mangleNamespaceName(clsName + "::" + vd->name);
+            visit(*vd);
+        }
     }
 }
 
