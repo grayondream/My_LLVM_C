@@ -296,3 +296,91 @@ TEST_F(ClassCodegenE2E, NTSelfRefPtrE2E) {
         }
     )", "test_nt_selfref.c"), 0);
 }
+
+// ========== INH: inheritance e2e ==========
+
+TEST_F(ClassCodegenE2E, INHStructE2E) {
+    EXPECT_EQ(runSource(R"(
+        struct B20 { int32 x; };
+        struct D20 : public B20 { int32 y; };
+        int32 main() { D20 d; d.x = 3; d.y = 4; return (d.x == 3 && d.y == 4) ? 0 : 1; }
+    )", "test_inh_struct.c"), 0);
+}
+
+TEST_F(ClassCodegenE2E, INHStructLayoutOffset0E2E) {
+    // INH-03：基类子对象偏移 0——派生指针隐式转基指针后字段同址。
+    EXPECT_EQ(runSource(R"(
+        struct B21 { int32 x; };
+        struct D21 : public B21 { int32 y; };
+        int32 main() { D21 d; d.x = 8; B21* b = &d; return b->x == 8 ? 0 : 1; }
+    )", "test_inh_layout.c"), 0);
+}
+
+TEST_F(ClassCodegenE2E, INHDeepChainE2E) {
+    // Review Focus 2：A→B→C 只用 C。
+    EXPECT_EQ(runSource(R"(
+        class A22 { public: int32 a; };
+        class B22 : public A22 { public: int32 b; };
+        class C22 : public B22 { public: int32 c; };
+        int32 main() { C22 o; o.a = 1; o.b = 2; o.c = 3;
+            return (o.a == 1 && o.b == 2 && o.c == 3) ? 0 : 1; }
+    )", "test_inh_deep.c"), 0);
+}
+
+TEST_F(ClassCodegenE2E, INHShadowE2E) {
+    // 字段遮蔽 pin（p5 行为）。遮蔽 = 两个独立字段：d.v 写派生槽；
+    // 基槽未写（实测裁决：a->v 读到未初始化基槽，断言移除，台账记录）。
+    EXPECT_EQ(runSource(R"(
+        class A23 { public: int32 v; };
+        class D23 : public A23 { public: int32 v; };
+        int32 main() { D23 d; d.v = 4;
+            return d.v == 4 ? 0 : 1; }
+    )", "test_inh_shadow.c"), 0);
+}
+
+TEST_F(ClassCodegenE2E, INHSliceE2E) {
+    // 派生→基 值赋值（切片语义）pin（p6 行为）。
+    EXPECT_EQ(runSource(R"(
+        class A24 { public: int32 x; int32 w; };
+        class D24 : public A24 { public: int32 t; };
+        int32 main() { D24 d; d.x = 3; d.w = 5; d.t = 9; A24 a = d;
+            a.x = 6; return (a.x == 6 && a.w == 5 && d.x == 3) ? 0 : 1; }
+    )", "test_inh_slice.c"), 0);
+}
+
+TEST_F(ClassCodegenE2E, INHDowncastE2E) {
+    // static_cast 向下转换 pin（p7 行为）。经派生指针写、基指针读同址
+    // （实测裁决：原 a->x==0 读未初始化基槽不稳，改为先写后读，台账记录）。
+    EXPECT_EQ(runSource(R"(
+        class A25 { public: int32 x; };
+        class D25 : public A25 { public: int32 t; };
+        int32 main() { D25 d; A25* a = &d; D25* d2 = static_cast<D25*>(a);
+            d2->x = 5; d2->t = 2; return (d.t == 2 && a->x == 5) ? 0 : 1; }
+    )", "test_inh_downcast.c"), 0);
+}
+
+TEST_F(ClassCodegenE2E, INHMultiInheritDiagE2E) {
+    // INH-02 端到端：多继承 → parser 诊断（fixture runSource 不查 parser
+    // 错误，实测裁决：改用显式管线断言，台账记录）。
+    Lexer lexer("test_inh_multi.c",
+        "class A26 { public: int32 x; }; class B26 { public: int32 y; }; "
+        "class C26 : public A26, public B26 { public: int32 z; }; "
+        "int32 main() { return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    EXPECT_FALSE(parser.getErrors().empty());
+}
+
+TEST_F(ClassCodegenE2E, INHStructChainGEPE2E) {
+    // 经中间 struct 的两级链 + 基指针写透。
+    EXPECT_EQ(runSource(R"(
+        struct A27 { int32 a; };
+        struct B27 : public A27 { int32 b; };
+        struct C27 : public B27 { int32 c; };
+        int32 main() { C27 o; B27* b = &o; A27* a = &o;
+            o.c = 9; b->b = 8; a->a = 7;
+            return (o.a == 7 && o.b == 8 && o.c == 9) ? 0 : 1; }
+    )", "test_inh_gep.c"), 0);
+}

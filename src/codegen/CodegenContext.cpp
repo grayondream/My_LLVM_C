@@ -412,6 +412,14 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
                 return existing;
             }
             std::vector<llvm::Type*> fieldTypes;
+            // INH-01: base sub-object occupies field slot 0 (mirror of the
+            // Class case below; StructDeclAST::codegen normally pre-creates
+            // this layout — this is the lazy-creation fallback).
+            if (!st->baseClass.empty()) {
+                if (auto* baseLLVM = llvm::StructType::getTypeByName(*context, st->baseClass)) {
+                    fieldTypes.push_back(baseLLVM);
+                }
+            }
             for (auto& f : st->fields) {
                 fieldTypes.push_back(getLLVMType(f.second));
             }

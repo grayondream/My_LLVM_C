@@ -894,32 +894,52 @@ llvm::Value* ArrayAccessExprAST::codegen(CodegenContext& ctx) {
 
 // Emit a GEP for a class field, following the base-class chain if the member
 // is inherited. The LLVM layout of a derived class is { %Base, ownFields... }.
-static llvm::Value* emitClassFieldGEP(CodegenContext& ctx, ClassType* classType,
+static llvm::Value* emitClassFieldGEP(CodegenContext& ctx, Type* aggType,
                                       llvm::Value* objPtr, const std::string& memberName) {
     auto& builder = ctx.getBuilder();
-    ClassType* cur = classType;
+    // INH-01: unified walk over ClassType and StructType inheritance chains —
+    // the base sub-object occupies field slot 0 of every derived layout.
+    Type* cur = aggType;
     llvm::Value* curPtr = objPtr;
 
     while (cur) {
-        for (size_t i = 0; i < cur->fields.size(); ++i) {
-            if (cur->fields[i].first == memberName) {
+        std::vector<std::pair<std::string, Type*>>* fields = nullptr;
+        std::string baseClassName;
+        Type* baseType = nullptr;
+        if (cur->kind == TypeKind::Class) {
+            auto* classType = static_cast<ClassType*>(cur);
+            fields = &classType->fields;
+            baseClassName = classType->baseClass;
+            baseType = classType->base;
+        } else if (cur->kind == TypeKind::Struct) {
+            auto* structType = static_cast<StructType*>(cur);
+            fields = &structType->fields;
+            baseClassName = structType->baseClass;
+            baseType = structType->base;
+        } else {
+            break;
+        }
+
+        for (size_t i = 0; i < fields->size(); ++i) {
+            if ((*fields)[i].first == memberName) {
                 unsigned idx = static_cast<unsigned>(i);
                 // Base sub-object occupies field index 0.
-                if (!cur->baseClass.empty()) idx += 1;
+                if (!baseClassName.empty()) idx += 1;
                 llvm::Type* curLLVM = ctx.getLLVMType(cur);
                 if (!curLLVM) return nullptr;
                 return builder.CreateStructGEP(curLLVM, curPtr, idx, "member");
             }
         }
 
-        if (cur->baseClass.empty()) break;
-        Type* baseType = cur->base;
-        if (!baseType || baseType->kind != TypeKind::Class) break;
-        auto* base = static_cast<ClassType*>(baseType);
+        if (baseClassName.empty()) break;
+        if (!baseType || (baseType->kind != TypeKind::Class &&
+                          baseType->kind != TypeKind::Struct)) {
+            break;
+        }
         llvm::Type* curLLVM = ctx.getLLVMType(cur);
         if (!curLLVM) break;
         curPtr = builder.CreateStructGEP(curLLVM, curPtr, 0, "base");
-        cur = base;
+        cur = baseType;
     }
 
     return nullptr;
@@ -979,6 +999,11 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
 
     if (valType && valType->kind == TypeKind::Struct) {
         auto* structType = static_cast<StructType*>(valType);
+        // INH-01: chain-aware GEP first (inherited fields live in the base
+        // sub-object); falls back to the local scan below.
+        if (auto* gep = emitClassFieldGEP(ctx, valType, objVal, memberName)) {
+            return gep;
+        }
         for (size_t i = 0; i < structType->fields.size(); ++i) {
             if (structType->fields[i].first == memberName) {
                 fieldIndex = i;
@@ -995,6 +1020,17 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
     } else if (valType && valType->kind == TypeKind::Pointer &&
                valBase && valBase->kind == TypeKind::Struct) {
         auto* structType = static_cast<StructType*>(valBase);
+        // INH-01: chain-aware GEP first — inherited fields live in the base
+        // sub-object behind the pointer.
+        // Load the pointer unless the object already produced a pointer value
+        // (a cast, a call result, `&x`, ...); only lvalue objects are addresses
+        // of a variable that stores the pointer (MEM-10).
+        if (object->isLValue) {
+            objVal = builder.CreateLoad(llvm::PointerType::get(ctx.getContext(), 0), objVal, "deref");
+        }
+        if (auto* gep = emitClassFieldGEP(ctx, valBase, objVal, memberName)) {
+            return gep;
+        }
         for (size_t i = 0; i < structType->fields.size(); ++i) {
             if (structType->fields[i].first == memberName) {
                 fieldIndex = i;
@@ -1002,12 +1038,6 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
             }
         }
         objType = ctx.getLLVMType(valBase);
-        // Load the pointer unless the object already produced a pointer value
-        // (a cast, a call result, `&x`, ...); only lvalue objects are addresses
-        // of a variable that stores the pointer (MEM-10).
-        if (object->isLValue) {
-            objVal = builder.CreateLoad(llvm::PointerType::get(ctx.getContext(), 0), objVal, "deref");
-        }
     } else if (valType && valType->kind == TypeKind::Pointer &&
                valBase && valBase->kind == TypeKind::Class) {
         auto* classType = static_cast<ClassType*>(valBase);
