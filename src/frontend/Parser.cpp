@@ -2913,7 +2913,8 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
 std::unique_ptr<EnumDeclAST> Parser::parseEnumDecl() {
     if (!match(TokenType::TOKEN_ENUM)) return nullptr;
 
-    std::string name = qualifyTypeDeclName(parseQualifiedTypeName());
+    std::string bareName = parseQualifiedTypeName();
+    std::string name = qualifyTypeDeclName(bareName);
 
     // Optional explicit underlying type: `enum E : uint8 { ... }` (TYP-09/TYP-25).
     Type* underlyingType = nullptr;
@@ -2939,9 +2940,11 @@ std::unique_ptr<EnumDeclAST> Parser::parseEnumDecl() {
 
     if (!check(TokenType::TOKEN_LBRACE)) {
         // Forward declaration
-        return std::make_unique<EnumDeclAST>(name,
-                                             std::vector<std::pair<std::string, int>>{},
-                                             underlyingType);
+        auto fwd = std::make_unique<EnumDeclAST>(name,
+                                                 std::vector<std::pair<std::string, int>>{},
+                                                 underlyingType);
+        fwd->bareName = bareName;
+        return fwd;
     }
 
     advance(); // consume '{'
@@ -2978,7 +2981,9 @@ std::unique_ptr<EnumDeclAST> Parser::parseEnumDecl() {
         enumType->addValue(v.first, v.second);
     }
 
-    return std::make_unique<EnumDeclAST>(name, std::move(values), underlyingType);
+    auto decl = std::make_unique<EnumDeclAST>(name, std::move(values), underlyingType);
+    decl->bareName = bareName;
+    return decl;
 }
 
 std::unique_ptr<TypedefDeclAST> Parser::parseTypedefDecl() {

@@ -1295,6 +1295,9 @@ void SemanticAnalyzer::visit(TernaryExprAST& node) {
 }
 
 void SemanticAnalyzer::visit(CastExprAST& node) {
+    // AGG-11/DS5: cast targets of private nested types are E2009 (the main
+    // heap-allocation path is `(Outer::Secret*)malloc(...)`).
+    checkNestedTypeAccess(node.castType, node);
     Type* exprType = getExprType(*node.expr);
     if (exprType && node.castType) {
         Type* from = stripTypedef(exprType);
@@ -1718,6 +1721,8 @@ void SemanticAnalyzer::visit(ContinueStmtAST& node) {}
 void SemanticAnalyzer::visit(NullStmtAST& node) {}
 
 void SemanticAnalyzer::visit(VarDeclAST& node) {
+    // AGG-11/DS5: naming a private nested type outside its class is E2009.
+    checkNestedTypeAccess(node.type, node);
     node.name = scopedName(node.name);
     if (node.isConstexpr) {
         if (!node.initExpr) {
@@ -1802,6 +1807,76 @@ void SemanticAnalyzer::visit(ArrayDeclAST& node) {
     }
 }
 
+void SemanticAnalyzer::visitNestedDecl(DeclAST& node) {
+    if (auto* sd = dynamic_cast<StructDeclAST*>(&node)) {
+        visit(*sd);
+    } else if (auto* ed = dynamic_cast<EnumDeclAST*>(&node)) {
+        visit(*ed);
+    } else if (auto* ud = dynamic_cast<UnionDeclAST*>(&node)) {
+        visit(*ud);
+    }
+}
+
+// AGG-11/DS4: nested types are analyzed before static members and method
+// bodies (same ordering rule as codegen). The caller has already pushed the
+// owning class's bare-name path onto classPathPrefix, so desugared
+// static-member symbols inside nested classes match what the qualified
+// access spelling (`ns::Outer::Inner::v`) flattens to.
+void SemanticAnalyzer::visitNestedTypeDecls(
+    std::vector<std::unique_ptr<DeclAST>>& nestedTypes, ClassType* owner) {
+    for (auto& nested : nestedTypes) {
+        if (!nested) continue;
+        std::string flatName;
+        std::string bareNested;
+        if (auto* sd = dynamic_cast<StructDeclAST*>(nested.get())) {
+            flatName = sd->name;
+            bareNested = sd->bareName;
+        } else if (auto* ed = dynamic_cast<EnumDeclAST*>(nested.get())) {
+            flatName = ed->name;
+            bareNested = ed->bareName;
+        } else if (auto* ud = dynamic_cast<UnionDeclAST*>(nested.get())) {
+            flatName = ud->name;
+            bareNested = ud->bareName;
+        }
+        if (bareNested.empty()) bareNested = flatName;
+        // DS5: record the access level so E2009 checks can find it. Struct
+        // and union nested types are always public (owner == null).
+        if (owner) {
+            nestedTypeAccess[flatName] =
+                {owner, owner->memberAccessLevel("type:" + bareNested)};
+        }
+        visitNestedDecl(*nested);
+    }
+}
+
+// AGG-11/DS5: a private nested type may only be named from inside its
+// defining class — checked at var declarations and cast targets.
+void SemanticAnalyzer::checkNestedTypeAccess(Type* type, const ASTNode& site) {
+    if (!type) return;
+    Type* t = stripTypedef(type);
+    while (t && t->kind == TypeKind::Pointer) {
+        t = stripTypedef(t->base);
+    }
+    if (!t) return;
+    std::string name;
+    switch (t->kind) {
+        case TypeKind::Class: name = static_cast<ClassType*>(t)->name; break;
+        case TypeKind::Struct: name = static_cast<StructType*>(t)->name; break;
+        case TypeKind::Union: name = static_cast<UnionType*>(t)->name; break;
+        case TypeKind::Enum: name = static_cast<EnumType*>(t)->name; break;
+        default: return;
+    }
+    auto it = nestedTypeAccess.find(name);
+    if (it == nestedTypeAccess.end()) return;
+    if (it->second.second == AccessLevel::Public) return;
+    if (currentClass == it->second.first) return;
+    emitError(DiagnosticCode::SemPrivateMemberAccess,
+              "cannot access private type '" + name + "' of class '" +
+                  it->second.first->name +
+                  "' outside the class; make it public or add an accessor",
+              site);
+}
+
 void SemanticAnalyzer::visit(StructDeclAST& node) {
     // PAR-04/DEC-01: `class` declarations are classes even without methods —
     // their members default to private and carry access levels.
@@ -1858,6 +1933,15 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
             classType->setMemberAccess(kv.first, kv.second);
         }
 
+        // AGG-11/DS4: nested types first (before static members and methods).
+        // classPathPrefix is extended with THIS class's bare name while its
+        // nested types are visited (their members resolve against it).
+        std::string savedPath = classPathPrefix;
+        classPathPrefix += mangleNamespaceName(
+            node.bareName.empty() ? node.name : node.bareName) + "_";
+        visitNestedTypeDecls(node.nestedTypes, classType);
+        classPathPrefix = savedPath;
+
         // AGG-10/DS2+DS3: static data members become globals under the
         // desugared key; the in-class initializer is their definition.
         // Declared BEFORE method bodies are analyzed so method bodies can
@@ -1865,8 +1949,9 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
         for (auto& vd : node.staticMembers) {
             if (!vd) continue;
             std::string origName = vd->name;
-            const std::string& clsName = node.bareName.empty() ? node.name : node.bareName;
-            vd->name = mangleNamespaceName(clsName + "::" + origName);
+            std::string clsPath = classPathPrefix +
+                (node.bareName.empty() ? node.name : node.bareName);
+            vd->name = mangleNamespaceName(clsPath + "::" + origName);
             staticMemberIndex[scopedName(vd->name)] = {classType, origName};
             ClassType* savedClass = currentClass;
             currentClass = classType;
@@ -1883,8 +1968,9 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
         for (auto& method : node.methods) {
             if (!method || !method->isStatic) continue;
             std::string origName = method->name;
-            const std::string& clsName = node.bareName.empty() ? node.name : node.bareName;
-            method->name = mangleNamespaceName(clsName + "::" + origName);
+            std::string clsPath = classPathPrefix +
+                (node.bareName.empty() ? node.name : node.bareName);
+            method->name = mangleNamespaceName(clsPath + "::" + origName);
             staticMemberIndex[scopedName(method->name)] = {classType, origName};
             std::vector<Type*> pts;
             for (auto& param : method->params) pts.push_back(param->type);
@@ -1917,12 +2003,19 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
             structType->addField(field.first, field.second);
         }
         typeCtx->addStruct(node.name, structType);
+        // AGG-11/DS4: nested types first (structs' nested types are public).
+        std::string savedPath = classPathPrefix;
+        classPathPrefix += mangleNamespaceName(
+            node.bareName.empty() ? node.name : node.bareName) + "_";
+        visitNestedTypeDecls(node.nestedTypes, nullptr);
+        classPathPrefix = savedPath;
         // AGG-10: struct static data members — same desugar; no access-level
         // index (struct members are always public).
         for (auto& vd : node.staticMembers) {
             if (!vd) continue;
-            const std::string& clsName = node.bareName.empty() ? node.name : node.bareName;
-            vd->name = mangleNamespaceName(clsName + "::" + vd->name);
+            std::string clsPath = classPathPrefix +
+                (node.bareName.empty() ? node.name : node.bareName);
+            vd->name = mangleNamespaceName(clsPath + "::" + vd->name);
             visit(*vd);
         }
     }
@@ -1934,6 +2027,12 @@ void SemanticAnalyzer::visit(UnionDeclAST& node) {
         unionType->addMember(member.first, member.second);
     }
     typeCtx->addUnion(node.name, unionType);
+    // AGG-11/DS4: nested types first (unions' nested types are public).
+    std::string savedPath = classPathPrefix;
+    classPathPrefix += mangleNamespaceName(
+        node.bareName.empty() ? node.name : node.bareName) + "_";
+    visitNestedTypeDecls(node.nestedTypes, nullptr);
+    classPathPrefix = savedPath;
 }
 
 void SemanticAnalyzer::visit(EnumDeclAST& node) {
@@ -1960,7 +2059,13 @@ void SemanticAnalyzer::visit(EnumDeclAST& node) {
         enumType->addValue(val.first, val.second);
         // Enumerators live in the enclosing (namespace) scope, so `A::Red`
         // resolves to the same key as `Red` used inside namespace A.
-        enumConstants[scopedName(val.first)] = {enumType, val.second};
+        // AGG-11/DS4: a class-nested enum's constants register under the
+        // flattened enclosing-class path (`Outer::Red` -> `Outer_Red`); the
+        // bare key is NOT registered, so `Red` stays unusable outside.
+        std::string key = classPathPrefix.empty()
+            ? scopedName(val.first)
+            : scopedName(mangleNamespaceName(classPathPrefix + val.first));
+        enumConstants[key] = {enumType, val.second};
     }
 }
 

@@ -163,6 +163,9 @@ public:
     std::vector<std::pair<std::string, int>> values;
     // Optional explicit underlying type (`enum E : u8`); null means default int.
     Type* underlyingType;
+    // AGG-11: enum name before qualifyTypeDeclName's namespace prefixing
+    // (mirrors StructDeclAST::bareName).
+    std::string bareName;
 
     EnumDeclAST(const std::string& n, std::vector<std::pair<std::string, int>> vals,
                 Type* underlying = nullptr)

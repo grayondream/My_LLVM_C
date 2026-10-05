@@ -1443,8 +1443,10 @@ TEST(SliceSemTest, NTStructInStruct) {
 
 TEST(SliceSemTest, NTNestedClassMethod) {
     // 方法表在 sema 填充——Task 1 预期 RED，Task 2 转绿。
+    // 注：用 class 而非 struct——本语言 struct 无方法通路（顶层同样），
+    // 带方法的嵌套类型须为 class（plan 缺陷修正，Ruling 已记）。
     EXPECT_TRUE(analyzeOk(
-        "class NTM { public: struct S { int32 f(int32 x) { return x; } }; }; "
+        "class NTM { public: class S { public: int32 f(int32 x) { return x; } }; }; "
         "int32 main() { NTM::S obj; return obj.f(7) == 7 ? 0 : 1; }"));
 }
 
@@ -1457,4 +1459,75 @@ TEST(SliceSemTest, NTForwardDeclPin) {
         "enum NF3 : uint8; union NF4; "
         "int32 main() { NF1 a; a.x = 1; NF2 b; b.y = 2; "
         "return (a.x == 1 && b.y == 2) ? 0 : 1; }"));
+}
+
+// ========== AGG-11 Task 2: sema traversal + classPathPrefix + enum constants + E2009 ==========
+
+TEST(SliceSemTest, NTNestedEnumBare) {
+    // 常量注册外层类作用域（DS4 修订）：Outer::Red；顶层 Mode::Red 不存在。
+    EXPECT_TRUE(analyzeOk(
+        "class NTE { public: enum Color { Red, Green }; int32 x; }; "
+        "int32 main() { NTE::Color c = NTE::Red; NTE o; o.x = 1; "
+        "return (o.x == 1 && c == 0) ? 0 : 1; }"));
+}
+
+TEST(SliceSemTest, NTNestedEnumConstantNotGlobal) {
+    // Review Focus 4：类外裸名 Red 不可用（pin，预期 Task 1 期即 PASS）。
+    EXPECT_FALSE(analyzeOk(
+        "class NTG { public: enum Color { Red }; }; int32 main() { return Red; }"));
+}
+
+TEST(SliceSemTest, NTStaticInNestedClass) {
+    EXPECT_TRUE(analyzeOk(
+        "class NTS { public: struct S { static int32 v = 3; }; }; "
+        "int32 main() { return NTS::S::v; }"));
+}
+
+TEST(SliceSemTest, NTStaticInNestedNsClass) {
+    // Review Focus 3：ns × 类嵌套组合双侧符号一致。
+    EXPECT_TRUE(analyzeOk(
+        "namespace ntns { class NTN { public: struct S { static int32 v = 3; }; }; } "
+        "int32 main() { return ntns::NTN::S::v; }"));
+}
+
+TEST(SliceSemTest, NTPrivateNestedTypeRejected) {
+    Lexer lexer("test.c",
+        "class NTP { private: struct Secret { int32 x; }; }; "
+        "int32 main() { NTP::Secret s; return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_TRUE(ast != nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_FALSE(analyzer.getErrors().empty());
+    bool hasE2009 = false;
+    for (auto& e : analyzer.getErrors())
+        if (e.message.find("private") != std::string::npos) hasE2009 = true;
+    EXPECT_TRUE(hasE2009);
+}
+
+TEST(SliceSemTest, NTPrivateNestedTypeInternalOk) {
+    EXPECT_TRUE(analyzeOk(
+        "class NTP2 { private: struct Secret { int32 x; }; "
+        "public: int32 probe() { Secret s; s.x = 4; return s.x; } }; "
+        "int32 main() { NTP2 o; return o.probe() == 4 ? 0 : 1; }"));
+}
+
+TEST(SliceSemTest, NTCastPrivateNestedRejected) {
+    // Review Focus 5：cast 目标类型检查（malloc 堆用法主通道）。
+    EXPECT_FALSE(analyzeOk(
+        "class NTP3 { private: struct Secret { int32 x; }; }; "
+        "int32 main() { return (NTP3::Secret*)0 ? 1 : 0; }"));
+}
+
+TEST(SliceSemTest, NTStaticNestedFactory) {
+    // 嵌套类 static 方法 + 实例字段组合。注意：刻意避开 self-type——
+    // 嵌套类型注册发生在 decl 解析器返回之后，其体内（含限定名
+    // `NTF2::S*`）无法自引用（顶层类同样存在的既有缺口，Ruling 已记）。
+    EXPECT_TRUE(analyzeOk(
+        "class NTF2 { public: class S { public: int32 x; "
+        "static int32 answer() { return 42; } }; "
+        "int32 probe() { NTF2::S s; s.x = NTF2::S::answer(); return s.x; } }; "
+        "int32 main() { NTF2 o; return o.probe() == 42 ? 0 : 1; }"));
 }

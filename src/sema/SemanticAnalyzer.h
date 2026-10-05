@@ -178,6 +178,19 @@ private:
     // (namespace prefix included), matching what access sites resolve.
     std::unordered_map<std::string, std::pair<ClassType*, std::string>> staticMemberIndex;
     void checkStaticMemberAccess(const std::string& originalName, ExprAST& node);
+    // AGG-11: flattened enclosing-class path for nested-type visits, e.g.
+    // "Outer_" while visiting a type nested directly in Outer. Accumulated
+    // from BARE class names so desugared static-member symbols inside nested
+    // classes match what the qualified access spelling flattens to.
+    std::string classPathPrefix;
+    // AGG-11/DS5: flattened nested-type name -> {defining class, access level}.
+    std::unordered_map<std::string, std::pair<ClassType*, AccessLevel>> nestedTypeAccess;
+    void visitNestedDecl(DeclAST& node);
+    void visitNestedTypeDecls(std::vector<std::unique_ptr<DeclAST>>& nestedTypes,
+                              ClassType* owner);
+    // AGG-11/DS5: E2009 when a private nested type is named as a var decl
+    // type or a cast target outside its defining class.
+    void checkNestedTypeAccess(Type* type, const ASTNode& site);
     TypeContext* typeCtx;
     std::unordered_map<std::string, ConstValue> constexprValues;
     std::unordered_set<std::string> definedFunctions;
