@@ -63,7 +63,12 @@ private:
     Symbol* resolveOverload(const std::string& name, const std::vector<Type*>& argTypes);
     bool isStructOrUnionType(Type* type) const;
     std::string getOperatorMangledName(BinaryOp op, Type* left, Type* right);
-    Symbol* resolveMethod(ClassType* classType, const std::string& methodName, const std::vector<Type*>& argTypes);
+    // INH-06（方案乙）: walks the class hierarchy — `defining` (when non-null)
+    // receives the class whose table provided the method, so access levels
+    // and E2009 attribution stay at the definition site.
+    Symbol* resolveMethod(ClassType* classType, const std::string& methodName,
+                          const std::vector<Type*>& argTypes,
+                          ClassType** defining = nullptr);
     bool isMethodCall(ExprAST& expr);
     bool tryAnalyzePrintCall(CallExprAST& node);
     bool tryAnalyzeAssertCall(CallExprAST& node);

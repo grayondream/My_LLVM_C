@@ -1643,3 +1643,72 @@ TEST(SliceSemTest, INHStructBareInheritParses) {
     ASSERT_NE(d6, nullptr);
     EXPECT_EQ(d6->baseClass, "B6");
 }
+
+// ========== INH: inheritance — sema（方案乙） ==========
+
+TEST(SliceSemTest, INHMethodChainSema) {
+    // 沿链方法调用（不依赖方法表复制；Task 1 后 struct/class 解析已通）。
+    EXPECT_TRUE(analyzeOk(
+        "class B7 { public: int32 f(int32 v) { return v; } }; "
+        "class D7 : public B7 { public: int32 y; }; "
+        "int32 main() { D7 d; return d.f(5) == 5 ? 0 : 1; }"));
+}
+
+TEST(SliceSemTest, INHPrivateBaseMethodRejected) {
+    // 方案乙行为收紧 pin：private 基方法经派生实例从类外调用 → E2009。
+    // 今天（复制机制）级别丢失放行 → RED；沿链后定义类级别生效 → GREEN。
+    EXPECT_FALSE(analyzeOk(
+        "class B8 { private: int32 m() { return 1; } }; "
+        "class D8 : public B8 { public: int32 z; }; "
+        "int32 main() { D8 d; return d.m(); }"));
+}
+
+TEST(SliceSemTest, INHBaseStaticProtectedPin) {
+    // AGG-10 挂账现状 pin：Base::ps 从派生访问维持拒绝（DS4 不放宽）。
+    // 今天即拒绝 → 预期 Task 2 期 PASS（防将来误放宽）。
+    EXPECT_FALSE(analyzeOk(
+        "class Base9 { protected: static int32 ps = 7; }; "
+        "class D9 : public Base9 { public: int32 get() { return Base9::ps; } }; "
+        "int32 main() { D9 d; return d.get(); }"));
+}
+
+TEST(SliceSemTest, INHStructFieldChainSema) {
+    // struct 字段沿链（Type.h StructType::base + sema walk）。
+    EXPECT_TRUE(analyzeOk(
+        "struct B10 { int32 x; }; struct D10 : public B10 { int32 y; }; "
+        "int32 main() { D10 d; d.x = 1; d.y = 2; "
+        "return (d.x == 1 && d.y == 2) ? 0 : 1; }"));
+}
+
+TEST(SliceSemTest, INHBaseUndefSema) {
+    // Review Focus 5：基类未定义 → 诊断而非崩溃。
+    EXPECT_FALSE(analyzeOk(
+        "class Undef11; class D11 : public Undef11 { public: int32 y; }; "
+        "int32 main() { D11 d; d.y = 1; return d.y; }"));
+}
+
+TEST(SliceSemTest, INHOverloadChainSema) {
+    // Review Focus 3：同名方法不同签名沿链——基 f(int32)、派生 f(float64)，
+    // 按实参各自命中（沿链查找不破坏重载第一阶段精确匹配）。
+    EXPECT_TRUE(analyzeOk(
+        "class B13 { public: int32 f(int32 v) { return v; } }; "
+        "class D13 : public B13 { public: float64 f(float64 v) { return v; } }; "
+        "int32 main() { D13 d; return (d.f(5) == 5 && d.f(0.5) == 0.5) ? 0 : 1; }"));
+}
+
+TEST(SliceSemTest, INHStructAnonPromote) {
+    // Review Focus 1：struct 继承 × 匿名内联字段（AGG-03 promote）共存。
+    EXPECT_TRUE(analyzeOk(
+        "struct B14 { int32 x; }; "
+        "struct D14 : public B14 { union { int32 a; float32 b; }; int32 c; }; "
+        "int32 main() { D14 d; d.x = 1; d.a = 2; d.c = 3; "
+        "return (d.x == 1 && d.a == 2 && d.c == 3) ? 0 : 1; }"));
+}
+
+TEST(SliceSemTest, INHCircularSema) {
+    // Review Focus 4：循环继承诊断不回归、不挂死。
+    EXPECT_FALSE(analyzeOk(
+        "class CA12 : public CB12 { public: int32 x; }; "
+        "class CB12 : public CA12 { public: int32 y; }; "
+        "int32 main() { return 0; }"));
+}

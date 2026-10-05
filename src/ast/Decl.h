@@ -131,6 +131,9 @@ public:
     // PAR-04/DEC-01: explicit access levels recorded by the parser (class
     // declarations record every member; structs leave this empty -> Public).
     std::unordered_map<std::string, AccessLevel> memberAccess;
+    // INH-01: true when this node came from a forward declaration (`class D;`)
+    // — sema uses it to keep ClassType::isComplete accurate.
+    bool isForwardDecl = false;
     // AGG-11: nested type declarations (enum/struct/class/union), in source
     // order. Registered under flat keys (`Outer_Inner`) at parse time.
     std::vector<std::unique_ptr<DeclAST>> nestedTypes;

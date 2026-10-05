@@ -2387,6 +2387,7 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
         auto fwd = std::make_unique<StructDeclAST>(name, std::vector<std::pair<std::string, Type*>>{});
         fwd->bareName = bareName;
         fwd->baseClass = std::move(baseClass);
+        fwd->isForwardDecl = true;
         return fwd;
     }
 
@@ -2629,6 +2630,7 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
         auto decl = std::make_unique<StructDeclAST>(name, std::vector<std::pair<std::string, Type*>>{});
         decl->baseClass = std::move(baseClass);
         decl->bareName = bareName;
+        decl->isForwardDecl = true;
         return decl;
     }
 

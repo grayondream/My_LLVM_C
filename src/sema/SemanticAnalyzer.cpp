@@ -1461,13 +1461,25 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
 
     if (memberBaseType->kind == TypeKind::Struct) {
         auto* structType = static_cast<StructType*>(memberBaseType);
-        for (auto& field : structType->fields) {
-            if (field.first == node.memberName) {
-                node.type = field.second;
-                node.isLValue = true;
-                return;
+        // INH-01: walk the base chain — inherited fields resolve at their
+        // defining struct (mirrors the class branch below).
+        StructType* definingStruct = nullptr;
+        for (StructType* cur = structType; cur && !definingStruct;) {
+            for (auto& field : cur->fields) {
+                if (field.first == node.memberName) {
+                    node.type = field.second;
+                    node.isLValue = true;
+                    definingStruct = cur;
+                    break;
+                }
             }
+            if (definingStruct) break;
+            if (cur->baseClass.empty()) break;
+            Type* baseType = cur->base;
+            if (!baseType || baseType->kind != TypeKind::Struct) break;
+            cur = static_cast<StructType*>(baseType);
         }
+        if (definingStruct) return;
         emitError("no member named '" + node.memberName + "' in struct '" + structType->name + "'", node);
     } else if (memberBaseType->kind == TypeKind::Class) {
         auto* classType = static_cast<ClassType*>(memberBaseType);
@@ -1548,7 +1560,10 @@ void SemanticAnalyzer::visit(MethodCallExprAST& node) {
         argTypes.push_back(argType);
     }
 
-    Symbol* method = resolveMethod(classType, node.methodName, argTypes);
+    // INH-06（方案乙）: the class whose table provided the method (possibly a
+    // base along the chain) — access levels attribute to it.
+    ClassType* definingClass = nullptr;
+    Symbol* method = resolveMethod(classType, node.methodName, argTypes, &definingClass);
     if (!method || method->type->kind != TypeKind::Function) {
         emitError("no matching method '" + node.methodName + "' in class '" + classType->name + "'", node);
         node.type = nullptr;
@@ -1556,15 +1571,16 @@ void SemanticAnalyzer::visit(MethodCallExprAST& node) {
         return;
     }
 
-    // SEM-04/DEC-01: non-public methods are only callable from inside the
-    // defining class (protected ≡ private until INH lands).
+    // SEM-04/DEC-01 + INH-06: non-public methods are only callable from
+    // inside the DEFINING class (which may be a base along the chain); the
+    // level comes from the defining class's own member-access map.
     {
-        AccessLevel level = classType->memberAccessLevel(node.methodName);
-        if (level != AccessLevel::Public && currentClass != classType) {
+        AccessLevel level = definingClass->memberAccessLevel(node.methodName);
+        if (level != AccessLevel::Public && currentClass != definingClass) {
             emitError(DiagnosticCode::SemPrivateMemberAccess,
                       "cannot call " +
                           std::string(level == AccessLevel::Private ? "private" : "protected") +
-                          " method '" + node.methodName + "' of class '" + classType->name +
+                          " method '" + node.methodName + "' of class '" + definingClass->name +
                           "' outside the class; make it public or add a public wrapper",
                       node);
             node.type = nullptr;
@@ -1888,10 +1904,15 @@ void SemanticAnalyzer::checkNestedTypeAccess(Type* type, const ASTNode& site) {
 void SemanticAnalyzer::visit(StructDeclAST& node) {
     // PAR-04/DEC-01: `class` declarations are classes even without methods —
     // their members default to private and carry access levels.
-    bool isClass = node.isClassDecl || !node.methods.empty() || !node.baseClass.empty();
+    // INH-01: struct declarations with a base stay structs — only classes
+    // (isClassDecl) or method-bearing declarations route to the class branch.
+    bool isClass = node.isClassDecl || !node.methods.empty();
 
     if (isClass) {
         auto* classType = typeCtx->getOrCreateClass(node.name);
+        // INH-01: a definition completes the class; forward declarations leave
+        // the placeholder incomplete (deriving from it is diagnosed below).
+        if (!node.isForwardDecl) classType->isComplete = true;
 
         // Add fields if not already added
         for (auto& field : node.fields) {
@@ -1906,15 +1927,19 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
                 emitError("base class '" + node.baseClass + "' of class '" + node.name + "' not found", node);
             } else if (hasCircularInheritance(node.name, node.baseClass)) {
                 emitError("circular inheritance detected involving class '" + node.name + "'", node);
+            } else if (!baseType->isComplete) {
+                // INH-01: a forward-declared (placeholder) base has no
+                // definition yet — deriving from it is rejected, mirroring
+                // C++'s incomplete-type rule.
+                emitError("base class '" + node.baseClass + "' of class '" + node.name +
+                              "' is incomplete; define it before deriving from it",
+                          node);
             } else {
+                // INH-06（方案乙）: no method-table copy — resolveMethod walks
+                // the base chain, so inherited methods keep their defining
+                // class, access level and definition-site signature.
                 classType->baseClass = node.baseClass;
                 classType->base = baseType;
-                for (auto& method : baseType->methods) {
-                    // Only add if not already present
-                    if (!classType->getMethod(method.first)) {
-                        classType->addMethod(method.first, method.second);
-                    }
-                }
             }
         }
 
@@ -2006,9 +2031,36 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
             currentClass = savedClass;
         }
     } else {
-        auto* structType = new StructType(node.name);
+        // INH-01: reuse the parse-time registration when present — variable
+        // declarations already point at that StructType object, so the base
+        // wiring must land on it (mirrors getOrCreateClass on the class path).
+        auto* structType = typeCtx->getStruct(node.name);
+        if (!structType) {
+            structType = new StructType(node.name);
+        }
         for (auto& field : node.fields) {
-            structType->addField(field.first, field.second);
+            if (!structType->getFieldType(field.first)) {
+                structType->addField(field.first, field.second);
+            }
+        }
+        // INH-01: single public inheritance — wire the base before layout
+        // (codegen puts the base sub-object in field slot 0) and validate it
+        // like the class branch does.
+        if (!node.isForwardDecl) structType->isComplete = true;
+        if (!node.baseClass.empty()) {
+            auto* baseType = typeCtx->getStruct(node.baseClass);
+            if (!baseType) {
+                emitError("base struct '" + node.baseClass + "' of struct '" + node.name + "' not found", node);
+            } else if (hasCircularInheritance(node.name, node.baseClass)) {
+                emitError("circular inheritance detected involving struct '" + node.name + "'", node);
+            } else if (!baseType->isComplete) {
+                emitError("base struct '" + node.baseClass + "' of struct '" + node.name +
+                              "' is incomplete; define it before deriving from it",
+                          node);
+            } else {
+                structType->baseClass = node.baseClass;
+                structType->base = baseType;
+            }
         }
         typeCtx->addStruct(node.name, structType);
         // AGG-11/DS4: nested types first (structs' nested types are public).
@@ -2320,7 +2372,9 @@ bool SemanticAnalyzer::hasCircularInheritance(const std::string& className, cons
     return false;
 }
 
-Symbol* SemanticAnalyzer::resolveMethod(ClassType* classType, const std::string& methodName, const std::vector<Type*>& argTypes) {
+Symbol* SemanticAnalyzer::resolveMethod(ClassType* classType, const std::string& methodName,
+                                        const std::vector<Type*>& argTypes,
+                                        ClassType** defining) {
     for (auto& method : classType->methods) {
         if (method.first == methodName) {
             if (method.second->paramTypes.size() - 1 == argTypes.size()) {
@@ -2333,6 +2387,7 @@ Symbol* SemanticAnalyzer::resolveMethod(ClassType* classType, const std::string&
                 }
                 if (match) {
                     Symbol* sym = new Symbol(methodName, method.second);
+                    if (defining) *defining = classType;
                     return sym;
                 }
             }
@@ -2357,6 +2412,7 @@ Symbol* SemanticAnalyzer::resolveMethod(ClassType* classType, const std::string&
         }
         if (match) {
             Symbol* sym = new Symbol(methodName, funcType);
+            if (defining) *defining = classType;
             return sym;
         }
     }
@@ -2364,7 +2420,7 @@ Symbol* SemanticAnalyzer::resolveMethod(ClassType* classType, const std::string&
     if (!classType->baseClass.empty()) {
         auto* baseType = typeCtx->getClass(classType->baseClass);
         if (baseType) {
-            Symbol* result = resolveMethod(baseType, methodName, argTypes);
+            Symbol* result = resolveMethod(baseType, methodName, argTypes, defining);
             if (result) return result;
         }
     }

@@ -70,10 +70,23 @@ public:
 class StructType : public Type {
 public:
     std::string name;
+    // INH-01: single public inheritance — base sub-object occupies field
+    // slot 0 in the LLVM layout (mirrors ClassType::baseClass/base).
+    std::string baseClass;
+    Type* base{};
+    // INH-01: completion tracking (mirrors ClassType::isComplete).
+    bool isComplete{};
     std::vector<std::pair<std::string, Type*>> fields;
 
     StructType(const std::string& n)
         : Type(TypeKind::Struct), name(n) {}
+
+    Type* getFieldType(const std::string& fieldName) const {
+        for (auto& [name, type] : fields) {
+            if (name == fieldName) return type;
+        }
+        return nullptr;
+    }
 
     void addField(const std::string& fieldName, Type* fieldType) {
         fields.push_back({fieldName, fieldType});
@@ -161,6 +174,11 @@ public:
 
     // DEC-01: per-member access levels; absent -> Public (struct path).
     std::unordered_map<std::string, AccessLevel> memberAccess;
+
+    // INH-01: false while only a forward declaration has been seen; sema sets
+    // it when the definition is visited. Deriving from an incomplete class is
+    // diagnosed.
+    bool isComplete{};
 
     ClassType(const std::string& n)
         : Type(TypeKind::Class), name(n) {}
