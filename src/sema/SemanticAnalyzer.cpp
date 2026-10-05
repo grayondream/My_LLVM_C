@@ -1462,8 +1462,10 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
     if (memberBaseType->kind == TypeKind::Struct) {
         auto* structType = static_cast<StructType*>(memberBaseType);
         // INH-01: walk the base chain — inherited fields resolve at their
-        // defining struct (mirrors the class branch below).
+        // defining struct (mirrors the class branch below). Depth-capped:
+        // a redefinition-shaped cycle must never hang the compiler (评审 C1).
         StructType* definingStruct = nullptr;
+        int walkDepth = 0;
         for (StructType* cur = structType; cur && !definingStruct;) {
             for (auto& field : cur->fields) {
                 if (field.first == node.memberName) {
@@ -1478,6 +1480,7 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
             Type* baseType = cur->base;
             if (!baseType || baseType->kind != TypeKind::Struct) break;
             cur = static_cast<StructType*>(baseType);
+            if (++walkDepth > 64) break;
         }
         if (definingStruct) return;
         emitError("no member named '" + node.memberName + "' in struct '" + structType->name + "'", node);
@@ -1486,6 +1489,9 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
         const std::string className = classType->name;
         ClassType* definingClass = nullptr;
         // Search this class and its base classes for the field.
+        // Depth-capped: a redefinition-shaped cycle must never hang the
+        // compiler (评审 C1).
+        int classWalkDepth = 0;
         while (classType) {
             for (auto& field : classType->fields) {
                 if (field.first == node.memberName) {
@@ -1499,6 +1505,7 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
             Type* baseType = classType->base;
             if (!baseType || baseType->kind != TypeKind::Class) break;
             classType = static_cast<ClassType*>(baseType);
+            if (++classWalkDepth > 64) break;
         }
         // SEM-04/DEC-01: non-public members are only reachable from inside
         // the defining class (protected ≡ private until INH lands).
@@ -2364,9 +2371,15 @@ bool SemanticAnalyzer::hasCircularInheritance(const std::string& className, cons
         }
         chain.push_back(current);
 
-        auto* type = typeCtx->getClass(current);
-        if (!type) break;
-        current = type->baseClass;
+        // INH-01 评审 C1: walk BOTH maps — a struct chain must be followed
+        // too, otherwise a redefinition-shaped cycle is accepted silently.
+        std::string next;
+        if (auto* type = typeCtx->getClass(current)) {
+            next = type->baseClass;
+        } else if (auto* stype = typeCtx->getStruct(current)) {
+            next = stype->baseClass;
+        }
+        current = next;
     }
 
     return false;
@@ -2374,7 +2387,7 @@ bool SemanticAnalyzer::hasCircularInheritance(const std::string& className, cons
 
 Symbol* SemanticAnalyzer::resolveMethod(ClassType* classType, const std::string& methodName,
                                         const std::vector<Type*>& argTypes,
-                                        ClassType** defining) {
+                                        ClassType** defining, int depth) {
     for (auto& method : classType->methods) {
         if (method.first == methodName) {
             if (method.second->paramTypes.size() - 1 == argTypes.size()) {
@@ -2417,10 +2430,10 @@ Symbol* SemanticAnalyzer::resolveMethod(ClassType* classType, const std::string&
         }
     }
 
-    if (!classType->baseClass.empty()) {
+    if (!classType->baseClass.empty() && depth < 64) {
         auto* baseType = typeCtx->getClass(classType->baseClass);
         if (baseType) {
-            Symbol* result = resolveMethod(baseType, methodName, argTypes, defining);
+            Symbol* result = resolveMethod(baseType, methodName, argTypes, defining, depth + 1);
             if (result) return result;
         }
     }

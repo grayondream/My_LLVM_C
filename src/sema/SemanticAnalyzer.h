@@ -65,10 +65,11 @@ private:
     std::string getOperatorMangledName(BinaryOp op, Type* left, Type* right);
     // INH-06（方案乙）: walks the class hierarchy — `defining` (when non-null)
     // receives the class whose table provided the method, so access levels
-    // and E2009 attribution stay at the definition site.
+    // and E2009 attribution stay at the definition site. Depth-capped
+    // (评审 C1): a redefinition-shaped cycle must never hang the compiler.
     Symbol* resolveMethod(ClassType* classType, const std::string& methodName,
                           const std::vector<Type*>& argTypes,
-                          ClassType** defining = nullptr);
+                          ClassType** defining = nullptr, int depth = 0);
     bool isMethodCall(ExprAST& expr);
     bool tryAnalyzePrintCall(CallExprAST& node);
     bool tryAnalyzeAssertCall(CallExprAST& node);

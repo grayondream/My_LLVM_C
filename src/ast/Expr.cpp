@@ -899,8 +899,11 @@ static llvm::Value* emitClassFieldGEP(CodegenContext& ctx, Type* aggType,
     auto& builder = ctx.getBuilder();
     // INH-01: unified walk over ClassType and StructType inheritance chains —
     // the base sub-object occupies field slot 0 of every derived layout.
+    // Depth-capped: a redefinition-shaped cycle must never hang the compiler
+    // (评审 C1).
     Type* cur = aggType;
     llvm::Value* curPtr = objPtr;
+    int walkDepth = 0;
 
     while (cur) {
         std::vector<std::pair<std::string, Type*>>* fields = nullptr;
@@ -940,6 +943,7 @@ static llvm::Value* emitClassFieldGEP(CodegenContext& ctx, Type* aggType,
         if (!curLLVM) break;
         curPtr = builder.CreateStructGEP(curLLVM, curPtr, 0, "base");
         cur = baseType;
+        if (++walkDepth > 64) break;
     }
 
     return nullptr;

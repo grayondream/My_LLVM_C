@@ -1688,12 +1688,14 @@ TEST(SliceSemTest, INHBaseUndefSema) {
 }
 
 TEST(SliceSemTest, INHOverloadChainSema) {
-    // Review Focus 3：同名方法不同签名沿链——基 f(int32)、派生 f(float64)，
-    // 按实参各自命中（沿链查找不破坏重载第一阶段精确匹配）。
+    // Review Focus 3（I1 裁决）：C++ 名字隐藏语义——本类查找（含隐式转换）
+    // 优先于跨跳，派生 f(float64) 遮蔽基 f(int32)，d.f(5) 命中派生；
+    // 经基指针调用命中基类定义（definingClass 按定义点归属）。
     EXPECT_TRUE(analyzeOk(
-        "class B13 { public: int32 f(int32 v) { return v; } }; "
-        "class D13 : public B13 { public: float64 f(float64 v) { return v; } }; "
-        "int32 main() { D13 d; return (d.f(5) == 5 && d.f(0.5) == 0.5) ? 0 : 1; }"));
+        "class B13 { public: int32 f(int32 v) { return 100; } }; "
+        "class D13 : public B13 { public: float64 f(float64 v) { return 0.5; } }; "
+        "int32 main() { D13 d; B13* b = &d; "
+        "return (d.f(5) == 0.5 && b->f(5) == 100) ? 0 : 1; }"));
 }
 
 TEST(SliceSemTest, INHStructAnonPromote) {
@@ -1711,4 +1713,27 @@ TEST(SliceSemTest, INHCircularSema) {
         "class CA12 : public CB12 { public: int32 x; }; "
         "class CB12 : public CA12 { public: int32 y; }; "
         "int32 main() { return 0; }"));
+}
+
+// ========== INH 评审修复轮：C1 struct 环检测 / I1 重载遮蔽裁决 / I2 自继承 pin ==========
+
+TEST(SliceSemTest, INHStructCircularRedefined) {
+    // C1：struct 重定义形态跨类成环——今天静默接受且沿链 walk 挂死/崩溃。
+    // 修复后：环检测覆盖 struct 链 → 诊断。
+    EXPECT_FALSE(analyzeOk(
+        "struct B31 { int32 b; }; struct A31 : B31 { int32 a; }; "
+        "struct B31 : A31 { int32 c; }; "
+        "int32 main() { A31 x; x.b = 1; return x.b; }"));
+}
+
+TEST(SliceSemTest, INHSelfInheritClassPin) {
+    // I2：自继承 pin（class 形态，今天已诊断，防回归）。
+    EXPECT_FALSE(analyzeOk(
+        "class S32 : S32 { public: int32 x; }; int32 main() { return 0; }"));
+}
+
+TEST(SliceSemTest, INHSelfInheritStructPin) {
+    // I2：自继承 pin（struct 形态）。
+    EXPECT_FALSE(analyzeOk(
+        "struct S33 : S33 { int32 x; }; int32 main() { return 0; }"));
 }
