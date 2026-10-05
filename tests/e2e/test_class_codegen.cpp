@@ -384,3 +384,21 @@ TEST_F(ClassCodegenE2E, INHStructChainGEPE2E) {
             return (o.a == 7 && o.b == 8 && o.c == 9) ? 0 : 1; }
     )", "test_inh_gep.c"), 0);
 }
+
+// ========== Redef: 类型重复定义诊断 e2e ==========
+
+TEST_F(ClassCodegenE2E, RedefStructE2E) {
+    // 重定义 → 诊断。fixture 的 runSource 对任何 sema 错误 ADD_FAILURE
+    //（正向用例专用），错误路径按 INHMultiInheritDiagE2E 先例走显式管线。
+    Lexer lexer("test_redef.c",
+        "struct B48 { int32 x; };\nstruct B48 { int32 y; };\nint32 main() { return 0; }\n");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_FALSE(analyzer.getErrors().empty());
+    // 内存 Diagnostic::format() 不含码位（E2004 由驱动打印时附加），断言消息文本。
+    EXPECT_NE(analyzer.getErrors().front().format().find("redefinition of type"), std::string::npos);
+}

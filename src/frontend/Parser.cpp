@@ -2893,6 +2893,7 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
         // Forward declaration
         auto fwd = std::make_unique<UnionDeclAST>(name, std::vector<std::pair<std::string, Type*>>{});
         fwd->bareName = bareName;
+        fwd->isForwardDecl = true;
         return fwd;
     }
 
@@ -3040,6 +3041,7 @@ std::unique_ptr<EnumDeclAST> Parser::parseEnumDecl() {
                                                  std::vector<std::pair<std::string, int>>{},
                                                  underlyingType);
         fwd->bareName = bareName;
+        fwd->isForwardDecl = true;
         return fwd;
     }
 

@@ -154,6 +154,9 @@ public:
     // AGG-11: union name before qualifyTypeDeclName's namespace prefixing
     // (mirrors StructDeclAST::bareName).
     std::string bareName;
+    // Redef 轮: true when from a forward declaration (`union U;`) — sema uses
+    // it to keep UnionType::isComplete accurate (mirrors StructDeclAST).
+    bool isForwardDecl = false;
 
     UnionDeclAST(const std::string& n, std::vector<std::pair<std::string, Type*>> mems)
         : name(n), members(std::move(mems)) {}
@@ -169,6 +172,9 @@ public:
     // AGG-11: enum name before qualifyTypeDeclName's namespace prefixing
     // (mirrors StructDeclAST::bareName).
     std::string bareName;
+    // Redef 轮: true when from a forward declaration (`enum E;`) — sema uses
+    // it to keep EnumType::isComplete accurate (mirrors StructDeclAST).
+    bool isForwardDecl = false;
 
     EnumDeclAST(const std::string& n, std::vector<std::pair<std::string, int>> vals,
                 Type* underlying = nullptr)

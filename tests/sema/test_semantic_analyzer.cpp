@@ -1737,3 +1737,51 @@ TEST(SliceSemTest, INHSelfInheritStructPin) {
     EXPECT_FALSE(analyzeOk(
         "struct S33 : S33 { int32 x; }; int32 main() { return 0; }"));
 }
+
+// ========== Redef: 类型重复定义诊断（四类全收 + 跨种类） ==========
+
+TEST(SliceSemTest, RedefStructRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "struct B40 { int32 x; }; struct B40 { int32 y; }; int32 main() { return 0; }"));
+}
+
+TEST(SliceSemTest, RedefClassRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "class B41 { public: int32 x; }; class B41 { public: int32 y; }; int32 main() { return 0; }"));
+}
+
+TEST(SliceSemTest, RedefUnionRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "union U42 { int32 x; }; union U42 { float32 y; }; int32 main() { return 0; }"));
+}
+
+TEST(SliceSemTest, RedefEnumRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "enum E43 { A, B }; enum E43 { C, D }; int32 main() { return 0; }"));
+}
+
+TEST(SliceSemTest, RedefCrossKindRejected) {
+    // 类型名同一命名空间：struct B 后 class B 亦诊断（C++ 同规则）。
+    EXPECT_FALSE(analyzeOk(
+        "struct B44 { int32 x; }; class B44 { public: int32 y; }; int32 main() { return 0; }"));
+}
+
+TEST(SliceSemTest, RedefFwdThenDefPin) {
+    // 前向声明 + 定义合法（占位 incomplete → 完成）。
+    EXPECT_TRUE(analyzeOk(
+        "struct B45; struct B45 { int32 x; }; int32 main() { B45 v; v.x = 1; return v.x; }"));
+}
+
+TEST(SliceSemTest, RedefFwdTwicePin) {
+    // 前向声明可重复。
+    EXPECT_TRUE(analyzeOk(
+        "struct B46; struct B46; struct B46 { int32 x; }; int32 main() { B46 v; v.x = 1; return v.x; }"));
+}
+
+TEST(SliceSemTest, RedefNestedSameInnerNamePin) {
+    // 不同外层类型的同名嵌套 inner（flat key 不同）不误报。
+    EXPECT_TRUE(analyzeOk(
+        "struct O47a { struct I47 { int32 x; }; }; "
+        "struct O47b { struct I47 { int32 y; }; }; "
+        "int32 main() { return 0; }"));
+}

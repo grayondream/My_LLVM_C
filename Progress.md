@@ -465,3 +465,19 @@
   判定式零改动（protected 放宽未做，另立项候选）；struct 带基类复用 parse 期
   StructType 对象（变量 Type* 同址）；派生自不完整基类诊断（isComplete）。
 - 遗留：INH-05 CRTP 随 GEN；protected 放宽另立项候选；LLJIT flaky 家族。
+
+## 2026-10-05 18:40 — Redef 类型重复定义诊断收口（bounded）
+- 完成事项：struct/class/union/enum 四类重复定义诊断（此前全静默，是 INH
+  评审 C1 的根因缺口）——sema 定义路径检查 `isTypeRedefined`（四张注册表
+  按 name 查 complete，跨种类同报）+ E2004 SemRedefinition 复用（func 重
+  定义同码）；`UnionType/EnumType` 补 isComplete、`UnionDeclAST/
+  EnumDeclAST` 补 isForwardDecl（parser 前向分支打标）；union visit 改复用
+  既有注册（镜像 struct 分支）。
+- 保持合法（pin）：fwd+def、fwd×2、不同外层同名嵌套 inner。
+- 落点：`src/ast/Type.h`、`src/ast/Decl.h`、`src/frontend/Parser.cpp`、
+  `src/sema/SemanticAnalyzer.cpp/.h`；测试 sema `Redef*` 8 项 + e2e 1 项。
+- 验证：RED 5 红（四类 + 跨种类）3 绿（pin）；GREEN 后全量 ctest 902/902。
+- 裁决：e2e fixture runSource 对任何 sema 错误 ADD_FAILURE（正向专用），
+  错误路径按 INHMultiInheritDiagE2E 先例走显式管线；内存 Diagnostic::
+  format() 不含码位（E2004 由驱动打印时附加），断言用消息文本。
+- 遗留：无（INH 评审 C1 根因就此闭合）。

@@ -97,6 +97,9 @@ class UnionType : public Type {
 public:
     std::string name;
     std::vector<std::pair<std::string, Type*>> members;
+    // Redef 轮: completion tracking (mirrors ClassType::isComplete) — a
+    // forward declaration leaves the placeholder incomplete.
+    bool isComplete{};
 
     UnionType(const std::string& n)
         : Type(TypeKind::Union), name(n) {}
@@ -112,6 +115,8 @@ public:
     std::vector<std::pair<std::string, int>> values;
     // Explicit underlying type (`enum E : u8`); null means the default (int).
     Type* underlyingType = nullptr;
+    // Redef 轮: completion tracking (mirrors ClassType::isComplete).
+    bool isComplete{};
 
     EnumType(const std::string& n)
         : Type(TypeKind::Enum), name(n) {}

@@ -63,6 +63,10 @@ private:
     Symbol* resolveOverload(const std::string& name, const std::vector<Type*>& argTypes);
     bool isStructOrUnionType(Type* type) const;
     std::string getOperatorMangledName(BinaryOp op, Type* left, Type* right);
+    // Redef 轮: true when `name` already refers to a fully defined type of
+    // ANY kind (class/struct/union/enum share one type-name namespace) —
+    // used to diagnose duplicate type definitions (E2004).
+    bool isTypeRedefined(const std::string& name) const;
     // INH-06（方案乙）: walks the class hierarchy — `defining` (when non-null)
     // receives the class whose table provided the method, so access levels
     // and E2009 attribution stay at the definition site. Depth-capped

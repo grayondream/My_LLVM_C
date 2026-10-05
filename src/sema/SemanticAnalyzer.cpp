@@ -1917,9 +1917,15 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
 
     if (isClass) {
         auto* classType = typeCtx->getOrCreateClass(node.name);
-        // INH-01: a definition completes the class; forward declarations leave
-        // the placeholder incomplete (deriving from it is diagnosed below).
-        if (!node.isForwardDecl) classType->isComplete = true;
+        // Redef 轮: a definition completes the class; forward declarations
+        // leave the placeholder incomplete. A second definition (or a
+        // definition colliding with any other completed kind) is E2004.
+        if (!node.isForwardDecl) {
+            if (isTypeRedefined(node.name)) {
+                emitError(DiagnosticCode::SemRedefinition, "redefinition of type '" + node.name + "'", node);
+            }
+            classType->isComplete = true;
+        }
 
         // Add fields if not already added
         for (auto& field : node.fields) {
@@ -2053,7 +2059,14 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
         // INH-01: single public inheritance — wire the base before layout
         // (codegen puts the base sub-object in field slot 0) and validate it
         // like the class branch does.
-        if (!node.isForwardDecl) structType->isComplete = true;
+        // Redef 轮: mirror of the class branch — duplicate definition of the
+        // same name (any kind) is E2004.
+        if (!node.isForwardDecl) {
+            if (isTypeRedefined(node.name)) {
+                emitError(DiagnosticCode::SemRedefinition, "redefinition of type '" + node.name + "'", node);
+            }
+            structType->isComplete = true;
+        }
         if (!node.baseClass.empty()) {
             auto* baseType = typeCtx->getStruct(node.baseClass);
             if (!baseType) {
@@ -2089,11 +2102,23 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
 }
 
 void SemanticAnalyzer::visit(UnionDeclAST& node) {
-    auto* unionType = new UnionType(node.name);
+    // Redef 轮: reuse an existing registration for named unions (mirrors the
+    // struct branch) so the completion state is observable across visits.
+    auto* unionType = node.name.empty() ? nullptr : typeCtx->getUnion(node.name);
+    if (!unionType) {
+        unionType = new UnionType(node.name);
+        typeCtx->addUnion(node.name, unionType);
+    }
     for (auto& member : node.members) {
         unionType->addMember(member.first, member.second);
     }
-    typeCtx->addUnion(node.name, unionType);
+    // Redef 轮: duplicate definition of the same name (any kind) is E2004.
+    if (!node.isForwardDecl && !node.name.empty()) {
+        if (isTypeRedefined(node.name)) {
+            emitError(DiagnosticCode::SemRedefinition, "redefinition of type '" + node.name + "'", node);
+        }
+        unionType->isComplete = true;
+    }
     // AGG-11/DS4: nested types first (unions' nested types are public).
     std::string savedPath = classPathPrefix;
     classPathPrefix += mangleNamespaceName(
@@ -2111,6 +2136,13 @@ void SemanticAnalyzer::visit(EnumDeclAST& node) {
         if (!node.name.empty()) {
             typeCtx->addEnum(node.name, enumType);
         }
+    }
+    // Redef 轮: duplicate definition of the same name (any kind) is E2004.
+    if (!node.isForwardDecl && !node.name.empty()) {
+        if (isTypeRedefined(node.name)) {
+            emitError(DiagnosticCode::SemRedefinition, "redefinition of type '" + node.name + "'", node);
+        }
+        enumType->isComplete = true;
     }
     // TYP-09/TYP-25: an explicit underlying type must be an integer type.
     if (node.underlyingType) {
@@ -2358,6 +2390,16 @@ void SemanticAnalyzer::visit(StmtAST& stmt) {
     if (auto* s = dynamic_cast<NullStmtAST*>(&stmt)) { visit(*s); return; }
     if (auto* s = dynamic_cast<DeclStmtAST*>(&stmt)) { visit(*s); return; }
     if (auto* s = dynamic_cast<DeferStmtAST*>(&stmt)) { visit(*s); return; }
+}
+
+bool SemanticAnalyzer::isTypeRedefined(const std::string& name) const {
+    // Redef 轮: all four type kinds share one name namespace — a completed
+    // type of any kind blocks a (re)definition of the same name.
+    if (auto* t = typeCtx->getClass(name); t && t->isComplete) return true;
+    if (auto* t = typeCtx->getStruct(name); t && t->isComplete) return true;
+    if (auto* t = typeCtx->getUnion(name); t && t->isComplete) return true;
+    if (auto* t = typeCtx->getEnum(name); t && t->isComplete) return true;
+    return false;
 }
 
 bool SemanticAnalyzer::hasCircularInheritance(const std::string& className, const std::string& baseClass) const {
