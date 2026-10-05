@@ -466,6 +466,19 @@ Type* SemanticAnalyzer::checkAssignmentTypes(Type* lhs, Type* rhs, ExprAST& node
     }
 
     if (isArithmeticType(lhsS) && isArithmeticType(rhsS)) return lhsRaw;
+    // Arrays are non-modifiable lvalues (C99 6.5.16): assignment to an array
+    // is rejected regardless of the RHS kind. Previously the generic
+    // same-kind / pointer-or-array rules let `a = b` (even shape-mismatched)
+    // and `a = p` through, where codegen stored a decayed pointer into the
+    // array's storage — silent memory corruption. Copies go through brace
+    // initializers, memcpy, or element assignment.
+    if (lhsS->kind == TypeKind::Array) {
+        emitError(DiagnosticCode::SemIncompatibleAssignment,
+                  "cannot assign to array '" + typeToString(lhs) +
+                      "': arrays are not modifiable lvalues (use memcpy or element assignment)",
+                  node);
+        return nullptr;
+    }
     // TYP-12: slice targets must match by element type; arrays decay to
     // slice views (zero-copy). Tightens the generic same-kind rule that
     // silently accepted int32[] = float64[].

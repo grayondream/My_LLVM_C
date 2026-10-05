@@ -1211,3 +1211,38 @@ TEST(SliceSemTest, VLAParamDiagnostic) {
             hasVLA = true;
     EXPECT_TRUE(hasVLA);
 }
+
+// Array-assignment defect fix (review finding 2026-10-04): arrays are
+// non-modifiable lvalues (C99 6.5.16). Assignment TO an array is rejected
+// regardless of RHS kind; assignment FROM an array (decay) stays allowed.
+TEST(SliceSemTest, AASGArrayToArrayRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { int32 a[3] = {1,2,3}; int32 b[3] = {4,5,6}; a = b; return 0; }"));
+}
+
+TEST(SliceSemTest, AASGArrayFromPointerRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { int32 a[3]; int32* p = 0; a = p; return 0; }"));
+}
+
+TEST(SliceSemTest, AASGPointerFromArrayOk) {
+    EXPECT_TRUE(analyzeOk(
+        "int32 main() { int32 a[3] = {1,2,3}; int32* p = 0; p = a; return 0; }"));
+}
+
+TEST(SliceSemTest, AASGArrayAssignDiagnostic) {
+    Lexer lexer("test.c",
+        "int32 main() { int32 a[3] = {1,2,3}; int32 b[3] = {4,5,6}; a = b; return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_TRUE(ast != nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_FALSE(analyzer.getErrors().empty());
+    bool hasLvalueMsg = false;
+    for (auto& e : analyzer.getErrors())
+        if (e.message.find("not modifiable lvalues") != std::string::npos)
+            hasLvalueMsg = true;
+    EXPECT_TRUE(hasLvalueMsg);
+}
