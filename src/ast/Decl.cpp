@@ -449,6 +449,9 @@ llvm::Value* MultiVarDeclAST::codegen(CodegenContext& ctx) {
 llvm::Value* StructDeclAST::codegen(CodegenContext& ctx) {
     // Reuse existing struct type if one with this name already exists
     if (auto* existing = llvm::StructType::getTypeByName(ctx.getContext(), name)) {
+        // AGG-10: static data members must be declared BEFORE method bodies
+        // are generated (method bodies may reference them). Idempotent.
+        emitStaticMembers(ctx);
         // Still need to generate methods if this is a class
         if (!methods.empty()) {
             for (auto& method : methods) {
@@ -474,6 +477,10 @@ llvm::Value* StructDeclAST::codegen(CodegenContext& ctx) {
 
     llvm::StructType* structType = llvm::StructType::create(ctx.getContext(), fieldTypes, name);
 
+    // AGG-10: static data members before methods — method bodies may
+    // reference them (same ordering requirement as sema).
+    emitStaticMembers(ctx);
+
     // Generate methods as separate functions
     if (isClass) {
         for (auto& method : methods) {
@@ -482,6 +489,14 @@ llvm::Value* StructDeclAST::codegen(CodegenContext& ctx) {
     }
 
     return nullptr;
+}
+
+// AGG-10: emit static data members as global variables. Idempotent: the
+// global branch of VarDeclAST::codegen reuses an existing GlobalVariable.
+void StructDeclAST::emitStaticMembers(CodegenContext& ctx) {
+    for (auto& vd : staticMembers) {
+        if (vd) vd->codegen(ctx);
+    }
 }
 
 llvm::Value* UnionDeclAST::codegen(CodegenContext& ctx) {

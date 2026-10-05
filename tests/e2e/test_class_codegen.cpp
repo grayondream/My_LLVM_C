@@ -172,3 +172,54 @@ TEST_F(ClassCodegenE2E, ClassMethodCallFromMain) {
         }
     )", "test_class_method_call.c"), 0);
 }
+
+// AGG-10: static members — global storage, class-qualified access only.
+TEST_F(ClassCodegenE2E, SMCounterPersist) {
+    EXPECT_EQ(runSource(R"(
+        class SMCtr2 {
+            private: static int32 count = 0;
+            public: static int32 next() { SMCtr2::count = SMCtr2::count + 1; return SMCtr2::count; }
+        };
+        int32 main() {
+            SMCtr2::next(); SMCtr2::next();
+            return SMCtr2::next() == 3 ? 0 : 1;
+        }
+    )", "test_sm_counter.c"), 0);
+}
+
+TEST_F(ClassCodegenE2E, SMStaticFactory) {
+    EXPECT_EQ(runSource(R"(
+        class SMPoint { public: int32 x; int32 y; };
+        class SMRegistry {
+            public: static SMPoint origin() { SMPoint p; p.x = 0; p.y = 0; return p; }
+        };
+        int32 main() {
+            SMPoint p = SMRegistry::origin();
+            return (p.x == 0 && p.y == 0) ? 0 : 1;
+        }
+    )", "test_sm_factory.c"), 0);
+}
+
+TEST_F(ClassCodegenE2E, SMPrivateInternalUse) {
+    // Review Focus 3: currentClass context covers static methods — no E2009.
+    EXPECT_EQ(runSource(R"(
+        class SMAcc {
+            private: static int32 secret = 11;
+            public: int32 reveal() { return SMAcc::secret; }
+        };
+        int32 main() {
+            SMAcc obj;
+            return obj.reveal() == 11 ? 0 : 1;
+        }
+    )", "test_sm_internal.c"), 0);
+}
+
+TEST_F(ClassCodegenE2E, SMStaticAfterForwardDecl) {
+    // Review Focus 2: the type is registered by the forward declaration;
+    // the later definition's staticMembers must still emit the global.
+    EXPECT_EQ(runSource(R"(
+        class SMFwd;
+        class SMFwd { public: static int32 v = 9; };
+        int32 main() { return SMFwd::v == 9 ? 0 : 1; }
+    )", "test_sm_fwd.c"), 0);
+}

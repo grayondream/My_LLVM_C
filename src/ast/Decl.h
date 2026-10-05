@@ -136,6 +136,7 @@ public:
     StructDeclAST(const std::string& n, std::vector<std::pair<std::string, Type*>> flds)
         : name(n), fields(std::move(flds)) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
+    void emitStaticMembers(CodegenContext& ctx);
 };
 
 class UnionDeclAST : public DeclAST {
