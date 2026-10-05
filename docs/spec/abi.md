@@ -79,6 +79,12 @@
    函数无 `this` 位。类在 namespace 内时，符号为
    `<ns前缀>_<类名>_<成员>_<参数编码>`（由 sema `scopedName` 统一附加），
    与访问侧全限定拼写 `ns::Class::member` 的拍平结果严格一致。
+5. **嵌套类型（AGG-11，2026-10-05）**：类/struct/union 体内声明的类型按
+   `Outer::Inner` → `Outer_Inner` 扁平键注册（`mangleQualifiedTypeName` 变换，
+   与 namespace 限定类型共用编码；namespace 组合 `ns::Outer::Inner` →
+   `ns_Outer_Inner`）。嵌套类型的 static 成员/方法沿第 4 条规则以扁平类名
+   为类路径（`ns::Outer::Inner::v` → `ns_Outer_Inner_v`）；类嵌套枚举常量
+   注册于外层类作用域（`Outer::Red` → `Outer_Red`，不注册裸键）。
 
 `typeToMangled` 规则：
 

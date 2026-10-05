@@ -12,6 +12,7 @@
 - 出错后能恢复继续扫描，不抛异常、不进入死循环。
 - 驱动层（`CompilerDriver` / `ModuleLoader` / `StdPrelude`）上报诊断并使编译失败。
 - 验收：新增测试先 RED 后 GREEN，且全量测试无回归。
+- 所有模块都要有完整的自动化测试case
 
 ---
 
@@ -437,3 +438,15 @@
 - I2：static 方法无法调用声明在其后的同类 static 方法——两遍处理：先统一改名+索引+declare 预注册（原型容忍），再统一分析体；补 1 项。
 - 全量 **840/840**（834 + 6）。
 - Deferred minors：static 数组成员诊断误导；半限定拼写拒绝未钉；protected static 经 Base:: 拒绝（已记 AGG-10 条目）；static+匿名聚合组合丢 static；Decl.cpp 注释与幂等事实不符；static 初始化器引用后声明成员（与全局一致）。
+
+## 2026-10-05 16:00 — AGG-11 嵌套类型 + 前向声明 完成（R5 Native）
+- 完成事项：类/struct/union 体内嵌套类型（enum/struct/class/union，任意深度）全链路——
+  Parser 三路判定 + `bareName` 前缀压栈 + 解析期扁平键注册（`src/frontend/Parser.cpp`、
+  `src/ast/Decl.h`）；sema `nestedTypes` 遍历 + `classPathPrefix` 去糖推广 + 嵌套枚举
+  常量 `Outer::Red` + private 嵌套类型 E2009（var decl + cast 目标）
+  （`src/sema/SemanticAnalyzer.cpp/.h`）；codegen 两分支递归生成（`src/ast/Decl.cpp`）。
+- 验证：全量 `ctest` 863/863（基线 840 → 863，新增 sema 16 项 + e2e 7 项）。
+- 提交：spec `4720650`+`4f2033d`，plan `a62bc30`，Task1 `25bc204`，Task2 `a0dcfb1`，Task3 `b4747c0`。
+- 文档：abi.md §4 第 5 条（嵌套类型扁平编码）；TODO AGG-11/PAR-03/PAR-04/P1-01/AGG-07 勾记。
+- 遗留：self-type 缺口（类体内裸/限定自引用类型，顶层类同样存在，是否立项待定）；
+  EnumUnderlyingE2E.Int8EnumNegativeValue 偶发 SEGFAULT（LLJIT flaky 家族，约 2/6 全量频次）。
