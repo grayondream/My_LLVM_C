@@ -1821,8 +1821,9 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
         auto structDecl = parseStructDecl();
         if (!structDecl) return nullptr;
 
-        // Register struct type in TypeContext if it has fields
-        if (!structDecl->fields.empty()) {
+        // Register struct type in TypeContext if it has fields or nested
+        // type declarations (AGG-11: a nested-only struct still names a type).
+        if (!structDecl->fields.empty() || !structDecl->nestedTypes.empty()) {
             auto structType = new StructType(structDecl->name);
             for (auto& field : structDecl->fields) {
                 structType->addField(field.first, field.second);
@@ -1849,7 +1850,8 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
         // into this fallback (the definition would be dropped and reparsed,
         // silently leaking the static members as bare globals).
         if (structDecl->fields.empty() && structDecl->staticMembers.empty() &&
-            structDecl->methods.empty() && !check(TokenType::TOKEN_SEMICOLON)) {
+            structDecl->methods.empty() && structDecl->nestedTypes.empty() &&
+            !check(TokenType::TOKEN_SEMICOLON)) {
             m_currentTokenPos = savedPos;
             return parseDeclarationAsType();
         }
@@ -1890,8 +1892,9 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
         auto unionDecl = parseUnionDecl();
         if (!unionDecl) return nullptr;
 
-        // Register union type in TypeContext if it has members
-        if (!unionDecl->members.empty()) {
+        // Register union type in TypeContext if it has members or nested
+        // type declarations (AGG-11: a nested-only union still names a type).
+        if (!unionDecl->members.empty() || !unionDecl->nestedTypes.empty()) {
             auto unionType = new UnionType(unionDecl->name);
             for (auto& member : unionDecl->members) {
                 unionType->addMember(member.first, member.second);
@@ -1911,8 +1914,10 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
 
         // If this is a forward declaration (empty members) and not followed by ';',
         // it might be a type reference (e.g., "union U operator+(...)")
-        // Fall through to normal type parsing
-        if (unionDecl->members.empty() && !check(TokenType::TOKEN_SEMICOLON)) {
+        // Fall through to normal type parsing. AGG-11: a declaration with
+        // nested types is a definition, never a forward reference.
+        if (unionDecl->members.empty() && unionDecl->nestedTypes.empty() &&
+            !check(TokenType::TOKEN_SEMICOLON)) {
             m_currentTokenPos = savedPos;
             return parseDeclarationAsType();
         }
@@ -2360,9 +2365,67 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
 
     advance(); // consume '{'
 
+    // AGG-11: while parsing this aggregate's body, nested type declarations
+    // and bare type references resolve against a prefix extended with this
+    // aggregate's own bare name (same mechanism as namespaces).
+    std::string savedPrefix = m_typeNamespacePrefix;
+    m_typeNamespacePrefix += mangleQualifiedTypeName(bareName) + "_";
+
     std::vector<std::pair<std::string, Type*>> fields;
     std::vector<std::unique_ptr<VarDeclAST>> staticMembers;
+    // AGG-11: nested type declarations, in source order.
+    std::vector<std::unique_ptr<DeclAST>> nestedTypes;
     while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
+        // AGG-11: a nested type declaration is `keyword IDENT {` (a forward
+        // `class D;` and an inherited `class D : Base` also route here);
+        // `keyword {` stays an anonymous inline member (AGG-03) and any other
+        // shape stays a field of that type.
+        {
+            TokenType kw = peek()->type;
+            if (kw == TokenType::TOKEN_ENUM || kw == TokenType::TOKEN_STRUCT ||
+                kw == TokenType::TOKEN_UNION || kw == TokenType::TOKEN_CLASS) {
+                size_t save = m_currentTokenPos;
+                advance();
+                std::string nestedName = parseQualifiedTypeName();
+                // A '{' followed (after the balanced closing brace) by an
+                // IDENTIFIER is an inline member definition with a declarator
+                // (`struct Inner { ... } inner;`) — that stays on the field
+                // path (pre-existing C-style idiom, pinned by tests).
+                bool isNested = false;
+                if (!nestedName.empty()) {
+                    if (check(TokenType::TOKEN_LBRACE)) {
+                        size_t afterBody = balancedBraceEnd(m_currentTokenPos);
+                        isNested = afterBody >= m_tokens.size() ||
+                                   m_tokens[afterBody].type != TokenType::TOKEN_IDENTIFIER;
+                    } else if (kw == TokenType::TOKEN_CLASS) {
+                        isNested = check(TokenType::TOKEN_COLON) ||
+                                   check(TokenType::TOKEN_SEMICOLON);
+                    }
+                }
+                m_currentTokenPos = save;
+                if (isNested) {
+                    std::unique_ptr<DeclAST> nested;
+                    if (kw == TokenType::TOKEN_ENUM) {
+                        nested = parseEnumDecl();
+                        // parseEnumDecl stops at '}' — the trailing ';' belongs
+                        // to the declaration (at top level parseDeclaration's
+                        // caller consumes it; here the member loop owns it).
+                        match(TokenType::TOKEN_SEMICOLON);
+                    }
+                    else if (kw == TokenType::TOKEN_UNION) nested = parseUnionDecl();
+                    else if (kw == TokenType::TOKEN_CLASS) nested = parseClassDecl();
+                    else nested = parseStructDecl();
+                    if (!nested) {
+                        m_typeNamespacePrefix = savedPrefix;
+                        return nullptr;
+                    }
+                    registerNestedDeclType(nested.get());
+                    nestedTypes.push_back(std::move(nested));
+                    continue;
+                }
+            }
+        }
+
         // AGG-10: `static` storage for the following data member (structs
         // have no method path, so static applies to variables only).
         bool memberIsStatic = false;
@@ -2380,6 +2443,7 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
             if (isAnonymousAggregate(fieldType)) {
                 if (!promoteAnonymousMembers(fields, fieldType)) {
                     error("duplicate member name in anonymous struct/union", *peek());
+                    m_typeNamespacePrefix = savedPrefix;
                     return nullptr;
                 }
                 continue;
@@ -2391,10 +2455,14 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
             std::unique_ptr<ExprAST> init = nullptr;
             if (match(TokenType::TOKEN_ASSIGN)) {
                 init = parseExpr(2);
-                if (!init) return nullptr;
+                if (!init) {
+                    m_typeNamespacePrefix = savedPrefix;
+                    return nullptr;
+                }
             }
             if (!expect(TokenType::TOKEN_SEMICOLON,
                         "expected ';' after static member declaration")) {
+                m_typeNamespacePrefix = savedPrefix;
                 return nullptr;
             }
             staticMembers.push_back(
@@ -2408,13 +2476,74 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
         match(TokenType::TOKEN_SEMICOLON);
     }
 
+    m_typeNamespacePrefix = savedPrefix;
     match(TokenType::TOKEN_RBRACE);
     match(TokenType::TOKEN_SEMICOLON);
 
     auto decl = std::make_unique<StructDeclAST>(name, std::move(fields));
     decl->bareName = bareName;
     decl->staticMembers = std::move(staticMembers);
+    decl->nestedTypes = std::move(nestedTypes);
     return decl;
+}
+
+// AGG-11: register a nested type declaration into TypeContext, mirroring
+// what parseDeclaration does for top-level declarations of the same kind
+// (idempotent: an existing registration, e.g. from a forward declaration,
+// wins).
+void Parser::registerNestedDeclType(DeclAST* decl) {
+    auto& tc = TypeContext::instance();
+    if (auto* sd = dynamic_cast<StructDeclAST*>(decl)) {
+        if (sd->isClassDecl) {
+            if (!tc.getClass(sd->name)) {
+                auto* classType = new ClassType(sd->name);
+                for (auto& f : sd->fields) classType->addField(f.first, f.second);
+                tc.addClass(sd->name, classType);
+            }
+        } else if (!tc.getStruct(sd->name)) {
+            auto* structType = new StructType(sd->name);
+            for (auto& f : sd->fields) structType->addField(f.first, f.second);
+            tc.addStruct(sd->name, structType);
+        }
+        return;
+    }
+    if (auto* ed = dynamic_cast<EnumDeclAST*>(decl)) {
+        if (!ed->values.empty() && !tc.getEnum(ed->name)) {
+            auto* enumType = new EnumType(ed->name);
+            enumType->underlyingType = ed->underlyingType;
+            for (auto& v : ed->values) enumType->addValue(v.first, v.second);
+            tc.addEnum(ed->name, enumType);
+        }
+        return;
+    }
+    if (auto* ud = dynamic_cast<UnionDeclAST*>(decl)) {
+        if (!tc.getUnion(ud->name)) {
+            auto* unionType = new UnionType(ud->name);
+            for (auto& m : ud->members) unionType->addMember(m.first, m.second);
+            tc.addUnion(ud->name, unionType);
+        }
+        return;
+    }
+}
+
+// AGG-11: token index just past the '}' matching the '{' at lbracePos
+// (lbracePos itself when the braces are unbalanced). Used to tell a nested
+// type declaration (`struct Inner { ... };`) from an inline member definition
+// with a declarator (`struct Inner { ... } inner;`).
+size_t Parser::balancedBraceEnd(size_t lbracePos) const {
+    if (lbracePos >= m_tokens.size() ||
+        m_tokens[lbracePos].type != TokenType::TOKEN_LBRACE) {
+        return lbracePos;
+    }
+    int depth = 0;
+    for (size_t i = lbracePos; i < m_tokens.size(); ++i) {
+        if (m_tokens[i].type == TokenType::TOKEN_LBRACE) {
+            ++depth;
+        } else if (m_tokens[i].type == TokenType::TOKEN_RBRACE) {
+            if (--depth == 0) return i + 1;
+        }
+    }
+    return lbracePos;
 }
 
 std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
@@ -2446,10 +2575,17 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
 
     advance(); // consume '{'
 
+    // AGG-11: extend the type-name prefix with this class's bare name while
+    // parsing the body (same mechanism as namespaces).
+    std::string savedPrefix = m_typeNamespacePrefix;
+    m_typeNamespacePrefix += mangleQualifiedTypeName(bareName) + "_";
+
     std::vector<std::pair<std::string, Type*>> fields;
     std::vector<std::unique_ptr<FunctionDeclAST>> methods;
     std::vector<std::unique_ptr<VarDeclAST>> staticMembers;
     std::unordered_map<std::string, AccessLevel> memberAccess;
+    // AGG-11: nested type declarations, in source order.
+    std::vector<std::unique_ptr<DeclAST>> nestedTypes;
     // DEC-01: class members default to private; `public:`/`private:`/
     // `protected:` sections change the level for the members that follow.
     AccessLevel currentAccess = AccessLevel::Private;
@@ -2476,6 +2612,58 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
             advance(); // consume specifier
             expect(TokenType::TOKEN_COLON, "expected ':' after access specifier");
             continue;
+        }
+
+        // AGG-11: a nested type declaration is `keyword IDENT {` (a forward
+        // `class D;` and an inherited `class D : Base` also route here);
+        // `keyword {` stays an anonymous inline member (AGG-03) and any other
+        // shape stays a field of that type. The access section in effect at
+        // the declaration is recorded under `type:<name>`.
+        {
+            TokenType kw = peek()->type;
+            if (kw == TokenType::TOKEN_ENUM || kw == TokenType::TOKEN_STRUCT ||
+                kw == TokenType::TOKEN_UNION || kw == TokenType::TOKEN_CLASS) {
+                size_t save = m_currentTokenPos;
+                advance();
+                std::string nestedName = parseQualifiedTypeName();
+                // A '{' followed (after the balanced closing brace) by an
+                // IDENTIFIER is an inline member definition with a declarator
+                // (`struct Inner { ... } inner;`) — that stays on the field
+                // path (pre-existing C-style idiom, pinned by tests).
+                bool isNested = false;
+                if (!nestedName.empty()) {
+                    if (check(TokenType::TOKEN_LBRACE)) {
+                        size_t afterBody = balancedBraceEnd(m_currentTokenPos);
+                        isNested = afterBody >= m_tokens.size() ||
+                                   m_tokens[afterBody].type != TokenType::TOKEN_IDENTIFIER;
+                    } else if (kw == TokenType::TOKEN_CLASS) {
+                        isNested = check(TokenType::TOKEN_COLON) ||
+                                   check(TokenType::TOKEN_SEMICOLON);
+                    }
+                }
+                m_currentTokenPos = save;
+                if (isNested) {
+                    std::unique_ptr<DeclAST> nested;
+                    if (kw == TokenType::TOKEN_ENUM) {
+                        nested = parseEnumDecl();
+                        // parseEnumDecl stops at '}' — the trailing ';' belongs
+                        // to the declaration (at top level parseDeclaration's
+                        // caller consumes it; here the member loop owns it).
+                        match(TokenType::TOKEN_SEMICOLON);
+                    }
+                    else if (kw == TokenType::TOKEN_UNION) nested = parseUnionDecl();
+                    else if (kw == TokenType::TOKEN_CLASS) nested = parseClassDecl();
+                    else nested = parseStructDecl();
+                    if (!nested) {
+                        m_typeNamespacePrefix = savedPrefix;
+                        return nullptr;
+                    }
+                    memberAccess["type:" + nestedName] = currentAccess;
+                    registerNestedDeclType(nested.get());
+                    nestedTypes.push_back(std::move(nested));
+                    continue;
+                }
+            }
         }
 
         // AGG-10: `static` storage for the following member (method or data).
@@ -2514,10 +2702,14 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                     std::unique_ptr<ExprAST> init = nullptr;
                     if (match(TokenType::TOKEN_ASSIGN)) {
                         init = parseExpr(2);
-                        if (!init) return nullptr;
+                        if (!init) {
+                            m_typeNamespacePrefix = savedPrefix;
+                            return nullptr;
+                        }
                     }
                     if (!expect(TokenType::TOKEN_SEMICOLON,
                                 "expected ';' after static member declaration")) {
+                        m_typeNamespacePrefix = savedPrefix;
                         return nullptr;
                     }
                     staticMembers.push_back(
@@ -2552,6 +2744,7 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                 size_t before = fields.size();
                 if (!promoteAnonymousMembers(fields, declType)) {
                     error("duplicate member name in anonymous struct/union", *peek());
+                    m_typeNamespacePrefix = savedPrefix;
                     return nullptr;
                 }
                 for (size_t i = before; i < fields.size(); ++i) {
@@ -2566,6 +2759,7 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
         }
     }
 
+    m_typeNamespacePrefix = savedPrefix;
     match(TokenType::TOKEN_RBRACE);
     match(TokenType::TOKEN_SEMICOLON);
 
@@ -2574,6 +2768,7 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
     decl->staticMembers = std::move(staticMembers);
     decl->baseClass = std::move(baseClass);
     decl->memberAccess = std::move(memberAccess);
+    decl->nestedTypes = std::move(nestedTypes);
     decl->bareName = bareName;
     decl->isClassDecl = true;
     return decl;
@@ -2613,17 +2808,75 @@ Type* Parser::parseMemberArraySuffix(Type* base) {
 std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
     if (!match(TokenType::TOKEN_UNION)) return nullptr;
 
-    std::string name = qualifyTypeDeclName(parseQualifiedTypeName());
+    std::string bareName = parseQualifiedTypeName();
+    std::string name = qualifyTypeDeclName(bareName);
 
     if (!check(TokenType::TOKEN_LBRACE)) {
         // Forward declaration
-        return std::make_unique<UnionDeclAST>(name, std::vector<std::pair<std::string, Type*>>{});
+        auto fwd = std::make_unique<UnionDeclAST>(name, std::vector<std::pair<std::string, Type*>>{});
+        fwd->bareName = bareName;
+        return fwd;
     }
 
     advance(); // consume '{'
 
+    // AGG-11: extend the type-name prefix with this union's bare name while
+    // parsing the body (same mechanism as namespaces).
+    std::string savedPrefix = m_typeNamespacePrefix;
+    m_typeNamespacePrefix += mangleQualifiedTypeName(bareName) + "_";
+
     std::vector<std::pair<std::string, Type*>> members;
+    // AGG-11: nested type declarations, in source order.
+    std::vector<std::unique_ptr<DeclAST>> nestedTypes;
     while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
+        // AGG-11: a nested type declaration is `keyword IDENT {`; `keyword {`
+        // stays an anonymous inline member (AGG-03), any other shape a field.
+        {
+            TokenType kw = peek()->type;
+            if (kw == TokenType::TOKEN_ENUM || kw == TokenType::TOKEN_STRUCT ||
+                kw == TokenType::TOKEN_UNION || kw == TokenType::TOKEN_CLASS) {
+                size_t save = m_currentTokenPos;
+                advance();
+                std::string nestedName = parseQualifiedTypeName();
+                // A '{' followed (after the balanced closing brace) by an
+                // IDENTIFIER is an inline member definition with a declarator
+                // (`struct Inner { ... } inner;`) — that stays on the field
+                // path (pre-existing C-style idiom, pinned by tests).
+                bool isNested = false;
+                if (!nestedName.empty()) {
+                    if (check(TokenType::TOKEN_LBRACE)) {
+                        size_t afterBody = balancedBraceEnd(m_currentTokenPos);
+                        isNested = afterBody >= m_tokens.size() ||
+                                   m_tokens[afterBody].type != TokenType::TOKEN_IDENTIFIER;
+                    } else if (kw == TokenType::TOKEN_CLASS) {
+                        isNested = check(TokenType::TOKEN_COLON) ||
+                                   check(TokenType::TOKEN_SEMICOLON);
+                    }
+                }
+                m_currentTokenPos = save;
+                if (isNested) {
+                    std::unique_ptr<DeclAST> nested;
+                    if (kw == TokenType::TOKEN_ENUM) {
+                        nested = parseEnumDecl();
+                        // parseEnumDecl stops at '}' — the trailing ';' belongs
+                        // to the declaration (at top level parseDeclaration's
+                        // caller consumes it; here the member loop owns it).
+                        match(TokenType::TOKEN_SEMICOLON);
+                    }
+                    else if (kw == TokenType::TOKEN_UNION) nested = parseUnionDecl();
+                    else if (kw == TokenType::TOKEN_CLASS) nested = parseClassDecl();
+                    else nested = parseStructDecl();
+                    if (!nested) {
+                        m_typeNamespacePrefix = savedPrefix;
+                        return nullptr;
+                    }
+                    registerNestedDeclType(nested.get());
+                    nestedTypes.push_back(std::move(nested));
+                    continue;
+                }
+            }
+        }
+
         Type* memberType = parseType();
         if (!memberType) break;
 
@@ -2633,6 +2886,7 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
             if (isAnonymousAggregate(memberType)) {
                 if (!promoteAnonymousMembers(members, memberType)) {
                     error("duplicate member name in anonymous struct/union", *peek());
+                    m_typeNamespacePrefix = savedPrefix;
                     return nullptr;
                 }
                 continue;
@@ -2647,10 +2901,13 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
         match(TokenType::TOKEN_SEMICOLON);
     }
 
+    m_typeNamespacePrefix = savedPrefix;
     match(TokenType::TOKEN_RBRACE);
     match(TokenType::TOKEN_SEMICOLON);
 
-    return std::make_unique<UnionDeclAST>(name, std::move(members));
+    auto decl = std::make_unique<UnionDeclAST>(name, std::move(members));
+    decl->nestedTypes = std::move(nestedTypes);
+    return decl;
 }
 
 std::unique_ptr<EnumDeclAST> Parser::parseEnumDecl() {

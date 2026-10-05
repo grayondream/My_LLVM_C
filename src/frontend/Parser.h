@@ -154,4 +154,10 @@ private:
     // Mangled prefix (trailing '_') active while parsing a namespace body, e.g.
     // "A_" inside `namespace A { ... }`.
     std::string m_typeNamespacePrefix;
+    // AGG-11: register a nested type declaration into TypeContext, mirroring
+    // what parseDeclaration does for the same kind at top level.
+    void registerNestedDeclType(DeclAST* decl);
+    // AGG-11: token index just past the '}' matching the '{' at lbracePos
+    // (lbracePos itself when braces are unbalanced).
+    size_t balancedBraceEnd(size_t lbracePos) const;
 };

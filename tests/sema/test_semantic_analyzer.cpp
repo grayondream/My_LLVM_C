@@ -1399,3 +1399,62 @@ TEST(SliceSemTest, SMStaticBackwardReference) {
         "static int32 b() { return 7; } }; "
         "int32 main() { return SMI2::a(); }"));
 }
+
+// ========== AGG-11: nested types — parser collects & registers under flat keys ==========
+
+TEST(SliceSemTest, NTNestedStructTypeRef) {
+    EXPECT_TRUE(analyzeOk(
+        "class NTO { public: struct Inner { int32 x; }; }; "
+        "int32 main() { NTO::Inner obj; obj.x = 3; return obj.x == 3 ? 0 : 1; }"));
+}
+
+TEST(SliceSemTest, NTEnumDoesNotEatFields) {
+    // 现状缺陷：成员循环 parseType 消费内联 enum 后因无标识符 break，
+    // 后续字段全部丢失。钉住修复。
+    EXPECT_TRUE(analyzeOk(
+        "class NTF { public: enum Color { Red, Green }; int32 x; }; "
+        "int32 main() { NTF o; o.x = 1; return o.x == 1 ? 0 : 1; }"));
+}
+
+TEST(SliceSemTest, NTDeepNested) {
+    EXPECT_TRUE(analyzeOk(
+        "class NTD { public: struct A { struct B { int32 v; }; }; }; "
+        "int32 main() { NTD::A::B obj; obj.v = 2; return obj.v == 2 ? 0 : 1; }"));
+}
+
+TEST(SliceSemTest, NTUnionNested) {
+    EXPECT_TRUE(analyzeOk(
+        "class NTU { public: union U { int32 a; float32 b; }; }; "
+        "int32 main() { NTU::U u; u.a = 1; return u.a == 1 ? 0 : 1; }"));
+}
+
+TEST(SliceSemTest, NTFieldOfNestedType) {
+    // 类体内字段用裸嵌套类型名（解析期前缀查找的自然结果）。
+    EXPECT_TRUE(analyzeOk(
+        "class NTFLD { public: struct Inner { int32 x; }; Inner field; }; "
+        "int32 main() { NTFLD o; o.field.x = 5; return o.field.x == 5 ? 0 : 1; }"));
+}
+
+TEST(SliceSemTest, NTStructInStruct) {
+    EXPECT_TRUE(analyzeOk(
+        "struct NTOS { struct Inner { int32 x; }; }; "
+        "int32 main() { NTOS::Inner obj; obj.x = 3; return obj.x == 3 ? 0 : 1; }"));
+}
+
+TEST(SliceSemTest, NTNestedClassMethod) {
+    // 方法表在 sema 填充——Task 1 预期 RED，Task 2 转绿。
+    EXPECT_TRUE(analyzeOk(
+        "class NTM { public: struct S { int32 f(int32 x) { return x; } }; }; "
+        "int32 main() { NTM::S obj; return obj.f(7) == 7 ? 0 : 1; }"));
+}
+
+TEST(SliceSemTest, NTForwardDeclPin) {
+    // DS6：前向声明（含嵌套类前向）+ 定义 + 使用；枚举/union 前向解析可用。
+    // 既有能力 pin——Task 1 期预期 PASS。
+    EXPECT_TRUE(analyzeOk(
+        "struct NF1 { int32 x; }; "
+        "class NF2; class NF2 { public: int32 y; }; "
+        "enum NF3 : uint8; union NF4; "
+        "int32 main() { NF1 a; a.x = 1; NF2 b; b.y = 2; "
+        "return (a.x == 1 && b.y == 2) ? 0 : 1; }"));
+}

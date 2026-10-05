@@ -131,6 +131,9 @@ public:
     // PAR-04/DEC-01: explicit access levels recorded by the parser (class
     // declarations record every member; structs leave this empty -> Public).
     std::unordered_map<std::string, AccessLevel> memberAccess;
+    // AGG-11: nested type declarations (enum/struct/class/union), in source
+    // order. Registered under flat keys (`Outer_Inner`) at parse time.
+    std::vector<std::unique_ptr<DeclAST>> nestedTypes;
     bool isClassDecl = false;
 
     StructDeclAST(const std::string& n, std::vector<std::pair<std::string, Type*>> flds)
@@ -143,6 +146,11 @@ class UnionDeclAST : public DeclAST {
 public:
     std::string name;
     std::vector<std::pair<std::string, Type*>> members;
+    // AGG-11: nested type declarations, in source order.
+    std::vector<std::unique_ptr<DeclAST>> nestedTypes;
+    // AGG-11: union name before qualifyTypeDeclName's namespace prefixing
+    // (mirrors StructDeclAST::bareName).
+    std::string bareName;
 
     UnionDeclAST(const std::string& n, std::vector<std::pair<std::string, Type*>> mems)
         : name(n), members(std::move(mems)) {}
