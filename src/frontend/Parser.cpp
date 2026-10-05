@@ -1844,8 +1844,12 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
 
         // If this is a forward declaration (empty fields) and not followed by ';',
         // it might be a type reference (e.g., "struct Point operator+(...)")
-        // Fall through to normal type parsing
-        if (structDecl->fields.empty() && !check(TokenType::TOKEN_SEMICOLON)) {
+        // Fall through to normal type parsing. AGG-10: a definition whose
+        // members are all static has empty fields too — it must NOT fall
+        // into this fallback (the definition would be dropped and reparsed,
+        // silently leaking the static members as bare globals).
+        if (structDecl->fields.empty() && structDecl->staticMembers.empty() &&
+            structDecl->methods.empty() && !check(TokenType::TOKEN_SEMICOLON)) {
             m_currentTokenPos = savedPos;
             return parseDeclarationAsType();
         }
@@ -2498,7 +2502,10 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                     if (func) {
                         func->isStatic = memberIsStatic;
                         methods.push_back(std::move(func));
-                        memberAccess[memberName] = currentAccess;
+                        // I1: static methods are keyed separately so a
+                        // same-name instance method's level stays intact.
+                        memberAccess[memberIsStatic ? "static:" + memberName : memberName] =
+                            currentAccess;
                     }
                 } else if (memberIsStatic) {
                     // AGG-10: static data member — optional in-class
@@ -2515,7 +2522,9 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                     }
                     staticMembers.push_back(
                         std::make_unique<VarDeclAST>(memberName, declType, std::move(init)));
-                    memberAccess[memberName] = currentAccess;
+                    // I1: access level keyed separately from instance members
+                    // so same-name static/instance members stay independent.
+                    memberAccess["static:" + memberName] = currentAccess;
                 } else {
                     // Field declaration
                     declType = parseMemberArraySuffix(declType);

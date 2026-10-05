@@ -223,3 +223,11 @@ TEST_F(ClassCodegenE2E, SMStaticAfterForwardDecl) {
         int32 main() { return SMFwd::v == 9 ? 0 : 1; }
     )", "test_sm_fwd.c"), 0);
 }
+
+// Review C2: struct with only static members — global storage, no fallback.
+TEST_F(ClassCodegenE2E, SMStructStaticE2E) {
+    EXPECT_EQ(runSource(R"(
+        struct SMS3 { static int32 v = 4; };
+        int32 main() { return SMS3::v == 4 ? 0 : 1; }
+    )", "test_sm_struct.c"), 0);
+}

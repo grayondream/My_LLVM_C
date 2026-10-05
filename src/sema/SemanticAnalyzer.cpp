@@ -149,7 +149,9 @@ void SemanticAnalyzer::checkStaticMemberAccess(const std::string& originalName, 
     if (it == staticMemberIndex.end()) return;
     ClassType* definingClass = it->second.first;
     if (!definingClass) return;
-    AccessLevel level = definingClass->memberAccessLevel(it->second.second);
+    // I1: static members are keyed "static:<name>" so a same-name instance
+    // member's access level is never consulted (independent keys).
+    AccessLevel level = definingClass->memberAccessLevel("static:" + it->second.second);
     if (level != AccessLevel::Public && currentClass != definingClass) {
         emitError(DiagnosticCode::SemPrivateMemberAccess,
                   "cannot access " +
@@ -1872,6 +1874,24 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
             currentClass = savedClass;
         }
 
+        // AGG-10/I2: register all static methods BEFORE analyzing any method
+        // body, so a static method may call a sibling declared later in the
+        // class body (same declaration-order freedom as instance methods,
+        // whose table is filled below). declare() tolerates the later
+        // re-declaration inside visit() (prototype pattern); only two
+        // definitions of one signature error, via definedFunctions.
+        for (auto& method : node.methods) {
+            if (!method || !method->isStatic) continue;
+            std::string origName = method->name;
+            const std::string& clsName = node.bareName.empty() ? node.name : node.bareName;
+            method->name = mangleNamespaceName(clsName + "::" + origName);
+            staticMemberIndex[scopedName(method->name)] = {classType, origName};
+            std::vector<Type*> pts;
+            for (auto& param : method->params) pts.push_back(param->type);
+            declare(scopedName(method->name),
+                    new FunctionType(method->returnType, std::move(pts), method->isVarArg));
+        }
+
         for (auto& method : node.methods) {
             ClassType* savedClass = currentClass;
             currentClass = classType;
@@ -1882,10 +1902,6 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
                 // The desugared name uses the BARE class name — scopedName
                 // (applied inside visit) adds the namespace prefix, matching
                 // what the fully qualified access spelling flattens to.
-                std::string origName = method->name;
-                const std::string& clsName = node.bareName.empty() ? node.name : node.bareName;
-                method->name = mangleNamespaceName(clsName + "::" + origName);
-                staticMemberIndex[scopedName(method->name)] = {classType, origName};
                 visit(*method);
             } else {
                 auto* thisType = new Type(TypeKind::Pointer, classType);

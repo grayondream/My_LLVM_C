@@ -1342,3 +1342,60 @@ TEST(SliceSemTest, SMStaticInNamespace) {
         "namespace smns { class SMN { public: static int32 v = 3; }; } "
         "int32 main() { return smns::SMN::v; }"));
 }
+
+// Review C2: a struct whose ONLY members are static must not fall into the
+// parser's forward-declaration fallback (which dropped the definition).
+TEST(SliceSemTest, SMStructStaticOnly) {
+    EXPECT_TRUE(analyzeOk(
+        "struct SMS { static int32 v = 4; }; "
+        "int32 main() { return SMS::v; }"));
+}
+
+TEST(SliceSemTest, SMStructStaticMixed) {
+    EXPECT_TRUE(analyzeOk(
+        "struct SMS2 { static int32 v = 4; int32 x; }; "
+        "int32 main() { SMS2 s; s.x = 1; return SMS2::v + s.x; }"));
+}
+
+// Review I1: same-name static and instance members must keep independent
+// access levels. Two assertions:
+//  - the PUBLIC instance member is not corrupted by the private static's
+//    level (no false E2009 on obj.f(1));
+//  - the static member's own private level is honored (E2009 on SMI1::f()).
+TEST(SliceSemTest, SMAccessLevelIndependent) {
+    EXPECT_TRUE(analyzeOk(
+        "class SMI1 { "
+        "public: int32 f(int32 x) { return x; } "
+        "private: static int32 f() { return 42; } }; "
+        "int32 main() { SMI1 obj; return obj.f(1); }"));
+}
+
+TEST(SliceSemTest, SMPrivateStaticMethodRejected) {
+    Lexer lexer("test.c",
+        "class SMI3 { "
+        "public: int32 f(int32 x) { return x; } "
+        "private: static int32 f() { return 42; } }; "
+        "int32 main() { return SMI3::f(); }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_TRUE(ast != nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_FALSE(analyzer.getErrors().empty());
+    bool hasE2009 = false;
+    for (auto& e : analyzer.getErrors())
+        if (e.message.find("private") != std::string::npos) hasE2009 = true;
+    EXPECT_TRUE(hasE2009);
+}
+
+// Review I2: a static method may call a sibling static method declared
+// LATER in the class body (declaration order must not matter, matching
+// instance methods).
+TEST(SliceSemTest, SMStaticBackwardReference) {
+    EXPECT_TRUE(analyzeOk(
+        "class SMI2 { "
+        "public: static int32 a() { return SMI2::b(); } "
+        "static int32 b() { return 7; } }; "
+        "int32 main() { return SMI2::a(); }"));
+}
