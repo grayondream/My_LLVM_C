@@ -410,3 +410,11 @@
 - 论证：无界栈增长与安全定位冲突（CERT MSC34-C）；C23 已降为可选；Rust/Zig/Go/Swift 均无 VLA；动态长度由 Slice 承接（未来配合显式堆分配）。
 - 实现：parseVariableDecl + parseParamDecl 两处 `[` 后非 NUMBER/`]` → "variable-length arrays are not supported: array size must be an integer literal"；pin 测试 2 项（VLA 前缀，钉消息文本）。816/816（基线 814）。
 - TYP-11 完结（`[x]`）。遗留相关：数组-数组赋值缺陷（另立项，见 2026-10-04 条目）。
+
+## 2026-10-05 数组赋值缺陷修复（bounded）
+
+- 背景：2026-10-04 评审发现的既有缺陷——`checkAssignmentTypes` 同 kind 放行 + isPointerOrArray 混合放行，`a=b`/`a=p` 静默通过且 codegen 写退化指针进数组存储（内存破坏、无诊断）。
+- 决策：C99 6.5.16 对齐——数组是不可修改左值，赋值左值为 Array 一律拒绝（含同形状）；不用"形状相等深拷贝"方案（YAGNI，复制走 memcpy/初始化列表/逐元素）。
+- 实现：SemanticAnalyzer.cpp `checkAssignmentTypes` 单点，Array LHS → SemIncompatibleAssignment；`p=a`/`slice=a`/struct/union 拷贝不动。
+- 测试：AASG 前缀 4 项（2 拒绝 + 1 退化回归 pin + 1 消息文本 pin）；RED 3 FAIL + 1 pin PASS 后转绿；全量 **820/820**（基线 816）。
+- 遗留：无。下一候选：AGG-10 static 成员、AGG-11 嵌套类型。

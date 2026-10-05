@@ -130,7 +130,7 @@
 - `[ ]` **TYP-10** `union`：C 风格布局、初始化、访问。
 - `[x]` **TYP-11** 固定数组 `i32[32]`；VLA（可变长度数组）；多维数组。**完成**：一维数组形参 `T name[N]` 去糖为 slice（2026-10-01，spec `docs/superpowers/specs/2026-10-01-typ11-array-params-design.md`）；多维数组本体（2026-10-03，spec docs/superpowers/specs/2026-10-03-multidim-arrays-design.md；顺带修复全局数组带初始化器的既有缺口）；多维形参行 slice 去糖（2026-10-04，spec docs/superpowers/specs/2026-10-04-multidim-array-params-design.md；顺带修复 typesEqual 数组分支忽略元素/长度的缺陷）。**VLA 明确不支持**（2026-10-05 用户决策）：运行时长度分配与安全定位冲突（无界栈增长）、C23 已将 VLA 降为可选、动态长度由 Slice 承接；专用诊断"variable-length arrays are not supported"（声明与形参两处）+ pin 测试。
 - `[x]` **TYP-12** `Slice`：`{ptr, length}`，不拥有、零拷贝。**已完成**：下标读写、`.len`、数组→slice 单向零拷贝退化（传参/赋值/初始化）、零初始化 `{null,0}`、规范 LLVM 单例类型、slice 元素类型严格比较。范围外（spec `docs/superpowers/specs/2026-09-30-slice-design.md` §8）：范围切片、显式构造、边界检查、字符串退化；遗留：无（MethodCall 传参退化已完成，2026-10-02——resolveMethod 两阶段匹配 + resolvedParamTypes，spec docs/superpowers/specs/2026-10-02-methodcall-decay-design.md）。全局变量 codegen 缺口已修复（无初始化器全局现为零初始化定义）；`T name[N]` 形参已去糖（TYP-11），return 局部数组被拒绝（悬垂 D4）。
-- `[ ]` **缺陷（评审发现，2026-10-04）**：数组-数组直接赋值静默通过且 codegen 语义损坏——`checkAssignmentTypes`（SemanticAnalyzer.cpp:478）对同 kind 直接放行，`a[2][3]=b[2][4]` 把 b 的退化指针写进 a 的存储（内存破坏、无诊断）。需另立项：sema 对 Array↔Array 要求形状相等或直接拒绝。
+- `[x]` **缺陷（评审发现，2026-10-04，已修复 2026-10-05）**：数组赋值静默写坏内存。修复：`checkAssignmentTypes` 对 Array 左值一律拒绝（C99 6.5.16 数组为不可修改左值；`a=b` 含同形状、`a=p` 均报 SemIncompatibleAssignment，建议 memcpy/逐元素）；`p=a` 退化与 struct/union 拷贝赋值不受影响。测试 4 项（AASG 前缀，816→820）。
 - `[ ]` **TYP-13** `Optional<T>`：`{ bool valid; T value; }`；显式访问（**无 `?` 传播算子**）。
 - `[ ]` **TYP-14** `Result<T,E>`：布局与 `.error`/`.value` 语义；显式访问。
 - `[ ]` **TYP-15** 指针类型：`T*`、函数指针、多级指针。
