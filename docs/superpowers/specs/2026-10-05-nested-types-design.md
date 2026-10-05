@@ -75,17 +75,20 @@ AGG-11（TODO.md:207）：嵌套类型、前向声明。P1-01 最后一项。
 - AGG-10 去糖公式推广：`scopedName(mangleNamespaceName(classPathPrefix + bareName + "::" + 成员))`，
   sema 新增 `classPathPrefix` 上下文（visit 嵌套类型时压栈外层类路径，如 `"Outer_"`）。
   验证：`ns::Outer::Inner::v` → 拍平 `ns_Outer_Inner_v` = 声明侧。
-- 嵌套枚举常量注册键 = `mangleNamespaceName(枚举限定名 + "::" + 值)`
-  （如 `Outer_Color_Red`）；与顶层枚举既有 `Mode::Red` 机制对齐（plan 阶段实证对齐点，
-  若机制不同则按既有机制扩展而非另起炉灶）。
+- 嵌套枚举常量：实证顶层枚举**无** `Mode::Red` 通路（常量注册于
+  `scopedName(值)`，C 风格外层作用域，spec 初稿的 `Outer::Color::Red` 假设不成立）。
+  按既有机制扩展：类嵌套枚举常量注册键 = `scopedName(classPathPrefix + 值)`
+  （如 `Outer_Red`），访问拼写 `Outer::Red`；**不注册裸键**（类外裸名 `Red` 不可用，
+  测试钉住）。namespace 顶层枚举行为不变。
 
 ### DS5：访问控制（2A）
 
 - parser 将嵌套类型级别记入外层类 `memberAccess["type:<名字>"]`（I1 独立键经验）。
 - sema 建 `nestedTypeAccess`（类型名 → {外层类, 级别}），`memberAccessLevel` 缺键
   Public 的既有语义保持兼容。
-- 检查点：**局部/全局变量声明与 new 表达式**——private 嵌套类型类外使用报 E2009；
-  类体内（`currentClass` 匹配）可用。
+- 检查点：**局部/全局变量声明与 cast 目标类型**（`CastExprAST::castType`——malloc
+  堆用法主通道 `(Outer::Inner*)malloc(...)`；语言无 `new`，AGG-12）——private 嵌套
+  类型类外使用报 E2009；类体内（`currentClass` 匹配）可用。
 - 限制（记录）：方法签名/返回类型/参数中的 private 嵌套类型不检查。
 
 ### DS6：前向声明
@@ -122,7 +125,7 @@ LLVM 类型由 `getLLVMType` 按注册名（`Outer_Inner`）惰性创建——�
 | 解析注册 | 嵌套 enum/struct/class/union 各 1（sema）；类中类中类 1（sema） |
 | 吞成员缺陷 | 嵌套 enum 后续字段不丢（sema，n4 复现钉住） |
 | 类型引用 | `Outer::Inner obj` 局部/全局/字段/参数（sema+e2e） |
-| 枚举常量 | `Outer::Color::Red`（sema+e2e）；ns 内 `ns::Outer::Color::Red`（sema） |
+| 枚举常量 | `Outer::Red`（sema+e2e）；ns 内 `ns::Outer::Red`（sema）；类外裸名 `Red` 不可用（sema pin） |
 | 访问控制 | private 嵌套类型类外 var decl/new 拒绝 E2009；类内可用（sema） |
 | static 随行 | 嵌套类 static 变量读写（sema+e2e）；嵌套类实例方法调用（e2e） |
 | 前向声明 | 前向声明+定义+自引用指针（e2e 钉住既有行为） |
