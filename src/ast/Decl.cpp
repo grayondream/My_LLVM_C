@@ -702,3 +702,15 @@ llvm::Value* NamespaceDeclAST::codegen(CodegenContext& ctx) {
     }
     return last;
 }
+
+// P1-04 / CT-01: compile_time 顶层声明节点不直接出码——static_assert 无值，
+// compile_time.if 由 sema 选中分支后、codegen 阶段另行处理（CT-03/SEM-07）。
+llvm::Value* CompileTimeIfDeclAST::codegen(CodegenContext& ctx) {
+    (void)ctx;
+    return nullptr;
+}
+
+llvm::Value* CompileTimeAssertDeclAST::codegen(CodegenContext& ctx) {
+    (void)ctx;
+    return nullptr;
+}

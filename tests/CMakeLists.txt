@@ -31,7 +31,12 @@ target_link_libraries(compiler_tests
         my_llvm_c_lib
         safec
         GTest::gtest_main
-        GTest::gmock
 )
+
+# P1-04: 系统 GTest（无 gmock 库）时跳过——测试源未使用 gmock；
+# FetchContent 路径下 gmock 可用，保持链接。
+if(TARGET GTest::gmock)
+    target_link_libraries(compiler_tests PRIVATE GTest::gmock)
+endif()
 
 gtest_discover_tests(compiler_tests)

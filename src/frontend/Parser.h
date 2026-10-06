@@ -45,6 +45,12 @@ private:
     // P1-03 / GEN-01 / PAR-21: `template<...>` 声明（函数/struct/class/别名）。
     std::unique_ptr<DeclAST> parseTemplateDecl();
 
+    // P1-04 / CT-01: `compile_time.if` / `compile_time.static_assert` 顶层声明。
+    // `compile_time` 非关键字；仅成员名 ∈ {if, static_assert} 的根链在此特判。
+    bool isCompileTimeDeclStart() const;
+    std::unique_ptr<DeclAST> parseCompileTimeIf();
+    std::unique_ptr<DeclAST> parseCompileTimeAssert();
+
     // 模板参数作用域栈：模板体 parse 期间，参数名解析为 TypeVarType /
     // 非类型参数（数组长度处）。GEN-01。
     struct TemplateScope {

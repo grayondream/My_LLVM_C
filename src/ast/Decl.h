@@ -274,3 +274,21 @@ public:
         : name(n), declarations(std::move(decls)) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
+
+// P1-04 / CT-03: 顶层 `compile_time.if (cond) { decls... } [else { decls... }]`。
+// 两个分支语法均 parse（spec compile_time.md §3）；选择在 sema 期完成。
+class CompileTimeIfDeclAST : public DeclAST {
+public:
+    std::unique_ptr<ExprAST> cond;
+    std::vector<std::unique_ptr<DeclAST>> thenDecls;
+    std::vector<std::unique_ptr<DeclAST>> elseDecls;
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+// P1-04 / CT-02: 顶层 `compile_time.static_assert(...);` 的包装节点（call 为
+// MethodCallExprAST 形态）。函数体内走普通表达式路径，无需包装。
+class CompileTimeAssertDeclAST : public DeclAST {
+public:
+    std::unique_ptr<ExprAST> call;
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};

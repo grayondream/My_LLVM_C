@@ -1962,6 +1962,14 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
         return parseTemplateDecl();
     }
 
+    // P1-04 / CT-01: `compile_time.if` / `compile_time.static_assert` 顶层声明。
+    if (isCompileTimeDeclStart()) {
+        if (m_tokens[m_currentTokenPos + 2].lexeme == "if") {
+            return parseCompileTimeIf();
+        }
+        return parseCompileTimeAssert();
+    }
+
     // 新增：支持 using 类型别名
     if (check(TokenType::TOKEN_IDENTIFIER)) {
         std::string name = peek()->lexeme;
@@ -2545,6 +2553,104 @@ std::unique_ptr<ParamDeclAST> Parser::parseParamDecl() {
 // P1-03 / GEN-01 / PAR-21: 解析 `template<...>` 声明。
 // 参数列表 → 模板体（函数/struct/class/using 别名；union/enum 拒绝）。
 // 定义处只 parse：参数名进入 m_templateScopes，模板体内的 `T`/`N` 由此解析。
+// P1-04 / CT-01: `compile_time` 非关键字——仅当前瞻出 `compile_time` + `.` +
+// 成员 ∈ {if, static_assert} 时才走编译期声明路径；只 peek 不消耗。
+bool Parser::isCompileTimeDeclStart() const {
+    if (eof() || peek()->lexeme != "compile_time") {
+        return false;
+    }
+    if (m_currentTokenPos + 2 >= m_tokens.size()) {
+        return false;
+    }
+    const Token& dot = m_tokens[m_currentTokenPos + 1];
+    if (dot.type != TokenType::TOKEN_DOT) {
+        return false;
+    }
+    const Token& member = m_tokens[m_currentTokenPos + 2];
+    return (member.type == TokenType::TOKEN_IDENTIFIER && member.lexeme == "static_assert")
+        || (member.type == TokenType::TOKEN_IF && member.lexeme == "if");
+}
+
+// P1-04 / CT-01: `compile_time.if (cond) { decls... } [else { decls... }]`。
+// 两个分支都 parse（spec compile_time.md §3 钉死），选择在 sema。
+std::unique_ptr<DeclAST> Parser::parseCompileTimeIf() {
+    advance(); // compile_time
+    advance(); // .
+    advance(); // if
+    if (!expect(TokenType::TOKEN_LPAREN, "'(' after 'compile_time.if'")) {
+        return nullptr;
+    }
+    auto cond = parseExpr(2); // minPrec=2：',' 分隔分支，不作运算符吞入
+    if (!cond) {
+        return nullptr;
+    }
+    if (!expect(TokenType::TOKEN_RPAREN, "')' after 'compile_time.if' condition")) {
+        return nullptr;
+    }
+
+    auto node = std::make_unique<CompileTimeIfDeclAST>();
+    node->cond = std::move(cond);
+
+    auto parseBranch = [this](std::vector<std::unique_ptr<DeclAST>>& out) -> bool {
+        if (!expect(TokenType::TOKEN_LBRACE, "'{'")) {
+            return false;
+        }
+        while (!check(TokenType::TOKEN_RBRACE) && !eof()) {
+            auto decl = parseDeclaration();
+            if (!decl) {
+                return false;
+            }
+            out.push_back(std::move(decl));
+        }
+        return expect(TokenType::TOKEN_RBRACE, "'}'");
+    };
+    if (!parseBranch(node->thenDecls)) {
+        return nullptr;
+    }
+    if (peek() && peek()->lexeme == "else") {
+        advance();
+        if (!parseBranch(node->elseDecls)) {
+            return nullptr;
+        }
+    }
+    return node;
+}
+
+// P1-04 / CT-01: `compile_time.static_assert(cond[, msg]);` —— 包装为
+// MethodCallExprAST（object=VariableExpr("compile_time")），sema 特判求值。
+std::unique_ptr<DeclAST> Parser::parseCompileTimeAssert() {
+    advance(); // compile_time
+    advance(); // .
+    advance(); // static_assert
+    if (!expect(TokenType::TOKEN_LPAREN, "'(' after 'compile_time.static_assert'")) {
+        return nullptr;
+    }
+    std::vector<std::unique_ptr<ExprAST>> args;
+    if (!check(TokenType::TOKEN_RPAREN)) {
+        while (true) {
+            auto arg = parseExpr(2); // minPrec=2：实参间 ',' 分隔（与调用实参一致）
+            if (!arg) {
+                return nullptr;
+            }
+            args.push_back(std::move(arg));
+            if (match(TokenType::TOKEN_COMMA)) {
+                continue;
+            }
+            break;
+        }
+    }
+    if (!expect(TokenType::TOKEN_RPAREN, "')' after 'compile_time.static_assert' arguments")) {
+        return nullptr;
+    }
+    match(TokenType::TOKEN_SEMICOLON); // 容错：无 ';' 也不报错
+
+    auto call = std::make_unique<MethodCallExprAST>(
+        std::make_unique<VariableExprAST>("compile_time"), "static_assert", std::move(args));
+    auto node = std::make_unique<CompileTimeAssertDeclAST>();
+    node->call = std::move(call);
+    return node;
+}
+
 std::unique_ptr<DeclAST> Parser::parseTemplateDecl() {
     advance(); // 消耗 'template'
     if (!expect(TokenType::TOKEN_LT, "expected '<' after 'template'")) {
