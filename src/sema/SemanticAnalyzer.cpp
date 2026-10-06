@@ -1463,6 +1463,47 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
             node.isLValue = false;
             return;
         }
+        // P1-02 (TYP-13/14): Optional/Result pseudo-fields — freely readable
+        // and writable (DS3, C semantics); no runtime check is implied.
+        if (strippedObj->kind == TypeKind::Optional) {
+            auto* optType = static_cast<OptionalType*>(strippedObj);
+            if (node.memberName == "valid") {
+                node.type = TypeContext::instance().getBool();
+                node.isLValue = true;
+                return;
+            }
+            if (node.memberName == "value") {
+                node.type = optType->elementType;
+                node.isLValue = true;
+                return;
+            }
+            emitError("no member named '" + node.memberName + "' in Optional", node);
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
+        }
+        if (strippedObj->kind == TypeKind::Result) {
+            auto* resType = static_cast<ResultType*>(strippedObj);
+            if (node.memberName == "ok") {
+                node.type = TypeContext::instance().getBool();
+                node.isLValue = true;
+                return;
+            }
+            if (node.memberName == "value") {
+                node.type = resType->successType;
+                node.isLValue = true;
+                return;
+            }
+            if (node.memberName == "error") {
+                node.type = resType->errorType;
+                node.isLValue = true;
+                return;
+            }
+            emitError("no member named '" + node.memberName + "' in Result", node);
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
+        }
         if (strippedObj->kind != TypeKind::Struct && strippedObj->kind != TypeKind::Class &&
             strippedObj->kind != TypeKind::Union) {
             emitError("member access with '.' requires struct/class/union type, but got '" + typeToString(objType) + "'", node);
@@ -1787,6 +1828,51 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
             initList->type = node.type;
             initList->isLValue = false;
             for (auto& e : initList->initializers) getExprType(*e);
+            // P1-02 (TYP-13/14): aggregate shape check for Optional/Result —
+            // arity and per-field types (DS4 layout: flag, value[, error]).
+            Type* vt = node.type;
+            while (vt && vt->kind == TypeKind::Typedef)
+                vt = static_cast<TypedefType*>(vt)->aliasedType;
+            if (vt && (vt->kind == TypeKind::Optional || vt->kind == TypeKind::Result)) {
+                size_t expected = vt->kind == TypeKind::Optional ? 2 : 3;
+                std::vector<Type*> fieldTypes;
+                if (vt->kind == TypeKind::Optional) {
+                    auto* ot = static_cast<OptionalType*>(vt);
+                    fieldTypes = {TypeContext::instance().getBool(), ot->elementType};
+                } else {
+                    auto* rt = static_cast<ResultType*>(vt);
+                    fieldTypes = {TypeContext::instance().getBool(), rt->successType,
+                                  rt->errorType};
+                }
+                if (initList->initializers.size() != expected) {
+                    emitError("initializer list for '" + node.name + "' has " +
+                                  std::to_string(initList->initializers.size()) +
+                                  " elements, expected " + std::to_string(expected),
+                              node);
+                } else {
+                    for (size_t i = 0; i < fieldTypes.size(); ++i) {
+                        // getExprType (not ->type): element types are computed
+                        // lazily and the node field is not yet populated here.
+                        Type* it = getExprType(*initList->initializers[i]);
+                        if (!it) continue;
+                        // Flag fields (valid/ok) follow the language's normal
+                        // bool-assignment channel (`true` literals are int32
+                        // in this language, C-style). Value/error fields are
+                        // positional literal slots: exact typesEqual — else
+                        // `{5, true}` would silently accept bool as the value.
+                        bool okField = i == 0
+                            ? typesCompatible(fieldTypes[i], it)
+                            : typesEqual(fieldTypes[i], it);
+                        if (!okField) {
+                            emitError("type mismatch in initializer " +
+                                          std::to_string(i) + " of '" + node.name +
+                                          "': expected '" + typeToString(fieldTypes[i]) +
+                                          "', got '" + typeToString(it) + "'",
+                                      node);
+                        }
+                    }
+                }
+            }
         } else {
             Type* initType = getExprType(*node.initExpr);
             if (initType && !typesCompatible(node.type, initType)) {

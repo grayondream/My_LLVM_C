@@ -1828,3 +1828,48 @@ TEST(SliceSemTest, OptNominalEqualPin) {
     EXPECT_TRUE(analyzeOk(
         "int32 main() { int32? a = {true, 5}; int32? b = a; b = a; return 0; }"));
 }
+
+// ---------- OPT/RES Task 4: 伪字段访问 + 初始化列表校验 ----------
+
+TEST(SliceSemTest, OptMemberFieldTypes) {
+    EXPECT_TRUE(analyzeOk(
+        "int32 main() { int32? o = {true, 5}; bool v = o.valid; int32 x = o.value; return x; }"));
+}
+
+TEST(SliceSemTest, OptUnknownMemberRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { int32? o = {true, 5}; int32 x = o.nope; return x; }"));
+}
+
+TEST(SliceSemTest, ResMemberFieldTypes) {
+    EXPECT_TRUE(analyzeOk(
+        "int32 main() { Result<int32, int32> r = {false, 0, 1}; bool ok = r.ok; "
+        "int32 v = r.value; int32 e = r.error; return e; }"));
+}
+
+TEST(SliceSemTest, ResUnknownMemberRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { Result<int32, int32> r; int32 x = r.valid; return x; }"));
+}
+
+TEST(SliceSemTest, OptInitListArityRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { int32? o = {true}; return 0; }"));
+}
+
+TEST(SliceSemTest, OptInitListValueMismatchRejected) {
+    // value 槽位类型错配（true/false 是 int32 字面量，{5, true} 与 {1, 1}
+    // 在类型层不可区分、C 语义合法——不钉顺序，钉 value 类型）。
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { int32? o = {true, 5.0}; return 0; }"));
+}
+
+TEST(SliceSemTest, ResInitListArityRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { Result<int32, int32> r = {false, 0}; return 0; }"));
+}
+
+TEST(SliceSemTest, OptMemberWritablePin) {
+    EXPECT_TRUE(analyzeOk(
+        "int32 main() { int32? o = {true, 5}; o.value = 6; o.valid = false; return 0; }"));
+}
