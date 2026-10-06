@@ -210,6 +210,8 @@ std::string Parser::tokenTypeName(TokenType type) const {
         case TokenType::TOKEN_UNION:         return "'union'";
         case TokenType::TOKEN_ENUM:          return "'enum'";
         case TokenType::TOKEN_TYPEDEF:       return "'typedef'";
+        case TokenType::TOKEN_TEMPLATE:      return "'template'";
+        case TokenType::TOKEN_TYPENAME:      return "'typename'";
         case TokenType::TOKEN_SIZEOF:        return "'sizeof'";
         case TokenType::TOKEN_OPERATOR:      return "'operator'";
         case TokenType::TOKEN_SEMICOLON:     return "';'";
@@ -1680,6 +1682,11 @@ Type* Parser::parseBaseType() {
             // cursor untouched for callers that probe.
             size_t saved = m_currentTokenPos;
             std::string name = parseQualifiedTypeName();
+            // P1-03 / GEN-01: 模板体内的类型参数名 → TypeVarType 占位。
+            if (!m_templateScopes.empty() &&
+                m_templateScopes.back().typeParams.count(name)) {
+                return TypeContext::instance().getTypeVar(name);
+            }
             // P1-02 (TYP-13/14): builtin polymorphic types `Optional<T>` and
             // `Result<T,E>` — special-cased here (type positions only) since
             // the general template system (GEN) does not exist yet; mirrors
@@ -1721,6 +1728,45 @@ Type* Parser::parseBaseType() {
                     return nullptr;
                 }
                 return TypeContext::instance().getResultType(successType, errorType);
+            }
+            // P1-03 / GEN-03: 类型位置的模板使用 `Name<args>`——产生
+            // TypeInstanceType 占位，sema 在使用点实例化并解析为具体类型。
+            // 实参可为类型或整型字面量；嵌套 `>>` 按深度拆分（同 Optional）。
+            if (check(TokenType::TOKEN_LT)) {
+                advance(); // consume '<'
+                auto closeBracket = [this]() -> bool {
+                    if (check(TokenType::TOKEN_GT)) {
+                        advance();
+                        return true;
+                    }
+                    if (check(TokenType::TOKEN_RSHIFT)) {
+                        m_tokens[m_currentTokenPos].type = TokenType::TOKEN_GT;
+                        m_tokens[m_currentTokenPos].lexeme = ">";
+                        return true;
+                    }
+                    return false;
+                };
+                auto* inst = new TypeInstanceType(name);
+                while (true) {
+                    if (check(TokenType::TOKEN_NUMBER)) {
+                        auto numTok = advance();
+                        inst->valueArgs.push_back(std::get<long long>(numTok->value));
+                    } else {
+                        Type* argType = parseType();
+                        if (!argType) {
+                            errorUnexpected("expected type or integer template argument");
+                            return nullptr;
+                        }
+                        inst->typeArgs.push_back(argType);
+                    }
+                    if (match(TokenType::TOKEN_COMMA)) continue;
+                    break;
+                }
+                if (!closeBracket()) {
+                    errorUnexpected("expected '>' to close template argument list");
+                    return nullptr;
+                }
+                return inst;
             }
             if (Type* named = lookupNamedType(name)) {
                 return named;
@@ -1822,6 +1868,11 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
 
     if (check(TokenType::TOKEN_TYPEDEF)) {
         return parseTypedefDecl();
+    }
+
+    // P1-03 / GEN-01 / PAR-21: `template<...>` 声明。
+    if (check(TokenType::TOKEN_TEMPLATE)) {
+        return parseTemplateDecl();
     }
 
     // 新增：支持 using 类型别名
@@ -2404,6 +2455,103 @@ std::unique_ptr<ParamDeclAST> Parser::parseParamDecl() {
     return std::make_unique<ParamDeclAST>(name, type);
 }
 
+// P1-03 / GEN-01 / PAR-21: 解析 `template<...>` 声明。
+// 参数列表 → 模板体（函数/struct/class/using 别名；union/enum 拒绝）。
+// 定义处只 parse：参数名进入 m_templateScopes，模板体内的 `T`/`N` 由此解析。
+std::unique_ptr<DeclAST> Parser::parseTemplateDecl() {
+    advance(); // 消耗 'template'
+    if (!expect(TokenType::TOKEN_LT, "expected '<' after 'template'")) {
+        return nullptr;
+    }
+
+    m_templateScopes.emplace_back();
+    auto& scope = m_templateScopes.back();
+    std::vector<TemplateDeclAST::Param> params;
+
+    auto parseParamName = [this]() -> std::string {
+        if (!check(TokenType::TOKEN_IDENTIFIER)) {
+            errorUnexpected("template parameter name");
+            return "";
+        }
+        return advance()->lexeme;
+    };
+
+    while (true) {
+        auto tok = peek();
+        if (!tok) {
+            m_templateScopes.pop_back();
+            errorUnexpectedEOF("template parameter");
+            return nullptr;
+        }
+        if (tok->type == TokenType::TOKEN_TYPENAME) {
+            advance();
+            std::string name = parseParamName();
+            if (name.empty()) {
+                m_templateScopes.pop_back();
+                return nullptr;
+            }
+            params.push_back({name, true, nullptr});
+            scope.typeParams.insert(name);
+        } else if (tok->type == TokenType::TOKEN_CLASS) {
+            error("use 'typename' instead of 'class' in template parameter list", *tok);
+            m_templateScopes.pop_back();
+            return nullptr;
+        } else if (tok->type == TokenType::TOKEN_USIZE || tok->type == TokenType::TOKEN_ISIZE ||
+                   tok->type == TokenType::TOKEN_INT8 || tok->type == TokenType::TOKEN_INT16 ||
+                   tok->type == TokenType::TOKEN_INT32 || tok->type == TokenType::TOKEN_INT64 ||
+                   tok->type == TokenType::TOKEN_UINT8 || tok->type == TokenType::TOKEN_UINT16 ||
+                   tok->type == TokenType::TOKEN_UINT32 || tok->type == TokenType::TOKEN_UINT64) {
+            // GEN-02: 非类型（整数）参数，如 `usize N`。
+            Type* nonTypeType = parseBaseType();
+            if (!nonTypeType) {
+                m_templateScopes.pop_back();
+                return nullptr;
+            }
+            std::string name = parseParamName();
+            if (name.empty()) {
+                m_templateScopes.pop_back();
+                return nullptr;
+            }
+            params.push_back({name, false, nonTypeType});
+            scope.valueParams.insert(name);
+        } else {
+            errorUnexpected("'typename' or an integer type in template parameter list");
+            m_templateScopes.pop_back();
+            return nullptr;
+        }
+        if (match(TokenType::TOKEN_COMMA)) continue;
+        break;
+    }
+
+    if (!expect(TokenType::TOKEN_GT, "expected '>' to close template parameter list")) {
+        m_templateScopes.pop_back();
+        return nullptr;
+    }
+
+    // 解析模板体——委托给普通声明解析（函数/struct/class/using 别名共用
+    // 既有路径）。委托期间 m_templateScopes 栈顶使参数名解析为占位类型。
+    auto bodyStart = peek();
+    auto body = parseDeclaration();
+    if (!body) {
+        m_templateScopes.pop_back();
+        return nullptr;
+    }
+
+    if (dynamic_cast<UnionDeclAST*>(body.get()) || dynamic_cast<EnumDeclAST*>(body.get())) {
+        if (bodyStart) error("'template' is not supported on unions/enums", *bodyStart);
+        m_templateScopes.pop_back();
+        return nullptr;
+    }
+
+    m_templateScopes.pop_back();
+
+    auto tpl = std::make_unique<TemplateDeclAST>();
+    tpl->params = std::move(params);
+    tpl->decl = std::move(body);
+    tpl->isAlias = dynamic_cast<UsingDeclAST*>(tpl->decl.get()) != nullptr;
+    return tpl;
+}
+
 std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
     if (!match(TokenType::TOKEN_STRUCT)) return nullptr;
 
@@ -2910,18 +3058,28 @@ Type* Parser::parseMemberArraySuffix(Type* base) {
     if (!base || !check(TokenType::TOKEN_LBRACKET)) return base;
     std::vector<int> dims;
     std::vector<bool> explicitDim;
+    // P1-03 / GEN-02: 维度为模板非类型参数名（`T data[N]`）——size 记占位 0，
+    // 参数名记入 ArrayType::sizeParam，实例化时由 valueArgs 具体化。
+    std::vector<std::string> dimParams;
     while (check(TokenType::TOKEN_LBRACKET)) {
         advance(); // consume '['
         int size = 1;
         bool hasNumber = false;
+        std::string sizeParam;
         if (check(TokenType::TOKEN_NUMBER)) {
             auto numTok = advance();
             size = static_cast<int>(std::get<long long>(numTok->value));
+            hasNumber = true;
+        } else if (!m_templateScopes.empty() && check(TokenType::TOKEN_IDENTIFIER) &&
+                   m_templateScopes.back().valueParams.count(peek()->lexeme)) {
+            sizeParam = advance()->lexeme;
+            size = 0;
             hasNumber = true;
         }
         expect(TokenType::TOKEN_RBRACKET, "expected ']' after array size");
         dims.push_back(size);
         explicitDim.push_back(hasNumber);
+        dimParams.push_back(sizeParam);
     }
     for (size_t i = 1; i < dims.size(); ++i) {
         if (!explicitDim[i]) {
@@ -2933,6 +3091,7 @@ Type* Parser::parseMemberArraySuffix(Type* base) {
     Type* result = base;
     for (size_t i = dims.size(); i-- > 0;) {
         result = new ArrayType(result, dims[i]);
+        if (!dimParams[i].empty()) static_cast<ArrayType*>(result)->sizeParam = dimParams[i];
     }
     return result;
 }

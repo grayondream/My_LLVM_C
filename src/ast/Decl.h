@@ -200,6 +200,24 @@ public:
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
+// P1-03 / GEN-01 / PAR-21: 模板声明——`template<...>` 修饰函数/struct/class/
+// using 别名。定义处只 parse 不 sema；实例化由 sema 侧 TemplateRegistry 驱动。
+class TemplateDeclAST : public DeclAST {
+public:
+    struct Param {
+        std::string name;
+        bool isType = true;
+        // isType==false 时为该非类型参数的类型节点（如 usize），否则 nullptr。
+        Type* nonTypeType = nullptr;
+    };
+
+    std::vector<Param> params;
+    std::unique_ptr<DeclAST> decl; // FunctionDeclAST / StructDeclAST / UsingDeclAST
+    bool isAlias = false;
+
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
 // 新增AST节点
 class UsingDeclAST : public DeclAST {
 public:

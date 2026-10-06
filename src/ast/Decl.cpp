@@ -602,6 +602,12 @@ llvm::Value* UsingDeclAST::codegen(CodegenContext& ctx) {
     return nullptr;
 }
 
+llvm::Value* TemplateDeclAST::codegen(CodegenContext& ctx) {
+    // P1-03 / GEN-05: 模板定义本身不产生代码——惰性实例化，未使用的模板
+    // 零符号。实例化产生的实例 decl 由 sema 追加到翻译单元尾部出码。
+    return nullptr;
+}
+
 llvm::Value* TypeDeclAST::codegen(CodegenContext& ctx) {
     // type 声明在代码生成阶段不需要做任何事情
     // 新类型已经在语义分析阶段处理

@@ -3,6 +3,7 @@
 #include <vector>
 #include <memory>
 #include <optional>
+#include <unordered_set>
 #include "frontend/Token.h"
 #include "ast/Decl.h"
 #include "sema/Diagnostic.h"
@@ -40,6 +41,17 @@ private:
     Type* parseType();
 
     Type* parseBaseType();
+
+    // P1-03 / GEN-01 / PAR-21: `template<...>` 声明（函数/struct/class/别名）。
+    std::unique_ptr<DeclAST> parseTemplateDecl();
+
+    // 模板参数作用域栈：模板体 parse 期间，参数名解析为 TypeVarType /
+    // 非类型参数（数组长度处）。GEN-01。
+    struct TemplateScope {
+        std::unordered_set<std::string> typeParams;
+        std::unordered_set<std::string> valueParams;
+    };
+    std::vector<TemplateScope> m_templateScopes;
 
     // Namespace-qualified type names (PAR-22): consume `A::B::name`, returning
     // the joined name ("" when no identifier is present).

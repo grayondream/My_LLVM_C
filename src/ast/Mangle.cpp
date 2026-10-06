@@ -78,6 +78,17 @@ std::string typeToMangled(Type* type) {
             auto* t = static_cast<TypedefType*>(type);
             return typeToMangled(t->aliasedType);
         }
+        case TypeKind::TypeVar: {
+            // 仅存在于模板体内；实例化后不残留，此处仅作诊断期兜底拼写。
+            auto* tv = static_cast<TypeVarType*>(type);
+            return tv->name;
+        }
+        case TypeKind::TypeInstance: {
+            // P1-03: parse 期占位——正常实例化后不存在；出现即内部未解析，
+            // 以 `模板名` 兜底（避免 "unknown" 掩盖问题来源）。
+            auto* ti = static_cast<TypeInstanceType*>(type);
+            return ti->templateName;
+        }
         default: return "unknown";
     }
 }

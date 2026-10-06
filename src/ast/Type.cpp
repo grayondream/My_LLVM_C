@@ -232,3 +232,11 @@ ResultType* TypeContext::getResultType(Type* successType, Type* errorType) {
     // 结果类型不需要缓存，因为每个结果类型都有不同的成功和错误类型
     return new ResultType(successType, errorType);
 }
+
+TypeVarType* TypeContext::getTypeVar(const std::string& name) {
+    auto it = m_typeVars.find(name);
+    if (it != m_typeVars.end()) return it->second;
+    auto* tv = new TypeVarType(name);
+    m_typeVars[name] = tv;
+    return tv;
+}

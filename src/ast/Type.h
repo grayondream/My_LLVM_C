@@ -44,6 +44,11 @@ enum class TypeKind {
     Slice,
     Optional,
     Result,
+    // P1-03 / GEN: 模板类型参数占位与模板使用占位。TypeVar 仅合法存在于
+    // 模板体 AST 内；TypeInstance 是 parse 期 `Name<args>` 的占位，sema 在
+    // 使用点解析为具体实例类型后不再残留。
+    TypeVar,
+    TypeInstance,
 };
 
 class Type {
@@ -62,6 +67,9 @@ class ArrayType : public Type {
 public:
     Type* elementType;
     int size;
+    // P1-03 / GEN-02: 非空时 size 是占位值（0），实际长度在实例化时由该
+    // 命名的非类型模板参数给出（`T data[N]`）。具体化后副本须清空本字段。
+    std::string sizeParam;
 
     ArrayType(Type* elem, int sz)
         : Type(TypeKind::Array), elementType(elem), size(sz) {}
@@ -170,6 +178,28 @@ public:
         : Type(TypeKind::Result), successType(success), errorType(error) {}
 };
 
+// P1-03 / GEN-01: 模板类型参数占位（`template<typename T>` 中的 T）。
+// 仅合法存在于模板体 AST；实例化（克隆替换）后不得残留。
+class TypeVarType : public Type {
+public:
+    std::string name;
+
+    explicit TypeVarType(const std::string& n)
+        : Type(TypeKind::TypeVar), name(n) {}
+};
+
+// P1-03 / GEN-03: parse 期模板使用占位（`Box<i32>`、`Array<T, 8>`）。
+// sema 在使用点触发实例化并把它解析为具体 ClassType；sema 结束后不存在。
+class TypeInstanceType : public Type {
+public:
+    std::string templateName;
+    std::vector<Type*> typeArgs;
+    std::vector<long long> valueArgs;
+
+    explicit TypeInstanceType(const std::string& n)
+        : Type(TypeKind::TypeInstance), templateName(n) {}
+};
+
 class ClassType : public Type {
 public:
     std::string name;
@@ -266,6 +296,9 @@ public:
     OptionalType* getOptionalType(Type* elementType);
     ResultType* getResultType(Type* successType, Type* errorType);
 
+    // P1-03 / GEN-01: 模板类型参数占位，同名同指针（单射）。
+    TypeVarType* getTypeVar(const std::string& name);
+
 private:
     std::unordered_map<TypeKind, Type*> m_types;
     std::unordered_map<std::string, Type*> m_typedefs;
@@ -273,4 +306,5 @@ private:
     std::unordered_map<std::string, UnionType*> m_unions;
     std::unordered_map<std::string, EnumType*> m_enums;
     std::unordered_map<std::string, ClassType*> m_classes;
+    std::unordered_map<std::string, TypeVarType*> m_typeVars;
 };

@@ -57,6 +57,9 @@ enum class TokenType : int32_t {
     TOKEN_DEFER,
     TOKEN_ALIGNOF,
     TOKEN_OFFSETOF,
+    // P1-03 / GEN-01 / PAR-21
+    TOKEN_TEMPLATE,
+    TOKEN_TYPENAME,
     TOKEN_INT8,
     TOKEN_INT16,
     TOKEN_INT32,
