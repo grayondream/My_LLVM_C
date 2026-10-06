@@ -164,3 +164,20 @@ TEST_F(CompileTimeEval, UnknownMemberDiagnosed) {
     }
     EXPECT_TRUE(found);
 }
+
+TEST_F(CompileTimeEval, UnknownTypeArgDiagnosed) {
+    // Review Focus 5 关联：类型实参按名解析，失败诊断不崩溃。
+    Lexer lexer("ct_unknown_type.c", "int32 main() { usize s = compile_time.size_of(Nope); return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_FALSE(analyzer.getErrors().empty());
+    bool found = false;
+    for (const auto& d : analyzer.getErrors()) {
+        if (d.message.find("unknown type 'Nope' in compile_time expression") != std::string::npos) found = true;
+    }
+    EXPECT_TRUE(found);
+}

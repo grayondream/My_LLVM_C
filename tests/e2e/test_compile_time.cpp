@@ -117,3 +117,65 @@ int32 main() { bool d = compile_time.build.debug; return d ? 1 : 0; }
     EXPECT_EQ(runSourceImpl(src, "ct_debug_true.c", true), 1);
     EXPECT_EQ(runSourceImpl(src, "ct_debug_false.c", false), 0);
 }
+
+// ---- P1-04 / CT-06: 布局查询（size_of/align_of/offset_of）----
+
+TEST_F(CompileTimeE2E, SizeOfScalars) {
+    int r = runSource(R"(
+constexpr usize s32 = compile_time.size_of(int32);
+constexpr usize s64 = compile_time.size_of(float64);
+constexpr usize s8 = compile_time.size_of(int8);
+constexpr usize sb = compile_time.size_of(bool);
+constexpr usize sp = compile_time.size_of(int32*);
+int32 main() {
+    return (s32 == 4 && s64 == 8 && s8 == 1 && sb == 1 && sp == 8) ? 1 : 0;
+}
+)", "ct_sizeof_scalars.c");
+    EXPECT_EQ(r, 1);
+}
+
+TEST_F(CompileTimeE2E, SizeOfClassWithBase) {
+    // Review Focus 4: 基类子对象占槽 0，布局须与 codegen DataLayout 一致。
+    int r = runSource(R"(
+class B { public: int32 b; }
+class D : B { public: float64 v; }
+int32 main() {
+    return (compile_time.size_of(D) == 16 && compile_time.offset_of(D, "v") == 8) ? 1 : 0;
+}
+)", "ct_sizeof_base.c");
+    EXPECT_EQ(r, 1);
+}
+
+TEST_F(CompileTimeE2E, SizeOfNestedStructUnion) {
+    int r = runSource(R"(
+struct Inner { int32 a; float64 b; }
+union U { int32 i; float64 f; }
+struct Outer { Inner in; U u; int16 c; }
+int32 main() {
+    return (compile_time.size_of(Outer) == 32
+         && compile_time.offset_of(Outer, "u") == 16
+         && compile_time.offset_of(Outer, "c") == 24
+         && compile_time.size_of(U) == 8
+         && compile_time.align_of(Outer) == 8) ? 1 : 0;
+}
+)", "ct_sizeof_nested.c");
+    EXPECT_EQ(r, 1);
+}
+
+TEST_F(CompileTimeE2E, ConstVarFromCompileTime) {
+    int r = runSource(R"(
+constexpr usize N = compile_time.size_of(float64);
+int32 main() { return N == 8 ? 1 : 0; }
+)", "ct_constvar.c");
+    EXPECT_EQ(r, 1);
+}
+
+TEST_F(CompileTimeE2E, ConstExprFnInCompileTime) {
+    // Review Focus 3: constexpr 函数在 compile_time 表达式内（委托路径）。
+    int r = runSource(R"(
+constexpr int32 twice(int32 x) { return x * 2; }
+constexpr int32 r = compile_time.size_of(int32) * 0 + twice(21);
+int32 main() { return r == 42 ? 1 : 0; }
+)", "ct_constexpr_fn.c");
+    EXPECT_EQ(r, 1);
+}

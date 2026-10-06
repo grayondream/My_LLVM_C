@@ -749,11 +749,40 @@ std::unique_ptr<ExprAST> Parser::parsePostfix(std::unique_ptr<ExprAST> lhs) {
             case TokenType::TOKEN_LPAREN: {
                 advance(); // consume '('
                 std::vector<std::unique_ptr<ExprAST>> args;
+                // P1-04 / CT-06: compile_time.size_of/align_of/offset_of 的
+                // 类型实参——内建标量类型是关键字，parseExpr 无法解析；此
+                // 处按 parseType 解析，包装为 SizeofExprAST(sizeofType=T,
+                // expr=nullptr) 供 sema/求值器取用（CT-08 类型值的最小切片）。
+                bool isCTTypeQuery = false;
+                std::string ctMember;
+                if (auto* memberAccess = dynamic_cast<MemberAccessExprAST*>(lhs.get())) {
+                    ctMember = memberAccess->memberName;
+                    if (ctMember == "size_of" || ctMember == "align_of"
+                        || ctMember == "offset_of") {
+                        const ExprAST* cur = memberAccess->object.get();
+                        while (auto* ma = dynamic_cast<const MemberAccessExprAST*>(cur)) {
+                            cur = ma->object.get();
+                        }
+                        if (auto* var = dynamic_cast<const VariableExprAST*>(cur)) {
+                            isCTTypeQuery = var->name == "compile_time";
+                        }
+                    }
+                }
                 if (!peek() || peek()->type != TokenType::TOKEN_RPAREN) {
+                    bool firstArg = true;
                     while (true) {
-                        auto arg = parseExpr(2); // minPrec=2: ',' separates args
+                        std::unique_ptr<ExprAST> arg;
+                        if (isCTTypeQuery && (ctMember != "offset_of" || firstArg)
+                            && isTypeStart()) {
+                            Type* ty = parseType();
+                            if (!ty) return nullptr;
+                            arg = std::make_unique<SizeofExprAST>(ty, nullptr);
+                        } else {
+                            arg = parseExpr(2); // minPrec=2: ',' separates args
+                        }
                         if (!arg) return nullptr;
                         args.push_back(std::move(arg));
+                        firstArg = false;
                         if (!match(TokenType::TOKEN_COMMA)) break;
                     }
                 }

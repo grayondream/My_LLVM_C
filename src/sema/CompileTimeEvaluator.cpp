@@ -2,7 +2,12 @@
 
 #include "ast/Expr.h"
 #include "ast/Decl.h"
+#include "ast/Type.h"
 #include "sema/SemanticAnalyzer.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
 
@@ -28,7 +33,14 @@ static std::string ctTargetArch() {
 }
 
 CompileTimeEvaluator::CompileTimeEvaluator(SemanticAnalyzer& sema)
-    : m_sema(sema) {}
+    : m_sema(sema) {
+    // P1-04 / CT-06: 独立 LLVMContext/Module 承载布局查询（DataLayout 与
+    // codegen 的 host 目标一致——默认布局即 64-bit LP64，与 x86_64/aarch64 匹配）。
+    m_llvmCtx = std::make_unique<llvm::LLVMContext>();
+    m_module = std::make_unique<llvm::Module>("compile_time_layout", *m_llvmCtx);
+}
+
+CompileTimeEvaluator::~CompileTimeEvaluator() = default;
 
 std::optional<ConstValue> CompileTimeEvaluator::eval(ExprAST* expr, ASTNode& at) {
     if (!expr) {
@@ -156,14 +168,20 @@ std::optional<ConstValue> CompileTimeEvaluator::eval(ExprAST* expr, ASTNode& at)
     }
 
     // P1-04 / CT-01: compile_time 成员调用（static_assert/size_of 族/if）
-    // —— CT-02（T5）与布局查询（T4）接管；此处仅校验成员名（spec §3）。
+    // —— CT-02（T5）接管 if/static_assert；此处实现布局查询（CT-06）。
     if (auto* mc = dynamic_cast<MethodCallExprAST*>(expr)) {
         if (SemanticAnalyzer::isCompileTimeRoot(mc->object.get())) {
             static const std::unordered_set<std::string> kKnownMembers = {
                 "static_assert", "if", "size_of", "align_of", "offset_of"};
             if (!kKnownMembers.count(mc->methodName)) {
                 m_sema.emitError("unknown compile_time member '" + mc->methodName + "'", at);
+                return std::nullopt;
             }
+            if (mc->methodName == "size_of" || mc->methodName == "align_of"
+                || mc->methodName == "offset_of") {
+                return evalLayoutQuery(*mc, at);
+            }
+            // static_assert / if：CT-02/CT-03 后续任务接管，此处静默。
             return std::nullopt;
         }
         return std::nullopt;
@@ -317,4 +335,233 @@ CompileTimeEvaluator::evalCTMemberChain(MemberAccessExprAST& node, ASTNode& at) 
     }
 
     return unknown(members[0]);
+}
+
+// P1-04 / CT-06: Type* → llvm::Type（布局规则与 CodegenContext::getLLVMType
+// 一致——基类子对象占槽 0；union 以最大对齐成员 + 填充布局）。
+llvm::Type* CompileTimeEvaluator::toLLVMType(Type* t) {
+    if (!t) return nullptr;
+    while (t && t->kind == TypeKind::Typedef) {
+        t = static_cast<TypedefType*>(t)->aliasedType;
+    }
+    if (!t) return nullptr;
+    auto cached = m_typeCache.find(t);
+    if (cached != m_typeCache.end()) return cached->second;
+
+    llvm::LLVMContext& ctx = *m_llvmCtx;
+    llvm::Type* result = nullptr;
+    switch (t->kind) {
+        case TypeKind::Char:    result = llvm::Type::getInt8Ty(ctx); break;
+        case TypeKind::Bool:    result = llvm::Type::getInt1Ty(ctx); break;
+        case TypeKind::Int8:    result = llvm::Type::getInt8Ty(ctx); break;
+        case TypeKind::Int16:   result = llvm::Type::getInt16Ty(ctx); break;
+        case TypeKind::Int32:   result = llvm::Type::getInt32Ty(ctx); break;
+        case TypeKind::Int64:   result = llvm::Type::getInt64Ty(ctx); break;
+        case TypeKind::Int128:  result = llvm::Type::getInt128Ty(ctx); break;
+        case TypeKind::UInt8:   result = llvm::Type::getInt8Ty(ctx); break;
+        case TypeKind::UInt16:  result = llvm::Type::getInt16Ty(ctx); break;
+        case TypeKind::UInt32:  result = llvm::Type::getInt32Ty(ctx); break;
+        case TypeKind::UInt64:  result = llvm::Type::getInt64Ty(ctx); break;
+        case TypeKind::UInt128: result = llvm::Type::getInt128Ty(ctx); break;
+        case TypeKind::ISize:   result = llvm::Type::getInt64Ty(ctx); break;
+        case TypeKind::USize:   result = llvm::Type::getInt64Ty(ctx); break;
+        case TypeKind::Float32: result = llvm::Type::getFloatTy(ctx); break;
+        case TypeKind::Float64: result = llvm::Type::getDoubleTy(ctx); break;
+        case TypeKind::Float16: result = llvm::Type::getHalfTy(ctx); break;
+        case TypeKind::Float128:result = llvm::Type::getFP128Ty(ctx); break;
+        case TypeKind::Pointer: result = llvm::PointerType::get(ctx, 0); break;
+        case TypeKind::Enum: {
+            auto* et = static_cast<EnumType*>(t);
+            result = et->underlyingType ? toLLVMType(et->underlyingType)
+                                        : llvm::Type::getInt32Ty(ctx);
+            break;
+        }
+        case TypeKind::Struct: {
+            auto* st = static_cast<StructType*>(t);
+            llvm::StructType* llvmSt = llvm::StructType::getTypeByName(ctx, st->name);
+            if (!llvmSt) {
+                llvmSt = llvm::StructType::create(ctx, st->name);
+            }
+            m_typeCache[t] = llvmSt;
+            if (!llvmSt->isOpaque()) {
+                result = llvmSt;
+                break;
+            }
+            std::vector<llvm::Type*> fieldTypes;
+            if (!st->baseClass.empty()) {
+                // 布局按名解析基类（与 CodegenContext 一致；StructType::base
+                // 可能为空占位）。
+                if (Type* baseType = m_sema.resolveTypeByName(st->baseClass)) {
+                    if (llvm::Type* baseLLVM = toLLVMType(baseType)) {
+                        fieldTypes.push_back(baseLLVM);
+                    }
+                }
+            }
+            for (auto& f : st->fields) {
+                if (llvm::Type* ft = toLLVMType(f.second)) {
+                    fieldTypes.push_back(ft);
+                }
+            }
+            llvmSt->setBody(fieldTypes);
+            result = llvmSt;
+            break;
+        }
+        case TypeKind::Class: {
+            // ClassType 布局与 StructType 分离（字段/基类成员偏移不同），
+            // 基类子对象占槽 0（INH-01）。
+            auto* ct = static_cast<ClassType*>(t);
+            llvm::StructType* llvmSt = llvm::StructType::getTypeByName(ctx, ct->name);
+            if (!llvmSt) {
+                llvmSt = llvm::StructType::create(ctx, ct->name);
+            }
+            m_typeCache[t] = llvmSt;
+            if (!llvmSt->isOpaque()) {
+                result = llvmSt;
+                break;
+            }
+            std::vector<llvm::Type*> fieldTypes;
+            if (!ct->baseClass.empty()) {
+                if (Type* baseType = m_sema.resolveTypeByName(ct->baseClass)) {
+                    if (llvm::Type* baseLLVM = toLLVMType(baseType)) {
+                        fieldTypes.push_back(baseLLVM);
+                    }
+                }
+            }
+            for (auto& f : ct->fields) {
+                if (llvm::Type* ft = toLLVMType(f.second)) {
+                    fieldTypes.push_back(ft);
+                }
+            }
+            llvmSt->setBody(fieldTypes);
+            result = llvmSt;
+            break;
+        }
+        case TypeKind::Union: {
+            auto* ut = static_cast<UnionType*>(t);
+            const std::string& name = ut->name;
+            llvm::StructType* st = llvm::StructType::getTypeByName(ctx, name);
+            if (!st) {
+                st = llvm::StructType::create(ctx, name);
+            }
+            m_typeCache[t] = st;
+            if (!st->isOpaque()) {
+                result = st;
+                break;
+            }
+            const llvm::DataLayout& dl = m_module->getDataLayout();
+            uint64_t maxSize = 0;
+            llvm::Type* alignType = nullptr;
+            uint64_t maxAlign = 0;
+            for (auto& m : ut->members) {
+                llvm::Type* mt = toLLVMType(m.second);
+                if (!mt) continue;
+                uint64_t sz = dl.getTypeAllocSize(mt);
+                uint64_t al = dl.getABITypeAlign(mt).value();
+                if (sz > maxSize) maxSize = sz;
+                if (al > maxAlign) {
+                    maxAlign = al;
+                    alignType = mt;
+                }
+            }
+            if (maxSize == 0) maxSize = 1;
+            std::vector<llvm::Type*> fields;
+            if (alignType) {
+                fields.push_back(alignType);
+                uint64_t alignSize = dl.getTypeAllocSize(alignType);
+                if (maxSize > alignSize) {
+                    fields.push_back(llvm::ArrayType::get(
+                        llvm::Type::getInt8Ty(ctx), maxSize - alignSize));
+                }
+            } else {
+                fields.push_back(llvm::ArrayType::get(
+                    llvm::Type::getInt8Ty(ctx), maxSize));
+            }
+            st->setBody(fields);
+            result = st;
+            break;
+        }
+        default:
+            return nullptr; // Optional/Slice 等未支持布局——诊断路径
+    }
+    m_typeCache[t] = result;
+    return result;
+}
+
+// P1-04 / CT-06: size_of(T)/align_of(T)/offset_of(T, "f") —— 结果 usize。
+std::optional<ConstValue>
+CompileTimeEvaluator::evalLayoutQuery(MethodCallExprAST& node, ASTNode& at) {
+    // 类型实参：SizeofExprAST 包装（内建标量关键字路径）或单个标识符
+    // （自定义类型按名解析——CT-08 切除后的最小落地，spec §1）。
+    Type* queriedType = nullptr;
+    std::string queriedName;
+    if (!node.args.empty()) {
+        if (auto* sized = dynamic_cast<SizeofExprAST*>(node.args[0].get())) {
+            queriedType = sized->sizeofType;
+        } else if (auto* name = dynamic_cast<VariableExprAST*>(node.args[0].get())) {
+            queriedName = name->name;
+            queriedType = m_sema.resolveTypeByName(name->name);
+        }
+    }
+    if (!queriedType) {
+        m_sema.emitError("unknown type '" + (queriedName.empty()
+                             ? std::string("(unnamed)") : queriedName)
+                             + "' in compile_time expression", at);
+        return std::nullopt;
+    }
+
+    const llvm::DataLayout& dl = m_module->getDataLayout();
+    ConstValue cv;
+    cv.type = ConstValue::INT;
+
+    if (node.methodName == "offset_of") {
+        if (node.args.size() != 2) {
+            m_sema.emitError("compile_time.offset_of requires (type, field)", at);
+            return std::nullopt;
+        }
+        auto* field = dynamic_cast<StringExprAST*>(node.args[1].get());
+        if (!field) {
+            m_sema.emitError("compile_time.offset_of field must be a string literal", at);
+            return std::nullopt;
+        }
+        llvm::Type* lt = toLLVMType(queriedType);
+        auto* structTy = lt ? llvm::dyn_cast<llvm::StructType>(lt) : nullptr;
+        if (!structTy || structTy->isOpaque()) {
+            m_sema.emitError("unknown type '" + queriedName + "' in compile_time expression", at);
+            return std::nullopt;
+        }
+        // 字段序与 codegen GEP 一致：基类子对象占槽 0。
+        std::vector<std::pair<std::string, Type*>> fields;
+        bool hasBase = false;
+        if (queriedType->kind == TypeKind::Struct) {
+            auto* st = static_cast<StructType*>(queriedType);
+            fields = st->fields;
+            hasBase = !st->baseClass.empty();
+        } else if (queriedType->kind == TypeKind::Class) {
+            auto* ct = static_cast<ClassType*>(queriedType);
+            fields = ct->fields;
+            hasBase = !ct->baseClass.empty();
+        }
+        for (size_t i = 0; i < fields.size(); ++i) {
+            if (fields[i].first == field->value) {
+                cv.intVal = static_cast<long long>(
+                    dl.getStructLayout(structTy)->getElementOffset(i + (hasBase ? 1 : 0)));
+                return cv;
+            }
+        }
+        m_sema.emitError("unknown field '" + field->value
+                         + "' in compile_time.offset_of expression", at);
+        return std::nullopt;
+    }
+
+    llvm::Type* lt = toLLVMType(queriedType);
+    if (!lt) {
+        m_sema.emitError("unknown type in compile_time." + node.methodName + " expression", at);
+        return std::nullopt;
+    }
+    if (node.methodName == "size_of") {
+        cv.intVal = static_cast<long long>(dl.getTypeAllocSize(lt));
+    } else { // align_of
+        cv.intVal = static_cast<long long>(dl.getABITypeAlign(lt).value());
+    }
+    return cv;
 }
