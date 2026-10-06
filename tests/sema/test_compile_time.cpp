@@ -286,3 +286,35 @@ int32 main() { return 0; }
     }
     EXPECT_TRUE(found);
 }
+
+// ---- P1-04 / T7 硬化（回归 pin）----
+
+TEST_F(CompileTimeEval, UserCompileTimeVarNotHijacked) {
+    // 用户自定义 compile_time 变量：普通标识符使用不被劫持（无成员访问）。
+    EXPECT_TRUE(analyzeOk(R"(
+int32 compile_time = 3;
+int32 main() { return compile_time + 1; }
+)"));
+}
+
+TEST_F(CompileTimeEval, CTInFunctionBodyStaticAssert) {
+    // 函数体内 static_assert（表达式路径）：成功与失败各一。
+    EXPECT_TRUE(analyzeOk(R"(
+int32 main() { compile_time.static_assert(2 > 1, "in body"); return 0; }
+)"));
+    Lexer lexer("ct_sa_body_fail.c", R"(
+int32 main() { compile_time.static_assert(2 > 3, "body fail"); return 0; }
+)");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_FALSE(analyzer.getErrors().empty());
+    bool found = false;
+    for (const auto& d : analyzer.getErrors()) {
+        if (d.message.find("static_assert failed: body fail") != std::string::npos) found = true;
+    }
+    EXPECT_TRUE(found);
+}

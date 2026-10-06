@@ -234,3 +234,20 @@ int32 main() { Ghost g; return g.x; }
     analyzer.analyze(*ast);
     EXPECT_FALSE(analyzer.getErrors().empty());
 }
+
+TEST_F(CompileTimeE2E, CTDepthLimitE2E) {
+    // 深度超限：100 层嵌套加法 → 诊断，编译失败（e2e 复 pin）。
+    std::string expr = "compile_time.size_of(int32) + ";
+    for (int i = 0; i < 100; ++i) expr += "(";
+    expr += "1";
+    for (int i = 0; i < 100; ++i) expr += "+1)";
+    std::string src = "int32 main() { int32 x = " + expr + "; return 0; }\n";
+    Lexer lexer("ct_depth_e2e.c", src);
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    EXPECT_FALSE(analyzer.getErrors().empty());
+}

@@ -83,7 +83,7 @@
 - `[ ]` **PAR-12** `(新)` 匿名 class/struct/union：匿名类型定义、匿名成员提升。
 - `[ ]` **PAR-13** `(新)` 指定初始化器 `{.field = v}`、柔性数组 `T a[]`。
 - `[ ]` **PAR-14** `(已实现)` `sizeof`；`(新)` `alignof`、`offsetof`。
-- `[ ]` **PAR-15** `(新)` `compile_time` 表达式：`static_assert`、`if`、目标/构建查询、反射（取代 `type_info`）。
+- `[x]` **PAR-15** `(新)` `compile_time` 表达式：`static_assert`、`if`、目标/构建查询完成（2026-10-06）；反射部分未含（另轮）。
 - `[ ]` **PAR-16** `(新)` 内联汇编 `asm` 语句/表达式。
 - `[x]` **PAR-17** `(新)` `this` 表达式（2026-10-06）。方法体内 `this` 走隐式 this 参数按普通变量解析；`this.field` 点号对指针自动解引用；static 方法内 this 钉死诊断。
 - `[x]` **PAR-18** `(新)` `static_cast<T>(x)` / C 风格强转；向下转换（CRTP 必需）。C 风格 `(T)x` 已泛化到完整类型（P0-02）；`static_cast`/`reinterpret_cast` 已实现（LEX-11/DEC-18）：static 限算术↔算术、指针↔指针；reinterpret 为标量位重解释（同宽 `bitcast`）。
@@ -174,7 +174,7 @@
 - `[ ]` **SEM-04** 访问控制检查：`public/private/protected`（单继承链）。**部分完成**（PAR-04/DEC-01 轮次）：class 默认 private / struct 默认 public，访问段解析修复（不再截断类体），类外访问 private/protected 成员与方法报 **E2009**（`SemanticAnalyzer`，快照 `tests/diagnostics/snapshots/private_member_access.txt`）；类内方法经 `this->` 可访问。**待补**：protected 在派生类内放开（随 INH 单继承链）、友元。
 - `[ ]` **SEM-05** 类型检查：表达式/赋值/调用/返回/字段访问。
 - `[x]` **SEM-06** 泛型实例化检查（GEN-06）。已实现（2026-10-06）：实例点全量 sema + 惰性方法体。
-- `[ ]` **SEM-07** `compile_time` 条件求值与死代码消除。
+- `[x]` **SEM-07** `compile_time` 条件求值与死代码消除——sema 期选分支原位展开，codegen 仅出选中分支（2026-10-06）。死分支类型占位毒化（`Type::ctDeadBranch`），活分支 sema 注册新对象解毒。
 - `[ ]` **SEM-08** 格式字符串类型检查：`{}`、`{:x}`、`{:f}`、`{:02}`、`{:.2f}`（`print/println`）。
 - `[ ]` **SEM-09** 数组/Slice 边界检查策略：静态可证明或运行时检查（见 DEC-06）。
 - `[ ]` **SEM-10** 整数溢出检查策略：Debug 检查 / Release 行为（见 DEC-07）。
@@ -274,20 +274,20 @@
 
 > 以 `compile_time` 命名空间统一承载；**不再使用 `type_info(T)` 与独立 `static_assert` 关键字**。
 
-- `[~]` **CT-01** `compile_time` 语法入口：`comptime` 关键字统一并入 `compile_time`（旧名 token 已移除）。（草案见 `docs/spec/compile_time.md`）
-- `[~]` **CT-02** `compile_time.static_assert(cond, msg)`：编译期断言，失败带源码位置诊断。（草案见 `docs/spec/compile_time.md`）
-- `[~]` **CT-03** `compile_time.if(cond) { ... }`：条件编译与死代码消除。（草案见 `docs/spec/compile_time.md`）
-- `[~]` **CT-04** 目标查询：`compile_time.target.os/arch/cpu`。（草案见 `docs/spec/compile_time.md`）
-- `[~]` **CT-05** 构建查询：`compile_time.build.debug` 等。（草案见 `docs/spec/compile_time.md`）
-- `[~]` **CT-06** 编译期求值器：解释 AST、常量折叠、字符串比较/整数运算/布尔逻辑。（草案见 `docs/spec/compile_time.md`）
-- `[~]` **CT-07** 反射 API（取代 `type_info`）：类型名、大小、对齐、字段、偏移、属性。（草案见 `docs/spec/compile_time.md`）
-- `[~]` **CT-08** 类型作为值：编译期与类型系统交互。（草案见 `docs/spec/compile_time.md`）
-- `[~]` **CT-09** 编译期缓存：求值结果缓存、增量编译。（草案见 `docs/spec/compile_time.md`）
-- `[~]` **CT-10** 编译期错误诊断：位置、求值栈、原因。（草案见 `docs/spec/compile_time.md`）
-- `[~]` **CT-11** 编译期沙箱：限制文件/网络/系统访问。（草案见 `docs/spec/compile_time.md`）
-- `[~]` **CT-12** 与 LLVM 常量集成。（草案见 `docs/spec/compile_time.md`）
-- `[~]` **CT-13** `(新)` `compile_time` 反射 API 的精确签名与返回类型（取代 `type_info`，细化 CT-07）。（草案见 `docs/spec/compile_time.md`）
-- `[~]` **CT-14** `(新)` `constexpr` 与 `compile_time` 的边界与互操作（落实 DEC-05）。（草案见 `docs/spec/compile_time.md`）
+- `[x]` **CT-01** `compile_time` 语法入口——非关键字；顶层 `compile_time.if`/`static_assert` parseDeclarationImpl 前瞻特判；表达式内 MethodCall/MemberAccess 钩子特判（2026-10-06）。
+- `[x]` **CT-02** `compile_time.static_assert(cond, msg)`——顶层包装节点 + 函数体内表达式路径；失败诊断 `static_assert failed[: msg]` 带位置（2026-10-06）。
+- `[x]` **CT-03** `compile_time.if(cond)`——仅顶层声明级（函数体内 YAGNI）；sema 期选择，codegen 只出选中分支；死分支类型毒化诊断（2026-10-06）。
+- `[x]` **CT-04** 目标查询 `compile_time.target.os/arch/cpu`——host triple 映射（2026-10-06）。
+- `[x]` **CT-05** 构建查询 `compile_time.build.debug/optimize/version`——`setBuildConfig` 注入（driver 按 optLevel 接线），无 CLI flag（2026-10-06）。
+- `[x]` **CT-06** 编译期求值器 `CompileTimeEvaluator`——ConstValue 迁入 + STR；字面量/算术/位/比较/逻辑/三元/字符串 `==`/`!=`/`+`；size_of/align_of/offset_of 布局查询；constexpr 函数委托（DEC-05）（2026-10-06）。
+- `[ ]` **CT-07** 反射 API（取代 `type_info`）：类型名、大小、对齐、字段、偏移、属性——另轮（依赖 str/Slice，与 P1-06 排序协调）。
+- `[ ]` **CT-08** 类型作为值：编译期与类型系统交互——另轮；本轮仅落地最小切片（size_of 族类型实参按名解析）。
+- `[ ]` **CT-09** 编译期缓存：求值结果缓存、增量编译——另轮（随 MOD-10 协调）。
+- `[~]` **CT-10** 编译期错误诊断——本轮仅完成「诊断带源码位置」；求值栈/原因链未做。
+- `[~]` **CT-11** 编译期沙箱——YAGNI：求值器无 IO 能力即天然沙箱（2026-10-06 裁决）。
+- `[x]` **CT-12** 与 LLVM 常量集成——表达式节点 `ctInt/ctFloat/ctHandled`，codegen 直接出 `llvm::Constant`，零运行时指令（2026-10-06）。
+- `[ ]` **CT-13** `(新)` `compile_time` 反射 API 的精确签名与返回类型——另轮（随 CT-07）。
+- `[x]` **CT-14** `(新)` `constexpr` 与 `compile_time` 边界与互操作——并存 + 共享内核（DEC-05 裁决，2026-10-06）。
 
 ---
 
@@ -454,7 +454,7 @@
 - `[x]` **DEC-02** `import math;` 后符号访问语法：**直接非限定访问**（`add`）。模块是物理边界，不引入 `math.add` 式运算符；限定名由模块内 `namespace` 提供。
 - `[x]` **DEC-03** `Result<T,E>` 精确布局与 `.error`/`.value` 语义（显式访问，无 `?`）。**裁决**（2026-10-06，DS4）：`{ bool ok; T value; E error; }` 三字段加判别标志——两字段草案无法区分成功/失败，哨兵约定与任意 E 冲突；与 Optional `{ bool valid; T value; }` 对称。实现见 TYP-14。
 - `[ ]` **DEC-04** 默认参数范围；**确认不做**命名参数。
-- `[ ]` **DEC-05** `constexpr` 与 `compile_time` 的关系（是否合并）。
+- `[x]` **DEC-05** `constexpr` 与 `compile_time` 的关系——裁决：并存 + 共享求值器内核（2026-10-06）；constexpr 保持既有语义（运行时可调用），CT 表达式内 constexpr 函数调用委托 `evaluateConstexpr`。
 - `[ ]` **DEC-06** Slice/数组边界检查默认策略：静态可证 or 运行时检查，Debug/Release 差异。
 - `[ ]` **DEC-07** 整数溢出默认行为：Debug 检查 / Release 回绕。
 - `[ ]` **DEC-08** 位域布局对齐哪个 C ABI（System V / MSVC）；与 `[[packed]]`/`[[align]]` 交互。
@@ -508,7 +508,7 @@
 - `[x]` **P1-01** class / enum / union / 数组 / Slice（AGG、TYP-11/12）。enum、class 访问段（DEC-01）、union（AGG-03/17）、Slice（TYP-12）、嵌套类型（AGG-11，2026-10-05）全部完成。
 - `[x]` **P1-02** Optional / Result 显式访问（TYP-13/14/STD-02）。完成（2026-10-06）：内建魔术类型（同 Slice 先例）；`Optional<T>`/`Result<T,E>` 类型位置尖括号 + `T?` 糖；严格类型相等；codegen 全通路（e2e 7 项）；DEC-03 随此轮裁决；spec `docs/superpowers/specs/2026-10-06-optional-result-design.md`，plan `docs/superpowers/plans/2026-10-06-optional-result.md`。
 - `[x]` **P1-03** **泛型 + CRTP**（GEN、INH-05、PAR-17/18、CG-07/08）。2026-10-06 完成：989/989。
-- `[ ]` **P1-04** `compile_time` 与反射（CT；取代 type_info/static_assert）。
+- `[x]` **P1-04** `compile_time` 与反射——核心纵向切片完成（2026-10-06）：CT-01/02/03/04/05/06/12/14 + PAR-15 部分 + SEM-07 + DEC-05；反射 CT-07/08/13 另轮（与 P1-06 str 排序协调）。
 - `[ ]` **P1-05** 注解系统（ANN）。
 - `[ ]` **P1-06** str / String / format（FMT、STD-10/11）。
 - `[ ]` **P1-07** 位域、匿名类型、指定初始化器、lambda（AGG-03~06、PAR-10~13）。
