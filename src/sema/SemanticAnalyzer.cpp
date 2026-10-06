@@ -451,6 +451,15 @@ Type* SemanticAnalyzer::checkBinaryTypes(BinaryOp op, Type* left, Type* right, E
 
         case BinaryOp::And:
         case BinaryOp::Or:
+            // 评审 I1: logical operands must be scalar — Optional/Result
+            // reaching `and`/`br` produced invalid IR.
+            if (!isScalarType(left) || !isScalarType(right)) {
+                emitError("logical operator '" + binaryOpToString(op) +
+                              "' requires scalar operands, got '" +
+                              typeToString(left) + "' and '" + typeToString(right) + "'",
+                          node);
+                return nullptr;
+            }
             return typeCtx->getInt32();
 
         case BinaryOp::BitAnd:
@@ -975,8 +984,26 @@ void SemanticAnalyzer::visit(BinaryExprAST& node) {
     Type* leftType = getExprType(*node.left);
     Type* rightType = getExprType(*node.right);
 
-    // Check for operator overloading on struct/union types
-    if (isStructOrUnionType(leftType) || isStructOrUnionType(rightType)) {
+    // Check for operator overloading on aggregate-like types (struct/union/
+    // class/Optional/Result). 评审 I1: Optional/Result must take this path —
+    // falling through to the generic comparison switch emitted ICmp on a
+    // struct and aborted the compiler.
+    auto isOverloadOperand = [](Type* t) {
+        while (t && t->kind == TypeKind::Typedef)
+            t = static_cast<TypedefType*>(t)->aliasedType;
+        if (!t) return false;
+        switch (t->kind) {
+            case TypeKind::Struct:
+            case TypeKind::Class:
+            case TypeKind::Union:
+            case TypeKind::Optional:
+            case TypeKind::Result:
+                return true;
+            default:
+                return false;
+        }
+    };
+    if (isOverloadOperand(leftType) || isOverloadOperand(rightType)) {
         std::string mangledName = getOperatorMangledName(node.op, leftType, rightType);
         if (!mangledName.empty()) {
             // Look up by the unmangled operator name (e.g., "operator+")
@@ -1290,6 +1317,15 @@ void SemanticAnalyzer::visit(AssignmentExprAST& node) {
         emitError("cannot assign to const variable", node);
         return;
     }
+    // 评审 I5: general assignability gate — an rvalue LHS (e.g. a call
+    // result's pseudo-field) must not reach codegen as a store destination.
+    // Skip when lhsType is null: resolution already diagnosed (e.g. E2009).
+    if (node.lhs && lhsType && !node.lhs->isLValue) {
+        emitError("expression is not assignable", node);
+        node.type = nullptr;
+        node.isLValue = false;
+        return;
+    }
     Type* rhsType = getExprType(*node.rhs);
     node.type = checkAssignmentTypes(lhsType, rhsType, node);
     node.isLValue = true;
@@ -1302,6 +1338,22 @@ void SemanticAnalyzer::visit(TernaryExprAST& node) {
 
     if (condType && !isScalarType(condType)) {
         emitError("ternary condition must be scalar type, but got '" + typeToString(condType) + "'", node);
+    }
+
+    // 评审 I4: Optional/Result branches produced a phi over aggregate
+    // pointers/values (silent garbage or a PHINode assert). Not supported
+    // this round — use if/else. (Root cause for scalar/struct ternaries is a
+    // preexisting gap, deferred.)
+    auto isOptionalResultBranch = [](Type* t) {
+        while (t && t->kind == TypeKind::Typedef)
+            t = static_cast<TypedefType*>(t)->aliasedType;
+        return t && (t->kind == TypeKind::Optional || t->kind == TypeKind::Result);
+    };
+    if (isOptionalResultBranch(thenType) || isOptionalResultBranch(elseType)) {
+        emitError("ternary branches of Optional/Result type are not supported; use if/else", node);
+        node.type = nullptr;
+        node.isLValue = false;
+        return;
     }
 
     node.type = getCommonType(thenType, elseType);
@@ -1467,14 +1519,16 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
         // and writable (DS3, C semantics); no runtime check is implied.
         if (strippedObj->kind == TypeKind::Optional) {
             auto* optType = static_cast<OptionalType*>(strippedObj);
+            // 评审 I5: propagate object lvalue-ness — `make().value = 5` must
+            // not present an rvalue slot as assignable.
             if (node.memberName == "valid") {
                 node.type = TypeContext::instance().getBool();
-                node.isLValue = true;
+                node.isLValue = node.object->isLValue;
                 return;
             }
             if (node.memberName == "value") {
                 node.type = optType->elementType;
-                node.isLValue = true;
+                node.isLValue = node.object->isLValue;
                 return;
             }
             emitError("no member named '" + node.memberName + "' in Optional", node);
@@ -1486,17 +1540,17 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
             auto* resType = static_cast<ResultType*>(strippedObj);
             if (node.memberName == "ok") {
                 node.type = TypeContext::instance().getBool();
-                node.isLValue = true;
+                node.isLValue = node.object->isLValue;
                 return;
             }
             if (node.memberName == "value") {
                 node.type = resType->successType;
-                node.isLValue = true;
+                node.isLValue = node.object->isLValue;
                 return;
             }
             if (node.memberName == "error") {
                 node.type = resType->errorType;
-                node.isLValue = true;
+                node.isLValue = node.object->isLValue;
                 return;
             }
             emitError("no member named '" + node.memberName + "' in Result", node);
@@ -1851,6 +1905,13 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
                               node);
                 } else {
                     for (size_t i = 0; i < fieldTypes.size(); ++i) {
+                        // Nested brace lists recurse through codegen's
+                        // emitAggregateInitializer (struct precedent: no sema
+                        // element-level check); only scalar slots are typed.
+                        if (dynamic_cast<InitializerListExprAST*>(
+                                initList->initializers[i].get())) {
+                            continue;
+                        }
                         // getExprType (not ->type): element types are computed
                         // lazily and the node field is not yet populated here.
                         Type* it = getExprType(*initList->initializers[i]);
@@ -1860,9 +1921,25 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
                         // in this language, C-style). Value/error fields are
                         // positional literal slots: exact typesEqual — else
                         // `{5, true}` would silently accept bool as the value.
-                        bool okField = i == 0
-                            ? typesCompatible(fieldTypes[i], it)
-                            : typesEqual(fieldTypes[i], it);
+                        bool okField;
+                        if (i == 0) {
+                            // Flag fields (valid/ok) follow the language's normal
+                            // bool-assignment channel (`true` literals are int32
+                            // in this language, C-style).
+                            okField = typesCompatible(fieldTypes[i], it);
+                        } else {
+                            // Value/error slots are positional literal slots:
+                            // exact match after stripping typedefs on BOTH
+                            // sides (评审 I2: typesEqual does not strip —
+                            // `Optional<MyInt> o = {true, 5}` was mis-rejected).
+                            Type* ft = fieldTypes[i];
+                            while (ft && ft->kind == TypeKind::Typedef)
+                                ft = static_cast<TypedefType*>(ft)->aliasedType;
+                            Type* its = it;
+                            while (its && its->kind == TypeKind::Typedef)
+                                its = static_cast<TypedefType*>(its)->aliasedType;
+                            okField = typesEqual(ft, its);
+                        }
                         if (!okField) {
                             emitError("type mismatch in initializer " +
                                           std::to_string(i) + " of '" + node.name +

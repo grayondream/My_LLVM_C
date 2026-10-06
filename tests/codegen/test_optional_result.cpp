@@ -38,6 +38,47 @@ TEST(OptResLayoutTest, ResultIsFlagFirstTriple) {
     EXPECT_EQ(st->getElementType(2), llvm::Type::getInt64Ty(ctx.getContext()));
 }
 
+TEST(OptResLayoutTest, EnumUnderlyingDistinctLayouts) {
+    // 评审 C1：布局身份键须单射——不同底层类型的枚举的 Optional 不得共享
+    // LLVM 具名结构体（否则 8 字节 store 打进 2 字节栈槽）。
+    spdlog::set_level(spdlog::level::off);
+    CodegenContext ctx;
+    auto* small = new EnumType("LayoutColor");
+    small->underlyingType = TypeContext::instance().getUInt8();
+    auto* big = new EnumType("LayoutBig");
+    big->underlyingType = TypeContext::instance().getUInt64();
+    auto* sa = llvm::cast<llvm::StructType>(
+        ctx.getLLVMType(TypeContext::instance().getOptionalType(small)));
+    auto* sb = llvm::cast<llvm::StructType>(
+        ctx.getLLVMType(TypeContext::instance().getOptionalType(big)));
+    EXPECT_NE(sa->getName(), sb->getName());
+}
+
+TEST(OptResLayoutTest, ResultNameCollisionInjective) {
+    // 评审 C1：Result<My_Err, x> 与 Result<My, Err_x> 不得同名。
+    spdlog::set_level(spdlog::level::off);
+    CodegenContext ctx;
+    Type* r1 = TypeContext::instance().getResultType(
+        new StructType("My_Err"), new StructType("x"));
+    Type* r2 = TypeContext::instance().getResultType(
+        new StructType("My"), new StructType("Err_x"));
+    auto* s1 = llvm::cast<llvm::StructType>(ctx.getLLVMType(r1));
+    auto* s2 = llvm::cast<llvm::StructType>(ctx.getLLVMType(r2));
+    EXPECT_NE(s1->getName(), s2->getName());
+}
+
+TEST(OptResLayoutTest, UserStructPrefixCollisionSafe) {
+    // 评审 C1：用户 struct 名撞内建前缀不得复用布局。
+    spdlog::set_level(spdlog::level::off);
+    CodegenContext ctx;
+    Type* builtin = TypeContext::instance().getOptionalType(
+        TypeContext::instance().getInt32());
+    Type* user = new StructType("Optional_int32");
+    auto* sb = llvm::cast<llvm::StructType>(ctx.getLLVMType(builtin));
+    auto* su = llvm::cast<llvm::StructType>(ctx.getLLVMType(user));
+    EXPECT_NE(sb->getName(), su->getName());
+}
+
 TEST(OptResLayoutTest, DistinctInstancesHaveDistinctNames) {
     spdlog::set_level(spdlog::level::off);
     CodegenContext ctx;

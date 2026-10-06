@@ -1873,3 +1873,46 @@ TEST(SliceSemTest, OptMemberWritablePin) {
     EXPECT_TRUE(analyzeOk(
         "int32 main() { int32? o = {true, 5}; o.value = 6; o.valid = false; return 0; }"));
 }
+
+// ========== OPT/RES 评审修复（2026-10-06，C1/I1/I2/I4/I5） ==========
+
+TEST(SliceSemTest, OptComparisonRejected) {
+    // 评审 I1：Optional 上 ==/</&& 曾崩编译器（ICmp 打在 struct 上）。
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { int32? a = {true, 5}; int32? b = {true, 5}; bool r = a == b; return 0; }"));
+}
+
+TEST(SliceSemTest, OptLtRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { int32? a = {true, 5}; int32? b = {false, 0}; bool r = a < b; return 0; }"));
+}
+
+TEST(SliceSemTest, OptLogicalRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { int32? a = {true, 5}; int32? b = {false, 0}; bool r = a && b; return 0; }"));
+}
+
+TEST(SliceSemTest, OptTypedefArgPin) {
+    // 评审 I2：init-list 校验须剥 typedef。
+    EXPECT_TRUE(analyzeOk(
+        "typedef int32 MyInt; int32 main() { Optional<MyInt> o = {true, 5}; return 0; }"));
+}
+
+TEST(SliceSemTest, OptTypedefValuePin) {
+    EXPECT_TRUE(analyzeOk(
+        "typedef int32 MyInt; int32 main() { MyInt x = 5; int32? p = {true, x}; return x; }"));
+}
+
+TEST(SliceSemTest, OptTernaryBranchRejected) {
+    // 评审 I4：Optional/Result 作三元分支曾产生 phi ptr 静默垃圾/断言。
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { int32? a = {true, 5}; int32? b = {false, 0}; "
+        "int32? c = a.valid ? a : b; return 0; }"));
+}
+
+TEST(SliceSemTest, OptRvalueAssignRejected) {
+    // 评审 I5：rvalue 伪字段赋值曾生成 store 到非指针。
+    EXPECT_FALSE(analyzeOk(
+        "int32? make(int32 v) { int32? t = {v != 0, 7}; return t; } "
+        "int32 main() { make(1).value = 5; return 0; }"));
+}

@@ -985,8 +985,9 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
                 return builder.CreateStructGEP(ctx.getLLVMType(st), agg,
                                                (unsigned)idx, "optresmember");
             }
-            if (object->type->kind == TypeKind::Typedef)
-                agg = builder.CreateLoad(ctx.getLLVMType(st), agg);
+            // Rvalue object (call result etc.): the aggregate is already a
+            // value — no load here (评审 I3: a spurious load on typedef'd
+            // returns crashed the backend with "Do not know how to promote").
             return builder.CreateExtractValue(agg, {(unsigned)idx}, "optresmember");
         }
     }

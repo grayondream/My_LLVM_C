@@ -40,7 +40,13 @@ std::string typeToMangled(Type* type) {
             auto* u = static_cast<UnionType*>(type);
             return u->name;
         }
-        case TypeKind::Enum: return "int32";
+        case TypeKind::Enum: {
+            // 评审 C1: all enums used to mangle as "int32", colliding
+            // f(Optional<int32>) with f(Optional<SomeEnum>) symbols. Use the
+            // (unique) enum name; anonymous enums keep the int32 ABI shape.
+            auto* et = static_cast<EnumType*>(type);
+            return et->name.empty() ? std::string("int32") : et->name;
+        }
         case TypeKind::Bool: return "bool";
         case TypeKind::Int8: return "int8";
         case TypeKind::Int16: return "int16";

@@ -378,6 +378,79 @@ llvm::Value* CodegenContext::emitArrayToSliceDecay(ArrayType* arrayType,
                                   static_cast<uint64_t>(arrayType->size)), {1});
 }
 
+// P1-02 评审 C1: injective layout-identity key. The LLVM named-struct name
+// IS the layout identity (getTypeByName reuse), so it must never collide:
+// length-prefixed components + '.' separators (user identifiers cannot
+// contain '.'). Covers: two enums with different underlying types, the
+// Result<My_Err, x> / Result<My, Err_x> ambiguity, and user structs named
+// like the old "Optional_int32" prefix.
+static std::string layoutKindName(TypeKind k) {
+    switch (k) {
+        case TypeKind::Void: return "void";
+        case TypeKind::Bool: return "bool";
+        case TypeKind::Char: return "char";
+        case TypeKind::Int8: return "i8";
+        case TypeKind::Int16: return "i16";
+        case TypeKind::Int32: return "i32";
+        case TypeKind::Int64: return "i64";
+        case TypeKind::Int128: return "i128";
+        case TypeKind::UInt8: return "u8";
+        case TypeKind::UInt16: return "u16";
+        case TypeKind::UInt32: return "u32";
+        case TypeKind::UInt64: return "u64";
+        case TypeKind::UInt128: return "u128";
+        case TypeKind::ISize: return "isize";
+        case TypeKind::USize: return "usize";
+        case TypeKind::Float16: return "f16";
+        case TypeKind::Float32: return "f32";
+        case TypeKind::Float64: return "f64";
+        case TypeKind::Float128: return "f128";
+        default: return "unk";
+    }
+}
+
+static std::string layoutKey(Type* t) {
+    if (!t) return "unk";
+    switch (t->kind) {
+        case TypeKind::Typedef:
+            return layoutKey(static_cast<TypedefType*>(t)->aliasedType);
+        case TypeKind::Pointer:
+            return "P" + layoutKey(t->base);
+        case TypeKind::Array: {
+            auto* at = static_cast<ArrayType*>(t);
+            return "A" + std::to_string(at->size) + "." + layoutKey(at->elementType);
+        }
+        case TypeKind::Slice:
+            return "L" + layoutKey(static_cast<SliceType*>(t)->elementType);
+        case TypeKind::Optional:
+            return "O" + layoutKey(static_cast<OptionalType*>(t)->elementType);
+        case TypeKind::Result: {
+            auto* r = static_cast<ResultType*>(t);
+            return "R" + layoutKey(r->successType) + "." + layoutKey(r->errorType);
+        }
+        case TypeKind::Struct: {
+            auto* s = static_cast<StructType*>(t);
+            return "S" + std::to_string(s->name.size()) + "." + s->name;
+        }
+        case TypeKind::Class: {
+            auto* c = static_cast<ClassType*>(t);
+            return "C" + std::to_string(c->name.size()) + "." + c->name;
+        }
+        case TypeKind::Union: {
+            auto* u = static_cast<UnionType*>(t);
+            return "U" + std::to_string(u->name.size()) + "." + u->name;
+        }
+        case TypeKind::Enum: {
+            auto* e = static_cast<EnumType*>(t);
+            std::string underlying =
+                e->underlyingType ? layoutKindName(e->underlyingType->kind) : "i32";
+            return "E" + std::to_string(e->name.size()) + "." + e->name + "." + underlying;
+        }
+        default:
+            return layoutKindName(t->kind);
+    }
+}
+
 llvm::Type* CodegenContext::getLLVMType(Type* type) {
     if (!type) return llvm::Type::getVoidTy(*context);
 
@@ -515,8 +588,9 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
             // P1-02 (TYP-13) DS4: { i1 valid, T value } — 判别标志在前。
             // 原实现误转换 SliceType* 且字段序为 {T, i1}。
             auto* optType = static_cast<OptionalType*>(type);
-            std::string name =
-                "Optional_" + typeToMangled(optType->elementType);
+            // 评审 C1: injective identity key (layoutKey) — 用户可控的名字
+            // （枚举底层类型、struct 名下划线）不得影响布局身份。
+            std::string name = "opt." + layoutKey(optType->elementType);
             if (auto* st = llvm::StructType::getTypeByName(*context, name))
                 return st; // idempotent: named struct identity is unique
             std::vector<llvm::Type*> fieldTypes;
@@ -528,8 +602,8 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
             // P1-02 (TYP-14) DS4: { i1 ok, T value, E error } — 原实现无
             // 判别标志（DEC-03 裁决随此轮）。
             auto* resultType = static_cast<ResultType*>(type);
-            std::string name = "Result_" + typeToMangled(resultType->successType) +
-                               "_" + typeToMangled(resultType->errorType);
+            std::string name = "res." + layoutKey(resultType->successType) +
+                               "." + layoutKey(resultType->errorType);
             if (auto* st = llvm::StructType::getTypeByName(*context, name))
                 return st; // idempotent: named struct identity is unique
             std::vector<llvm::Type*> fieldTypes;

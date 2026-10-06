@@ -177,3 +177,43 @@ TEST_F(OptionalResultE2E, NestedOptional) {
         }
     )", "optres7.c"), 2);
 }
+
+TEST_F(OptionalResultE2E, EnumUnderlyingCoexist) {
+    // 评审 C1：不同底层宽度枚举的 Optional 同模块共存，取值不得腐坏。
+    EXPECT_EQ(runSource(R"(
+        enum SmallColor : uint8 { SC0, SC1 };
+        enum BigColor : uint64 { BC0, BC1 };
+        int32 main() {
+            Optional<SmallColor> a = {true, SC1};
+            Optional<BigColor> b = {true, BC1};
+            if (a.valid && b.valid) {
+                if (a.value == SC1 && b.value == BC1) { return 1; }
+            }
+            return 0;
+        }
+    )", "optres8.c"), 1);
+}
+
+TEST_F(OptionalResultE2E, EnumOverloadDistinct) {
+    // 评审 C1：f(Optional<int32>) 与 f(Optional<SmallColor>) 符号不得碰撞。
+    EXPECT_EQ(runSource(R"(
+        enum SmallColor : uint8 { SC0, SC1 };
+        int32 f(int32? o) { if (o.valid) { return o.value; } return 100; }
+        int32 f(SmallColor c) { return 200; }
+        int32 main() {
+            int32? o = {true, 7};
+            SmallColor c = SC1;
+            if (f(o) == 7 && f(c) == 200) { return 1; }
+            return 0;
+        }
+    )", "optres9.c"), 1);
+}
+
+TEST_F(OptionalResultE2E, TypedefRvalueMember) {
+    // 评审 I3：typedef 返回类型的 rvalue 伪字段访问曾生成 load%struct 崩溃。
+    EXPECT_EQ(runSource(R"(
+        typedef int32? Opt;
+        Opt make(int32 v) { Opt t = {v != 0, 7}; return t; }
+        int32 main() { return make(1).value; }
+    )", "optres10.c"), 7);
+}
