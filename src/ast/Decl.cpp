@@ -82,6 +82,32 @@ static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
             }
             break;
         }
+        case TypeKind::Optional:
+        case TypeKind::Result: {
+            // P1-02 (TYP-13/14) DS4: {i1 flag, value[, error]} — GEP per
+            // pseudo-field, recursing for nested brace lists.
+            bool isOpt = type->kind == TypeKind::Optional;
+            unsigned n = isOpt ? 2 : 3;
+            for (unsigned i = 0; i < init->initializers.size() && i < n; ++i) {
+                auto& item = *init->initializers[i];
+                Type* ftype;
+                if (i == 0) {
+                    ftype = TypeContext::instance().getBool();
+                } else if (isOpt) {
+                    ftype = static_cast<OptionalType*>(type)->elementType;
+                } else {
+                    ftype = i == 1 ? static_cast<ResultType*>(type)->successType
+                                   : static_cast<ResultType*>(type)->errorType;
+                }
+                llvm::Value* fptr = builder.CreateStructGEP(destLLVM, dest, i, "optresinit");
+                if (auto* nested = dynamic_cast<InitializerListExprAST*>(&item)) {
+                    emitAggregateInitializer(ctx, fptr, ftype, nested);
+                } else {
+                    storeScalarInitializer(ctx, fptr, ctx.getLLVMType(ftype), item, ftype);
+                }
+            }
+            break;
+        }
         case TypeKind::Struct:
         case TypeKind::Class: {
             std::vector<std::pair<std::string, Type*>>* fields = nullptr;
@@ -134,6 +160,38 @@ static llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
     };
 
     switch (type->kind) {
+        case TypeKind::Optional:
+        case TypeKind::Result: {
+            // P1-02 (TYP-13/14) DS4: global Optional/Result brace initializers.
+            bool isOpt = type->kind == TypeKind::Optional;
+            unsigned n = isOpt ? 2 : 3;
+            auto* stTy = llvm::dyn_cast<llvm::StructType>(ctx.getLLVMType(type));
+            if (!stTy) return nullptr;
+            std::vector<llvm::Constant*> elems;
+            for (unsigned i = 0; i < n; ++i) {
+                llvm::Constant* c = nullptr;
+                Type* ftype;
+                if (i == 0) {
+                    ftype = TypeContext::instance().getBool();
+                } else if (isOpt) {
+                    ftype = static_cast<OptionalType*>(type)->elementType;
+                } else {
+                    ftype = i == 1 ? static_cast<ResultType*>(type)->successType
+                                   : static_cast<ResultType*>(type)->errorType;
+                }
+                if (i < init->initializers.size()) {
+                    if (auto* nested = dynamic_cast<InitializerListExprAST*>(
+                            init->initializers[i].get())) {
+                        c = buildAggregateConstant(ctx, ftype, nested);
+                    } else {
+                        c = constFor(*init->initializers[i], ftype);
+                    }
+                }
+                if (!c) c = llvm::Constant::getNullValue(stTy->getElementType(i));
+                elems.push_back(c);
+            }
+            return llvm::ConstantStruct::get(stTy, elems);
+        }
         case TypeKind::Array: {
             auto* at = static_cast<ArrayType*>(type);
             auto* arrTy = llvm::dyn_cast<llvm::ArrayType>(ctx.getLLVMType(type));
@@ -267,7 +325,9 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
             // Zero the whole object first so unspecified fields stay zero.
             Type* elem = stripTypedefs(type);
             if (elem && (elem->kind == TypeKind::Struct || elem->kind == TypeKind::Class ||
-                         elem->kind == TypeKind::Union)) {
+                         elem->kind == TypeKind::Union ||
+                         elem->kind == TypeKind::Optional ||
+                         elem->kind == TypeKind::Result)) {
                 ctx.getBuilder().CreateStore(llvm::Constant::getNullValue(llvmType), alloca);
             }
             emitAggregateInitializer(ctx, alloca, type, initList);

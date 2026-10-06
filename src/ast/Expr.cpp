@@ -965,6 +965,32 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
         }
     }
 
+    // P1-02 (TYP-13/14): Optional/Result pseudo-fields. DS4 layout: flag
+    // (i1) at index 0, value at 1, error at 2 (Result only). Lvalue access
+    // yields the field address (writable); rvalue access extracts the field.
+    {
+        Type* st = object->type;
+        while (st && st->kind == TypeKind::Typedef)
+            st = static_cast<TypedefType*>(st)->aliasedType;
+        if (st && (st->kind == TypeKind::Optional || st->kind == TypeKind::Result)) {
+            long idx = -1;
+            if (memberName == "valid" || memberName == "ok") idx = 0;
+            else if (memberName == "value") idx = 1;
+            else if (st->kind == TypeKind::Result && memberName == "error") idx = 2;
+            if (idx < 0) return nullptr; // sema already diagnosed
+            auto& builder = ctx.getBuilder();
+            llvm::Value* agg = object->codegen(ctx);
+            if (!agg) return nullptr;
+            if (object->isLValue) {
+                return builder.CreateStructGEP(ctx.getLLVMType(st), agg,
+                                               (unsigned)idx, "optresmember");
+            }
+            if (object->type->kind == TypeKind::Typedef)
+                agg = builder.CreateLoad(ctx.getLLVMType(st), agg);
+            return builder.CreateExtractValue(agg, {(unsigned)idx}, "optresmember");
+        }
+    }
+
     llvm::Value* objVal = object->codegen(ctx);
     if (!objVal) return nullptr;
 
