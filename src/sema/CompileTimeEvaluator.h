@@ -12,6 +12,7 @@
 class SemanticAnalyzer;
 class ExprAST;
 class ASTNode;
+class MemberAccessExprAST;
 
 class CompileTimeEvaluator {
 public:
@@ -36,6 +37,8 @@ private:
     static constexpr int kMaxDepth = 64;
 
     std::optional<ConstValue> evalBinary(ConstValue& left, ConstValue& right, int op);
+    // compile_time.<target|build>.<member> 值（CT-04/05）。
+    std::optional<ConstValue> evalCTMemberChain(MemberAccessExprAST& node, ASTNode& at);
 
     SemanticAnalyzer& m_sema;
     int m_depth = 0;

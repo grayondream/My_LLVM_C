@@ -313,6 +313,8 @@ int CompilerDriver::compileFile(const std::string& inputFile) {
     }
 
     SemanticAnalyzer analyzer;
+    // P1-04 / CT-05: build 查询注入（optLevel>0 记为 Ox；debug 暂无 CLI flag）。
+    analyzer.setBuildConfig(false, optLevel > 0 ? "O" + std::to_string(optLevel) : "O0");
     analyzer.analyze(*ast);
     for (const auto& diag : analyzer.getErrors()) {
         std::cerr << diag.formatWithSeverity() << "\n";

@@ -54,6 +54,26 @@ public:
     std::optional<ConstValue> evaluateConstexpr(ExprAST* expr);
     const std::unordered_map<std::string, ConstValue>& getConstexprValues() const { return constexprValues; }
 
+    // ---- P1-04 / CT-04/05/12: compile_time 特判 ----
+    // 根标识符为 `compile_time` 的成员链判定（含嵌套链 target.os）。
+    static bool isCompileTimeRoot(const ExprAST* expr);
+    // 表达式树中任一位置含 compile_time 根（Binary/Unary/Ternary 守卫用）。
+    static bool containsCompileTimeRoot(const ExprAST* expr);
+    // 整树交给编译期求值器（含 compile_time 成员值与 constexpr 委托）。
+    std::optional<ConstValue> evalCompileTime(ExprAST* expr, ASTNode& at);
+    // MethodCall 形态（compile_time.static_assert/size_of/...）钩子：返回 true
+    // 表示已处理（节点已置 type/ct 值）。
+    bool tryAnalyzeCompileTimeCall(MethodCallExprAST& node);
+    // MemberAccess 链形态（compile_time.target.os / build.*）钩子。
+    bool tryAnalyzeCompileTimeChain(MemberAccessExprAST& node);
+    // CT-05 构建查询注入（driver/测试用；不加 CLI flag）。
+    void setBuildConfig(bool debug, const std::string& optimize) {
+        m_ctBuildDebug = debug;
+        m_ctBuildOptimize = optimize;
+    }
+    // 惰性求值器（持 sema 引用，构造后创建）。
+    CompileTimeEvaluator& ctEval();
+
     // Compile-time environment used while interpreting a constexpr function.
     using ConstEnv = std::unordered_map<std::string, ConstValue>;
 
@@ -235,6 +255,11 @@ private:
     void checkNestedTypeAccess(Type* type, const ASTNode& site);
     TypeContext* typeCtx;
     std::unordered_map<std::string, ConstValue> constexprValues;
+
+    // P1-04 / CT-04/05: build 查询注入值与惰性求值器。
+    bool m_ctBuildDebug = false;
+    std::string m_ctBuildOptimize = "O0";
+    std::unique_ptr<CompileTimeEvaluator> m_ctEval;
     std::unordered_set<std::string> definedFunctions;
     std::unordered_map<std::string, FunctionDeclAST*> constexprFunctions;
     ConstEnv* activeEnv = nullptr; // innermost constexpr call environment

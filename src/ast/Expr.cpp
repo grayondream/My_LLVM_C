@@ -27,6 +27,26 @@ static llvm::Value* emitLoad(CodegenContext& ctx, llvm::Value* ptr, Type* astTyp
     return ctx.loadValue(ptr, astType);
 }
 
+// P1-04 / CT-12: compile_time 常量节点直接出 llvm::Constant（零运行时指令）。
+// 非常量节点返回 nullptr（走普通路径）；ctHandled 但无值（static_assert 等）
+// 出被丢弃的 i32 0。必须在任何子表达式出码之前调用——compile_time 根标识符
+// 未声明，子树出码会失败。
+static llvm::Value* ctConstantOrNull(CodegenContext& ctx, ExprAST& node) {
+    if (node.ctInt && node.type) {
+        llvm::Type* ty = ctx.getLLVMType(node.type);
+        if (auto* intTy = llvm::dyn_cast<llvm::IntegerType>(ty)) {
+            return llvm::ConstantInt::get(intTy, static_cast<uint64_t>(*node.ctInt));
+        }
+    }
+    if (node.ctFloat && node.type) {
+        return llvm::ConstantFP::get(ctx.getLLVMType(node.type), *node.ctFloat);
+    }
+    if (node.ctHandled) {
+        return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.getContext()), 0);
+    }
+    return nullptr;
+}
+
 // Evaluate an expression node as a value: lvalues are dereferenced, rvalues are
 // used as-is. A pointer-typed rvalue (string literal, call result, function
 // designator) is already a value and must not be loaded from.
@@ -204,6 +224,7 @@ llvm::Value* VariableExprAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
+    if (auto* ct = ctConstantOrNull(ctx, *this)) return ct;
     // Check if this is an overloaded operator call
     if (!mangledCallee.empty()) {
         llvm::Function* calleeFn = ctx.getModule().getFunction(mangledCallee);
@@ -359,6 +380,7 @@ llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
+    if (auto* ct = ctConstantOrNull(ctx, *this)) return ct;
     llvm::Value* v = operand->codegen(ctx);
     if (!v) return nullptr;
 
@@ -644,6 +666,7 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* MethodCallExprAST::codegen(CodegenContext& ctx) {
+    if (auto* ct = ctConstantOrNull(ctx, *this)) return ct;
     llvm::Value* objVal = object->codegen(ctx);
     if (!objVal) return nullptr;
 
@@ -790,6 +813,7 @@ llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* TernaryExprAST::codegen(CodegenContext& ctx) {
+    if (auto* ct = ctConstantOrNull(ctx, *this)) return ct;
     llvm::Value* condVal = cond->codegen(ctx);
     if (!condVal) return nullptr;
     if (cond->isLValue && cond->type && cond->type->kind != TypeKind::Array) {
@@ -989,6 +1013,7 @@ static llvm::Value* emitClassFieldGEP(CodegenContext& ctx, Type* aggType,
 }
 
 llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
+    if (auto* ct = ctConstantOrNull(ctx, *this)) return ct;
     // TYP-12: slice `.len` extracts the length field of the {ptr, len} view.
     {
         Type* st = object->type;

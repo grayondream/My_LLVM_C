@@ -83,6 +83,14 @@ class ExprAST : public ASTNode {
 public:
     Type* type{nullptr};
     bool isLValue{false};
+
+    // P1-04 / CT-12: compile_time 求值结果（sema 写入；codegen 直接出
+    // llvm::Constant，零运行时指令）。STR 不落这些字段——类型系统无 str，
+    // STR 节点 type=nullptr 永不达 codegen。
+    bool ctHandled = false;
+    std::optional<long long> ctInt;
+    std::optional<double> ctFloat;
+
     virtual llvm::Value* codegen(CodegenContext& ctx) = 0;
 };
 
@@ -142,6 +150,7 @@ public:
     std::unique_ptr<ExprAST> right;
     std::string mangledCallee;  // Set by sema for operator overloading
 
+
     BinaryExprAST(BinaryOp oper, std::unique_ptr<ExprAST> l, std::unique_ptr<ExprAST> r)
         : op(oper), left(std::move(l)), right(std::move(r)) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
@@ -151,6 +160,7 @@ class UnaryExprAST : public ExprAST {
 public:
     UnaryOp op;
     std::unique_ptr<ExprAST> operand;
+
 
     UnaryExprAST(UnaryOp oper, std::unique_ptr<ExprAST> expr)
         : op(oper), operand(std::move(expr)) {}
@@ -266,6 +276,7 @@ public:
     MemberAccessKind accessKind;
     std::unique_ptr<ExprAST> object;
     std::string memberName;
+
 
     MemberAccessExprAST(MemberAccessKind kind, std::unique_ptr<ExprAST> obj, const std::string& member)
         : accessKind(kind), object(std::move(obj)), memberName(member) {}

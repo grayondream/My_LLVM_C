@@ -114,3 +114,53 @@ TEST_F(CompileTimeEval, EvalNonConstantQuiet) {
     EXPECT_FALSE(v.has_value());
     EXPECT_EQ(ex.analyzer->getErrors().size(), ex.baseErrors);
 }
+
+// ---- P1-04 / CT-04/05: sema 钩子与 build 配置注入 ----
+
+static bool analyzeOk(const std::string& source) {
+    Lexer lexer("ct_sema_test.c", source);
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    if (!ast) return false;
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    if (!parser.getErrors().empty()) return false; // parse 诊断不得被吞
+    return analyzer.getErrors().empty();
+}
+
+TEST_F(CompileTimeEval, CompileTimeInsideNamespace) {
+    // Review Focus 2: namespace 内的 compile_time 根链不被 namespacePrefix 劫持。
+    EXPECT_TRUE(analyzeOk(R"(
+constexpr int32 ok = compile_time.build.debug;
+namespace N { int32 f() { return ok; } }
+)"));
+}
+
+TEST_F(CompileTimeEval, StrEscapeDiagnosed) {
+    // Review Focus 5: STR 值赋给运行时变量 → 类型错误诊断，不崩溃。
+    Lexer lexer("ct_str_escape.c", "int32 main() { int32 x = compile_time.target.os; return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    EXPECT_FALSE(analyzer.getErrors().empty());
+}
+
+TEST_F(CompileTimeEval, UnknownMemberDiagnosed) {
+    Lexer lexer("ct_unknown_member.c", "int32 main() { int32 x = compile_time.nope; return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_FALSE(analyzer.getErrors().empty());
+    bool found = false;
+    for (const auto& d : analyzer.getErrors()) {
+        if (d.message.find("unknown compile_time member 'nope'") != std::string::npos) found = true;
+    }
+    EXPECT_TRUE(found);
+}

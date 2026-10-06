@@ -3,8 +3,29 @@
 #include "ast/Expr.h"
 #include "ast/Decl.h"
 #include "sema/SemanticAnalyzer.h"
+#include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/Triple.h"
+
+#include <algorithm>
+#include <unordered_set>
 
 using ConstValue = CompileTimeEvaluator::ConstValue;
+
+// P1-04 / CT-04: host 目标映射（spec §4）：triple → os/arch/cpu 查询值。
+static std::string ctTargetOs() {
+    std::string triple = llvm::sys::getDefaultTargetTriple();
+    if (triple.find("linux") != std::string::npos) return "linux";
+    if (triple.find("darwin") != std::string::npos
+        || triple.find("apple") != std::string::npos) return "macos";
+    if (triple.find("windows") != std::string::npos
+        || triple.find("mingw") != std::string::npos) return "windows";
+    return "unknown";
+}
+
+static std::string ctTargetArch() {
+    llvm::Triple triple(llvm::sys::getDefaultTargetTriple());
+    return triple.getArchName().str();
+}
 
 CompileTimeEvaluator::CompileTimeEvaluator(SemanticAnalyzer& sema)
     : m_sema(sema) {}
@@ -125,6 +146,29 @@ std::optional<ConstValue> CompileTimeEvaluator::eval(ExprAST* expr, ASTNode& at)
         return m_sema.evaluateConstexpr(expr);
     }
 
+    // P1-04 / CT-04/05: compile_time 成员链值（target.os/arch/cpu、
+    // build.debug/optimize/version）。未知成员诊断在此发出（spec §3 钉死）。
+    if (auto* ma = dynamic_cast<MemberAccessExprAST*>(expr)) {
+        if (SemanticAnalyzer::isCompileTimeRoot(ma->object.get())) {
+            return evalCTMemberChain(*ma, at);
+        }
+        return std::nullopt;
+    }
+
+    // P1-04 / CT-01: compile_time 成员调用（static_assert/size_of 族/if）
+    // —— CT-02（T5）与布局查询（T4）接管；此处仅校验成员名（spec §3）。
+    if (auto* mc = dynamic_cast<MethodCallExprAST*>(expr)) {
+        if (SemanticAnalyzer::isCompileTimeRoot(mc->object.get())) {
+            static const std::unordered_set<std::string> kKnownMembers = {
+                "static_assert", "if", "size_of", "align_of", "offset_of"};
+            if (!kKnownMembers.count(mc->methodName)) {
+                m_sema.emitError("unknown compile_time member '" + mc->methodName + "'", at);
+            }
+            return std::nullopt;
+        }
+        return std::nullopt;
+    }
+
     return std::nullopt; // 普通非常量节点：静默失败（spec §2 钉死）
 }
 
@@ -208,4 +252,69 @@ CompileTimeEvaluator::evalBinary(ConstValue& left, ConstValue& right, int op) {
     }
 
     return std::nullopt;
+}
+
+std::optional<ConstValue>
+CompileTimeEvaluator::evalCTMemberChain(MemberAccessExprAST& node, ASTNode& at) {
+    // 根链成员名序列：compile_time.target.os → [target, os]。
+    std::vector<std::string> members;
+    {
+        std::vector<MemberAccessExprAST*> chain;
+        ExprAST* cur = &node;
+        while (auto* ma = dynamic_cast<MemberAccessExprAST*>(cur)) {
+            chain.push_back(ma);
+            cur = ma->object.get();
+        }
+        for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+            members.push_back((*it)->memberName);
+        }
+    }
+
+    auto unknown = [&](const std::string& name) {
+        m_sema.emitError("unknown compile_time member '" + name + "'", at);
+        return std::optional<ConstValue>{};
+    };
+
+    if (members[0] == "target") {
+        if (members.size() == 1) return unknown("target"); // 裸命名空间
+        if (members.size() > 2) return unknown(members[2]);
+        ConstValue cv;
+        cv.type = ConstValue::STR;
+        const std::string& m = members[1];
+        if (m == "os") {
+            cv.strVal = ctTargetOs();
+        } else if (m == "arch") {
+            cv.strVal = ctTargetArch();
+        } else if (m == "cpu") {
+            cv.strVal = llvm::sys::getHostCPUName().str();
+        } else {
+            return unknown(m);
+        }
+        return cv;
+    }
+
+    if (members[0] == "build") {
+        if (members.size() == 1) return unknown("build");
+        if (members.size() > 2) return unknown(members[2]);
+        const std::string& m = members[1];
+        ConstValue cv;
+        if (m == "debug") {
+            cv.type = ConstValue::INT;
+            cv.intVal = m_sema.m_ctBuildDebug ? 1 : 0;
+            return cv;
+        }
+        if (m == "optimize") {
+            cv.type = ConstValue::STR;
+            cv.strVal = m_sema.m_ctBuildOptimize;
+            return cv;
+        }
+        if (m == "version") {
+            cv.type = ConstValue::STR;
+            cv.strVal = "1.0.0";
+            return cv;
+        }
+        return unknown(m);
+    }
+
+    return unknown(members[0]);
 }

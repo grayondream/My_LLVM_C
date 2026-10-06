@@ -1,4 +1,5 @@
 #include "sema/SemanticAnalyzer.h"
+#include "sema/CompileTimeEvaluator.h"
 #include "ast/Expr.h"
 #include "ast/Stmt.h"
 #include "ast/Decl.h"
@@ -638,8 +639,155 @@ Type* SemanticAnalyzer::getExprType(ExprAST& expr) {
     return expr.type;
 }
 
+// ---- P1-04 / CT-04/05/12: compile_time 特判 ----
+
+CompileTimeEvaluator& SemanticAnalyzer::ctEval() {
+    if (!m_ctEval) {
+        m_ctEval = std::make_unique<CompileTimeEvaluator>(*this);
+    }
+    return *m_ctEval;
+}
+
+bool SemanticAnalyzer::isCompileTimeRoot(const ExprAST* expr) {
+    // 沿 MemberAccess 对象链下行，根为 VariableExpr("compile_time") 即真。
+    while (expr) {
+        if (auto* ma = dynamic_cast<const MemberAccessExprAST*>(expr)) {
+            expr = ma->object.get();
+            continue;
+        }
+        if (auto* var = dynamic_cast<const VariableExprAST*>(expr)) {
+            return var->name == "compile_time";
+        }
+        return false;
+    }
+    return false;
+}
+
+bool SemanticAnalyzer::containsCompileTimeRoot(const ExprAST* expr) {
+    if (!expr) return false;
+    if (isCompileTimeRoot(expr)) return true;
+    if (auto* bin = dynamic_cast<const BinaryExprAST*>(expr)) {
+        return containsCompileTimeRoot(bin->left.get())
+            || containsCompileTimeRoot(bin->right.get());
+    }
+    if (auto* un = dynamic_cast<const UnaryExprAST*>(expr)) {
+        return containsCompileTimeRoot(un->operand.get());
+    }
+    if (auto* ter = dynamic_cast<const TernaryExprAST*>(expr)) {
+        return containsCompileTimeRoot(ter->cond.get())
+            || containsCompileTimeRoot(ter->then.get())
+            || containsCompileTimeRoot(ter->elseExpr.get());
+    }
+    if (auto* mc = dynamic_cast<const MethodCallExprAST*>(expr)) {
+        if (containsCompileTimeRoot(mc->object.get())) return true;
+        for (const auto& a : mc->args) {
+            if (containsCompileTimeRoot(a.get())) return true;
+        }
+        return false;
+    }
+    if (auto* ma = dynamic_cast<const MemberAccessExprAST*>(expr)) {
+        return containsCompileTimeRoot(ma->object.get());
+    }
+    if (auto* call = dynamic_cast<const CallExprAST*>(expr)) {
+        for (const auto& a : call->args) {
+            if (containsCompileTimeRoot(a.get())) return true;
+        }
+    }
+    return false;
+}
+
+// INT 结果的节点类型映射：按值域 int32/int64（spec §4）。
+static Type* ctIntTypeFor(TypeContext* typeCtx, long long v) {
+    return (v < -2147483648LL || v > 2147483647LL)
+        ? typeCtx->getInt64() : typeCtx->getInt32();
+}
+
+std::optional<SemanticAnalyzer::ConstValue>
+SemanticAnalyzer::evalCompileTime(ExprAST* expr, ASTNode& at) {
+    return ctEval().eval(expr, at);
+}
+
+bool SemanticAnalyzer::tryAnalyzeCompileTimeChain(MemberAccessExprAST& node) {
+    if (!isCompileTimeRoot(node.object.get())) {
+        return false;
+    }
+    // 根链成员名序列（e.g. compile_time.target.os → [target, os]）。
+    std::vector<std::string> members;
+    {
+        std::vector<const MemberAccessExprAST*> chain;
+        const ExprAST* cur = &node;
+        while (auto* ma = dynamic_cast<const MemberAccessExprAST*>(cur)) {
+            chain.push_back(ma);
+            cur = ma->object.get();
+        }
+        for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+            members.push_back((*it)->memberName);
+        }
+    }
+    node.ctHandled = true;
+    node.isLValue = false;
+    auto v = ctEval().eval(&node, node);
+    if (!v) {
+        node.type = nullptr; // 未知成员等诊断已由求值器发出
+        return true;
+    }
+    switch (v->type) {
+        case ConstValue::INT:
+            node.ctInt = v->intVal;
+            // 成员值类型映射（spec §4）：build.debug → bool，其余按值域。
+            node.type = (members.size() == 2 && members[0] == "build" && members[1] == "debug")
+                ? typeCtx->getBool()
+                : ctIntTypeFor(typeCtx, v->intVal);
+            break;
+        case ConstValue::DOUBLE:
+            node.ctFloat = v->doubleVal;
+            node.type = typeCtx->getFloat64();
+            break;
+        default:
+            // STR/CHAR 逃逸：编译期上下文（static_assert/if/constexpr 初始化）
+            // 整树由求值器接管、不经本钩子——凡到钩子必是运行时上下文。
+            emitError("compile-time string value cannot be used in runtime context", node);
+            node.type = nullptr;
+            break;
+    }
+    return true;
+}
+
+bool SemanticAnalyzer::tryAnalyzeCompileTimeCall(MethodCallExprAST& node) {
+    auto* obj = dynamic_cast<VariableExprAST*>(node.object.get());
+    if (!obj || obj->name != "compile_time") {
+        return false;
+    }
+    node.ctHandled = true;
+    node.isLValue = false;
+    auto v = ctEval().eval(&node, node);
+    if (v && v->type == ConstValue::INT) {
+        node.ctInt = v->intVal;
+        node.type = ctIntTypeFor(typeCtx, v->intVal);
+    } else if (v && v->type == ConstValue::DOUBLE) {
+        node.ctFloat = v->doubleVal;
+        node.type = typeCtx->getFloat64();
+    } else if (v) {
+        // STR/CHAR 结果逃逸（理由同链形钩子）。
+        emitError("compile-time string value cannot be used in runtime context", node);
+        node.type = nullptr;
+    } else {
+        // static_assert/size_of 族/if 由 CT-02/CT-06 后续任务接管；此处
+        // type=nullptr，外层类型检查兜底。
+        node.type = nullptr;
+    }
+    return true;
+}
+
+
 std::optional<SemanticAnalyzer::ConstValue> SemanticAnalyzer::evaluateConstexpr(ExprAST* expr) {
     if (!expr) return std::nullopt;
+
+    // P1-04 / CT-12: 表达式树含 compile_time 根 → 整树委托编译期求值器
+    // （含 target/build 值与字符串运算；DEC-05 共享内核由此对接）。
+    if (containsCompileTimeRoot(expr)) {
+        return evalCompileTime(expr, *expr);
+    }
 
     if (auto* num = dynamic_cast<NumberExprAST*>(expr)) {
         ConstValue cv;
@@ -998,6 +1146,39 @@ void SemanticAnalyzer::visit(VariableExprAST& node) {
 }
 
 void SemanticAnalyzer::visit(BinaryExprAST& node) {
+    // P1-04 / CT-12: 表达式树含 compile_time 根 → 优先整树编译期折叠。
+    if (containsCompileTimeRoot(&node)) {
+        size_t baseErrors = getErrors().size();
+        auto v = evalCompileTime(&node, node);
+        if (v && (v->type == ConstValue::INT || v->type == ConstValue::DOUBLE)) {
+            node.ctHandled = true;
+            node.isLValue = false;
+            if (v->type == ConstValue::INT) {
+                node.ctInt = v->intVal;
+                node.type = ctIntTypeFor(typeCtx, v->intVal);
+            } else {
+                node.ctFloat = v->doubleVal;
+                node.type = typeCtx->getFloat64();
+            }
+            return;
+        }
+        if (v) {
+            // STR/CHAR 结果逃逸到运行时上下文（spec §2 意图为类型错误）。
+            emitError("compile-time string value cannot be used in runtime context", node);
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
+        }
+        if (getErrors().size() > baseErrors) {
+            // 求值器已诊断（未知成员/深度超限）：就地报错，不回退。
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
+        }
+        // 混入运行时操作数且无诊断：回退普通路径——CT 子节点由各自钩子
+        // 求值成常量，本节点作普通运行时表达式处理。
+    }
+
     Type* leftType = getExprType(*node.left);
     Type* rightType = getExprType(*node.right);
 
@@ -1070,6 +1251,39 @@ void SemanticAnalyzer::visit(BinaryExprAST& node) {
 }
 
 void SemanticAnalyzer::visit(UnaryExprAST& node) {
+    // P1-04 / CT-12: 表达式树含 compile_time 根 → 优先整树编译期折叠。
+    if (containsCompileTimeRoot(&node)) {
+        size_t baseErrors = getErrors().size();
+        auto v = evalCompileTime(&node, node);
+        if (v && (v->type == ConstValue::INT || v->type == ConstValue::DOUBLE)) {
+            node.ctHandled = true;
+            node.isLValue = false;
+            if (v->type == ConstValue::INT) {
+                node.ctInt = v->intVal;
+                node.type = ctIntTypeFor(typeCtx, v->intVal);
+            } else {
+                node.ctFloat = v->doubleVal;
+                node.type = typeCtx->getFloat64();
+            }
+            return;
+        }
+        if (v) {
+            // STR/CHAR 结果逃逸到运行时上下文（spec §2 意图为类型错误）。
+            emitError("compile-time string value cannot be used in runtime context", node);
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
+        }
+        if (getErrors().size() > baseErrors) {
+            // 求值器已诊断（未知成员/深度超限）：就地报错，不回退。
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
+        }
+        // 混入运行时操作数且无诊断：回退普通路径——CT 子节点由各自钩子
+        // 求值成常量，本节点作普通运行时表达式处理。
+    }
+
     Type* operandType = getExprType(*node.operand);
 
     switch (node.op) {
@@ -1489,6 +1703,39 @@ void SemanticAnalyzer::visit(AssignmentExprAST& node) {
 }
 
 void SemanticAnalyzer::visit(TernaryExprAST& node) {
+    // P1-04 / CT-12: 表达式树含 compile_time 根 → 优先整树编译期折叠。
+    if (containsCompileTimeRoot(&node)) {
+        size_t baseErrors = getErrors().size();
+        auto v = evalCompileTime(&node, node);
+        if (v && (v->type == ConstValue::INT || v->type == ConstValue::DOUBLE)) {
+            node.ctHandled = true;
+            node.isLValue = false;
+            if (v->type == ConstValue::INT) {
+                node.ctInt = v->intVal;
+                node.type = ctIntTypeFor(typeCtx, v->intVal);
+            } else {
+                node.ctFloat = v->doubleVal;
+                node.type = typeCtx->getFloat64();
+            }
+            return;
+        }
+        if (v) {
+            // STR/CHAR 结果逃逸到运行时上下文（spec §2 意图为类型错误）。
+            emitError("compile-time string value cannot be used in runtime context", node);
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
+        }
+        if (getErrors().size() > baseErrors) {
+            // 求值器已诊断（未知成员/深度超限）：就地报错，不回退。
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
+        }
+        // 混入运行时操作数且无诊断：回退普通路径——CT 子节点由各自钩子
+        // 求值成常量，本节点作普通运行时表达式处理。
+    }
+
     Type* condType = getExprType(*node.cond);
     Type* thenType = getExprType(*node.then);
     Type* elseType = getExprType(*node.elseExpr);
@@ -1618,6 +1865,12 @@ void SemanticAnalyzer::visit(ArrayAccessExprAST& node) {
 }
 
 void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
+    // P1-04 / CT-04/05: compile_time 成员链特判——先于对象解析（根标识符是
+    // 编译期命名空间，不是普通变量，普通路径会误报 undeclared）。
+    if (tryAnalyzeCompileTimeChain(node)) {
+        return;
+    }
+
     Type* objType = getExprType(*node.object);
 
     if (!objType) {
@@ -1819,6 +2072,11 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
 }
 
 void SemanticAnalyzer::visit(MethodCallExprAST& node) {
+    // P1-04 / CT-01/02: compile_time 成员调用特判（先于对象解析，理由同链形）。
+    if (tryAnalyzeCompileTimeCall(node)) {
+        return;
+    }
+
     Type* objType = getExprType(*node.object);
     if (!objType) {
         node.type = nullptr;
