@@ -294,3 +294,83 @@ TEST_F(GenericE2E, CallerScopeTypeParamName) {
         }
     )", "gen14.c"), 1);
 }
+
+// ========== P1-03 评审修复轮（fix-first） ==========
+
+TEST_F(GenericE2E, InstanceSharedAcrossFunctions) {
+    // C1：同一实例在两个函数中调用——实例符号不得落在首次调用者的局部
+    // 作用域。
+    EXPECT_EQ(runSource(R"(
+        template<typename T> T tmax(T a, T b) { return a; }
+        int32 f() { return tmax(3, 4); }
+        int32 main() { return f() + tmax(1, 2); }
+    )", "gen15.c"), 4);
+}
+
+TEST_F(GenericE2E, SpeculativeRollbackRestoresRshift) {
+    // C2：投机解析失败回滚须恢复被拆分的 >> token（静默错译回归）。
+    EXPECT_EQ(runSource(R"(
+        typedef int32 b;
+        int32 main() {
+            int32 b2 = 8; int32 x = 0;
+            int32 b = b2;
+            int32 y = x < b >> 2;
+            return y ? 1 : 2;
+        }
+    )", "gen16.c"), 1);
+}
+
+TEST_F(GenericE2E, TemplateClassInheritsPlainBase) {
+    // C3：模板类继承非模板基类——实例布局须含基类子对象槽。
+    EXPECT_EQ(runSource(R"(
+        class Base {
+        public:
+            int32 b;
+        };
+        template<typename T> class W : Base {
+        public:
+            T v;
+        };
+        int32 main() {
+            W<int32> w;
+            w.b = 3;
+            w.v = 4;
+            return w.b * 10 + w.v;
+        }
+    )", "gen17.c"), 34);
+}
+
+TEST_F(GenericE2E, NestedEnumInTemplateClass) {
+    // I4：克隆器覆盖嵌套 union/enum/type 声明——不得静默丢弃。
+    EXPECT_EQ(runSource(R"(
+        template<typename T> class EE {
+        public:
+            enum Color { Red = 7 };
+            T tag;
+            int32 first() { return (int32)EE::Red; }
+        };
+        int32 main() {
+            EE<int32> e;
+            e.tag = 1;
+            return e.first();
+        }
+    )", "gen18.c"), 7);
+}
+
+TEST_F(GenericE2E, SelfValueFieldDiagnosed) {
+    // I3：非模板类值语义自引用（A x）须诊断而非编译器崩溃。
+    Lexer lexer("gen19.c", "class BadA { BadA x; };\nint32 main() { return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_FALSE(analyzer.getErrors().empty());
+    bool found = false;
+    for (auto& e : analyzer.getErrors()) {
+        if (e.message.find("cannot have its own type by value") != std::string::npos)
+            found = true;
+    }
+    EXPECT_TRUE(found);
+}

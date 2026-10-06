@@ -2122,3 +2122,35 @@ TEST(TplCrtpSemTest, CrtpRecursiveValueFieldRejected) {
     }
     EXPECT_TRUE(found);
 }
+
+// ========== P1-03 评审修复轮（fix-first） ==========
+
+TEST(TplFixSemTest, ExplicitArgsSuppressDeduction) {
+    // I1：显式实参定位后推导跳过（plan 钉死规则）——字面量不再冲突。
+    TemplateRegistry::instance().resetForTesting();
+    EXPECT_TRUE(analyzeFullyOk(
+        "template<typename T> T tmax(T a, T b) { return a; }\n"
+        "int32 main() { return tmax<float64>(3, 4); }"));
+}
+
+TEST(TplFixSemTest, DeepNestingDepthLimit) {
+    // I2：真实 parser→sema 路径上的深度上限（100 层须诊断，64 内合法）。
+    TemplateRegistry::instance().resetForTesting();
+    std::string src = "template<typename T> struct Box { T value; };\n";
+    std::string inner = "int32";
+    for (int i = 0; i < 100; ++i) inner = "Box<" + inner + ">";
+    src += "int32 main() { " + inner + " b; return 0; }";
+    Lexer lexer("t.c", src);
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    bool found = false;
+    for (auto& e : analyzer.getErrors()) {
+        if (e.message.find("template instantiation depth limit exceeded") != std::string::npos)
+            found = true;
+    }
+    EXPECT_TRUE(found);
+}

@@ -616,16 +616,20 @@ std::unique_ptr<ExprAST> Parser::parsePrimaryImpl() {
         std::vector<Type*> explicitTemplateArgs;
         std::vector<long long> explicitTemplateValues;
         bool hasTemplateArgs = false;
+        // 评审 C2：closeBracket 会原地拆分 RSHIFT token——回滚须恢复，
+        // 否则比较表达式被静默错译。
+        std::vector<std::pair<size_t, TokenType>> rshiftMutations;
         if (peek() && peek()->type == TokenType::TOKEN_LT) {
             size_t save = m_currentTokenPos;
             bool ok = true;
             advance(); // '<'
-            auto closeBracket = [this]() -> bool {
+            auto closeBracket = [this, &rshiftMutations]() -> bool {
                 if (check(TokenType::TOKEN_GT)) {
                     advance();
                     return true;
                 }
                 if (check(TokenType::TOKEN_RSHIFT)) {
+                    rshiftMutations.emplace_back(m_currentTokenPos, TokenType::TOKEN_RSHIFT);
                     m_tokens[m_currentTokenPos].type = TokenType::TOKEN_GT;
                     m_tokens[m_currentTokenPos].lexeme = ">";
                     return true;
@@ -656,6 +660,11 @@ std::unique_ptr<ExprAST> Parser::parsePrimaryImpl() {
             if (ok) {
                 hasTemplateArgs = true;
             } else {
+                // 评审 C2：恢复被 closeBracket 拆分的 RSHIFT token。
+                for (auto& [pos, orig] : rshiftMutations) {
+                    m_tokens[pos].type = orig;
+                    m_tokens[pos].lexeme = ">>";
+                }
                 m_currentTokenPos = save;
                 explicitTemplateArgs.clear();
                 explicitTemplateValues.clear();
@@ -1796,17 +1805,27 @@ Type* Parser::parseBaseType() {
             // 实参可为类型或整型字面量；嵌套 `>>` 按深度拆分（同 Optional）。
             if (check(TokenType::TOKEN_LT)) {
                 advance(); // consume '<'
-                auto closeBracket = [this]() -> bool {
+                // 评审 C2：closeBracket 原地拆分 RSHIFT——失败路径（调用方
+                // 可能回退光标重解析）必须恢复。
+                std::vector<std::pair<size_t, TokenType>> rshiftMutations;
+                auto closeBracket = [this, &rshiftMutations]() -> bool {
                     if (check(TokenType::TOKEN_GT)) {
                         advance();
                         return true;
                     }
                     if (check(TokenType::TOKEN_RSHIFT)) {
+                        rshiftMutations.emplace_back(m_currentTokenPos, TokenType::TOKEN_RSHIFT);
                         m_tokens[m_currentTokenPos].type = TokenType::TOKEN_GT;
                         m_tokens[m_currentTokenPos].lexeme = ">";
                         return true;
                     }
                     return false;
+                };
+                auto restoreRshift = [this, &rshiftMutations]() {
+                    for (auto& [pos, orig] : rshiftMutations) {
+                        m_tokens[pos].type = orig;
+                        m_tokens[pos].lexeme = ">>";
+                    }
                 };
                 auto* inst = new TypeInstanceType(name);
                 while (true) {
@@ -1815,11 +1834,13 @@ Type* Parser::parseBaseType() {
                         inst->valueArgs.push_back(std::get<long long>(numTok->value));
                     } else if (check(TokenType::TOKEN_FLOAT)) {
                         error("non-type template argument must be an integer constant", *peek());
+                        restoreRshift();
                         return nullptr;
                     } else {
                         Type* argType = parseType();
                         if (!argType) {
                             errorUnexpected("expected type or integer template argument");
+                            restoreRshift();
                             return nullptr;
                         }
                         inst->typeArgs.push_back(argType);
@@ -1829,6 +1850,7 @@ Type* Parser::parseBaseType() {
                 }
                 if (!closeBracket()) {
                     errorUnexpected("expected '>' to close template argument list");
+                    restoreRshift();
                     return nullptr;
                 }
                 return inst;

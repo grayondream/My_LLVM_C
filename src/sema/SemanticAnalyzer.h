@@ -38,6 +38,7 @@ public:
 
     // P1-03 / GEN-03: 解析类型树中的 TypeInstance 占位为具体实例类型。
     Type* resolveTypeInstance(Type* t, ASTNode& at);
+    Type* resolveTypeInstanceUse(TypeInstanceType* use, ASTNode& at);
     // 别名展开产物中的实例类型当场补 visit。
     void ensureInstanceVisited(Type* t, ASTNode& at);
     // P1-03 / INH-05: 基类实例惰性方法的首次调用触发。
@@ -200,6 +201,8 @@ private:
     // PAR-17: static 方法体 visit 标记（this 诊断）。
     bool m_inStaticMethod = false;
     // P1-03 / INH-05 / GEN-09: 惰性方法体——基类实例（CRTP）延迟到首次调用。
+    int m_useDepth = 0; // 评审 I2：使用点解析深度
+    static constexpr int kMaxTemplateUseDepth = 64;
     std::vector<std::string> m_definingStack; // visit 中的类名栈（CRTP 自嵌套检测）
     std::unordered_set<std::string> m_lazyInstanceMethods;
     std::unordered_map<std::string, std::vector<FunctionDeclAST*>> m_pendingLazyMethods;

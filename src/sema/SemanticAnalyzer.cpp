@@ -1357,6 +1357,10 @@ bool SemanticAnalyzer::tryAnalyzeTemplateCall(CallExprAST& node) {
         }
     }
 
+    // 评审 I1：显式实参定位后推导跳过——显式绑定单独记录（区别于推导
+    // 绑定，后者仍须做冲突检测）。
+    std::unordered_set<std::string> explicitlyBound;
+
     // typename/value 参数按声明顺序分配。
     std::vector<TemplateDeclAST::Param*> typeParams;
     std::vector<TemplateDeclAST::Param*> valueParams;
@@ -1377,8 +1381,10 @@ bool SemanticAnalyzer::tryAnalyzeTemplateCall(CallExprAST& node) {
                       node);
             return true;
         }
-        for (size_t i = 0; i < typeParams.size(); ++i)
+        for (size_t i = 0; i < typeParams.size(); ++i) {
             typeArgMap[typeParams[i]->name] = node.explicitTemplateArgs[i];
+            explicitlyBound.insert(typeParams[i]->name);
+        }
         for (size_t i = 0; i < valueParams.size(); ++i)
             valueArgMap[valueParams[i]->name] = node.explicitTemplateValues[i];
     }
@@ -1403,9 +1409,12 @@ bool SemanticAnalyzer::tryAnalyzeTemplateCall(CallExprAST& node) {
         Type* a = argTypes[i];
         if (!a) continue;
         if (p && p->kind == TypeKind::TypeVar) {
+            // 评审 I1：显式实参定位后推导跳过（plan 钉死：显式优先）。
+            if (explicitlyBound.count(static_cast<TypeVarType*>(p)->name)) continue;
             if (!deduce(static_cast<TypeVarType*>(p)->name, a)) return true;
         } else if (p && p->kind == TypeKind::Pointer && p->base &&
                    p->base->kind == TypeKind::TypeVar) {
+            if (explicitlyBound.count(static_cast<TypeVarType*>(p->base)->name)) continue;
             Type* aStripped = a;
             while (aStripped && aStripped->kind == TypeKind::Typedef)
                 aStripped = static_cast<TypedefType*>(aStripped)->aliasedType;
@@ -1445,7 +1454,12 @@ bool SemanticAnalyzer::tryAnalyzeTemplateCall(CallExprAST& node) {
     if (!m_visitedInstances.count(instName)) {
         m_visitedInstances.insert(instName);
         m_instStack.push_back(node.callee + "<...>");
+        // 评审 C1：实例符号必须落在全局作用域——否则同一实例的第二个调用
+        // 点（另一函数/另一块作用域）找不到声明。
+        Scope* savedScope = currentScope;
+        currentScope = globalScope.get();
         visit(*inst);
+        currentScope = savedScope;
         m_instStack.pop_back();
     }
 
@@ -2832,58 +2846,22 @@ Type* SemanticAnalyzer::resolveTypeInstance(Type* t, ASTNode& at) {
         }
         case TypeKind::TypeInstance: {
             auto* use = static_cast<TypeInstanceType*>(t);
-
-            // 嵌套实例实参先解析（Box<Box<i32>> 的内层先行完成）。
-            for (auto*& arg : use->typeArgs) arg = resolveTypeInstance(arg, at);
-
-            auto& reg = TemplateRegistry::instance();
-            std::string name =
-                TemplateRegistry::instanceName(use->templateName, use->typeArgs, use->valueArgs);
-
-            // 别名模板：展开目标类型（键缓存防重复展开），产物中的实例
-            // 类型立即补 visit——字段访问要求布局当场完整。
-            auto* tpl = reg.find(use->templateName);
-            if (tpl && dynamic_cast<UsingDeclAST*>(tpl->decl.get())) {
-                if (m_aliasCache.count(name)) return m_aliasCache[name];
-                std::unordered_map<std::string, Type*> typeArgMap;
-                std::unordered_map<std::string, long long> valueArgMap;
-                size_t ti = 0, vi = 0;
-                for (auto& p : tpl->params) {
-                    if (p.isType) {
-                        if (ti < use->typeArgs.size()) typeArgMap[p.name] = use->typeArgs[ti++];
-                    } else {
-                        if (vi < use->valueArgs.size()) valueArgMap[p.name] = use->valueArgs[vi++];
-                    }
-                }
-                Type* expanded = TemplateInstantiator(typeArgMap, valueArgMap)
-                                     .rewrite(static_cast<UsingDeclAST*>(tpl->decl.get())
-                                                  ->aliasedType);
-                m_aliasCache[name] = expanded;
-                ensureInstanceVisited(expanded, at);
-                return expanded;
-            }
-
-            auto* decl = reg.instantiateClass(use->templateName, use->typeArgs, use->valueArgs);
-            if (!decl) {
-                emitError("cannot instantiate template '" + use->templateName + "'", at);
+            // 评审 I2：真实 parser→sema 路径上的深度上限（嵌套实参在此自底
+            // 向上解析，Registry 的克隆链计不到它们）。单出口：递归深度
+            // 由 lambda 外的计数器守护。
+            ++m_useDepth;
+            if (m_useDepth > kMaxTemplateUseDepth) {
+                emitError("template instantiation depth limit exceeded (64)", at);
+                --m_useDepth;
                 return nullptr;
             }
-
-            // 同一实例只 visit 一次（去重键已在 Registry 保证 decl 唯一）。
-            if (!m_visitedInstances.count(name)) {
-                m_visitedInstances.insert(name);
-                m_instStack.push_back(use->templateName + "<...>");
-                visit(*static_cast<StructDeclAST*>(decl));
-                m_instStack.pop_back();
-            }
-
-            if (auto* ct = typeCtx->getClass(name)) return ct;
-            return typeCtx->getStruct(name);
+            Type* result = resolveTypeInstanceUse(use, at);
+            --m_useDepth;
+            return result;
         }
         case TypeKind::Struct: {
             auto* st = static_cast<StructType*>(t);
-            if (st->isTemplatePattern) {
-                emitError("use of template '" + st->name + "' requires template arguments", at);
+            if (st->isTemplatePattern) {                emitError("use of template '" + st->name + "' requires template arguments", at);
                 return nullptr;
             }
             return t;
@@ -2920,6 +2898,56 @@ Type* SemanticAnalyzer::resolveTypeByName(const std::string& name) {
 
 // 别名展开产物中的实例类型：若其实例 decl 已克隆但未 visit，立即补齐
 // （字段访问要求布局当场完整）。
+// P1-03 / GEN-03: TypeInstance 占位的解析主体（深度计数在调用方）。
+Type* SemanticAnalyzer::resolveTypeInstanceUse(TypeInstanceType* use, ASTNode& at) {
+    // 嵌套实例实参先解析（Box<Box<i32>> 的内层先行完成）。
+    for (auto*& arg : use->typeArgs) arg = resolveTypeInstance(arg, at);
+
+    auto& reg = TemplateRegistry::instance();
+    std::string name =
+        TemplateRegistry::instanceName(use->templateName, use->typeArgs, use->valueArgs);
+
+    // 别名模板：展开目标类型（键缓存防重复展开），产物中的实例
+    // 类型立即补 visit——字段访问要求布局当场完整。
+    auto* tpl = reg.find(use->templateName);
+    if (tpl && dynamic_cast<UsingDeclAST*>(tpl->decl.get())) {
+        if (m_aliasCache.count(name)) return m_aliasCache[name];
+        std::unordered_map<std::string, Type*> typeArgMap;
+        std::unordered_map<std::string, long long> valueArgMap;
+        size_t ti = 0, vi = 0;
+        for (auto& p : tpl->params) {
+            if (p.isType) {
+                if (ti < use->typeArgs.size()) typeArgMap[p.name] = use->typeArgs[ti++];
+            } else {
+                if (vi < use->valueArgs.size()) valueArgMap[p.name] = use->valueArgs[vi++];
+            }
+        }
+        Type* expanded = TemplateInstantiator(typeArgMap, valueArgMap)
+                             .rewrite(
+                                 static_cast<UsingDeclAST*>(tpl->decl.get())->aliasedType);
+        m_aliasCache[name] = expanded;
+        ensureInstanceVisited(expanded, at);
+        return expanded;
+    }
+
+    auto* decl = reg.instantiateClass(use->templateName, use->typeArgs, use->valueArgs);
+    if (!decl) {
+        emitError("cannot instantiate template '" + use->templateName + "'", at);
+        return nullptr;
+    }
+
+    // 同一实例只 visit 一次（去重键已在 Registry 保证 decl 唯一）。
+    if (!m_visitedInstances.count(name)) {
+        m_visitedInstances.insert(name);
+        m_instStack.push_back(use->templateName + "<...>");
+        visit(*static_cast<StructDeclAST*>(decl));
+        m_instStack.pop_back();
+    }
+
+    if (auto* ct = typeCtx->getClass(name)) return ct;
+    return typeCtx->getStruct(name);
+}
+
 void SemanticAnalyzer::ensureInstanceVisited(Type* t, ASTNode& at) {
     if (!t) return;
     std::string name;
@@ -2966,7 +2994,9 @@ void SemanticAnalyzer::visitLazyMethodsOf(const std::string& className) {
 
 // CRTP：模板基类实例的字段若为派生类值语义自嵌套（`D next`），在实例化点
 // 拒绝——类型尺寸无限。
-void SemanticAnalyzer::checkInstanceFieldComplete(StructDeclAST& node) {    if (m_instStack.empty()) return;
+// 评审 I3 + INH-05：类/结构体字段值语义自引用（`A x` / CRTP 的 `D next`）
+// ——类型尺寸无限，诊断而非编译器崩溃。模板实例化中沿用原文案。
+void SemanticAnalyzer::checkInstanceFieldComplete(StructDeclAST& node) {
     for (auto& field : node.fields) {
         Type* ft = field.second;
         while (ft && ft->kind == TypeKind::Typedef) {
@@ -2978,9 +3008,15 @@ void SemanticAnalyzer::checkInstanceFieldComplete(StructDeclAST& node) {    if (
                                 : static_cast<StructType*>(ft)->name;
         if (std::find(m_definingStack.begin(), m_definingStack.end(), fname) !=
             m_definingStack.end()) {
-            emitError("recursive instantiation of template '" + m_instStack.back() +
-                          "': field '" + field.first + "' has value type '" + fname + "'",
-                      node);
+            if (!m_instStack.empty()) {
+                emitError("recursive instantiation of template '" + m_instStack.back() +
+                              "': field '" + field.first + "' has value type '" + fname + "'",
+                          node);
+            } else {
+                emitError("field '" + field.first + "' of '" + fname +
+                              "' cannot have its own type by value",
+                          node);
+            }
             return;
         }
     }

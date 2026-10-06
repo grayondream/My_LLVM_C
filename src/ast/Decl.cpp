@@ -5,6 +5,8 @@
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Constants.h"
 #include "Mangle.h"
+#include <functional>
+#include <unordered_set>
 
 static llvm::Constant* foldToConstant(CodegenContext& ctx, const FoldedValue& fv) {
     switch (fv.type) {
@@ -460,16 +462,36 @@ llvm::Value* DeclStmtAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* TranslationUnitAST::codegen(CodegenContext& ctx) {
-    // 预扫 1：struct/class 布局——模板实例（名字含 '$'）先行，派生类布局
-    // 的基类子对象（llvm::StructType::getTypeByName）依赖其先存在。
+    // 预扫 1：struct/class 布局——模板实例（名字含 '$'）先行，且按基类
+    // 依赖序出码（评审 C3：模板类继承非模板基类时，基类子对象槽依赖基类
+    // llvm::StructType 先存在）。函数体只生成一次（FunctionDeclAST 幂等
+    // 守卫），此处可安全重复到达。
+    std::unordered_set<std::string> emittedStructs;
+    std::function<void(StructDeclAST*)> emitStruct = [&](StructDeclAST* st) {
+        if (!st || emittedStructs.count(st->name)) return;
+        emittedStructs.insert(st->name);
+        ClassType* ct = TypeContext::instance().getClass(st->name);
+        std::string base = ct ? ct->baseClass : std::string();
+        if (!base.empty()) {
+            for (auto& d : declarations) {
+                if (auto* b = dynamic_cast<StructDeclAST*>(d.get())) {
+                    if (b->name == base) {
+                        emitStruct(b);
+                        break;
+                    }
+                }
+            }
+        }
+        st->codegen(ctx);
+    };
     for (auto& decl : declarations) {
         if (auto* st = dynamic_cast<StructDeclAST*>(decl.get())) {
-            if (st->name.find('$') != std::string::npos) st->codegen(ctx);
+            if (st->name.find('$') != std::string::npos) emitStruct(st);
         }
     }
     for (auto& decl : declarations) {
         if (auto* st = dynamic_cast<StructDeclAST*>(decl.get())) {
-            if (st->name.find('$') == std::string::npos) st->codegen(ctx);
+            if (st->name.find('$') == std::string::npos) emitStruct(st);
         }
     }
 
