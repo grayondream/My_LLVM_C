@@ -165,8 +165,73 @@ TEST_F(CompileTimeEval, UnknownMemberDiagnosed) {
     EXPECT_TRUE(found);
 }
 
+// ---- P1-04 / CT-02: compile_time.static_assert ----
+
+TEST_F(CompileTimeEval, StaticAssertOk) {
+    EXPECT_TRUE(analyzeOk(R"(
+compile_time.static_assert(1 == 1, "ok");
+int32 main() { return 0; }
+)"));
+}
+
+TEST_F(CompileTimeEval, StaticAssertFailsWithMsg) {
+    Lexer lexer("ct_sa_msg.c", R"(
+compile_time.static_assert(1 == 2, "must hold");
+int32 main() { return 0; }
+)");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_FALSE(analyzer.getErrors().empty());
+    bool found = false;
+    for (const auto& d : analyzer.getErrors()) {
+        if (d.message.find("static_assert failed: must hold") != std::string::npos) found = true;
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(CompileTimeEval, StaticAssertFailsNoMsg) {
+    Lexer lexer("ct_sa_nomsg.c", R"(
+compile_time.static_assert(1 == 2);
+int32 main() { return 0; }
+)");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_FALSE(analyzer.getErrors().empty());
+    bool found = false;
+    for (const auto& d : analyzer.getErrors()) {
+        if (d.message.find("static_assert failed") != std::string::npos
+            && d.message.find("static_assert failed:") == std::string::npos) found = true;
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(CompileTimeEval, StaticAssertNonConstant) {
+    Lexer lexer("ct_sa_nonconst.c", R"(
+int32 main() { int32 x = 1; compile_time.static_assert(x == 1, "x"); return 0; }
+)");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_FALSE(analyzer.getErrors().empty());
+    bool found = false;
+    for (const auto& d : analyzer.getErrors()) {
+        if (d.message.find("compile_time argument must be a compile-time constant") != std::string::npos) found = true;
+    }
+    EXPECT_TRUE(found);
+}
+
 TEST_F(CompileTimeEval, UnknownTypeArgDiagnosed) {
-    // Review Focus 5 关联：类型实参按名解析，失败诊断不崩溃。
     Lexer lexer("ct_unknown_type.c", "int32 main() { usize s = compile_time.size_of(Nope); return 0; }");
     auto tokens = lexer.tokenize();
     Parser parser(tokens);

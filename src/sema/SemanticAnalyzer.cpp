@@ -760,6 +760,34 @@ bool SemanticAnalyzer::tryAnalyzeCompileTimeCall(MethodCallExprAST& node) {
     }
     node.ctHandled = true;
     node.isLValue = false;
+
+    // P1-04 / CT-02: compile_time.static_assert(cond[, msg])。
+    if (node.methodName == "static_assert") {
+        if (node.args.empty() || node.args.size() > 2) {
+            emitError("compile_time.static_assert requires (condition) or (condition, message)", node);
+            node.type = nullptr;
+            return true;
+        }
+        auto cond = ctEval().eval(node.args[0].get(), node);
+        if (!cond || cond->type != ConstValue::INT) {
+            emitError("compile_time argument must be a compile-time constant", node);
+            node.type = nullptr;
+            return true;
+        }
+        if (cond->intVal == 0) {
+            std::string msg = "static_assert failed";
+            if (node.args.size() == 2) {
+                if (auto cv = ctEval().eval(node.args[1].get(), node);
+                    cv && cv->type == ConstValue::STR) {
+                    msg += ": " + cv->strVal;
+                }
+            }
+            emitError(msg, node);
+        }
+        node.type = nullptr;
+        return true;
+    }
+
     auto v = ctEval().eval(&node, node);
     if (v && v->type == ConstValue::INT) {
         node.ctInt = v->intVal;
@@ -2993,6 +3021,11 @@ void SemanticAnalyzer::analyzeTopLevelDecl(DeclAST& decl) {
         for (auto& d : multi->decls) {
             if (auto* v = dynamic_cast<VarDeclAST*>(d.get())) visit(*v);
             else if (auto* a = dynamic_cast<ArrayDeclAST*>(d.get())) visit(*a);
+        }
+    } else if (auto* ctAssert = dynamic_cast<CompileTimeAssertDeclAST*>(&decl)) {
+        // P1-04 / CT-02: 顶层 static_assert——内层 MethodCall 走钩子求值。
+        if (auto* call = dynamic_cast<MethodCallExprAST*>(ctAssert->call.get())) {
+            visit(*call);
         }
     }
 

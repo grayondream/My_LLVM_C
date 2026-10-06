@@ -179,3 +179,12 @@ int32 main() { return r == 42 ? 1 : 0; }
 )", "ct_constexpr_fn.c");
     EXPECT_EQ(r, 1);
 }
+
+TEST_F(CompileTimeE2E, StaticAssertE2E) {
+    int r = runSource(R"(
+compile_time.static_assert(compile_time.target.os == "linux", "this test runs on linux");
+compile_time.static_assert(compile_time.size_of(int32) == 4, "int32 is 4 bytes");
+int32 main() { return 0; }
+)", "ct_static_assert.c");
+    EXPECT_EQ(r, 0);
+}
