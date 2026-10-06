@@ -1,5 +1,6 @@
 #include "CodegenContext.h"
 #include "ast/Type.h"
+#include "ast/Mangle.h"
 #include "ast/Expr.h"
 #include "ast/Symbol.h"
 #include "support/Log.h"
@@ -511,20 +512,27 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
                             "Slice");
         }
         case TypeKind::Optional: {
-            // 可选类型表示为 { value, has_value } 结构体
-            auto* sliceType = static_cast<SliceType*>(type);
+            // P1-02 (TYP-13) DS4: { i1 valid, T value } — 判别标志在前。
+            // 原实现误转换 SliceType* 且字段序为 {T, i1}。
+            auto* optType = static_cast<OptionalType*>(type);
             std::vector<llvm::Type*> fieldTypes;
-            fieldTypes.push_back(getLLVMType(sliceType->elementType)); // value
-            fieldTypes.push_back(llvm::Type::getInt1Ty(*context));    // has_value
-            return llvm::StructType::create(*context, fieldTypes, "Optional");
+            fieldTypes.push_back(llvm::Type::getInt1Ty(*context));    // valid
+            fieldTypes.push_back(getLLVMType(optType->elementType));  // value
+            return llvm::StructType::create(
+                *context, fieldTypes, "Optional_" + typeToMangled(optType->elementType));
         }
         case TypeKind::Result: {
-            // 结果类型表示为 { value, error } 结构体
+            // P1-02 (TYP-14) DS4: { i1 ok, T value, E error } — 原实现无
+            // 判别标志（DEC-03 裁决随此轮）。
             auto* resultType = static_cast<ResultType*>(type);
             std::vector<llvm::Type*> fieldTypes;
+            fieldTypes.push_back(llvm::Type::getInt1Ty(*context));     // ok
             fieldTypes.push_back(getLLVMType(resultType->successType)); // value
             fieldTypes.push_back(getLLVMType(resultType->errorType));   // error
-            return llvm::StructType::create(*context, fieldTypes, "Result");
+            return llvm::StructType::create(
+                *context, fieldTypes,
+                "Result_" + typeToMangled(resultType->successType) + "_" +
+                    typeToMangled(resultType->errorType));
         }
         default:               return llvm::Type::getInt32Ty(*context);
     }
