@@ -131,8 +131,8 @@
 - `[x]` **TYP-11** 固定数组 `i32[32]`；VLA（可变长度数组）；多维数组。**完成**：一维数组形参 `T name[N]` 去糖为 slice（2026-10-01，spec `docs/superpowers/specs/2026-10-01-typ11-array-params-design.md`）；多维数组本体（2026-10-03，spec docs/superpowers/specs/2026-10-03-multidim-arrays-design.md；顺带修复全局数组带初始化器的既有缺口）；多维形参行 slice 去糖（2026-10-04，spec docs/superpowers/specs/2026-10-04-multidim-array-params-design.md；顺带修复 typesEqual 数组分支忽略元素/长度的缺陷）。**VLA 明确不支持**（2026-10-05 用户决策）：运行时长度分配与安全定位冲突（无界栈增长）、C23 已将 VLA 降为可选、动态长度由 Slice 承接；专用诊断"variable-length arrays are not supported"（声明与形参两处）+ pin 测试。
 - `[x]` **TYP-12** `Slice`：`{ptr, length}`，不拥有、零拷贝。**已完成**：下标读写、`.len`、数组→slice 单向零拷贝退化（传参/赋值/初始化）、零初始化 `{null,0}`、规范 LLVM 单例类型、slice 元素类型严格比较。范围外（spec `docs/superpowers/specs/2026-09-30-slice-design.md` §8）：范围切片、显式构造、边界检查、字符串退化；遗留：无（MethodCall 传参退化已完成，2026-10-02——resolveMethod 两阶段匹配 + resolvedParamTypes，spec docs/superpowers/specs/2026-10-02-methodcall-decay-design.md）。全局变量 codegen 缺口已修复（无初始化器全局现为零初始化定义）；`T name[N]` 形参已去糖（TYP-11），return 局部数组被拒绝（悬垂 D4）。
 - `[x]` **缺陷（评审发现，2026-10-04，已修复 2026-10-05）**：数组赋值静默写坏内存。修复：`checkAssignmentTypes` 对 Array 左值一律拒绝（C99 6.5.16 数组为不可修改左值；`a=b` 含同形状、`a=p` 均报 SemIncompatibleAssignment，建议 memcpy/逐元素）；`p=a` 退化与 struct/union 拷贝赋值不受影响。测试 4 项（AASG 前缀，816→820）。
-- `[ ]` **TYP-13** `Optional<T>`：`{ bool valid; T value; }`；显式访问（**无 `?` 传播算子**）。
-- `[ ]` **TYP-14** `Result<T,E>`：布局与 `.error`/`.value` 语义；显式访问。
+- `[x]` **TYP-13** `Optional<T>`：`{ bool valid; T value; }`；显式访问（**无 `?` 传播算子**）。**完成**（2026-10-06）：`T?` 与 `Optional<T>` 双形式同型；`{i1, T}` 布局（valid 在前）；伪字段 `.valid`/`.value` 自由读写；类型相等按元素严格（`int32?` ≠ `float64?`）；spec `docs/superpowers/specs/2026-10-06-optional-result-design.md`。
+- `[x]` **TYP-14** `Result<T,E>`：布局与 `.error`/`.value` 语义；显式访问。**完成**（2026-10-06）：`{ bool ok; T value; E error; }`（DEC-03 裁决加判别标志）；伪字段 `.ok`/`.value`/`.error`；实参严格相等；e2e 错误路径/传参/返回可用；spec 同上。
 - `[ ]` **TYP-15** 指针类型：`T*`、函数指针、多级指针。
 - `[ ]` **TYP-16** 限定符类型：`const/volatile/restrict/atomic`。
 - `[ ]` **TYP-17** 函数类型：参数/返回/调用约定/可变参数。
@@ -353,7 +353,7 @@
 
 ### std.core
 - `[x]` **STD-01** 基础类型导出；`panic/assert/abort`。`libs/std/core.smc` 已建（`min/max/clamp`）。`panic`/`assert` 实现为**语言内建**（需调用点编译期信息，无预处理器；见 `docs/spec/stdlib.md`）：`assert(cond)` 失败打印 `file:line: assertion failed` 后 `abort()`，`panic(msg)` 打印 `file:line: panic: <msg>` 后 `abort()`；`abort` 由 `std.c` 绑定层暴露。
-- `[ ]` **STD-02** `Optional<T>`、`Result<T,E>`（显式访问访问器）。
+- `[x]` **STD-02** `Optional<T>`、`Result<T,E>`（显式访问访问器）。由语言内建承载（2026-10-06）：伪字段即访问器（`.valid/.value`、`.ok/.value/.error`），无 trait/泛型前 stdlib 不设包装函数；见 `docs/spec/stdlib.md` §6。
 - `[ ]` **STD-03** 内存操作：`memcpy/memset/memmove/memcmp`。
 - `[ ]` **STD-04** 整数运算与溢出辅助。
 
@@ -456,7 +456,7 @@
 
 - `[x]` **DEC-01** class 默认访问级别：**class 默认 private，struct 默认 public**（C++ 惯例）；`public:`/`private:`/`protected:` 段切换（`protected` 为上下文关键字，继承落地前 ≡ private，见 SEM-04/INH）。实现见 `src/frontend/Parser.cpp`（记录）与 `SemanticAnalyzer`（检查，E2009）。
 - `[x]` **DEC-02** `import math;` 后符号访问语法：**直接非限定访问**（`add`）。模块是物理边界，不引入 `math.add` 式运算符；限定名由模块内 `namespace` 提供。
-- `[ ]` **DEC-03** `Result<T,E>` 精确布局与 `.error`/`.value` 语义（显式访问，无 `?`）。
+- `[x]` **DEC-03** `Result<T,E>` 精确布局与 `.error`/`.value` 语义（显式访问，无 `?`）。**裁决**（2026-10-06，DS4）：`{ bool ok; T value; E error; }` 三字段加判别标志——两字段草案无法区分成功/失败，哨兵约定与任意 E 冲突；与 Optional `{ bool valid; T value; }` 对称。实现见 TYP-14。
 - `[ ]` **DEC-04** 默认参数范围；**确认不做**命名参数。
 - `[ ]` **DEC-05** `constexpr` 与 `compile_time` 的关系（是否合并）。
 - `[ ]` **DEC-06** Slice/数组边界检查默认策略：静态可证 or 运行时检查，Debug/Release 差异。
@@ -510,7 +510,7 @@
 
 ### P1：核心现代能力
 - `[x]` **P1-01** class / enum / union / 数组 / Slice（AGG、TYP-11/12）。enum、class 访问段（DEC-01）、union（AGG-03/17）、Slice（TYP-12）、嵌套类型（AGG-11，2026-10-05）全部完成。
-- `[ ]` **P1-02** Optional / Result 显式访问（TYP-13/14/STD-02）。
+- `[x]` **P1-02** Optional / Result 显式访问（TYP-13/14/STD-02）。完成（2026-10-06）：内建魔术类型（同 Slice 先例）；`Optional<T>`/`Result<T,E>` 类型位置尖括号 + `T?` 糖；严格类型相等；codegen 全通路（e2e 7 项）；DEC-03 随此轮裁决；spec `docs/superpowers/specs/2026-10-06-optional-result-design.md`，plan `docs/superpowers/plans/2026-10-06-optional-result.md`。
 - `[ ]` **P1-03** **泛型 + CRTP**（GEN、INH-05、PAR-17/18、CG-07/08）。
 - `[ ]` **P1-04** `compile_time` 与反射（CT；取代 type_info/static_assert）。
 - `[ ]` **P1-05** 注解系统（ANN）。

@@ -481,3 +481,23 @@
   错误路径按 INHMultiInheritDiagE2E 先例走显式管线；内存 Diagnostic::
   format() 不含码位（E2004 由驱动打印时附加），断言用消息文本。
 - 遗留：无（INH 评审 C1 根因就此闭合）。
+
+## 2026-10-06 — P1-02 Optional/Result（TYP-13/14、STD-02、DEC-03）
+- 完成事项：Optional/Result 内建魔术类型端到端——parser 类型位置尖括号
+  （`Optional<T>`/`Result<T,E>`，`>>` 原地拆分，isTypeStart 同步）；类型
+  相等严格化（typesEqual/compatible/checkAssignmentTypes 按实参）；布局
+  `{i1,T}`/`{i1,T,E}`（valid/ok 在前，修 SliceType 误转换，具名结构体幂
+  等）；伪字段 `.valid/.ok/.value/.error`（可写）；聚合初始化校验 + 
+  codegen（GEP/ExtractValue/常量）；e2e 7 项。spec + plan 在 docs/
+  superpowers/。
+- 关键裁决：getLLVMType 幂等（getTypeByName 先查，防实例漂移）；flag 字
+  段走 bool 赋值通道（true/false 是 int32 字面量）、value/error 字段 
+  typesEqual；`{5, true}` 类型层不可拒（C 语义合法）；嵌套 {} 跳过 sema
+  校验（struct 先例）；`T??` 双后缀不承诺。
+- 落点：`src/frontend/Parser.cpp`、`src/ast/Symbol.cpp`、
+  `src/ast/Expr.cpp`、`src/ast/Decl.cpp`、`src/codegen/CodegenContext.cpp`、
+  `src/sema/SemanticAnalyzer.cpp`、`docs/spec/{abi,conversions,stdlib}.md`、
+  `TODO.md`；测试 sema +16、layout +3、e2e +7。
+- 验证：全量 ctest 927/927（902 → 927，每任务 TDD RED→GREEN）。
+- 遗留：`T??`/return 位置 {} 推断未做（后者为既有全局行为，struct 同）；
+  最终评审待做。

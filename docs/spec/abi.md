@@ -24,8 +24,8 @@
 | `T*` | `ptr` (opaque) | 指针 | 指针 | `[impl]` | 多级 = 多 ptr |
 | `T[N]` | `[N x T]` | N×size | align(T) | `[impl]` | |
 | `T[]` (Slice) | `{ ptr, i64 }` | 16(64 位) | 8 | `[impl]` | **目标** `{ptr, usize}`，TYP-12 |
-| `T?` (Optional) | `{ T, i1 }` | — | — | `[impl]` | **目标** `{ bool valid; T value; }`，TYP-13 |
-| `Result<T,E>` | `{ T, E }` | — | — | `[impl]` | 精确布局/访问见 DEC-03 |
+| `T?` (Optional) | `{ i1, T }` | — | — | `[impl]` | `{ bool valid; T value; }`（TYP-13，2026-10-06 落地：判别标志在前） |
+| `Result<T,E>` | `{ i1, T, E }` | — | — | `[impl]` | `{ bool ok; T value; E error; }`（DEC-03 裁决，2026-10-06：加判别标志） |
 
 ## 2. 聚合布局
 
