@@ -12,3 +12,21 @@ docs/*
 PROGRESS.md
 Progress.md
 .tmp
+
+# P1-04: in-source CMake 产物防误提交（compile_time 轮教训）
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+cmake_test_discovery*.json
+compiler_tests[*_*.cmake
+*.o
+*.o.d
+bin/
+lib/
+googletest/
+/Makefile
+src/Makefile
+tests/Makefile
+a.out
