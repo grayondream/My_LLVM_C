@@ -944,6 +944,14 @@ void SemanticAnalyzer::visit(StringExprAST& node) {
 }
 
 void SemanticAnalyzer::visit(VariableExprAST& node) {
+    // PAR-17: static 方法内无 this——钉死诊断（非 static 方法里 `this` 是
+    // 隐式插入的参数，按普通变量解析）。
+    if (node.name == "this" && m_inStaticMethod) {
+        emitError("'this' is not valid in a static method", node);
+        node.type = nullptr;
+        node.isLValue = false;
+        return;
+    }
     // AGG-10/DS5: qualified static-member access — access check against the
     // declaring class before the ordinary symbol resolution proceeds.
     checkStaticMemberAccess(node.name, node);
@@ -1698,6 +1706,14 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
             node.isLValue = false;
             return;
         }
+        // PAR-17: `this.field`/`p.field`——点号对指针自动解引用（沿用
+        // methodcall decay 机制）；codegen 侧本就支持指针对象。
+        if (node.accessKind == MemberAccessKind::Dot && strippedObj->kind == TypeKind::Pointer &&
+            strippedBase && (strippedBase->kind == TypeKind::Struct ||
+                             strippedBase->kind == TypeKind::Class ||
+                             strippedBase->kind == TypeKind::Union)) {
+            strippedObj = strippedBase;
+        }
         if (strippedObj->kind != TypeKind::Struct && strippedObj->kind != TypeKind::Class &&
             strippedObj->kind != TypeKind::Union) {
             emitError("member access with '.' requires struct/class/union type, but got '" + typeToString(objType) + "'", node);
@@ -2360,7 +2376,9 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
                 // The desugared name uses the BARE class name — scopedName
                 // (applied inside visit) adds the namespace prefix, matching
                 // what the fully qualified access spelling flattens to.
+                m_inStaticMethod = true;
                 visit(*method);
+                m_inStaticMethod = false;
             } else {
                 auto* thisType = new Type(TypeKind::Pointer, classType);
                 auto thisParam = std::make_unique<ParamDeclAST>("this", thisType);

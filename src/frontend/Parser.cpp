@@ -2911,6 +2911,12 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
         return decl;
     }
 
+    // PAR-17: 自引用签名（`A* self()`）——体 parse 前先注册占位 ClassType，
+    // parseDeclarationImpl 的注册路径对已存在者幂等复用。
+    if (!TypeContext::instance().getClass(name)) {
+        TypeContext::instance().addClass(name, new ClassType(name));
+    }
+
     advance(); // consume '{'
 
     // AGG-11: extend the type-name prefix with this class's bare name while

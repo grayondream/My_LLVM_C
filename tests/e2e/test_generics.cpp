@@ -170,3 +170,34 @@ TEST_F(GenericE2E, AliasTemplateE2E) {
         }
     )", "gen7.c"), 56);
 }
+
+TEST_F(GenericE2E, ThisFieldAccess) {
+    EXPECT_EQ(runSource(R"(
+        class FieldA {
+        public:
+            int32 v;
+            int32 get() { return this.v; }
+        };
+        int32 main() {
+            FieldA a;
+            a.v = 9;
+            return a.get();
+        }
+    )", "gen8.c"), 9);
+}
+
+TEST_F(GenericE2E, ThisPassthrough) {
+    EXPECT_EQ(runSource(R"(
+        class SelfA {
+        public:
+            int32 v;
+            SelfA* self() { return this; }
+        };
+        int32 main() {
+            SelfA a;
+            a.v = 1;
+            a.self()->v = 6;
+            return a.v;
+        }
+    )", "gen9.c"), 6);
+}

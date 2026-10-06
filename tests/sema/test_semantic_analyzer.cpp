@@ -2080,3 +2080,24 @@ TEST(TplArrSemTest, NonIntegralValueParamRejected) {
     if (!ast) found = true; // parse 整体失败也计拒绝
     ASSERT_TRUE(found);
 }
+
+// ========== P1-03 / PAR-17: this 表达式（TplThis* 前缀） ==========
+
+TEST(TplThisSemTest, ThisInStaticRejected) {
+    TemplateRegistry::instance().resetForTesting();
+    Lexer lexer("t.c",
+        "class A { public: static int32 f() { return this.v; } };\n"
+        "int32 main() { return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    bool found = false;
+    for (auto& e : analyzer.getErrors()) {
+        if (e.message.find("'this' is not valid in a static method") != std::string::npos)
+            found = true;
+    }
+    EXPECT_TRUE(found);
+}

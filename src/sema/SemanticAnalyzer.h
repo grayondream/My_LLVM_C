@@ -190,6 +190,8 @@ private:
     // 与已 visit 实例去重集。
     std::vector<std::string> m_instStack;
     std::unordered_set<std::string> m_visitedInstances;
+    // PAR-17: static 方法体 visit 标记（this 诊断）。
+    bool m_inStaticMethod = false;
     // 别名模板展开缓存：键 = 实例 mangled 名。
     std::unordered_map<std::string, Type*> m_aliasCache;
     std::unique_ptr<Scope> globalScope;
