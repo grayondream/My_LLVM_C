@@ -53,7 +53,7 @@
 - `[x]` **LEX-05** `(已实现)` 浮点字面量：小数/指数/`f16/f32/f64/f128` 后缀；补全测试。**已完成**：小数（含“结尾点”形式 `1.` / `1.e3`，数字后紧跟 `.` 一律进入小数部分）、指数 `e/E`（可带 `+`/`-`，数字间允许 `_`）、后缀走 LEX-15；带指数即浮点，无后缀默认 `float64`（`tests/frontend/test_lexer.cpp` 的 `LexerFloatExponentTest`/`LexerTrailingDotFloatTest`）。**明确延后**：十六进制浮点 `0x1p3` 不入规范（无 std.math/位级用例，YAGNI；如需再挂靠 LEX-04/TYP-04）。
 - `[ ]` **LEX-06** `(已实现)` 字符与字符串字面量：转义、UTF-8；补原始字符串/多行字符串。
 - `[ ]` **LEX-07** `(已实现)` 注释：行注释/块注释；补文档注释。
-- `[ ]` **LEX-08** `(改)` 泛型 `template<...>` 与比较运算符 `<`、`>>` 拆分的歧义消解（为 GEN 铺路）。
+- `[x]` **LEX-08** `(改)` 泛型 `template<...>` 与比较运算符 `<`、`>>` 拆分的歧义消解（2026-10-06）。类型位置 `<` 跟随标识符 → 实参列表；调用位置投机解析 `name<args>(`，失败回滚按比较（歧义取比较，C++ 立场）；`>>` 按嵌套深度拆分。
 - `[ ]` **LEX-09** Slice 语法 `T[]` 的 token 与解析支持（当前已有 `SliceType`，核对）。
 - `[ ]` **LEX-10** 注解 token：`[[repr(C)]]/[[packed]]/[[align(64)]]/[[inline]]/[[cold]]/[[nonnull]]/[[deprecated]]`。
 - `[x]` **LEX-11** `static_cast<T>(x)` / `reinterpret_cast<T>(x)` 等转换关键字（为 INH/CRTP 铺路）。已实现为**上下文关键字**（紧跟 `<类型>` 时解析），见 PAR-18。
@@ -85,11 +85,11 @@
 - `[ ]` **PAR-14** `(已实现)` `sizeof`；`(新)` `alignof`、`offsetof`。
 - `[ ]` **PAR-15** `(新)` `compile_time` 表达式：`static_assert`、`if`、目标/构建查询、反射（取代 `type_info`）。
 - `[ ]` **PAR-16** `(新)` 内联汇编 `asm` 语句/表达式。
-- `[ ]` **PAR-17** `(新)` `this` 表达式（CRTP 必需）。
+- `[x]` **PAR-17** `(新)` `this` 表达式（2026-10-06）。方法体内 `this` 走隐式 this 参数按普通变量解析；`this.field` 点号对指针自动解引用；static 方法内 this 钉死诊断。
 - `[x]` **PAR-18** `(新)` `static_cast<T>(x)` / C 风格强转；向下转换（CRTP 必需）。C 风格 `(T)x` 已泛化到完整类型（P0-02）；`static_cast`/`reinterpret_cast` 已实现（LEX-11/DEC-18）：static 限算术↔算术、指针↔指针；reinterpret 为标量位重解释（同宽 `bitcast`）。
 - `[ ]` **PAR-19** AST 节点带源码位置/属性/注释/文档；AST 序列化（增量编译缓存）。
 - `[ ]` **PAR-20** 语法错误恢复与高质量诊断。
-- `[ ]` **PAR-21** `(新)` 模板声明语法 `template<typename T>` / `template<typename T, usize N>`（函数/类/别名，见 GEN）。
+- `[x]` **PAR-21** `(新)` 模板声明语法（2026-10-06）。函数/struct/class/别名模板；union/enum 拒绝；`class T` 参数诊断提示 typename；非类型参数仅整数。
 - `[x]` **PAR-22** `(新)` `namespace` 声明与限定名 `ns::name` 语法（现缺失；`src/libsafec` 已使用 `namespace safec`）。函数/变量成员、嵌套命名空间、限定类型名（struct/class/union/enum/typedef）均已实现。
 - `[x]` **PAR-23** `(新)` 运算符优先级/结合性在解析器中的显式实现与表驱动测试（配合 INF-10）。`smc::getOperatorInfo` 表驱动 + `test_operator_precedence` + `test_spec_conformance`。
 - `[ ]` **PAR-24** `(新)` 别名声明规范形式收敛：`typedef`/`using`/`type` 的取舍与统一 AST（见 DEC-16）。
@@ -136,7 +136,7 @@
 - `[ ]` **TYP-15** 指针类型：`T*`、函数指针、多级指针。
 - `[ ]` **TYP-16** 限定符类型：`const/volatile/restrict/atomic`。
 - `[ ]` **TYP-17** 函数类型：参数/返回/调用约定/可变参数。
-- `[ ]` **TYP-18** `(新)` 模板实例类型 `Box<i32>`：实例化、缓存、去重（见 GEN）。
+- `[x]` **TYP-18** `(新)` 模板实例类型（2026-10-06）。惰性实例化 + Registry 键去重（同实参同 decl/type）；裸模板名使用诊断。
 - `[~]` **TYP-19** 类型相等/兼容/隐式转换/显式转换规则（含常规算术转换）。TYP-20（enum 强类型、名义相等）与 TYP-22（整数提升 + 常规算术转换）已落地；隐式窄化策略与限定符参与见 TYP-23/TYP-16。
 - `[x]` **TYP-20** 枚举与整数必须显式转换。`typesCompatible`/`conversionRank`/`checkAssignmentTypes` 拒绝 `enum ↔ 非同类 enum/整数/浮点` 的隐式转换（赋值/初始化/实参/返回），要求 `(T)`/`static_cast`/`reinterpret_cast`；运算符仍按整数提升。枚举名义相等（同名才相等）。
 - `[ ]` **TYP-21** ABI 类型检查：`[[repr(C)]]` 下布局可预测；位域布局规则（见 DEC-08）。
@@ -153,15 +153,15 @@
 
 > 语法**对齐 C++ 简单泛型**；支持函数模板、类模板、非类型参数、CRTP；单态化展开，零运行时开销。
 
-- `[ ]` **GEN-01** 声明语法：`template<typename T>` 函数模板、类模板、类型别名；`typename` 关键字。
-- `[ ]` **GEN-02** 非类型（常量）模板参数：`template<typename T, usize N>`；用于数组长度/`sizeof`/`compile_time`。
-- `[ ]` **GEN-03** 实例化：显式 `max<int>(3,4)`、`Box<i32>`；实参推导 `max(3,4)`。
-- `[ ]` **GEN-04** 解析歧义：`<`/`>` 比较、`>>` 拆分（配合 LEX-08）。
-- `[ ]` **GEN-05** 单态化：编译期展开、实例去重、缓存、代码膨胀控制。
-- `[ ]` **GEN-06** 约束策略：**无 trait**，定义处不检查；每个实例化点各自类型检查（依赖运算符重载与 `to_string/to_hash/equals` 扩展点）。
-- `[ ]` **GEN-07** 符号修饰与 ABI：导出模板实例的命名规则。
-- `[ ]` **GEN-08** 模板成员方法解析与 `this` 传递。
-- `[ ]` **GEN-09** CRTP 支撑：见 INH-05（`this`、模板基类、延迟实例化、`static_cast`）。
+- `[x]` **GEN-01** 声明语法（2026-10-06）。`template`/`typename` 关键字；TemplateDeclAST；TypeVarType 占位（同名同指针）。
+- `[x]` **GEN-02** 非类型（常量）模板参数（2026-10-06）。仅整数；字段数组长度占位（ArrayType::sizeParam）实例化时具体化；`compile_time` 语境后续轮。
+- `[x]` **GEN-03** 实例化（2026-10-06）。显式 + 推导（形参 T 取实参类型、T* 取去指针类型；冲突/无法推导诊断）；类模板不推导。
+- `[x]` **GEN-04** 解析歧义（2026-10-06）。见 LEX-08。
+- `[x]` **GEN-05** 单态化（2026-10-06）。AST 克隆替换器（全节点族）+ Registry 状态机去重 + 深度上限 64；未使用模板零符号；调用点按需前向声明。
+- `[x]` **GEN-06** 约束策略（2026-10-06）。定义处只 parse；实例点全量普通 sema；诊断附 `in instantiation of template '...'`。
+- `[x]` **GEN-07** 符号修饰与 ABI（2026-10-06）。实例名 `名$实参拼写`（typeToMangled 复用，指针 …ptr 后缀）；函数实例符号沿用 mangleFunction 追加参数。
+- `[x]` **GEN-08** 模板成员方法解析与 `this` 传递（2026-10-06）。实例即普通类声明，隐式 this 参数为实例类型；基类实例方法体惰性（首次调用 visit）。
+- `[x]` **GEN-09** CRTP 支撑（2026-10-06）：见 INH-05（`this`、模板基类、延迟实例化、`static_cast`）。
 - `[ ]` **GEN-10** **不做**（Non-goals）：特化/偏特化、SFINAE、可变参数模板、模板模板参数、concepts、默认模板实参。
 
 ---
@@ -173,7 +173,7 @@
 - `[ ]` **SEM-03** 指针对空性检查：`[[nonnull]]`、可选运行时非空断言。
 - `[ ]` **SEM-04** 访问控制检查：`public/private/protected`（单继承链）。**部分完成**（PAR-04/DEC-01 轮次）：class 默认 private / struct 默认 public，访问段解析修复（不再截断类体），类外访问 private/protected 成员与方法报 **E2009**（`SemanticAnalyzer`，快照 `tests/diagnostics/snapshots/private_member_access.txt`）；类内方法经 `this->` 可访问。**待补**：protected 在派生类内放开（随 INH 单继承链）、友元。
 - `[ ]` **SEM-05** 类型检查：表达式/赋值/调用/返回/字段访问。
-- `[ ]` **SEM-06** 泛型实例化检查（GEN-06）。
+- `[x]` **SEM-06** 泛型实例化检查（GEN-06）。已实现（2026-10-06）：实例点全量 sema + 惰性方法体。
 - `[ ]` **SEM-07** `compile_time` 条件求值与死代码消除。
 - `[ ]` **SEM-08** 格式字符串类型检查：`{}`、`{:x}`、`{:f}`、`{:02}`、`{:.2f}`（`print/println`）。
 - `[ ]` **SEM-09** 数组/Slice 边界检查策略：静态可证明或运行时检查（见 DEC-06）。
@@ -224,11 +224,7 @@
 - `[x]` **INH-02** **多继承不支持**：`struct D : B, C` 给出明确诊断。**完成**（2026-10-05）：基类名后遇 `,` 即诊断（此前静默误解析为前向声明）；诊断经 Parser::error（无 E 码，E2xxx 注册归 INF-13）。
 - `[x]` **INH-03** 继承布局：基类子对象为派生类第一个字段（偏移 0）。**完成**（2026-10-05）：ClassType 路径既有实现 pin 测试钉住；StructType 路径本轮补齐（getLLVMType Struct case + StructDeclAST::codegen isClass 路径）；`[[repr(C)]]` 稳定性待 ANN（P1-05）落地后复查。
 - `[x]` **INH-04** 转换：派生→基隐式；基→派生需 `static_cast`。**完成**（2026-10-05）：指针隐式上行、值赋值切片语义、`static_cast<Derived*>` 下行转换均以 e2e pin（此前已可用）。
-- `[ ]` **INH-05** **CRTP 必需项**（随 GEN 模板系统另立一轮；本轮已覆盖 `static_cast<Derived*>` 向下转换——既有 PAR-18）：
-  - `this` 关键字与类型（PAR-17）；
-  - 基类支持模板实例 `: Shape<Circle>`（现 `baseClass` 仅为 `string`，需改为类型化）；
-  - `Shape<Circle>` 的**延迟实例化**（`Circle` 未定义完即可实例化）；
-  - `static_cast<Derived*>(this)` 向下转换（PAR-18）。
+- `[x]` **INH-05** **CRTP 必需项**。**完成**（2026-10-06，随 P1-03）：`this` 表达式（PAR-17，隐式 this 参数 + `this.field` 点号自动解引用）；基类支持模板实例 `: Shape<Circle>`（parse 捕获源拼写，sema 经 Registry 实例化，派生类前向占位可作实参）；基类实例方法体**惰性**（登记签名 + 首次调用 visit——派生类方法表未就绪时不检查）；`static_cast<Derived*>(this)` 向下转换（PAR-18 既有）。
 - `[x]` **INH-06** 成员/方法沿单继承链查找；重写（非虚，静默遮蔽规则）。**完成**（2026-10-05，方案乙）：删除 sema 基类方法表复制循环，`resolveMethod` 沿 `base` 链查找并经 out-param 返回 definingClass——继承方法保留定义类的访问级别与 E2009 归属；私有基方法经派生实例从类外调用的洞闭合（行为收紧，pin）；派生同名重载不再被复制去重吞掉；字段访问沿链 walk 泛化至 StructType（sema + GEP 两路）。**protected 放宽维持未做**（判定式保持 `currentClass == definingClass`，比 C++ 严格——派生类方法内经 `this->` 访问基类 protected 成员仍拒绝；如需放宽另立项，检查点已收敛于三处）。
 - `[ ]` **INH-07** **不做**（Non-goals）：多继承、虚继承、菱形继承、虚函数/vtable/RTTI。
 
@@ -406,7 +402,7 @@
 - `[ ]` **CG-04** `(已实现)` 控制流：if/while/do-while/for/switch/break/continue；补测试。
 - `[ ]` **CG-05** `(已实现)` 表达式 codegen（含指针 GEP、fneg、前缀/后缀 `++/--`）；补测试。
 - `[ ]` **CG-06** class 方法降级 `Vector_length(Vector* self)`、`static` 成员变量降级。
-- `[ ]` **CG-07** **模板单态化代码生成**（GEN-05）、实例去重缓存。
+- `[x]` **CG-07** **模板单态化代码生成**（GEN-05）、实例去重缓存。已实现（2026-10-06）：实例即普通声明走既有 codegen；TU 预扫（实例布局先行 + 函数签名）+ 调用点按需前向声明。
 - `[ ]` **CG-08** **继承布局与 `this`/`static_cast` codegen**（INH）。
 - `[ ]` **CG-09** **位域 codegen**：`iN` 与读-改-写位操作。
 - `[ ]` **CG-10** **内联 `asm`** → LLVM `InlineAsm`（操作数约束/clobber/volatile/目标限定）。
@@ -511,7 +507,7 @@
 ### P1：核心现代能力
 - `[x]` **P1-01** class / enum / union / 数组 / Slice（AGG、TYP-11/12）。enum、class 访问段（DEC-01）、union（AGG-03/17）、Slice（TYP-12）、嵌套类型（AGG-11，2026-10-05）全部完成。
 - `[x]` **P1-02** Optional / Result 显式访问（TYP-13/14/STD-02）。完成（2026-10-06）：内建魔术类型（同 Slice 先例）；`Optional<T>`/`Result<T,E>` 类型位置尖括号 + `T?` 糖；严格类型相等；codegen 全通路（e2e 7 项）；DEC-03 随此轮裁决；spec `docs/superpowers/specs/2026-10-06-optional-result-design.md`，plan `docs/superpowers/plans/2026-10-06-optional-result.md`。
-- `[ ]` **P1-03** **泛型 + CRTP**（GEN、INH-05、PAR-17/18、CG-07/08）。
+- `[x]` **P1-03** **泛型 + CRTP**（GEN、INH-05、PAR-17/18、CG-07/08）。2026-10-06 完成：989/989。
 - `[ ]` **P1-04** `compile_time` 与反射（CT；取代 type_info/static_assert）。
 - `[ ]` **P1-05** 注解系统（ANN）。
 - `[ ]` **P1-06** str / String / format（FMT、STD-10/11）。

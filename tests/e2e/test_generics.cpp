@@ -249,3 +249,48 @@ TEST_F(GenericE2E, CrtpSameShape) {
         }
     )", "gen11.c"), 1);
 }
+
+// ========== P1-03 / T8 硬化 ==========
+
+TEST_F(GenericE2E, UnusedTemplateNoSymbol) {
+    // 惰性实例化：只声明不使用 → 零符号。
+    Lexer lexer("gen12.c",
+        "template<typename T> T unused_fn(T x) { return x; }\n"
+        "int32 main() { return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_TRUE(analyzer.getErrors().empty());
+    CodegenContext ctx;
+    ctx.setSourceFile("gen12.c");
+    ast->codegen(ctx);
+    EXPECT_EQ(ctx.getModule().getFunction("unused_fn"), nullptr);
+    EXPECT_EQ(ctx.getModule().getFunction("unused_fn_int32"), nullptr);
+}
+
+TEST_F(GenericE2E, DeepNestingBox) {
+    EXPECT_EQ(runSource(R"(
+        template<typename T> struct Box { T value; };
+        int32 main() {
+            Box<Box<Box<int32>>> b;
+            b.value.value.value = 5;
+            return b.value.value.value * 2;
+        }
+    )", "gen13.c"), 10);
+}
+
+TEST_F(GenericE2E, CallerScopeTypeParamName) {
+    // 调用方作用域里与模板参数同名的变量——克隆体绑定具体类型，
+    // 调用方变量的名字不参与推导/替换。
+    EXPECT_EQ(runSource(R"(
+        template<typename T> T id2(T a) { return a; }
+        int32 main() {
+            int32 T = 5;
+            int32 r = id2(7);
+            return r == 7 && T == 5 ? 1 : 0;
+        }
+    )", "gen14.c"), 1);
+}
