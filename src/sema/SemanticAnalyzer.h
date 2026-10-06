@@ -52,13 +52,20 @@ public:
     // LEX-15: fixed-width base type for a numeric literal kind (nullptr for None).
     Type* typeForLiteralKind(LiteralKind kind);
     std::optional<ConstValue> evaluateConstexpr(ExprAST* expr);
+    // P1-04 评审 I1: 以已折叠实参解释 constexpr 函数体（求值器委托用，
+    // 避免 evaluateConstexpr 整树 CT 委托互递归）。
+    std::optional<ConstValue> evalConstexprCallCT(CallExprAST& call,
+                                                  const std::vector<ConstValue>& argValues);
     const std::unordered_map<std::string, ConstValue>& getConstexprValues() const { return constexprValues; }
 
     // ---- P1-04 / CT-04/05/12: compile_time 特判 ----
-    // 根标识符为 `compile_time` 的成员链判定（含嵌套链 target.os）。
-    static bool isCompileTimeRoot(const ExprAST* expr);
+    // 根标识符为 `compile_time` 的成员链判定（含嵌套链 target.os）；
+    // 作用域内已声明的同名变量优先（spec §1 消歧，评审 I4）。
+    bool isCompileTimeRoot(const ExprAST* expr);
     // 表达式树中任一位置含 compile_time 根（Binary/Unary/Ternary 守卫用）。
-    static bool containsCompileTimeRoot(const ExprAST* expr);
+    bool containsCompileTimeRoot(const ExprAST* expr);
+    // P1-04 评审 I3: 毒化类型（仅 compile_time.if 未选中分支声明）使用检查。
+    void checkCtDeadBranchUse(Type* t, ASTNode& at);
     // 整树交给编译期求值器（含 compile_time 成员值与 constexpr 委托）。
     std::optional<ConstValue> evalCompileTime(ExprAST* expr, ASTNode& at);
     // MethodCall 形态（compile_time.static_assert/size_of/...）钩子：返回 true

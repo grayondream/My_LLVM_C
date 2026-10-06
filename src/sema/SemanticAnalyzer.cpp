@@ -656,7 +656,11 @@ bool SemanticAnalyzer::isCompileTimeRoot(const ExprAST* expr) {
             continue;
         }
         if (auto* var = dynamic_cast<const VariableExprAST*>(expr)) {
-            return var->name == "compile_time";
+            if (var->name != "compile_time") return false;
+            // P1-04 评审 I4（spec §1 消歧）：作用域内已声明的同名变量优先，
+            // 其成员访问走普通路径，不被编译期命名空间劫持。
+            if (currentScope && currentScope->lookup("compile_time")) return false;
+            return true;
         }
         return false;
     }
@@ -702,6 +706,45 @@ static Type* ctIntTypeFor(TypeContext* typeCtx, long long v) {
         ? typeCtx->getInt64() : typeCtx->getInt32();
 }
 
+// P1-04 评审 I3: 沿 typedef/指针/数组包装层检查毒化标志，返回毒化层
+// 的可读名字（聚合名或 typedef 名）。
+static bool ctIsPoisonedType(Type* t, std::string& name) {
+    bool poisoned = false;
+    while (t) {
+        if (t->ctDeadBranch) {
+            poisoned = true;
+            if (name.empty()) {
+                switch (t->kind) {
+                    case TypeKind::Struct:
+                    case TypeKind::Class: name = static_cast<StructType*>(t)->name; break;
+                    case TypeKind::Union: name = static_cast<UnionType*>(t)->name; break;
+                    case TypeKind::Enum:  name = static_cast<EnumType*>(t)->name; break;
+                    case TypeKind::Typedef: name = static_cast<TypedefType*>(t)->name; break;
+                    default: break;
+                }
+            }
+        }
+        switch (t->kind) {
+            case TypeKind::Typedef: t = static_cast<TypedefType*>(t)->aliasedType; continue;
+            case TypeKind::Pointer: t = t->base; continue;
+            case TypeKind::Array:   t = static_cast<ArrayType*>(t)->elementType; continue;
+            default: return poisoned;
+        }
+    }
+    return poisoned;
+}
+
+void SemanticAnalyzer::checkCtDeadBranchUse(Type* t, ASTNode& at) {
+    if (!t) return;
+    std::string name;
+    if (!ctIsPoisonedType(t, name)) return;
+    if (!name.empty()) {
+        emitError("use of type '" + name + "' from a non-selected compile_time.if branch", at);
+    } else {
+        emitError("use of a type declared in a non-selected compile_time.if branch", at);
+    }
+}
+
 std::optional<SemanticAnalyzer::ConstValue>
 SemanticAnalyzer::evalCompileTime(ExprAST* expr, ASTNode& at) {
     return ctEval().eval(expr, at);
@@ -743,8 +786,12 @@ bool SemanticAnalyzer::tryAnalyzeCompileTimeChain(MemberAccessExprAST& node) {
             node.ctFloat = v->doubleVal;
             node.type = typeCtx->getFloat64();
             break;
-        default:
-            // STR/CHAR 逃逸：编译期上下文（static_assert/if/constexpr 初始化）
+        case ConstValue::CHAR:
+            // CHAR 有运行时类型——防御回退（评审 I2）。
+            node.type = nullptr;
+            break;
+        default: // STR
+            // STR 逃逸：编译期上下文（static_assert/if/constexpr 初始化）
             // 整树由求值器接管、不经本钩子——凡到钩子必是运行时上下文。
             emitError("compile-time string value cannot be used in runtime context", node);
             node.type = nullptr;
@@ -795,9 +842,12 @@ bool SemanticAnalyzer::tryAnalyzeCompileTimeCall(MethodCallExprAST& node) {
     } else if (v && v->type == ConstValue::DOUBLE) {
         node.ctFloat = v->doubleVal;
         node.type = typeCtx->getFloat64();
-    } else if (v) {
-        // STR/CHAR 结果逃逸（理由同链形钩子）。
+    } else if (v && v->type == ConstValue::STR) {
+        // STR 结果逃逸（理由同链形钩子）。
         emitError("compile-time string value cannot be used in runtime context", node);
+        node.type = nullptr;
+    } else if (v) {
+        // CHAR：有运行时类型，防御回退（评审 I2）。
         node.type = nullptr;
     } else {
         // static_assert/size_of 族/if 由 CT-02/CT-06 后续任务接管；此处
@@ -807,6 +857,37 @@ bool SemanticAnalyzer::tryAnalyzeCompileTimeCall(MethodCallExprAST& node) {
     return true;
 }
 
+
+// P1-04 评审 I1: 以已折叠实参解释 constexpr 函数体（DEC-05 共享内核；
+// 实参的 CT 折叠由 CompileTimeEvaluator 负责，避免整树委托互递归）。
+std::optional<SemanticAnalyzer::ConstValue>
+SemanticAnalyzer::evalConstexprCallCT(CallExprAST& call,
+                                      const std::vector<ConstValue>& argValues) {
+    std::string calleeName = call.callee;
+    auto it = constexprFunctions.find(calleeName);
+    if (it == constexprFunctions.end()) {
+        calleeName = resolveNamespaceName(calleeName);
+        it = constexprFunctions.find(calleeName);
+    }
+    if (it == constexprFunctions.end()) {
+        return std::nullopt;
+    }
+    FunctionDeclAST* fn = it->second;
+    if (!fn->body || argValues.size() != fn->params.size()) {
+        return std::nullopt;
+    }
+    ConstEnv env = activeEnv ? *activeEnv : ConstEnv{};
+    for (size_t i = 0; i < fn->params.size(); ++i) {
+        env[fn->params[i]->name] = argValues[i];
+    }
+    ConstEnv* saved = activeEnv;
+    activeEnv = &env;
+    constexprCallDepth++;
+    auto result = evalConstexprStmt(fn->body.get(), env, 1);
+    constexprCallDepth--;
+    activeEnv = saved;
+    return result;
+}
 
 std::optional<SemanticAnalyzer::ConstValue> SemanticAnalyzer::evaluateConstexpr(ExprAST* expr) {
     if (!expr) return std::nullopt;
@@ -1190,13 +1271,14 @@ void SemanticAnalyzer::visit(BinaryExprAST& node) {
             }
             return;
         }
-        if (v) {
-            // STR/CHAR 结果逃逸到运行时上下文（spec §2 意图为类型错误）。
+        if (v && v->type == ConstValue::STR) {
+            // STR 逃逸到运行时上下文（spec §2 意图为类型错误）。
             emitError("compile-time string value cannot be used in runtime context", node);
             node.type = nullptr;
             node.isLValue = false;
             return;
         }
+        // CHAR 有运行时类型：回退普通路径（子节点钩子已产常量）——评审 I2。
         if (getErrors().size() > baseErrors) {
             // 求值器已诊断（未知成员/深度超限）：就地报错，不回退。
             node.type = nullptr;
@@ -1295,13 +1377,14 @@ void SemanticAnalyzer::visit(UnaryExprAST& node) {
             }
             return;
         }
-        if (v) {
-            // STR/CHAR 结果逃逸到运行时上下文（spec §2 意图为类型错误）。
+        if (v && v->type == ConstValue::STR) {
+            // STR 逃逸到运行时上下文（spec §2 意图为类型错误）。
             emitError("compile-time string value cannot be used in runtime context", node);
             node.type = nullptr;
             node.isLValue = false;
             return;
         }
+        // CHAR 有运行时类型：回退普通路径（子节点钩子已产常量）——评审 I2。
         if (getErrors().size() > baseErrors) {
             // 求值器已诊断（未知成员/深度超限）：就地报错，不回退。
             node.type = nullptr;
@@ -1747,13 +1830,14 @@ void SemanticAnalyzer::visit(TernaryExprAST& node) {
             }
             return;
         }
-        if (v) {
-            // STR/CHAR 结果逃逸到运行时上下文（spec §2 意图为类型错误）。
+        if (v && v->type == ConstValue::STR) {
+            // STR 逃逸到运行时上下文（spec §2 意图为类型错误）。
             emitError("compile-time string value cannot be used in runtime context", node);
             node.type = nullptr;
             node.isLValue = false;
             return;
         }
+        // CHAR 有运行时类型：回退普通路径（子节点钩子已产常量）——评审 I2。
         if (getErrors().size() > baseErrors) {
             // 求值器已诊断（未知成员/深度超限）：就地报错，不回退。
             node.type = nullptr;
@@ -1801,6 +1885,8 @@ void SemanticAnalyzer::visit(CastExprAST& node) {
     // heap-allocation path is `(Outer::Secret*)malloc(...)`).
     node.castType = resolveTypeInstance(node.castType, node);
     checkNestedTypeAccess(node.castType, node);
+    // P1-04 评审 I3: cast 目标不得来自 compile_time.if 死分支。
+    checkCtDeadBranchUse(node.castType, node);
     Type* exprType = getExprType(*node.expr);
     if (exprType && node.castType) {
         Type* from = stripTypedef(exprType);
@@ -2315,18 +2401,8 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
     // AGG-11/DS5: naming a private nested type outside its class is E2009.
     node.type = resolveTypeInstance(node.type, node);
     checkNestedTypeAccess(node.type, node);
-    // P1-04 / CT-03: 毒化类型（仅在 compile_time.if 未选中分支声明）拒绝。
-    if (node.type && node.type->ctDeadBranch) {
-        std::string name;
-        switch (node.type->kind) {
-            case TypeKind::Struct:
-            case TypeKind::Class:  name = static_cast<StructType*>(node.type)->name; break;
-            case TypeKind::Union:  name = static_cast<UnionType*>(node.type)->name; break;
-            case TypeKind::Enum:   name = static_cast<EnumType*>(node.type)->name; break;
-            default: break;
-        }
-        emitError("use of type '" + name + "' from a non-selected compile_time.if branch", node);
-    }
+    // P1-04 / CT-03 / 评审 I3: 毒化类型（含 typedef/指针/数组包装层）拒绝。
+    checkCtDeadBranchUse(node.type, node);
     node.name = scopedName(node.name);
     if (node.isConstexpr) {
         if (!node.initExpr) {
@@ -2449,6 +2525,8 @@ void SemanticAnalyzer::visit(ArrayDeclAST& node) {
     // private nested type must not slip through as the element type.
     node.elementType = resolveTypeInstance(node.elementType, node);
     checkNestedTypeAccess(node.elementType, node);
+    // P1-04 评审 I3: 元素类型不得来自 compile_time.if 死分支。
+    checkCtDeadBranchUse(node.elementType, node);
     node.name = scopedName(node.name);
     if (auto* initList = dynamic_cast<InitializerListExprAST*>(node.initExpr.get())) {
         if (node.size == 0) {
@@ -2566,7 +2644,11 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
 
 void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
     // P1-03 / GEN-03: 实例字段/方法签名中的实例占位先解析。
-    for (auto& f : node.fields) f.second = resolveTypeInstance(f.second, node);
+    for (auto& f : node.fields) {
+        f.second = resolveTypeInstance(f.second, node);
+        // P1-04 评审 I3: 字段类型不得来自 compile_time.if 死分支。
+        checkCtDeadBranchUse(f.second, node);
+    }
     for (auto& m : node.methods) {
         m->returnType = resolveTypeInstance(m->returnType, node);
         for (auto& p : m->params) p->type = resolveTypeInstance(p->type, node);
@@ -2932,6 +3014,9 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
     // P1-03 / GEN-03: 返回类型与参数类型中的实例占位先解析。
     node.returnType = resolveTypeInstance(node.returnType, node);
     for (auto& p : node.params) p->type = resolveTypeInstance(p->type, node);
+    // P1-04 评审 I3: 返回/参数类型不得来自 compile_time.if 死分支。
+    checkCtDeadBranchUse(node.returnType, node);
+    for (auto& p : node.params) checkCtDeadBranchUse(p->type, node);
 
     // Validate constexpr function constraints
     if (node.isConstexpr) {
@@ -3042,6 +3127,15 @@ void SemanticAnalyzer::visit(CompileTimeIfDeclAST& node) {
             Type* poison = tc.getEnum(e->name);
             if (!liveNames.count(e->name)) tc.removeEnum(e->name);
             if (poison) poison->ctDeadBranch = true;
+        } else if (auto* t = dynamic_cast<TypedefDeclAST*>(d.get())) {
+            // 评审 I3: typedef 别名毒化（别名包装层在检查中穿透）。
+            if (Type* poison = TypeContext::instance().getTypedef(t->name)) {
+                poison->ctDeadBranch = true;
+            }
+        } else if (auto* u2 = dynamic_cast<UsingDeclAST*>(d.get())) {
+            if (Type* poison = TypeContext::instance().getTypedef(u2->name)) {
+                poison->ctDeadBranch = true;
+            }
         }
     }
 

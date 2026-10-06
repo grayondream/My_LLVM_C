@@ -154,14 +154,23 @@ std::optional<ConstValue> CompileTimeEvaluator::eval(ExprAST* expr, ASTNode& at)
         return std::nullopt;
     }
 
-    if (dynamic_cast<CallExprAST*>(expr)) {
-        return m_sema.evaluateConstexpr(expr);
+    if (auto* call = dynamic_cast<CallExprAST*>(expr)) {
+        // P1-04 评审 I1: 实参由本求值器折叠（可能含 CT 根），再以已折叠
+        // 实参解释 constexpr 函数体——避免与 evaluateConstexpr 的整树
+        // CT 委托互递归。
+        std::vector<ConstValue> argValues;
+        for (auto& a : call->args) {
+            auto v = eval(a.get(), at);
+            if (!v) return std::nullopt;
+            argValues.push_back(*v);
+        }
+        return m_sema.evalConstexprCallCT(*call, argValues);
     }
 
     // P1-04 / CT-04/05: compile_time 成员链值（target.os/arch/cpu、
     // build.debug/optimize/version）。未知成员诊断在此发出（spec §3 钉死）。
     if (auto* ma = dynamic_cast<MemberAccessExprAST*>(expr)) {
-        if (SemanticAnalyzer::isCompileTimeRoot(ma->object.get())) {
+        if (m_sema.isCompileTimeRoot(ma->object.get())) {
             return evalCTMemberChain(*ma, at);
         }
         return std::nullopt;
@@ -170,7 +179,7 @@ std::optional<ConstValue> CompileTimeEvaluator::eval(ExprAST* expr, ASTNode& at)
     // P1-04 / CT-01: compile_time 成员调用（static_assert/size_of 族/if）
     // —— CT-02（T5）接管 if/static_assert；此处实现布局查询（CT-06）。
     if (auto* mc = dynamic_cast<MethodCallExprAST*>(expr)) {
-        if (SemanticAnalyzer::isCompileTimeRoot(mc->object.get())) {
+        if (m_sema.isCompileTimeRoot(mc->object.get())) {
             static const std::unordered_set<std::string> kKnownMembers = {
                 "static_assert", "if", "size_of", "align_of", "offset_of"};
             if (!kKnownMembers.count(mc->methodName)) {

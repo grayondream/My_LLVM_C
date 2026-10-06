@@ -232,7 +232,14 @@ int32 main() { Ghost g; return g.x; }
     ASSERT_NE(ast, nullptr);
     SemanticAnalyzer analyzer;
     analyzer.analyze(*ast);
-    EXPECT_FALSE(analyzer.getErrors().empty());
+    ASSERT_FALSE(analyzer.getErrors().empty());
+    bool found = false;
+    for (const auto& d : analyzer.getErrors()) {
+        // 评审 M3: 消息须点名类型（非泛化类型错误）。
+        if (d.message.find("Ghost") != std::string::npos
+            && d.message.find("non-selected compile_time.if branch") != std::string::npos) found = true;
+    }
+    EXPECT_TRUE(found);
 }
 
 TEST_F(CompileTimeE2E, CTDepthLimitE2E) {

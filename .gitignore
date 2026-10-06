@@ -20,7 +20,7 @@ cmake_install.cmake
 CTestTestfile.cmake
 Testing/
 cmake_test_discovery*.json
-compiler_tests[*_*.cmake
+compiler_tests\[*_*.cmake
 *.o
 *.o.d
 bin/

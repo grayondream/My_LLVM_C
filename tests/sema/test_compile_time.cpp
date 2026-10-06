@@ -146,7 +146,13 @@ TEST_F(CompileTimeEval, StrEscapeDiagnosed) {
     ASSERT_NE(ast, nullptr);
     SemanticAnalyzer analyzer;
     analyzer.analyze(*ast);
-    EXPECT_FALSE(analyzer.getErrors().empty());
+    ASSERT_FALSE(analyzer.getErrors().empty());
+    bool found = false;
+    for (const auto& d : analyzer.getErrors()) {
+        // 评审 M3: 须为 STR 逃逸专属诊断。
+        if (d.message.find("compile-time string value cannot be used in runtime context") != std::string::npos) found = true;
+    }
+    EXPECT_TRUE(found);
 }
 
 TEST_F(CompileTimeEval, UnknownMemberDiagnosed) {
@@ -317,4 +323,60 @@ int32 main() { compile_time.static_assert(2 > 3, "body fail"); return 0; }
         if (d.message.find("static_assert failed: body fail") != std::string::npos) found = true;
     }
     EXPECT_TRUE(found);
+}
+
+// ---- P1-04 评审修复（I1/I2/I3/I4/I5）----
+
+TEST_F(CompileTimeEval, ConstExprFnWithCTArg) {
+    // I1: constexpr 函数实参含 compile_time 根 → 委托不得互递归。
+    EXPECT_TRUE(analyzeOk(R"(
+constexpr int32 twice(int32 x) { return x * 2; }
+constexpr int32 r = twice(compile_time.size_of(int32));
+int32 main() { return 0; }
+)"));
+}
+
+TEST_F(CompileTimeEval, CharInCTTernary) {
+    // I2: CHAR 是运行时类型，CT 常量条件下的三元不得误报 STR 逃逸。
+    EXPECT_TRUE(analyzeOk(R"(
+int32 main() { char c = compile_time.build.debug ? 'a' : 'b'; return 0; }
+)"));
+}
+
+TEST_F(CompileTimeEval, DeadBranchTypeWrappedUseDiagnosed) {
+    // I3: 毒化检查覆盖指针/数组/typedef 包装层。
+    auto deadBranchSource = [](const std::string& use) {
+        return "compile_time.if (1 == 2) { struct Ghost { int32 x; } typedef int32 GhostInt; } "
+               "else { int32 h() { return 1; } } "
+               "int32 main() { " + use + " return 0; }";
+    };
+    for (const char* use : {"Ghost* p;", "Ghost g2[3];", "GhostInt x;"}) {
+        Lexer lexer("ct_dead_wrap.c", deadBranchSource(use));
+        auto tokens = lexer.tokenize();
+        Parser parser(tokens);
+        auto ast = parser.parse();
+        ASSERT_NE(ast, nullptr) << use;
+        SemanticAnalyzer analyzer;
+        analyzer.analyze(*ast);
+        EXPECT_FALSE(analyzer.getErrors().empty()) << use;
+    }
+}
+
+TEST_F(CompileTimeEval, UserCompileTimeVarMemberAccess) {
+    // I4: 用户自定义 compile_time 变量的成员访问不被劫持（spec §1 消歧）。
+    EXPECT_TRUE(analyzeOk(R"(
+struct S { int32 target; }
+int32 main() {
+    S compile_time;
+    compile_time.target = 1;
+    return compile_time.target;
+}
+)"));
+}
+
+TEST_F(CompileTimeEval, CompileTimeInsideNamespaceReal) {
+    // I5: compile_time 根链在 namespace 体内不被 namespacePrefix 劫持。
+    EXPECT_TRUE(analyzeOk(R"(
+namespace N { constexpr int32 ok = compile_time.build.debug; }
+)"));
 }
