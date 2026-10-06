@@ -569,3 +569,11 @@
 - 验证：ctest 1032/1032（基线 999 + 33）；每任务 TDD RED→GREEN，全量绿后提交。
 - 修复：filter-branch 重写 7 个未推送提交以清除误提交的 in-source CMake 产物（138k 行→1.9k 行）；.gitignore 补防复发规则。
 - 遗留：反射 CT-07/08/13 另轮（依赖 P1-06 str）；两分支同名类型变体选择不支持；函数参数/返回值位置未检查毒化类型；OptionalBranchExec 偶发 SEGFAULT（判定 LLJIT 压力 flaky）。
+
+## 2026-10-06 22:20 — P1-04 终审与修复 pass
+
+- 终审（fresh reviewer subagent）：0 Critical / 5 Important / 4 Minor。
+- 修复（每项 RED→GREEN）：I1 constexpr CT 实参互递归（新增 `evalConstexprCallCT`）；I2 CHAR 误判 STR 逃逸；I3 毒化覆盖（typedef/指针/数组/字段/参数/cast）；I4 同名变量消歧（作用域感知）；I5/M3 测试补 pin 与断言强化。
+- Ruling：M1（size_of→usize）实测引发 E2007 重载匹配回归，回退挂账。
+- 验证：ctest 1037/1037；新增测试 38 个（parse 4 + sema 21 + e2e 13）。
+- 遗留：CT-07/08/13 反射另轮；M1/M2/M4 deferred；OptionalBranchExec 偶发 SEGFAULT（LLJIT flaky）。
