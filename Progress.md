@@ -561,3 +561,11 @@
 - 遗留：模板与模块 import 组合未测；别名模板嵌套展开缓存为进程级；
   struct 模板方法（struct 无方法语义）不支持；`compile_time` 语境的
   非类型参数（GEN-02 后半）随 P1-04；M1-M6 minors 挂账不变。
+
+## 2026-10-06 21:40 — P1-04 compile_time 核心纵向切片完成
+
+- 完成事项：CT-01（解析层前瞻特判）、CT-02（static_assert 顶层+函数体）、CT-03（compile_time.if 条件编译+死分支类型毒化）、CT-04/05（target/build 查询）、CT-06（CompileTimeEvaluator 求值器：ConstValue+STR、运算、size_of/align_of/offset_of 布局查询）、CT-12（ctInt/ctFloat/ctHandled → llvm::Constant 零指令）、CT-14/DEC-05（并存+共享内核）、PAR-15/SEM-07（部分/完成）。TODO.md 收口 14 条。
+- 关键文件：`src/sema/CompileTimeEvaluator.{h,cpp}`（新）、`src/sema/SemanticAnalyzer.{h,cpp}`（钩子/守卫/毒化）、`src/ast/{Expr.h,Expr.cpp,Decl.h,Decl.cpp}`、`src/frontend/Parser.{h,cpp}`、`src/driver/CompilerDriver.cpp`、`tests/{frontend,sema,e2e}/test_compile_time*.cpp`（新 3 文件 32 用例）。
+- 验证：ctest 1032/1032（基线 999 + 33）；每任务 TDD RED→GREEN，全量绿后提交。
+- 修复：filter-branch 重写 7 个未推送提交以清除误提交的 in-source CMake 产物（138k 行→1.9k 行）；.gitignore 补防复发规则。
+- 遗留：反射 CT-07/08/13 另轮（依赖 P1-06 str）；两分支同名类型变体选择不支持；函数参数/返回值位置未检查毒化类型；OptionalBranchExec 偶发 SEGFAULT（判定 LLJIT 压力 flaky）。
