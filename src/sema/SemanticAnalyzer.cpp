@@ -275,6 +275,13 @@ bool SemanticAnalyzer::typesCompatible(Type* left, Type* right) const {
     if (left->kind == TypeKind::Slice && right->kind == TypeKind::Array)
         return typesEqual(static_cast<SliceType*>(left)->elementType,
                           static_cast<ArrayType*>(right)->elementType);
+    // P1-02 (TYP-13/14): Optional/Result match strictly by their type
+    // arguments (int32? != float64?) — before the generic same-kind rule.
+    if (left->kind == TypeKind::Optional && right->kind == TypeKind::Optional)
+        return typesEqual(static_cast<OptionalType*>(left)->elementType,
+                          static_cast<OptionalType*>(right)->elementType);
+    if (left->kind == TypeKind::Result && right->kind == TypeKind::Result)
+        return typesEqual(left, right);
     if (left->kind == right->kind) return true;
     if (isArithmeticType(left) && isArithmeticType(right)) return true;
     if (left->kind == TypeKind::Pointer && right->kind == TypeKind::Pointer) return true;
@@ -511,7 +518,14 @@ Type* SemanticAnalyzer::checkAssignmentTypes(Type* lhs, Type* rhs, ExprAST& node
     if (lhsS->kind == TypeKind::Slice && rhsS->kind == TypeKind::Array)
         return typesEqual(static_cast<SliceType*>(lhsS)->elementType,
                           static_cast<ArrayType*>(rhsS)->elementType) ? lhsRaw : nullptr;
-    if (lhsS->kind == rhsS->kind) return lhsRaw;
+    if (lhsS->kind == rhsS->kind) {
+        // P1-02 (TYP-13/14): Optional/Result are strict in their type
+        // arguments — the generic same-kind rule would mis-accept
+        // int32? = float64?.
+        if (lhsS->kind == TypeKind::Optional || lhsS->kind == TypeKind::Result)
+            return typesEqual(lhsS, rhsS) ? lhsRaw : nullptr;
+        return lhsRaw;
+    }
     if (isPointerOrArray(lhsS) && isPointerOrArray(rhsS)) return lhsRaw;
     if (isPointerOrArray(lhsS) && isIntegerType(rhsS)) return lhsRaw;
 

@@ -1805,3 +1805,26 @@ TEST(SliceSemTest, OptResParseNestedArgs) {
     EXPECT_TRUE(analyzeOk(
         "int32 main() { Result<int32, int32?> r; Optional<Optional<int32>> o; return 0; }"));
 }
+
+TEST(SliceSemTest, OptMismatchRejected) {
+    // 同 kind 泛化规则今天会误放行：Optional<int32> ≠ Optional<float64>。
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { int32? a = {true, 5}; float64? b = a; return 0; }"));
+}
+
+TEST(SliceSemTest, ResMismatchRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { Result<int32, int32> a; Result<int32, float64> b = a; return 0; }"));
+}
+
+TEST(SliceSemTest, OptToPlainRejected) {
+    // T? ↔ T 无隐式转换（spec §4.3）。现状即拒（kind 不同），转 pin。
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { int32? a = {true, 5}; int32 b = a; return 0; }"));
+}
+
+TEST(SliceSemTest, OptNominalEqualPin) {
+    // 同实参拷贝/赋值放行（成员访问 pin 在 Task 4）。
+    EXPECT_TRUE(analyzeOk(
+        "int32 main() { int32? a = {true, 5}; int32? b = a; b = a; return 0; }"));
+}
