@@ -535,3 +535,14 @@
 - 遗留（评审 minors，挂账待裁决）：M1 双重诊断、M2 函数指针无参检（既有）、
   M3 `Optional <` 歧义、M4 codegen 混映射、M5 return 位 {}、M6 T?? 文案；
   三元标量根因独立缺陷轮。
+
+## 2026-10-06（续）— 三元根因缺陷轮
+- 完成事项：TernaryExprAST codegen 分支取值（lvalue loadValue，数组除外）
+  + getCommonType 统一 cast + phi 前驱记实际终结块；sema 撤销 I4 拒绝并
+  新增分支兼容性诊断；顺带修解析后缀优先级（parseUnaryImpl 一元分支补
+  parsePostfix，-a.v/-arr[i]/++a.v 曾误解析为 (-a).v/(-arr)[i]）。
+- 落点：src/ast/Expr.cpp、src/sema/SemanticAnalyzer.cpp、
+  src/frontend/Parser.cpp；测试 tests/e2e/test_ternary.cpp（11）+ sema 1。
+- 验证：全量 ctest 952/952（940 → 952，TDD RED→GREEN）。
+- 遗留：数组作三元分支（退化语义）未处理；Optional/Result 全局零初始化
+  已绿；M1-M6 及 LLJIT flaky、P1-03 泛型待后续轮。
