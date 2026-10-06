@@ -40,6 +40,13 @@ public:
     Type* resolveTypeInstance(Type* t, ASTNode& at);
     // 别名展开产物中的实例类型当场补 visit。
     void ensureInstanceVisited(Type* t, ASTNode& at);
+    // P1-03 / INH-05: 基类实例惰性方法的首次调用触发。
+    void visitLazyMethodsOf(const std::string& className);
+    // CRTP：实例字段值语义自嵌套拒绝。
+    void checkInstanceFieldComplete(StructDeclAST& node);
+    void visitStructDeclImpl(StructDeclAST& node);
+    // 按名字解析类型（模板基类实参拼写用）。
+    Type* resolveTypeByName(const std::string& name);
 
     Type* getExprType(ExprAST& expr);
     // LEX-15: fixed-width base type for a numeric literal kind (nullptr for None).
@@ -192,6 +199,10 @@ private:
     std::unordered_set<std::string> m_visitedInstances;
     // PAR-17: static 方法体 visit 标记（this 诊断）。
     bool m_inStaticMethod = false;
+    // P1-03 / INH-05 / GEN-09: 惰性方法体——基类实例（CRTP）延迟到首次调用。
+    std::vector<std::string> m_definingStack; // visit 中的类名栈（CRTP 自嵌套检测）
+    std::unordered_set<std::string> m_lazyInstanceMethods;
+    std::unordered_map<std::string, std::vector<FunctionDeclAST*>> m_pendingLazyMethods;
     // 别名模板展开缓存：键 = 实例 mangled 名。
     std::unordered_map<std::string, Type*> m_aliasCache;
     std::unique_ptr<Scope> globalScope;

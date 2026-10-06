@@ -2651,6 +2651,43 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
             }
         }
         baseClass = qualifyTypeDeclName(parseQualifiedTypeName());
+        // P1-03 / INH-05 / GEN-09: 模板实例基类 `Shape<Circle>`——实参在
+        // 派生类定义处尚不存在（CRTP），parse 只捕获源拼写，sema 在派生类
+        // visit 时经 Registry 解析。实参限定为类型名/数字的平拼写。
+        if (check(TokenType::TOKEN_LT)) {
+            std::string spelling = "<";
+            advance();
+            int depth = 1;
+            while (!eof() && depth > 0) {
+                auto t = peek();
+                if (t->type == TokenType::TOKEN_GT) {
+                    --depth;
+                    if (depth == 0) {
+                        spelling += ">";
+                        advance();
+                        break;
+                    }
+                }
+                if (t->type == TokenType::TOKEN_IDENTIFIER ||
+                    t->type == TokenType::TOKEN_NUMBER ||
+                    t->type == TokenType::TOKEN_COMMA ||
+                    t->type == TokenType::TOKEN_STAR ||
+                    t->type == TokenType::TOKEN_LT ||
+                    t->type == TokenType::TOKEN_GT ||
+                    t->type == TokenType::TOKEN_RSHIFT) {
+                    spelling += t->lexeme;
+                    advance();
+                } else {
+                    error("unsupported template base class argument", *t);
+                    return nullptr;
+                }
+            }
+            if (depth != 0) {
+                errorUnexpected("expected '>' to close template base class arguments");
+                return nullptr;
+            }
+            baseClass += spelling;
+        }
         // INH-02: single inheritance only — a ',' after the base name would
         // otherwise be silently mis-parsed as a forward declaration.
         if (check(TokenType::TOKEN_COMMA)) {
@@ -2894,6 +2931,43 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
             }
         }
         baseClass = qualifyTypeDeclName(parseQualifiedTypeName());
+        // P1-03 / INH-05 / GEN-09: 模板实例基类 `Shape<Circle>`——实参在
+        // 派生类定义处尚不存在（CRTP），parse 只捕获源拼写，sema 在派生类
+        // visit 时经 Registry 解析。实参限定为类型名/数字的平拼写。
+        if (check(TokenType::TOKEN_LT)) {
+            std::string spelling = "<";
+            advance();
+            int depth = 1;
+            while (!eof() && depth > 0) {
+                auto t = peek();
+                if (t->type == TokenType::TOKEN_GT) {
+                    --depth;
+                    if (depth == 0) {
+                        spelling += ">";
+                        advance();
+                        break;
+                    }
+                }
+                if (t->type == TokenType::TOKEN_IDENTIFIER ||
+                    t->type == TokenType::TOKEN_NUMBER ||
+                    t->type == TokenType::TOKEN_COMMA ||
+                    t->type == TokenType::TOKEN_STAR ||
+                    t->type == TokenType::TOKEN_LT ||
+                    t->type == TokenType::TOKEN_GT ||
+                    t->type == TokenType::TOKEN_RSHIFT) {
+                    spelling += t->lexeme;
+                    advance();
+                } else {
+                    error("unsupported template base class argument", *t);
+                    return nullptr;
+                }
+            }
+            if (depth != 0) {
+                errorUnexpected("expected '>' to close template base class arguments");
+                return nullptr;
+            }
+            baseClass += spelling;
+        }
         // INH-02: single inheritance only — a ',' after the base name would
         // otherwise be silently mis-parsed as a forward declaration.
         if (check(TokenType::TOKEN_COMMA)) {

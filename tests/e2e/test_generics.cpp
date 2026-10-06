@@ -201,3 +201,51 @@ TEST_F(GenericE2E, ThisPassthrough) {
         }
     )", "gen9.c"), 6);
 }
+
+// ========== P1-03 / INH-05 / GEN-09: CRTP 全链路 ==========
+
+TEST_F(GenericE2E, CrtpStaticDispatch) {
+    EXPECT_EQ(runSource(R"(
+        template<typename D>
+        class Shape {
+        public:
+            float64 twice_area() { return static_cast<D*>(this)->area() * 2.0; }
+        };
+        class Circle : Shape<Circle> {
+        public:
+            float64 r;
+            float64 area() { return 3.14159 * this->r * this->r; }
+        };
+        int32 main() {
+            Circle c;
+            c.r = 1.0;
+            float64 t = c.twice_area();
+            return t > 6.0 && t < 6.3 ? 1 : 0;
+        }
+    )", "gen10.c"), 1);
+}
+
+TEST_F(GenericE2E, CrtpSameShape) {
+    EXPECT_EQ(runSource(R"(
+        template<typename D>
+        class Shape {
+        public:
+            float64 twice_area() { return static_cast<D*>(this)->area() * 2.0; }
+            bool same_shape(D* other) {
+                return static_cast<D*>(this)->area() == other->area();
+            }
+        };
+        class Circle2 : Shape<Circle2> {
+        public:
+            float64 r;
+            float64 area() { return 3.14159 * this->r * this->r; }
+        };
+        int32 main() {
+            Circle2 c1;
+            Circle2 c2;
+            c1.r = 1.0;
+            c2.r = 1.0;
+            return c1.same_shape(&c2) ? 1 : 0;
+        }
+    )", "gen11.c"), 1);
+}

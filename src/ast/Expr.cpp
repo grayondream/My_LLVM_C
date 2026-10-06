@@ -589,8 +589,18 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
     
     llvm::Function* calleeFn = ctx.getModule().getFunction(mangledName);
     if (!calleeFn) {
-        LOGE("unknown function: {}", callee);
-        return nullptr;
+        // P1-03 / GEN-05: 惰性前向声明——模板实例函数等定义可能在本调用点
+        // 之后出码；按调用点已知签名建声明，定义侧复用同名 llvm::Function。
+        llvm::Type* retLLVM = type ? ctx.getLLVMType(type) : nullptr;
+        if (!retLLVM) {
+            LOGE("unknown function: {}", callee);
+            return nullptr;
+        }
+        std::vector<llvm::Type*> paramLLVM;
+        for (auto* pt : argTypes) paramLLVM.push_back(ctx.getLLVMType(pt));
+        auto* fnType = llvm::FunctionType::get(retLLVM, paramLLVM, false);
+        calleeFn = llvm::Function::Create(fnType, llvm::Function::ExternalLinkage,
+                                          mangledName, ctx.getModule());
     }
 
     std::vector<llvm::Value*> argsV;
@@ -637,6 +647,19 @@ llvm::Value* MethodCallExprAST::codegen(CodegenContext& ctx) {
     llvm::Value* objVal = object->codegen(ctx);
     if (!objVal) return nullptr;
 
+    // P1-03 / PAR-17: 对象是指针类型的左值变量（`D* other` 作 `other->area()`
+    // 的对象）——先解引用取出对象指针；类实例变量（alloca 即对象地址）不变。
+    {
+        Type* objT = object->type;
+        while (objT && objT->kind == TypeKind::Typedef)
+            objT = static_cast<TypedefType*>(objT)->aliasedType;
+        if (objT && objT->kind == TypeKind::Pointer && object->isLValue) {
+            auto& builder = ctx.getBuilder();
+            objVal = builder.CreateLoad(llvm::PointerType::get(ctx.getContext(), 0), objVal,
+                                        "objderef");
+        }
+    }
+
     // Get the object's type (should be a pointer to a class type)
     llvm::Type* objLLVMType = objVal->getType();
     if (!objLLVMType->isPointerTy()) return nullptr;
@@ -673,28 +696,19 @@ llvm::Value* MethodCallExprAST::codegen(CodegenContext& ctx) {
     std::string mangledName = mangleFunction(methodName, argTypes);
 
     llvm::Function* calleeFn = ctx.getModule().getFunction(mangledName);
-    if (!calleeFn && resolvedParamTypes.empty()) {
-        // Walk inheritance chain to find the declaring class (fallback only:
-        // sema already resolved through the chain into resolvedParamTypes).
-        ClassType* searchType = classType;
-        while (!calleeFn && searchType && !searchType->baseClass.empty()) {
-            ClassType* baseType = TypeContext::instance().getClass(searchType->baseClass);
-            if (!baseType) break;
-            std::vector<Type*> baseArgTypes;
-            Type* baseThisType = new Type(TypeKind::Pointer, baseType);
-            baseArgTypes.push_back(baseThisType);
-            for (auto& arg : args) {
-                baseArgTypes.push_back(arg->type);
-            }
-            std::string baseMangledName = mangleFunction(methodName, baseArgTypes);
-            calleeFn = ctx.getModule().getFunction(baseMangledName);
-            if (calleeFn) {
-                mangledName = baseMangledName;
-                className = baseType->name;
-                break;
-            }
-            searchType = baseType;
+    if (!calleeFn) {
+        // P1-03 / INH-05: 惰性前向声明（基类实例方法体在派生类方法之后出码
+        // 等场景）；定义侧复用同名 llvm::Function。
+        if (resolvedParamTypes.empty() || !type) {
+            LOGE("unknown method: {}", mangledName);
+            return nullptr;
         }
+        llvm::Type* retLLVM = ctx.getLLVMType(type);
+        std::vector<llvm::Type*> paramLLVM;
+        for (auto* pt : argTypes) paramLLVM.push_back(ctx.getLLVMType(pt));
+        auto* fnType = llvm::FunctionType::get(retLLVM, paramLLVM, false);
+        calleeFn = llvm::Function::Create(fnType, llvm::Function::ExternalLinkage,
+                                          mangledName, ctx.getModule());
     }
 
     std::vector<llvm::Value*> argsV;

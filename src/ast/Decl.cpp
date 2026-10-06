@@ -398,6 +398,11 @@ llvm::Value* FunctionDeclAST::codegen(CodegenContext& ctx) {
     if (!function) {
         function = static_cast<llvm::Function*>(codegenPrototype(ctx));
     }
+    // P1-03 / GEN-05: 函数体只生成一次——TU 预扫（实例 struct 布局先行）
+    // 与主循环可能两次到达同一方法定义。
+    if (function->size() > 0) {
+        return function;
+    }
 
     // A declaration without a body needs no entry block or code.
     if (!body) {
@@ -455,8 +460,21 @@ llvm::Value* DeclStmtAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* TranslationUnitAST::codegen(CodegenContext& ctx) {
-    // 预扫：先声明全部函数签名——模板实例函数在 analyze 末尾追加到翻译
-    // 单元尾部，其前方的调用点 codegen 必须能解析到符号。
+    // 预扫 1：struct/class 布局——模板实例（名字含 '$'）先行，派生类布局
+    // 的基类子对象（llvm::StructType::getTypeByName）依赖其先存在。
+    for (auto& decl : declarations) {
+        if (auto* st = dynamic_cast<StructDeclAST*>(decl.get())) {
+            if (st->name.find('$') != std::string::npos) st->codegen(ctx);
+        }
+    }
+    for (auto& decl : declarations) {
+        if (auto* st = dynamic_cast<StructDeclAST*>(decl.get())) {
+            if (st->name.find('$') == std::string::npos) st->codegen(ctx);
+        }
+    }
+
+    // 预扫 2：函数签名声明——调用点（含前向引用的模板实例方法/函数）按需
+    // 解析符号。
     for (auto& decl : declarations) {
         if (auto* fn = dynamic_cast<FunctionDeclAST*>(decl.get())) {
             fn->codegenPrototype(ctx);

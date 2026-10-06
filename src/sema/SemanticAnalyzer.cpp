@@ -1842,9 +1842,11 @@ void SemanticAnalyzer::visit(MethodCallExprAST& node) {
         node.isLValue = false;
         return;
     }
+    // P1-03 / INH-05 / GEN-09: 基类实例方法体惰性——首次调用触发 visit
+    // （this 插入 + body 检查），此时派生类方法表已完整。
+    if (definingClass) visitLazyMethodsOf(definingClass->name);
 
-    // SEM-04/DEC-01 + INH-06: non-public methods are only callable from
-    // inside the DEFINING class (which may be a base along the chain); the
+    // SEM-04/DEC-01 + INH-06: non-public methods are only callable from    // inside the DEFINING class (which may be a base along the chain); the
     // level comes from the defining class's own member-access map.
     {
         AccessLevel level = definingClass->memberAccessLevel(node.methodName);
@@ -2245,12 +2247,20 @@ void SemanticAnalyzer::checkNestedTypeAccess(Type* type, const ASTNode& site) {
 }
 
 void SemanticAnalyzer::visit(StructDeclAST& node) {
+    m_definingStack.push_back(node.name);
+    visitStructDeclImpl(node);
+    m_definingStack.pop_back();
+}
+
+void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
     // P1-03 / GEN-03: 实例字段/方法签名中的实例占位先解析。
     for (auto& f : node.fields) f.second = resolveTypeInstance(f.second, node);
     for (auto& m : node.methods) {
         m->returnType = resolveTypeInstance(m->returnType, node);
         for (auto& p : m->params) p->type = resolveTypeInstance(p->type, node);
     }
+    // P1-03 / INH-05 / GEN-09: 实例字段值语义自嵌套（CRTP 的 `D next`）拒绝。
+    checkInstanceFieldComplete(node);
     // PAR-04/DEC-01: `class` declarations are classes even without methods —
     // their members default to private and carry access levels.
     // INH-01: struct declarations with a base stay structs — only classes
@@ -2276,6 +2286,49 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
             }
         }
 
+        // P1-03 / INH-05 / GEN-09: 模板实例基类（CRTP）——baseClass 拼写为
+        // `Shape<Circle>`。实参在此刻解析（派生类自身的前向占位 ClassType
+        // 已由 getOrCreateClass 创建，可作实参）；实例方法体惰性——派生类
+        // 方法表未就绪，延迟到首次调用（见 visit(MethodCallExprAST)）。
+        if (node.baseClass.find('<') != std::string::npos) {
+            size_t lt = node.baseClass.find('<');
+            std::string tplName = node.baseClass.substr(0, lt);
+            std::string argsSpelling = node.baseClass.substr(lt + 1, node.baseClass.size() - lt - 2);
+            std::vector<Type*> baseArgs;
+            std::string cur;
+            auto flushArg = [&]() {
+                if (cur.empty()) return;
+                Type* argType = resolveTypeByName(cur);
+                if (!argType) {
+                    emitError("unknown template base class argument '" + cur + "' of '" +
+                                  node.baseClass + "'",
+                              node);
+                }
+                baseArgs.push_back(argType);
+                cur.clear();
+            };
+            for (size_t i = 0; i <= argsSpelling.size(); ++i) {
+                if (i == argsSpelling.size() || argsSpelling[i] == ',') flushArg();
+                else if (argsSpelling[i] != ' ') cur += argsSpelling[i];
+            }
+            if (!baseArgs.empty() && std::all_of(baseArgs.begin(), baseArgs.end(), [](Type* t) { return t; })) {
+                std::string instName = TemplateRegistry::instanceName(tplName, baseArgs, {});
+                auto* inst = TemplateRegistry::instance().instantiateClass(tplName, baseArgs, {});
+                if (!inst) {
+                    emitError("cannot instantiate template base class '" + node.baseClass + "'", node);
+                    return;
+                }
+                if (!m_visitedInstances.count(instName)) {
+                    m_visitedInstances.insert(instName);
+                    m_lazyInstanceMethods.insert(instName);
+                    m_instStack.push_back(tplName + "<...>");
+                    visit(*inst);
+                    m_instStack.pop_back();
+                }
+                node.baseClass = instName;
+            }
+        }
+
         if (!node.baseClass.empty()) {
             auto* baseType = typeCtx->getClass(node.baseClass);
             if (!baseType) {
@@ -2298,6 +2351,11 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
             }
         }
 
+        // P1-03 / INH-05 / GEN-09: 基类实例的方法体惰性——派生类方法表未
+        // 就绪，只登记签名，body 延迟到首次调用（visit(MethodCallExprAST)
+        // 触发）。非实例路径不变。
+        const bool lazyMethods = m_lazyInstanceMethods.count(node.name) > 0;
+
         for (auto& method : node.methods) {
             // AGG-10/DS1: static methods are not instance members — they
             // never enter the class method table, so instance calls reject.
@@ -2311,6 +2369,9 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
                 }
                 auto* methodType = new FunctionType(method->returnType, std::move(paramTypes));
                 classType->addMethod(method->name, methodType);
+            }
+            if (lazyMethods) {
+                m_pendingLazyMethods[node.name].push_back(method.get());
             }
         }
 
@@ -2367,6 +2428,8 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
         }
 
         for (auto& method : node.methods) {
+            // P1-03 / INH-05: 基类实例方法体惰性——首次调用时 visit。
+            if (lazyMethods) continue;
             ClassType* savedClass = currentClass;
             currentClass = classType;
             if (method->isStatic) {
@@ -2838,6 +2901,23 @@ Type* SemanticAnalyzer::resolveTypeInstance(Type* t, ASTNode& at) {
     }
 }
 
+// P1-03 / INH-05: 模板基类实参拼写 → 类型。按裸名与 scoped 名在各类型表
+// 中查找；CRTP 场景下派生类自身的占位 ClassType 已由 getOrCreateClass 建。
+Type* SemanticAnalyzer::resolveTypeByName(const std::string& name) {
+    auto tryOne = [&](const std::string& n) -> Type* {
+        if (Type* t = typeCtx->getClass(n)) return t;
+        if (Type* t = typeCtx->getStruct(n)) return t;
+        if (Type* t = typeCtx->getTypedef(n)) return t;
+        if (Type* t = typeCtx->getEnum(n)) return t;
+        if (Type* t = typeCtx->getUnion(n)) return t;
+        return nullptr;
+    };
+    if (Type* t = tryOne(name)) return t;
+    std::string scoped = scopedName(name);
+    if (scoped != name) return tryOne(scoped);
+    return nullptr;
+}
+
 // 别名展开产物中的实例类型：若其实例 decl 已克隆但未 visit，立即补齐
 // （字段访问要求布局当场完整）。
 void SemanticAnalyzer::ensureInstanceVisited(Type* t, ASTNode& at) {
@@ -2853,6 +2933,56 @@ void SemanticAnalyzer::ensureInstanceVisited(Type* t, ASTNode& at) {
         m_instStack.push_back(name);
         visit(*static_cast<StructDeclAST*>(decl));
         m_instStack.pop_back();
+    }
+}
+
+// P1-03 / INH-05 / GEN-09: 基类实例惰性方法的首次调用触发——this 插入与
+// body 检查在此进行（与 class 分支的方法循环一致）。
+void SemanticAnalyzer::visitLazyMethodsOf(const std::string& className) {
+    auto it = m_pendingLazyMethods.find(className);
+    if (it == m_pendingLazyMethods.end()) return;
+    auto pending = std::move(it->second);
+    m_pendingLazyMethods.erase(it);
+    m_lazyInstanceMethods.erase(className);
+
+    auto* classType = typeCtx->getClass(className);
+    if (!classType) return;
+    ClassType* savedClass = currentClass;
+    currentClass = classType;
+    for (auto* method : pending) {
+        if (method->isStatic) {
+            m_inStaticMethod = true;
+            visit(*method);
+            m_inStaticMethod = false;
+        } else {
+            auto thisType = new Type(TypeKind::Pointer, classType);
+            method->params.insert(method->params.begin(),
+                                  std::make_unique<ParamDeclAST>("this", thisType));
+            visit(*method);
+        }
+    }
+    currentClass = savedClass;
+}
+
+// CRTP：模板基类实例的字段若为派生类值语义自嵌套（`D next`），在实例化点
+// 拒绝——类型尺寸无限。
+void SemanticAnalyzer::checkInstanceFieldComplete(StructDeclAST& node) {    if (m_instStack.empty()) return;
+    for (auto& field : node.fields) {
+        Type* ft = field.second;
+        while (ft && ft->kind == TypeKind::Typedef) {
+            ft = static_cast<TypedefType*>(ft)->aliasedType;
+        }
+        if (!ft || (ft->kind != TypeKind::Class && ft->kind != TypeKind::Struct)) continue;
+        std::string fname = ft->kind == TypeKind::Class
+                                ? static_cast<ClassType*>(ft)->name
+                                : static_cast<StructType*>(ft)->name;
+        if (std::find(m_definingStack.begin(), m_definingStack.end(), fname) !=
+            m_definingStack.end()) {
+            emitError("recursive instantiation of template '" + m_instStack.back() +
+                          "': field '" + field.first + "' has value type '" + fname + "'",
+                      node);
+            return;
+        }
     }
 }
 

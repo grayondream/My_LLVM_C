@@ -2101,3 +2101,24 @@ TEST(TplThisSemTest, ThisInStaticRejected) {
     }
     EXPECT_TRUE(found);
 }
+
+// ========== P1-03 / INH-05: CRTP 递归值字段拒绝（TplCrtp* 前缀） ==========
+
+TEST(TplCrtpSemTest, CrtpRecursiveValueFieldRejected) {
+    TemplateRegistry::instance().resetForTesting();
+    Lexer lexer("t.c",
+        "template<typename D> class Base2 { D next; };\n"
+        "class Derived2 : Base2<Derived2> { public: int32 v; };\n"
+        "int32 main() { return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    bool found = false;
+    for (auto& e : analyzer.getErrors()) {
+        if (e.message.find("recursive instantiation") != std::string::npos) found = true;
+    }
+    EXPECT_TRUE(found);
+}
