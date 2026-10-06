@@ -4,6 +4,7 @@
 #include "ast/Decl.h"
 #include "ast/Type.h"
 #include "ast/Mangle.h"
+#include "sema/TemplateRegistry.h"
 #include <algorithm>
 
 // Strip any number of typedef/alias layers, returning the underlying type.
@@ -55,7 +56,11 @@ const std::vector<Diagnostic>& SemanticAnalyzer::getWarnings() const {
 }
 
 void SemanticAnalyzer::emitError(const std::string& msg, const ASTNode& node) {
-    errors.emplace_back(Diagnostic::Level::Error, msg, node.sourceFile, node.sourceLine, node.sourceColumn);
+    errors.emplace_back(Diagnostic::Level::Error, msg, node.sourceFile, node.sourceLine,
+                        node.sourceColumn);
+    if (!m_instStack.empty())
+        errors.back().message +=
+            " (in instantiation of template '" + m_instStack.back() + "')";
 }
 
 void SemanticAnalyzer::emitWarning(const std::string& msg, const ASTNode& node) {
@@ -64,6 +69,9 @@ void SemanticAnalyzer::emitWarning(const std::string& msg, const ASTNode& node) 
 
 void SemanticAnalyzer::emitError(DiagnosticCode code, const std::string& msg, const ASTNode& node) {
     errors.emplace_back(Diagnostic::Level::Error, code, msg, node.sourceFile, node.sourceLine, node.sourceColumn);
+    if (!m_instStack.empty())
+        errors.back().message +=
+            " (in instantiation of template '" + m_instStack.back() + "')";
 }
 
 void SemanticAnalyzer::emitWarning(DiagnosticCode code, const std::string& msg, const ASTNode& node) {
@@ -1367,6 +1375,7 @@ void SemanticAnalyzer::visit(TernaryExprAST& node) {
 void SemanticAnalyzer::visit(CastExprAST& node) {
     // AGG-11/DS5: cast targets of private nested types are E2009 (the main
     // heap-allocation path is `(Outer::Secret*)malloc(...)`).
+    node.castType = resolveTypeInstance(node.castType, node);
     checkNestedTypeAccess(node.castType, node);
     Type* exprType = getExprType(*node.expr);
     if (exprType && node.castType) {
@@ -1722,6 +1731,7 @@ void SemanticAnalyzer::visit(MethodCallExprAST& node) {
 void SemanticAnalyzer::visit(SizeofExprAST& node) {
     // Resolve the type of a `sizeof(expr)` operand; the expression itself is
     // not evaluated, but its type is needed by codegen.
+    node.sizeofType = resolveTypeInstance(node.sizeofType, node);
     if (!node.sizeofType && node.expr) {
         node.sizeofType = getExprType(*node.expr);
         if (!node.sizeofType) {
@@ -1858,6 +1868,7 @@ void SemanticAnalyzer::visit(NullStmtAST& node) {}
 
 void SemanticAnalyzer::visit(VarDeclAST& node) {
     // AGG-11/DS5: naming a private nested type outside its class is E2009.
+    node.type = resolveTypeInstance(node.type, node);
     checkNestedTypeAccess(node.type, node);
     node.name = scopedName(node.name);
     if (node.isConstexpr) {
@@ -1979,6 +1990,7 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
 void SemanticAnalyzer::visit(ArrayDeclAST& node) {
     // AGG-11 评审 I2: array declarations are var declarations (DS5) — a
     // private nested type must not slip through as the element type.
+    node.elementType = resolveTypeInstance(node.elementType, node);
     checkNestedTypeAccess(node.elementType, node);
     node.name = scopedName(node.name);
     if (auto* initList = dynamic_cast<InitializerListExprAST*>(node.initExpr.get())) {
@@ -2090,6 +2102,12 @@ void SemanticAnalyzer::checkNestedTypeAccess(Type* type, const ASTNode& site) {
 }
 
 void SemanticAnalyzer::visit(StructDeclAST& node) {
+    // P1-03 / GEN-03: 实例字段/方法签名中的实例占位先解析。
+    for (auto& f : node.fields) f.second = resolveTypeInstance(f.second, node);
+    for (auto& m : node.methods) {
+        m->returnType = resolveTypeInstance(m->returnType, node);
+        for (auto& p : m->params) p->type = resolveTypeInstance(p->type, node);
+    }
     // PAR-04/DEC-01: `class` declarations are classes even without methods —
     // their members default to private and carry access levels.
     // INH-01: struct declarations with a base stay structs — only classes
@@ -2391,6 +2409,9 @@ void SemanticAnalyzer::visit(DeclStmtAST& node) {
 void SemanticAnalyzer::visit(FunctionDeclAST& node) {
     // Namespace members are registered/emitted under a mangled key.
     node.name = scopedName(node.name);
+    // P1-03 / GEN-03: 返回类型与参数类型中的实例占位先解析。
+    node.returnType = resolveTypeInstance(node.returnType, node);
+    for (auto& p : node.params) p->type = resolveTypeInstance(p->type, node);
 
     // Validate constexpr function constraints
     if (node.isConstexpr) {
@@ -2485,6 +2506,9 @@ void SemanticAnalyzer::analyzeTopLevelDecl(DeclAST& decl) {
         visit(*moduleDecl);
     } else if (auto* nsDecl = dynamic_cast<NamespaceDeclAST*>(&decl)) {
         visit(*nsDecl);
+    } else if (auto* tplDecl = dynamic_cast<TemplateDeclAST*>(&decl)) {
+        // P1-03 / GEN-01: 模板定义只注册，不在此 sema（GEN-06 定义处不检查）。
+        TemplateRegistry::instance().registerTemplate(tplDecl);
     } else if (auto* multi = dynamic_cast<MultiVarDeclAST*>(&decl)) {
         for (auto& d : multi->decls) {
             if (auto* v = dynamic_cast<VarDeclAST*>(d.get())) visit(*v);
@@ -2534,6 +2558,115 @@ void SemanticAnalyzer::visit(NamespaceDeclAST& node) {
 void SemanticAnalyzer::analyze(TranslationUnitAST& ast) {
     errors.clear();
     visit(ast);
+
+    // P1-03 / GEN-05: 克隆期嵌套使用点（模板体内 `Box<f64>` 字段）产生的
+    // 待检实例——补 visit 并全部追加到翻译单元尾部供 codegen 出码。惰性
+    // 保证：从未使用的模板不产生任何实例或符号。
+    auto& pending = TemplateRegistry::instance().pendingInstances();
+    while (!pending.empty()) {
+        std::unique_ptr<DeclAST> decl = std::move(pending.front());
+        pending.pop_front();
+        if (auto* st = dynamic_cast<StructDeclAST*>(decl.get())) {
+            if (!m_visitedInstances.count(st->name)) {
+                m_visitedInstances.insert(st->name);
+                visit(*st);
+            }
+        } else if (auto* fn = dynamic_cast<FunctionDeclAST*>(decl.get())) {
+            if (!m_visitedInstances.count(fn->name)) {
+                m_visitedInstances.insert(fn->name);
+                visit(*fn);
+            }
+        }
+        ast.declarations.push_back(std::move(decl));
+    }
+}
+
+// P1-03 / GEN-03: 解析类型树中的 TypeInstance 占位——递归解析嵌套实参、
+// 触发实例化、visit 实例 decl（补全 TypeContext 中的实例类型），原地把
+// 占位节点替换为具体类型。sema 结束后 TypeInstance 不复存在。
+Type* SemanticAnalyzer::resolveTypeInstance(Type* t, ASTNode& at) {
+    if (!t) return nullptr;
+    switch (t->kind) {
+        case TypeKind::Pointer:
+            t->base = resolveTypeInstance(t->base, at);
+            return t;
+        case TypeKind::Array: {
+            auto* arr = static_cast<ArrayType*>(t);
+            arr->elementType = resolveTypeInstance(arr->elementType, at);
+            if (!arr->sizeParam.empty()) {
+                emitError("unbound non-type template parameter '" + arr->sizeParam +
+                              "' outside template body",
+                          at);
+                arr->sizeParam.clear();
+            }
+            return t;
+        }
+        case TypeKind::Slice: {
+            auto* s = static_cast<SliceType*>(t);
+            s->elementType = resolveTypeInstance(s->elementType, at);
+            return t;
+        }
+        case TypeKind::Optional: {
+            auto* o = static_cast<OptionalType*>(t);
+            o->elementType = resolveTypeInstance(o->elementType, at);
+            return t;
+        }
+        case TypeKind::Result: {
+            auto* r = static_cast<ResultType*>(t);
+            r->successType = resolveTypeInstance(r->successType, at);
+            r->errorType = resolveTypeInstance(r->errorType, at);
+            return t;
+        }
+        case TypeKind::Typedef: {
+            auto* td = static_cast<TypedefType*>(t);
+            td->aliasedType = resolveTypeInstance(td->aliasedType, at);
+            return t;
+        }
+        case TypeKind::TypeInstance: {
+            auto* use = static_cast<TypeInstanceType*>(t);
+
+            // 嵌套实例实参先解析（Box<Box<i32>> 的内层先行完成）。
+            for (auto*& arg : use->typeArgs) arg = resolveTypeInstance(arg, at);
+
+            auto& reg = TemplateRegistry::instance();
+            std::string name =
+                TemplateRegistry::instanceName(use->templateName, use->typeArgs, use->valueArgs);
+            auto* decl = reg.instantiateClass(use->templateName, use->typeArgs, use->valueArgs);
+            if (!decl) {
+                emitError("cannot instantiate template '" + use->templateName + "'", at);
+                return nullptr;
+            }
+
+            // 同一实例只 visit 一次（去重键已在 Registry 保证 decl 唯一）。
+            if (!m_visitedInstances.count(name)) {
+                m_visitedInstances.insert(name);
+                m_instStack.push_back(use->templateName + "<...>");
+                visit(*static_cast<StructDeclAST*>(decl));
+                m_instStack.pop_back();
+            }
+
+            if (auto* ct = typeCtx->getClass(name)) return ct;
+            return typeCtx->getStruct(name);
+        }
+        case TypeKind::Struct: {
+            auto* st = static_cast<StructType*>(t);
+            if (st->isTemplatePattern) {
+                emitError("use of template '" + st->name + "' requires template arguments", at);
+                return nullptr;
+            }
+            return t;
+        }
+        case TypeKind::Class: {
+            auto* ct = static_cast<ClassType*>(t);
+            if (ct->isTemplatePattern) {
+                emitError("use of template '" + ct->name + "' requires template arguments", at);
+                return nullptr;
+            }
+            return t;
+        }
+        default:
+            return t;
+    }
 }
 
 void SemanticAnalyzer::visit(ExprAST& expr) {

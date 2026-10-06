@@ -1396,6 +1396,12 @@ bool Parser::isTypeStart() const {
             size_t i = m_currentTokenPos;
             if (i >= m_tokens.size()) return false;
             std::string name = m_tokens[i].lexeme;
+            // P1-03 / GEN-01: 模板类型参数名（模板体内）是类型起始——
+            // TypeVar 不入类型表，须先于 lookupNamedType 判断。
+            if (!m_templateScopes.empty() &&
+                m_templateScopes.back().typeParams.count(name)) {
+                return true;
+            }
             while (i + 2 < m_tokens.size() &&
                    m_tokens[i + 1].type == TokenType::TOKEN_COLON_COLON &&
                    m_tokens[i + 2].type == TokenType::TOKEN_IDENTIFIER) {
@@ -2544,6 +2550,16 @@ std::unique_ptr<DeclAST> Parser::parseTemplateDecl() {
     }
 
     m_templateScopes.pop_back();
+
+    // 模板体 parse 经普通声明路径注册的类型名占位标记为模板模式——裸模板名
+    // （无实参）在类型位置由 sema 诊断（解析期占位必须保留，否则
+    // isTypeStart 失灵导致声明被当表达式解析）。
+    if (auto* stBody = dynamic_cast<StructDeclAST*>(body.get())) {
+        if (auto* pt = TypeContext::instance().getStruct(stBody->name))
+            pt->isTemplatePattern = true;
+        if (auto* pc = TypeContext::instance().getClass(stBody->name))
+            pc->isTemplatePattern = true;
+    }
 
     auto tpl = std::make_unique<TemplateDeclAST>();
     tpl->params = std::move(params);

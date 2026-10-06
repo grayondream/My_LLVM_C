@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "sema/SemanticAnalyzer.h"
+#include "sema/TemplateRegistry.h"
 #include "ast/Expr.h"
 #include "ast/Stmt.h"
 #include "ast/Decl.h"
@@ -1923,4 +1924,51 @@ TEST(SliceSemTest, TernaryIncompatibleBranchesRejected) {
     EXPECT_FALSE(analyzeOk(
         "struct S { int32 x; };\n"
         "int32 main() { S s = {1}; int32 t = 1; S c = t ? s : 5; return 0; }"));
+}
+
+// ========== P1-03 / GEN-03: 类模板实例化（Tpl* 前缀防 TypeContext 碰撞） ==========
+
+TEST(TplSemTest, ClassTemplateFieldAccessOk) {
+    TemplateRegistry::instance().resetForTesting();
+    EXPECT_TRUE(analyzeOk(
+        "template<typename T> struct Box { T value; };\n"
+        "int32 main() { Box<int32> b; b.value = 3; return 0; }"));
+}
+
+TEST(TplSemTest, ClassTemplateTypeMismatch) {
+    TemplateRegistry::instance().resetForTesting();
+    // 实例点检查：T=int32 后给 `b.value` 赋聚合类型是类型错误（GEN-06）。
+    // （float→int 赋值在 C 语义下合法窄化，不能用作失配用例。）
+    EXPECT_FALSE(analyzeOk(
+        "template<typename T> struct Box { T value; };\n"
+        "int32 main() { Box<int32> b; Box<float64> c; b.value = c; return 0; }"));
+}
+
+TEST(TplSemTest, InstanceErrorDualLoc) {
+    TemplateRegistry::instance().resetForTesting();
+    // 实例体内错误：诊断消息须含 `in instantiation of`（双 loc 的消息侧）。
+    // 方法承载类型须用 class（该语言 struct 无方法——解析器只在 class
+    // 路径解析方法）。
+    Lexer lexer("tpl.c",
+        "template<typename T> class B { T x; T bad() { return oops; } };\n"
+        "int32 main() { B<int32> b; return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    bool found = false;
+    for (auto& e : analyzer.getErrors()) {
+        if (e.message.find("in instantiation of") != std::string::npos) found = true;
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST(TplSemTest, BareTemplateNameRejected) {
+    TemplateRegistry::instance().resetForTesting();
+    // 裸模板名（无实参）在类型位置须报错，不静默解析。
+    EXPECT_FALSE(analyzeOk(
+        "template<typename T> struct Box { T value; };\n"
+        "int32 main() { Box b; return 0; }"));
 }

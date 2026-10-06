@@ -123,11 +123,11 @@ P1-02 固化的内建特判（伪字段、严格相等、布局）**原样保留
 
 ```
 template<typename D>
-struct Shape {
+class Shape {
     f64 twice_area() { return static_cast<D*>(this)->area() * 2.0; }
     bool same_shape(D* other) { return static_cast<D*>(this)->area() == other->area(); }
 };
-struct Circle : Shape<Circle> {
+class Circle : Shape<Circle> {
     f64 r;
     f64 area() { return 3.14159 * r * r; }
 };

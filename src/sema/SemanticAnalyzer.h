@@ -36,6 +36,9 @@ public:
     Type* checkAssignmentTypes(Type* lhs, Type* rhs, ExprAST& node);
     Type* checkFunctionCall(const std::string& name, const std::vector<std::unique_ptr<ExprAST>>& args, ExprAST& node, FunctionType** outFuncType = nullptr);
 
+    // P1-03 / GEN-03: 解析类型树中的 TypeInstance 占位为具体实例类型。
+    Type* resolveTypeInstance(Type* t, ASTNode& at);
+
     Type* getExprType(ExprAST& expr);
     // LEX-15: fixed-width base type for a numeric literal kind (nullptr for None).
     Type* typeForLiteralKind(LiteralKind kind);
@@ -178,6 +181,10 @@ private:
 
     std::vector<Diagnostic> errors;
     std::vector<Diagnostic> warnings;
+    // P1-03 / GEN-03: 正在 visit 的实例化栈（诊断附 `in instantiation of`）
+    // 与已 visit 实例去重集。
+    std::vector<std::string> m_instStack;
+    std::unordered_set<std::string> m_visitedInstances;
     std::unique_ptr<Scope> globalScope;
     Scope* currentScope;
     FunctionDeclAST* currentFunction;

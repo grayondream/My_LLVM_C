@@ -15,6 +15,7 @@ class TemplateRegistryTest : public ::testing::Test {
 protected:
     void SetUp() override {
         spdlog::set_level(spdlog::level::off);
+        TemplateRegistry::instance().resetForTesting();
     }
 };
 
@@ -30,7 +31,8 @@ static std::unique_ptr<TemplateDeclAST> makeBoxTemplate() {
 }
 
 TEST_F(TemplateRegistryTest, ClassInstanceNaming) {
-    TemplateRegistry::instance().registerTemplate(makeBoxTemplate());
+    auto tpl = makeBoxTemplate();
+    TemplateRegistry::instance().registerTemplate(tpl.get());
     auto* inst = TemplateRegistry::instance().instantiateClass(
         "Box", {TypeContext::instance().getInt32()}, {});
     ASSERT_NE(inst, nullptr);
@@ -41,7 +43,8 @@ TEST_F(TemplateRegistryTest, ClassInstanceNaming) {
 }
 
 TEST_F(TemplateRegistryTest, InstanceDedup) {
-    TemplateRegistry::instance().registerTemplate(makeBoxTemplate());
+    auto tpl = makeBoxTemplate();
+    TemplateRegistry::instance().registerTemplate(tpl.get());
     auto* a = TemplateRegistry::instance().instantiateClass(
         "Box", {TypeContext::instance().getFloat64()}, {});
     auto* b = TemplateRegistry::instance().instantiateClass(
@@ -60,7 +63,7 @@ TEST_F(TemplateRegistryTest, NestedTypeRewrite) {
     auto tpl = std::make_unique<TemplateDeclAST>();
     tpl->params.push_back({"T", true, nullptr});
     tpl->decl = std::move(st);
-    TemplateRegistry::instance().registerTemplate(std::move(tpl));
+    TemplateRegistry::instance().registerTemplate(tpl.get());
 
     auto* inst = TemplateRegistry::instance().instantiateClass(
         "H", {TypeContext::instance().getFloat64()}, {});
@@ -84,7 +87,7 @@ TEST_F(TemplateRegistryTest, ValueParamSubstitution) {
     tpl->params.push_back({"T", true, nullptr});
     tpl->params.push_back({"N", false, TypeContext::instance().getUSize()});
     tpl->decl = std::move(st);
-    TemplateRegistry::instance().registerTemplate(std::move(tpl));
+    TemplateRegistry::instance().registerTemplate(tpl.get());
 
     auto* inst = TemplateRegistry::instance().instantiateClass(
         "Arr", {TypeContext::instance().getInt32()}, {4});
@@ -106,7 +109,7 @@ TEST_F(TemplateRegistryTest, RecursiveInstantiationRejected) {
     auto tpl = std::make_unique<TemplateDeclAST>();
     tpl->params.push_back({"T", true, nullptr});
     tpl->decl = std::move(st);
-    TemplateRegistry::instance().registerTemplate(std::move(tpl));
+    TemplateRegistry::instance().registerTemplate(tpl.get());
 
     auto& reg = TemplateRegistry::instance();
     auto* inst = reg.instantiateClass("Node", {TypeContext::instance().getInt32()}, {});
@@ -121,7 +124,8 @@ TEST_F(TemplateRegistryTest, RecursiveInstantiationRejected) {
 
 TEST_F(TemplateRegistryTest, DepthLimit) {
     // 65 层嵌套 `Box<Box<...<i32>>>`——循环构造实参类型。
-    TemplateRegistry::instance().registerTemplate(makeBoxTemplate());
+    auto tpl = makeBoxTemplate();
+    TemplateRegistry::instance().registerTemplate(tpl.get());
     Type* arg = TypeContext::instance().getInt32();
     for (int i = 0; i < 65; ++i) {
         auto* inner = new TypeInstanceType("Box");

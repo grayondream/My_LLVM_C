@@ -9,7 +9,7 @@ TemplateRegistry& TemplateRegistry::instance() {
     return reg;
 }
 
-void TemplateRegistry::registerTemplate(std::unique_ptr<TemplateDeclAST> decl) {
+void TemplateRegistry::registerTemplate(TemplateDeclAST* decl) {
     std::string name;
     if (auto* fn = dynamic_cast<FunctionDeclAST*>(decl->decl.get())) {
         name = fn->name;
@@ -18,12 +18,17 @@ void TemplateRegistry::registerTemplate(std::unique_ptr<TemplateDeclAST> decl) {
     } else if (auto* ud = dynamic_cast<UsingDeclAST*>(decl->decl.get())) {
         name = ud->name;
     }
-    m_templates[name] = std::move(decl);
+    m_templates[name] = decl;
+
+    // 模板体 parse 走了普通声明路径，把类型名注册成了占位 StructType/
+    // ClassType——撤销，保证裸模板名（无实参）在类型位置报错而非静默解析。
+    TypeContext::instance().removeStruct(name);
+    TypeContext::instance().removeClass(name);
 }
 
 TemplateDeclAST* TemplateRegistry::find(const std::string& name) const {
     auto it = m_templates.find(name);
-    return it != m_templates.end() ? it->second.get() : nullptr;
+    return it != m_templates.end() ? it->second : nullptr;
 }
 
 std::string TemplateRegistry::instanceName(const std::string& name,

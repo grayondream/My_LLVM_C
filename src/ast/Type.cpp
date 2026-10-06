@@ -80,6 +80,29 @@ void TypeContext::addClass(const std::string& name, ClassType* type) {
     m_classes[name] = type;
 }
 
+void TypeContext::removeStruct(const std::string& name) {
+    m_structs.erase(name);
+}
+
+void TypeContext::removeClass(const std::string& name) {
+    m_classes.erase(name);
+}
+
+void TypeContext::removeInstanceTypes() {
+    for (auto it = m_structs.begin(); it != m_structs.end();) {
+        if (it->first.find('$') != std::string::npos)
+            it = m_structs.erase(it);
+        else
+            ++it;
+    }
+    for (auto it = m_classes.begin(); it != m_classes.end();) {
+        if (it->first.find('$') != std::string::npos)
+            it = m_classes.erase(it);
+        else
+            ++it;
+    }
+}
+
 ClassType* TypeContext::getClass(const std::string& name) const {
     auto it = m_classes.find(name);
     if (it != m_classes.end()) {

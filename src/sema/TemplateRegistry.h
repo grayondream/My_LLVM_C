@@ -16,8 +16,9 @@ class TemplateRegistry {
 public:
     static TemplateRegistry& instance();
 
-    // 注册模板定义（parse 完成后）。同名重复注册覆盖（单测重建用）。
-    void registerTemplate(std::unique_ptr<TemplateDeclAST> decl);
+    // 注册模板定义（parse 完成后）。非所有权——模板定义由翻译单元持有。
+    // 同名重复注册覆盖（单测重建用）。
+    void registerTemplate(TemplateDeclAST* decl);
     TemplateDeclAST* find(const std::string& name) const;
 
     // 类模板实例化：克隆模板体、按实参重写、改名 mangled 拼写
@@ -52,6 +53,16 @@ public:
     const std::vector<std::string>& getErrors() const { return m_errors; }
     void clearErrors() { m_errors.clear(); }
 
+    // 仅测试用：清空实例缓存/状态/待检队列（单测进程内多 TU 隔离）。
+    void resetForTesting() {
+        m_states.clear();
+        m_done.clear();
+        m_pending.clear();
+        m_errors.clear();
+        m_depth = 0;
+        TypeContext::instance().removeInstanceTypes();
+    }
+
     // 实例命名：`名 + 每个类型实参的 typeToMangled 拼写 + 非类型实参值`。
     static std::string instanceName(const std::string& name,
                                     const std::vector<Type*>& typeArgs,
@@ -69,7 +80,7 @@ private:
                               const std::unordered_map<std::string, long long>& valueArgMap,
                               bool wantClass);
 
-    std::unordered_map<std::string, std::unique_ptr<TemplateDeclAST>> m_templates;
+    std::unordered_map<std::string, TemplateDeclAST*> m_templates;
     std::map<std::string, State> m_states;
     std::unordered_map<std::string, DeclAST*> m_done;
     std::deque<std::unique_ptr<DeclAST>> m_pending;

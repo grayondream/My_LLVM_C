@@ -84,6 +84,9 @@ public:
     Type* base{};
     // INH-01: completion tracking (mirrors ClassType::isComplete).
     bool isComplete{};
+    // P1-03 / GEN: 模板体 parse 经普通声明路径注册的占位类型——裸模板名
+    // （无实参）使用时由 sema 诊断。
+    bool isTemplatePattern = false;
     std::vector<std::pair<std::string, Type*>> fields;
 
     StructType(const std::string& n)
@@ -215,6 +218,9 @@ public:
     // diagnosed.
     bool isComplete{};
 
+    // P1-03 / GEN: 模板体 parse 的占位注册（同 StructType::isTemplatePattern）。
+    bool isTemplatePattern = false;
+
     ClassType(const std::string& n)
         : Type(TypeKind::Class), name(n) {}
 
@@ -273,6 +279,14 @@ public:
     void addClass(const std::string& name, ClassType* type);
     ClassType* getClass(const std::string& name) const;
     ClassType* getOrCreateClass(const std::string& name);
+
+    // P1-03 / GEN: 模板体 parse 会经普通声明路径注册类型名（占位）——模板
+    // 注册时须撤销，保证裸模板名（无实参）在类型位置不可解析。
+    void removeStruct(const std::string& name);
+    void removeClass(const std::string& name);
+
+    // 仅测试用：清除所有模板实例类型（名字含 '$'）。
+    void removeInstanceTypes();
 
     // 新增类型获取方法
     Type* getBool();
