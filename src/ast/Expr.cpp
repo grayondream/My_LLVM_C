@@ -792,20 +792,45 @@ llvm::Value* TernaryExprAST::codegen(CodegenContext& ctx) {
 
     builder.CreateCondBr(condVal, thenBB, elseBB);
 
+    // 根因修复：lvalue 分支 codegen 产生的是地址——直接喂 phi 会把地址当
+    // 值（标量被截断、指针存变量地址、聚合为垃圾）。分支须先取值（数组
+    // 除外：数组 lvalue 不按值装入，与条件路径同一处理）。取值/转换在分支
+    // 块内完成——merge 块顶只允许 phi。
+    Type* common = type;
+    llvm::Type* commonLLVM = common ? ctx.getLLVMType(common) : nullptr;
+    auto finishBranch = [&ctx, commonLLVM](ExprAST& branch, llvm::Value* val) -> llvm::Value* {
+        if (branch.isLValue && branch.type && branch.type->kind != TypeKind::Array) {
+            val = ctx.loadValue(val, branch.type);
+        }
+        if (val && branch.type) {
+            if (llvm::Type* dest = commonLLVM) {
+                if (val->getType() != dest) val = ctx.castValue(val, branch.type, dest);
+            }
+        }
+        return val;
+    };
+
     builder.SetInsertPoint(thenBB);
     llvm::Value* thenVal = then->codegen(ctx);
     if (!thenVal) return nullptr;
+    thenVal = finishBranch(*then, thenVal);
+    if (!thenVal) return nullptr;
+    // 嵌套三元：内层表达式会切换插入点，phi 的前驱必须记实际终结块。
+    llvm::BasicBlock* thenPred = builder.GetInsertBlock();
     builder.CreateBr(mergeBB);
 
     builder.SetInsertPoint(elseBB);
     llvm::Value* elseVal = elseExpr->codegen(ctx);
     if (!elseVal) return nullptr;
+    elseVal = finishBranch(*elseExpr, elseVal);
+    if (!elseVal) return nullptr;
+    llvm::BasicBlock* elsePred = builder.GetInsertBlock();
     builder.CreateBr(mergeBB);
 
     builder.SetInsertPoint(mergeBB);
     llvm::PHINode* phi = builder.CreatePHI(thenVal->getType(), 2, "ternarytmp");
-    phi->addIncoming(thenVal, thenBB);
-    phi->addIncoming(elseVal, elseBB);
+    phi->addIncoming(thenVal, thenPred);
+    phi->addIncoming(elseVal, elsePred);
     return phi;
 }
 

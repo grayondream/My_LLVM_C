@@ -510,6 +510,10 @@ std::unique_ptr<ExprAST> Parser::parseUnaryImpl() {
         if (!operand) {
             return nullptr;
         }
+        // 解析优先级缺陷轮：后缀（`.`/`->`/`[...]`/调用）绑定必须紧于前缀
+        // 一元——`-a.v` 是 `-(a.v)` 而非 `(-a).v`，`-arr[i]` 是 `-(arr[i])`。
+        // 入口处的 parsePostfix 只作用于最外层，这里补内层。
+        operand = parsePostfix(std::move(operand));
         auto unaryOp = tokenToUnaryOp(op);
         return std::make_unique<UnaryExprAST>(unaryOp, std::move(operand));
     }

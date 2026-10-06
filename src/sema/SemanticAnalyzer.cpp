@@ -1340,17 +1340,21 @@ void SemanticAnalyzer::visit(TernaryExprAST& node) {
         emitError("ternary condition must be scalar type, but got '" + typeToString(condType) + "'", node);
     }
 
-    // 评审 I4: Optional/Result branches produced a phi over aggregate
-    // pointers/values (silent garbage or a PHINode assert). Not supported
-    // this round — use if/else. (Root cause for scalar/struct ternaries is a
-    // preexisting gap, deferred.)
-    auto isOptionalResultBranch = [](Type* t) {
+    // 三元根因轮：分支类型须兼容——非算术对且 typesCompatible 不成立时
+    // 拒绝（旧 getCommonType 对异 kind 静默取左，`t ? s : 5` 混型不报错）。
+    // Optional/Result 同型分支在此放行：codegen 已按值 phi（根因已修）。
+    auto strippedBranch = [](Type* t) {
         while (t && t->kind == TypeKind::Typedef)
             t = static_cast<TypedefType*>(t)->aliasedType;
-        return t && (t->kind == TypeKind::Optional || t->kind == TypeKind::Result);
+        return t;
     };
-    if (isOptionalResultBranch(thenType) || isOptionalResultBranch(elseType)) {
-        emitError("ternary branches of Optional/Result type are not supported; use if/else", node);
+    Type* bl = strippedBranch(thenType);
+    Type* br = strippedBranch(elseType);
+    if (bl && br && !(isArithmeticType(bl) && isArithmeticType(br)) &&
+        !typesCompatible(bl, br)) {
+        emitError("ternary branches have incompatible types: '" +
+                      typeToString(thenType) + "' and '" + typeToString(elseType) + "'",
+                  node);
         node.type = nullptr;
         node.isLValue = false;
         return;

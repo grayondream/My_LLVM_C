@@ -1903,9 +1903,10 @@ TEST(SliceSemTest, OptTypedefValuePin) {
         "typedef int32 MyInt; int32 main() { MyInt x = 5; int32? p = {true, x}; return x; }"));
 }
 
-TEST(SliceSemTest, OptTernaryBranchRejected) {
-    // 评审 I4：Optional/Result 作三元分支曾产生 phi ptr 静默垃圾/断言。
-    EXPECT_FALSE(analyzeOk(
+TEST(SliceSemTest, OptTernaryBranchAllowed) {
+    // 三元根因修复后撤销 I4 拒绝：同型 Optional 分支按值 phi（e2e 执行见
+    // TernaryE2E.OptionalBranch）。
+    EXPECT_TRUE(analyzeOk(
         "int32 main() { int32? a = {true, 5}; int32? b = {false, 0}; "
         "int32? c = a.valid ? a : b; return 0; }"));
 }
@@ -1915,4 +1916,11 @@ TEST(SliceSemTest, OptRvalueAssignRejected) {
     EXPECT_FALSE(analyzeOk(
         "int32? make(int32 v) { int32? t = {v != 0, 7}; return t; } "
         "int32 main() { make(1).value = 5; return 0; }"));
+}
+
+TEST(SliceSemTest, TernaryIncompatibleBranchesRejected) {
+    // 三元根因轮：非算术对且不兼容的分支须诊断（旧 getCommonType 静默取左）。
+    EXPECT_FALSE(analyzeOk(
+        "struct S { int32 x; };\n"
+        "int32 main() { S s = {1}; int32 t = 1; S c = t ? s : 5; return 0; }"));
 }
