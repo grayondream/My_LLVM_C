@@ -546,3 +546,18 @@
 - 验证：全量 ctest 952/952（940 → 952，TDD RED→GREEN）。
 - 遗留：数组作三元分支（退化语义）未处理；Optional/Result 全局零初始化
   已绿；M1-M6 及 LLJIT flaky、P1-03 泛型待后续轮。
+
+## 2026-10-06（续2）— P1-03 泛型 + CRTP
+- 完成事项：函数/类/别名模板 + 非类型参数（仅整数）+ 显式/推导实例化 +
+  编译期单态化 + this 表达式 + CRTP 全链路。模板定义只 parse 存 AST；
+  使用点惰性触发 TemplateInstantiator（AST 深克隆 + TypeVar 重写），
+  TemplateRegistry 键去重/状态机/深度上限 64；实例以普通声明走既有
+  sema/codegen；诊断附 `in instantiation of template`。
+- 落点：src/frontend/{Token,Lexer,Parser}.h/.cpp、src/ast/{Type,Decl,Expr,Mangle}、
+  src/sema/{TemplateRegistry,TemplateInstantiator,SemanticAnalyzer}、
+  docs/superpowers/specs/2026-10-06-generics-crtp-design.md、plan 同目录 plans/。
+- 验证：全量 ctest 992/992（952 → 992，每任务 TDD RED→GREEN）。
+  测试 +40：parser 6、registry 6、sema 13、e2e 15。
+- 遗留：模板与模块 import 组合未测；别名模板嵌套展开缓存为进程级；
+  struct 模板方法（struct 无方法语义）不支持；`compile_time` 语境的
+  非类型参数（GEN-02 后半）随 P1-04；M1-M6 minors 挂账不变。
