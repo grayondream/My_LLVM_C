@@ -5,6 +5,7 @@
 #include "ast/Type.h"
 #include "ast/Mangle.h"
 #include "sema/TemplateRegistry.h"
+#include "sema/TemplateInstantiator.h"
 #include <algorithm>
 
 // Strip any number of typedef/alias layers, returning the underlying type.
@@ -2757,6 +2758,30 @@ Type* SemanticAnalyzer::resolveTypeInstance(Type* t, ASTNode& at) {
             auto& reg = TemplateRegistry::instance();
             std::string name =
                 TemplateRegistry::instanceName(use->templateName, use->typeArgs, use->valueArgs);
+
+            // 别名模板：展开目标类型（键缓存防重复展开），产物中的实例
+            // 类型立即补 visit——字段访问要求布局当场完整。
+            auto* tpl = reg.find(use->templateName);
+            if (tpl && dynamic_cast<UsingDeclAST*>(tpl->decl.get())) {
+                if (m_aliasCache.count(name)) return m_aliasCache[name];
+                std::unordered_map<std::string, Type*> typeArgMap;
+                std::unordered_map<std::string, long long> valueArgMap;
+                size_t ti = 0, vi = 0;
+                for (auto& p : tpl->params) {
+                    if (p.isType) {
+                        if (ti < use->typeArgs.size()) typeArgMap[p.name] = use->typeArgs[ti++];
+                    } else {
+                        if (vi < use->valueArgs.size()) valueArgMap[p.name] = use->valueArgs[vi++];
+                    }
+                }
+                Type* expanded = TemplateInstantiator(typeArgMap, valueArgMap)
+                                     .rewrite(static_cast<UsingDeclAST*>(tpl->decl.get())
+                                                  ->aliasedType);
+                m_aliasCache[name] = expanded;
+                ensureInstanceVisited(expanded, at);
+                return expanded;
+            }
+
             auto* decl = reg.instantiateClass(use->templateName, use->typeArgs, use->valueArgs);
             if (!decl) {
                 emitError("cannot instantiate template '" + use->templateName + "'", at);
@@ -2792,6 +2817,24 @@ Type* SemanticAnalyzer::resolveTypeInstance(Type* t, ASTNode& at) {
         }
         default:
             return t;
+    }
+}
+
+// 别名展开产物中的实例类型：若其实例 decl 已克隆但未 visit，立即补齐
+// （字段访问要求布局当场完整）。
+void SemanticAnalyzer::ensureInstanceVisited(Type* t, ASTNode& at) {
+    if (!t) return;
+    std::string name;
+    if (t->kind == TypeKind::Struct) name = static_cast<StructType*>(t)->name;
+    else if (t->kind == TypeKind::Class) name = static_cast<ClassType*>(t)->name;
+    else return;
+    if (name.find('$') == std::string::npos) return;
+    auto* decl = TemplateRegistry::instance().instanceDeclFor(name);
+    if (decl && !m_visitedInstances.count(name)) {
+        m_visitedInstances.insert(name);
+        m_instStack.push_back(name);
+        visit(*static_cast<StructDeclAST*>(decl));
+        m_instStack.pop_back();
     }
 }
 

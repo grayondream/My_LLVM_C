@@ -44,6 +44,9 @@ public:
     // 实例化状态（递归检测用）。key = 实例 mangled 名。
     bool isInstantiating(const std::string& key) const;
 
+    // 已完成克隆的实例 decl（按实例名）。别名展开后补 visit 用。
+    DeclAST* instanceDeclFor(const std::string& instanceName) const;
+
     // 克隆完成、待 sema 的实例 decl 队列。调用方 pop 后 visit，最终转交
     // codegen（追加到翻译单元）。
     std::deque<std::unique_ptr<DeclAST>>& pendingInstances() { return m_pending; }

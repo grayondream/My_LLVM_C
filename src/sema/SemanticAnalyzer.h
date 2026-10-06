@@ -38,6 +38,8 @@ public:
 
     // P1-03 / GEN-03: 解析类型树中的 TypeInstance 占位为具体实例类型。
     Type* resolveTypeInstance(Type* t, ASTNode& at);
+    // 别名展开产物中的实例类型当场补 visit。
+    void ensureInstanceVisited(Type* t, ASTNode& at);
 
     Type* getExprType(ExprAST& expr);
     // LEX-15: fixed-width base type for a numeric literal kind (nullptr for None).
@@ -188,6 +190,8 @@ private:
     // 与已 visit 实例去重集。
     std::vector<std::string> m_instStack;
     std::unordered_set<std::string> m_visitedInstances;
+    // 别名模板展开缓存：键 = 实例 mangled 名。
+    std::unordered_map<std::string, Type*> m_aliasCache;
     std::unique_ptr<Scope> globalScope;
     Scope* currentScope;
     FunctionDeclAST* currentFunction;

@@ -1813,6 +1813,9 @@ Type* Parser::parseBaseType() {
                     if (check(TokenType::TOKEN_NUMBER)) {
                         auto numTok = advance();
                         inst->valueArgs.push_back(std::get<long long>(numTok->value));
+                    } else if (check(TokenType::TOKEN_FLOAT)) {
+                        error("non-type template argument must be an integer constant", *peek());
+                        return nullptr;
                     } else {
                         Type* argType = parseType();
                         if (!argType) {

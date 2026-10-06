@@ -2045,3 +2045,38 @@ TEST(TplFnSemTest, Undeducible) {
     }
     EXPECT_TRUE(found);
 }
+
+// ========== P1-03 / GEN-02: 非类型参数与别名模板（TplArr* 前缀） ==========
+
+TEST(TplArrSemTest, NonTypeParamArrayOk) {
+    TemplateRegistry::instance().resetForTesting();
+    EXPECT_TRUE(analyzeFullyOk(
+        "template<typename T, usize N> struct Arr { T data[N]; };\n"
+        "int32 main() { Arr<int32, 4> a; a.data[0] = 1; return 0; }"));
+}
+
+TEST(TplArrSemTest, AliasEquivalent) {
+    TemplateRegistry::instance().resetForTesting();
+    EXPECT_TRUE(analyzeFullyOk(
+        "template<typename T, usize N> struct Arr { T data[N]; };\n"
+        "template<typename T> using Vec = Arr<T, 8>;\n"
+        "int32 main() { Vec<int32> v; Arr<int32, 8> a = v; v = a; return 0; }"));
+}
+
+TEST(TplArrSemTest, NonIntegralValueParamRejected) {
+    TemplateRegistry::instance().resetForTesting();
+    Lexer lexer("t.c",
+        "template<typename T, usize N> struct Arr { T data[N]; };\n"
+        "int32 main() { Arr<int32, 0.5> a; return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    bool found = false;
+    for (auto& d : parser.getErrors()) {
+        if (d.message.find("non-type template argument must be an integer constant") !=
+            std::string::npos)
+            found = true;
+    }
+    if (!ast) found = true; // parse 整体失败也计拒绝
+    ASSERT_TRUE(found);
+}

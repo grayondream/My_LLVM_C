@@ -147,3 +147,26 @@ TEST_F(GenericE2E, NonTemplateExactMatchWins) {
         }
     )", "gen5.c"), 1);
 }
+
+TEST_F(GenericE2E, FixedArrayTemplate) {
+    EXPECT_EQ(runSource(R"(
+        template<typename T, usize N> struct Arr { T data[N]; };
+        int32 main() {
+            Arr<int32, 4> a;
+            a.data[0] = 1; a.data[1] = 2; a.data[2] = 3; a.data[3] = 4;
+            return a.data[0] + a.data[1] + a.data[2] + a.data[3];
+        }
+    )", "gen6.c"), 10);
+}
+
+TEST_F(GenericE2E, AliasTemplateE2E) {
+    EXPECT_EQ(runSource(R"(
+        template<typename T, usize N> struct Arr { T data[N]; };
+        template<typename T> using Vec = Arr<T, 2>;
+        int32 main() {
+            Vec<int32> v;
+            v.data[0] = 5; v.data[1] = 6;
+            return v.data[0] * 10 + v.data[1];
+        }
+    )", "gen7.c"), 56);
+}

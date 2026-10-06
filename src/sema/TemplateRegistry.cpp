@@ -46,6 +46,11 @@ bool TemplateRegistry::isInstantiating(const std::string& key) const {
     return it != m_states.end() && it->second == State::Instantiating;
 }
 
+DeclAST* TemplateRegistry::instanceDeclFor(const std::string& instanceName) const {
+    auto it = m_done.find(instanceName);
+    return it != m_done.end() ? it->second : nullptr;
+}
+
 DeclAST* TemplateRegistry::instantiateByKey(
     const std::string& key, const std::string& tplName, const std::string& displayName,
     const std::unordered_map<std::string, Type*>& typeArgMap,
