@@ -1785,3 +1785,23 @@ TEST(SliceSemTest, RedefNestedSameInnerNamePin) {
         "struct O47b { struct I47 { int32 y; }; }; "
         "int32 main() { return 0; }"));
 }
+
+// ========== OPT/RES: P1-02 Optional/Result（Task 1 语法） ==========
+
+TEST(SliceSemTest, OptResParseNamedOptional) {
+    // `Optional<T>` 显式形式必须与 `T?` 同型（spec §4.1）。
+    EXPECT_TRUE(analyzeOk("int32 main() { Optional<int32> o; return 0; }"));
+}
+
+TEST(SliceSemTest, OptResParseResult) {
+    // 语法聚焦：Result 声明/形参/返回解析（成员访问属 Task 4，初始化属
+    // Task 4/5 的聚合初始化语义）。
+    EXPECT_TRUE(analyzeOk(
+        "Result<int32, int32> take(Result<int32, int32> r) { return r; } "
+        "int32 main() { Result<int32, int32> x; return 0; }"));
+}
+
+TEST(SliceSemTest, OptResParseNestedArgs) {
+    EXPECT_TRUE(analyzeOk(
+        "int32 main() { Result<int32, int32?> r; Optional<Optional<int32>> o; return 0; }"));
+}

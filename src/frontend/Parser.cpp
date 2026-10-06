@@ -1396,6 +1396,14 @@ bool Parser::isTypeStart() const {
                 name += "::" + m_tokens[i + 2].lexeme;
                 i += 2;
             }
+            // P1-02: builtin polymorphic types `Optional<T>` / `Result<T, E>`
+            // are type starts even though no named type is registered (GEN
+            // templates do not exist yet; see parseBaseType).
+            if ((name == "Optional" || name == "Result") &&
+                i + 1 < m_tokens.size() &&
+                m_tokens[i + 1].type == TokenType::TOKEN_LT) {
+                return true;
+            }
             return lookupNamedType(name) != nullptr;
         }
         default:
@@ -1668,6 +1676,48 @@ Type* Parser::parseBaseType() {
             // cursor untouched for callers that probe.
             size_t saved = m_currentTokenPos;
             std::string name = parseQualifiedTypeName();
+            // P1-02 (TYP-13/14): builtin polymorphic types `Optional<T>` and
+            // `Result<T,E>` — special-cased here (type positions only) since
+            // the general template system (GEN) does not exist yet; mirrors
+            // the template-instance grammar. `T?` remains the Optional sugar.
+            if ((name == "Optional" || name == "Result") && check(TokenType::TOKEN_LT)) {
+                advance(); // consume '<'
+                auto closeBracket = [this]() -> bool {
+                    if (check(TokenType::TOKEN_GT)) {
+                        advance();
+                        return true;
+                    }
+                    if (check(TokenType::TOKEN_RSHIFT)) {
+                        // Nested args (`Optional<Optional<int32>>`): split the
+                        // lexed '>>' into two '>' by rewriting the token in
+                        // place; the outer close then consumes the remainder.
+                        m_tokens[m_currentTokenPos].type = TokenType::TOKEN_GT;
+                        m_tokens[m_currentTokenPos].lexeme = ">";
+                        return true;
+                    }
+                    return false;
+                };
+                if (name == "Optional") {
+                    Type* elem = parseType();
+                    if (!elem || !closeBracket()) {
+                        errorUnexpected("expected type argument list for 'Optional<T>'");
+                        return nullptr;
+                    }
+                    return TypeContext::instance().getOptionalType(elem);
+                }
+                Type* successType = parseType();
+                if (!successType || !check(TokenType::TOKEN_COMMA)) {
+                    errorUnexpected("expected ',' in 'Result<T, E>'");
+                    return nullptr;
+                }
+                advance(); // consume ','
+                Type* errorType = parseType();
+                if (!errorType || !closeBracket()) {
+                    errorUnexpected("expected type argument list for 'Result<T, E>'");
+                    return nullptr;
+                }
+                return TypeContext::instance().getResultType(successType, errorType);
+            }
             if (Type* named = lookupNamedType(name)) {
                 return named;
             }
