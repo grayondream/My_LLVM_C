@@ -12,14 +12,13 @@
 #include "ast/Expr.h"
 #include "ast/Stmt.h"
 #include "ast/Decl.h"
+#include "sema/CompileTimeEvaluator.h"
 
 class SemanticAnalyzer {
 public:
-    struct ConstValue {
-        enum Type { INT, DOUBLE, CHAR } type;
-        // LEX-15: integer constants keep the full 64-bit literal range.
-        union { long long intVal; double doubleVal; char charVal; };
-    };
+    // P1-04 / CT-06 / CT-14 / DEC-05: ConstValue 权威定义迁至
+    // CompileTimeEvaluator（加 STR）；别名保持既有引用点不改动。
+    using ConstValue = CompileTimeEvaluator::ConstValue;
 
     SemanticAnalyzer();
 
@@ -57,6 +56,9 @@ public:
 
     // Compile-time environment used while interpreting a constexpr function.
     using ConstEnv = std::unordered_map<std::string, ConstValue>;
+
+    // P1-04 / CT-06: 编译期求值器需要发诊断与访问内部状态。
+    friend class CompileTimeEvaluator;
 
 private:
     void emitError(const std::string& msg, const ASTNode& node);
