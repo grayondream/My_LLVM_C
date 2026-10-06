@@ -161,6 +161,11 @@ class CallExprAST : public ExprAST {
 public:
     std::string callee;
     std::vector<std::unique_ptr<ExprAST>> args;
+    // P1-03 / GEN-03: 显式模板实参 `max<int32>(3, 4)`——类型与整型值按
+    // 出现顺序分组；空且 hasTemplateArgs 时走纯推导。
+    bool hasTemplateArgs = false;
+    std::vector<Type*> explicitTemplateArgs;
+    std::vector<long long> explicitTemplateValues;
     // Parameter types of the overload chosen by semantic analysis. Empty when
     // unresolved (e.g. codegen is run without semantic analysis).
     std::vector<Type*> resolvedParamTypes;

@@ -610,6 +610,58 @@ std::unique_ptr<ExprAST> Parser::parsePrimaryImpl() {
             name += "::" + part->lexeme;
         }
 
+        // P1-03 / GEN-03: `name<args>(...)` 显式模板调用——投机解析实参列
+        // 表且必须紧跟 `(`；失败回滚按比较表达式处理（`a < b > (c)` 歧义
+        // 取比较，C++ 同款立场）。
+        std::vector<Type*> explicitTemplateArgs;
+        std::vector<long long> explicitTemplateValues;
+        bool hasTemplateArgs = false;
+        if (peek() && peek()->type == TokenType::TOKEN_LT) {
+            size_t save = m_currentTokenPos;
+            bool ok = true;
+            advance(); // '<'
+            auto closeBracket = [this]() -> bool {
+                if (check(TokenType::TOKEN_GT)) {
+                    advance();
+                    return true;
+                }
+                if (check(TokenType::TOKEN_RSHIFT)) {
+                    m_tokens[m_currentTokenPos].type = TokenType::TOKEN_GT;
+                    m_tokens[m_currentTokenPos].lexeme = ">";
+                    return true;
+                }
+                return false;
+            };
+            if (check(TokenType::TOKEN_GT) || check(TokenType::TOKEN_RSHIFT)) {
+                ok = closeBracket(); // `name<>()` 空实参：纯推导
+            } else {
+                while (true) {
+                    if (check(TokenType::TOKEN_NUMBER)) {
+                        auto numTok = advance();
+                        explicitTemplateValues.push_back(std::get<long long>(numTok->value));
+                    } else {
+                        Type* argType = parseType();
+                        if (!argType) {
+                            ok = false;
+                            break;
+                        }
+                        explicitTemplateArgs.push_back(argType);
+                    }
+                    if (match(TokenType::TOKEN_COMMA)) continue;
+                    break;
+                }
+                if (ok) ok = closeBracket();
+            }
+            if (ok) ok = peek() && peek()->type == TokenType::TOKEN_LPAREN;
+            if (ok) {
+                hasTemplateArgs = true;
+            } else {
+                m_currentTokenPos = save;
+                explicitTemplateArgs.clear();
+                explicitTemplateValues.clear();
+            }
+        }
+
         // Function call: identifier(args)
         if (peek() && peek()->type == TokenType::TOKEN_LPAREN) {
             advance(); // consume '('
@@ -630,7 +682,11 @@ std::unique_ptr<ExprAST> Parser::parsePrimaryImpl() {
             }
 
             expect(TokenType::TOKEN_RPAREN, "expected ')' after function arguments");
-            return std::make_unique<CallExprAST>(name, std::move(args));
+            auto call = std::make_unique<CallExprAST>(name, std::move(args));
+            call->hasTemplateArgs = hasTemplateArgs;
+            call->explicitTemplateArgs = std::move(explicitTemplateArgs);
+            call->explicitTemplateValues = std::move(explicitTemplateValues);
+            return call;
         }
 
         return std::make_unique<VariableExprAST>(name);

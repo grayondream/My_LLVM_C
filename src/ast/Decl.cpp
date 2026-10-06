@@ -363,26 +363,40 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
     return alloca;
 }
 
-llvm::Value* FunctionDeclAST::codegen(CodegenContext& ctx) {
+// P1-03 / GEN-05: 仅创建函数签名（无体）。TU codegen 预扫用——模板实例
+// 函数追加在翻译单元尾部，其前方的调用点必须能解析到符号。
+llvm::Value* FunctionDeclAST::codegenPrototype(CodegenContext& ctx) {
     llvm::Type* retType = ctx.getLLVMType(returnType);
     std::vector<llvm::Type*> paramTypes;
     for (auto& param : params) {
         paramTypes.push_back(ctx.getLLVMType(param->type));
     }
-
-    // Use mangled name for LLVM IR
     std::vector<Type*> astParamTypes;
     for (auto& param : params) {
         astParamTypes.push_back(param->type);
     }
     std::string mangledName = mangleFunction(name, astParamTypes);
 
-    // Reuse a previous declaration (prototype) if one already exists.
     llvm::Function* function = ctx.getModule().getFunction(mangledName);
     if (!function) {
         llvm::FunctionType* funcType = llvm::FunctionType::get(retType, paramTypes, isVarArg);
         function = llvm::Function::Create(
             funcType, llvm::Function::ExternalLinkage, mangledName, ctx.getModule());
+    }
+    return function;
+}
+
+llvm::Value* FunctionDeclAST::codegen(CodegenContext& ctx) {
+    // 签名已由 codegenPrototype（TU 预扫）或本函数创建；复用已有声明。
+    std::vector<Type*> astParamTypes;
+    for (auto& param : params) {
+        astParamTypes.push_back(param->type);
+    }
+    std::string mangledName = mangleFunction(name, astParamTypes);
+
+    llvm::Function* function = ctx.getModule().getFunction(mangledName);
+    if (!function) {
+        function = static_cast<llvm::Function*>(codegenPrototype(ctx));
     }
 
     // A declaration without a body needs no entry block or code.
@@ -441,6 +455,14 @@ llvm::Value* DeclStmtAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* TranslationUnitAST::codegen(CodegenContext& ctx) {
+    // 预扫：先声明全部函数签名——模板实例函数在 analyze 末尾追加到翻译
+    // 单元尾部，其前方的调用点 codegen 必须能解析到符号。
+    for (auto& decl : declarations) {
+        if (auto* fn = dynamic_cast<FunctionDeclAST*>(decl.get())) {
+            fn->codegenPrototype(ctx);
+        }
+    }
+
     llvm::Value* last = nullptr;
     for (auto& decl : declarations) {
         last = decl->codegen(ctx);

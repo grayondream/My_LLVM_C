@@ -1272,6 +1272,13 @@ void SemanticAnalyzer::visit(CallExprAST& node) {
     // Resolve a namespace-qualified or namespace-local callee to its mangled key.
     node.callee = resolveNamespaceName(node.callee);
 
+    // P1-03 / GEN-03/06: 函数模板调用（显式实参或推导）。模板命中但普通
+    // 函数精确匹配可行时走普通路径（SEM-16 最小规则）；诊断型失败返回
+    // true 就地结束。
+    if (node.hasTemplateArgs || TemplateRegistry::instance().find(node.callee)) {
+        if (tryAnalyzeTemplateCall(node)) return;
+    }
+
     // Builtin `assert`/`panic` (only when the user has not declared them).
     // They need the call site's source location, which a library function
     // cannot see without a preprocessor (STD-27 / DEC-21).
@@ -1317,6 +1324,125 @@ void SemanticAnalyzer::visit(CallExprAST& node) {
         node.resolvedParamTypes = funcType->paramTypes;
     }
     node.isLValue = false;
+}
+
+// P1-03 / GEN-03/06: 函数模板调用。
+// 显式实参 → 直接映射；否则从调用实参推导（形参 `T` 取实参类型、形参
+// `T*` 取去指针类型）。同参冲突 / 无法推导 → 诊断。实例化 + visit 实例
+// 后把 callee 重写为实例名，走普通调用解析。返回 true = 已处理。
+bool SemanticAnalyzer::tryAnalyzeTemplateCall(CallExprAST& node) {
+    auto& reg = TemplateRegistry::instance();
+    TemplateDeclAST* tpl = reg.find(node.callee);
+    if (!tpl) return false;
+    auto* fnTpl = dynamic_cast<FunctionDeclAST*>(tpl->decl.get());
+    if (!fnTpl) return false; // 类模板命中——让普通路径给出诊断
+
+    // 实参类型先解析。
+    std::vector<Type*> argTypes;
+    for (auto& a : node.args) argTypes.push_back(getExprType(*a));
+
+    // SEM-16 最小规则：无显式实参时，同名普通函数有可行匹配则优先。
+    if (!node.hasTemplateArgs) {
+        if (OverloadSet* overloads = currentScope->lookupOverload(node.callee)) {
+            if (overloads->resolve(argTypes)) return false;
+        }
+    }
+
+    // typename/value 参数按声明顺序分配。
+    std::vector<TemplateDeclAST::Param*> typeParams;
+    std::vector<TemplateDeclAST::Param*> valueParams;
+    for (auto& p : tpl->params) {
+        if (p.isType) typeParams.push_back(const_cast<TemplateDeclAST::Param*>(&p));
+        else valueParams.push_back(const_cast<TemplateDeclAST::Param*>(&p));
+    }
+
+    std::unordered_map<std::string, Type*> typeArgMap;
+    std::unordered_map<std::string, long long> valueArgMap;
+    // 显式实参。
+    if (node.hasTemplateArgs) {
+        if (node.explicitTemplateArgs.size() != typeParams.size() ||
+            node.explicitTemplateValues.size() != valueParams.size()) {
+            emitError("wrong number of template arguments for '" + node.callee + "' (expected " +
+                          std::to_string(typeParams.size()) + " type(s), " +
+                          std::to_string(valueParams.size()) + " value(s))",
+                      node);
+            return true;
+        }
+        for (size_t i = 0; i < typeParams.size(); ++i)
+            typeArgMap[typeParams[i]->name] = node.explicitTemplateArgs[i];
+        for (size_t i = 0; i < valueParams.size(); ++i)
+            valueArgMap[valueParams[i]->name] = node.explicitTemplateValues[i];
+    }
+
+    // 推导：逐位置匹配形参形状。
+    auto deduce = [&](const std::string& name, Type* arg) -> bool {
+        auto it = typeArgMap.find(name);
+        if (it != typeArgMap.end()) {
+            if (it->second != arg) {
+                emitError("conflicting deduction for '" + name + "': '" +
+                              typeToString(it->second) + "' vs '" + typeToString(arg) + "'",
+                          node);
+                return false;
+            }
+        } else {
+            typeArgMap[name] = arg;
+        }
+        return true;
+    };
+    for (size_t i = 0; i < fnTpl->params.size() && i < argTypes.size(); ++i) {
+        Type* p = fnTpl->params[i]->type;
+        Type* a = argTypes[i];
+        if (!a) continue;
+        if (p && p->kind == TypeKind::TypeVar) {
+            if (!deduce(static_cast<TypeVarType*>(p)->name, a)) return true;
+        } else if (p && p->kind == TypeKind::Pointer && p->base &&
+                   p->base->kind == TypeKind::TypeVar) {
+            Type* aStripped = a;
+            while (aStripped && aStripped->kind == TypeKind::Typedef)
+                aStripped = static_cast<TypedefType*>(aStripped)->aliasedType;
+            if (aStripped && aStripped->kind == TypeKind::Pointer) {
+                if (!deduce(static_cast<TypeVarType*>(p->base)->name, aStripped->base))
+                    return true;
+            }
+        }
+    }
+
+    // 未定的 typename 参数 → 诊断。
+    for (auto* tp : typeParams) {
+        if (!typeArgMap.count(tp->name)) {
+            emitError("cannot deduce template argument for '" + tp->name + "'", node);
+            return true;
+        }
+    }
+    for (auto* vp : valueParams) {
+        if (!valueArgMap.count(vp->name)) {
+            emitError("cannot deduce template argument for '" + vp->name + "'", node);
+            return true;
+        }
+    }
+
+    // 实参顺序列表（按声明顺序）。
+    std::vector<Type*> typeArgs;
+    for (auto* tp : typeParams) typeArgs.push_back(typeArgMap[tp->name]);
+    std::vector<long long> valueArgs;
+    for (auto* vp : valueParams) valueArgs.push_back(valueArgMap[vp->name]);
+
+    std::string instName = TemplateRegistry::instanceName(node.callee, typeArgs, valueArgs);
+    auto* inst = reg.instantiateFunction(node.callee, typeArgs, valueArgs, argTypes);
+    if (!inst) {
+        emitError("cannot instantiate template '" + node.callee + "'", node);
+        return true;
+    }
+    if (!m_visitedInstances.count(instName)) {
+        m_visitedInstances.insert(instName);
+        m_instStack.push_back(node.callee + "<...>");
+        visit(*inst);
+        m_instStack.pop_back();
+    }
+
+    // 调用点重写到实例符号，交普通调用解析（类型检查/绑定/codegen 名）。
+    node.callee = instName;
+    return false;
 }
 
 void SemanticAnalyzer::visit(AssignmentExprAST& node) {

@@ -117,3 +117,33 @@ TEST_F(GenericE2E, BoxNested) {
         }
     )", "gen2.c"), 7);
 }
+
+TEST_F(GenericE2E, GenericFuncRoundTrip) {
+    EXPECT_EQ(runSource(R"(
+        template<typename T> T tmax(T a, T b) { return a; }
+        int32 main() {
+            return tmax(3, 4);
+        }
+    )", "gen3.c"), 3);
+}
+
+TEST_F(GenericE2E, GenericFuncExplicit) {
+    EXPECT_EQ(runSource(R"(
+        template<typename T> T tmax(T a, T b) { return a; }
+        int32 main() {
+            return tmax<float64>(2.5, 1.5) == 2.5 ? 7 : 0;
+        }
+    )", "gen4.c"), 7);
+}
+
+TEST_F(GenericE2E, NonTemplateExactMatchWins) {
+    EXPECT_EQ(runSource(R"(
+        template<typename T> T tmax(T a, T b) { return a; }
+        int32 tmax(int32 a, int32 b) { return 99; }
+        int32 main() {
+            // 普通函数精确匹配优先（SEM-16 最小规则）
+            if (tmax(3, 4) == 99) return 1;
+            return 0;
+        }
+    )", "gen5.c"), 1);
+}

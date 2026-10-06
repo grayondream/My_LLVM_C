@@ -79,6 +79,9 @@ private:
                           ClassType** defining = nullptr, int depth = 0);
     bool isMethodCall(ExprAST& expr);
     bool tryAnalyzePrintCall(CallExprAST& node);
+    // P1-03 / GEN-03/06: 函数模板调用——推导/显式实参 → 实例化 → 调用点
+    // 重写到实例符号。返回 true = 已处理（含诊断失败）。
+    bool tryAnalyzeTemplateCall(CallExprAST& node);
     bool tryAnalyzeAssertCall(CallExprAST& node);
     bool tryAnalyzePanicCall(CallExprAST& node);
     bool lowerToString(CallExprAST& node, size_t argIndex, Type* argType);

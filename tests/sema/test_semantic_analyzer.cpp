@@ -1972,3 +1972,76 @@ TEST(TplSemTest, BareTemplateNameRejected) {
         "template<typename T> struct Box { T value; };\n"
         "int32 main() { Box b; return 0; }"));
 }
+
+// ========== P1-03 / GEN-03/06: 函数模板显式与推导（TplFn* 前缀） ==========
+
+// 完整管线检查：parse 诊断 + sema 诊断都须为空（表达式位置的模板调用
+// 若投机解析失败会回退成比较表达式并产生 parse 错误，analyzeOk 会漏报）。
+static bool analyzeFullyOk(const std::string& source) {
+    Lexer lexer("t.c", source);
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    if (!ast || !parser.getErrors().empty()) return false;
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    return analyzer.getErrors().empty();
+}
+
+TEST(TplFnSemTest, ExplicitFuncTemplateOk) {
+    TemplateRegistry::instance().resetForTesting();
+    EXPECT_TRUE(analyzeFullyOk(
+        "template<typename T> T tmax(T a, T b) { return a; }\n"
+        "int32 main() { return tmax<int32>(3, 4); }"));
+}
+
+TEST(TplFnSemTest, DeducedFuncTemplateOk) {
+    TemplateRegistry::instance().resetForTesting();
+    EXPECT_TRUE(analyzeFullyOk(
+        "template<typename T> T tmax(T a, T b) { return a; }\n"
+        "int32 main() { return tmax(3, 4); }"));
+}
+
+TEST(TplFnSemTest, PointerParamDeduction) {
+    TemplateRegistry::instance().resetForTesting();
+    // T* 形参按去指针类型推导（Review Focus 钉死项）。
+    EXPECT_TRUE(analyzeFullyOk(
+        "template<typename T> T* pick(T* a) { return a; }\n"
+        "int32 main() { int32 v = 5; int32* p = pick(&v); return *p; }"));
+}
+
+TEST(TplFnSemTest, ConflictingDeduction) {
+    TemplateRegistry::instance().resetForTesting();
+    Lexer lexer("t.c",
+        "template<typename T> T tmax(T a, T b) { return a; }\n"
+        "int32 main() { return tmax(3, 0.5); }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    bool found = false;
+    for (auto& e : analyzer.getErrors()) {
+        if (e.message.find("conflicting deduction for 'T'") != std::string::npos) found = true;
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST(TplFnSemTest, Undeducible) {
+    TemplateRegistry::instance().resetForTesting();
+    Lexer lexer("t.c",
+        "template<typename T> T make() { T x; return x; }\n"
+        "int32 main() { return make(); }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    bool found = false;
+    for (auto& e : analyzer.getErrors()) {
+        if (e.message.find("cannot deduce template argument") != std::string::npos) found = true;
+    }
+    EXPECT_TRUE(found);
+}

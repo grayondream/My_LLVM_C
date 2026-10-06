@@ -64,6 +64,8 @@ public:
         : name(n), returnType(ret), params(std::move(parameters)), body(std::move(b)),
           isConstexpr(constexpr_), isVarArg(varArg) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
+    // P1-03 / GEN-05: 仅创建签名（无体）——TU codegen 预扫。
+    llvm::Value* codegenPrototype(CodegenContext& ctx);
 };
 
 class DeclStmtAST : public StmtAST {
