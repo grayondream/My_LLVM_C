@@ -501,3 +501,37 @@
 - 验证：全量 ctest 927/927（902 → 927，每任务 TDD RED→GREEN）。
 - 遗留：`T??`/return 位置 {} 推断未做（后者为既有全局行为，struct 同）；
   最终评审待做。
+
+## 2026-10-06 — P1-02 Optional/Result 最终评审（独立评审人）
+- 完成事项：对 b5e80a0..db00f7d 全量评审——Review Focus 5 项均有测试且
+  通过（复核确认，未重复报告）；聚焦测试未覆盖区，实机构造 20+ 复现
+  用例（/tmp/opencode/t*.smc，本机 my_llvm_c -S 编译验证）。
+- 发现（详见评审报告）：**Critical ×1**——LLVM 具名结构体以
+  `typeToMangled` 作布局身份，而 enum 一律 mangle 成 "int32"
+  （Mangle.cpp:43）且 `_` 分隔可被 struct 名内下划线消歧失败：
+  `Optional<enum:u8>` 与 `Optional<enum:u64>` 共享 `{i1,i8}`，对 2 字节
+  alloca 发 8 字节 store（栈腐坏，t2 复现）；`Result<A_B,C>` 与
+  `Result<A,B_C>` 同名（t3c）；用户 struct 名 `Optional_int32` 与内建撞
+  名（t15b OOB GEP）。Important ×5：比较/逻辑算子对 Optional 静默放行
+  → ICmp 断言崩溃（SemanticAnalyzer.cpp:445/452，isStructOrUnionType
+  未含新 kind）；typedef 实参/typedef 初值被 init-list 校验误拒
+  （:1872 typesEqual 不剥 typedef）；typedef 返回类型 + 调用点取伪字段
+  → `load %Struct, %Struct %v` 非法 IR 崩溃（Expr.cpp:988 band-aid）；
+  三元分支不校验（getCommonType 恒取左）→ phi 断言/地址当值存（根因
+  既有，标量同样中招 t4）；rvalue 伪字段写 → 非法 store 崩溃
+  （sema isLValue 无条件 true，struct 同病）。Minor ×6：init-list 双
+  重诊断、间接调用无参检、`Optional <` 遮蔽变量、`.ok/.valid` codegen
+  混映射、return 位 `{}` 不可用（已裁决遗留）、`int32??` 诊断差。
+- 验证：全量 ctest 927/927 复跑通过（2 项 skip 为既有）；每个 Critical/
+  Important 均附最小复现与建议测试。
+- 结论：**fix-first**——C1（布局身份碰撞）与 I1（比较算子崩溃）须先修。
+- 遗留：无（评审交付，修复另立任务）。
+
+## 2026-10-06（续）— P1-02 最终评审与修复
+- 评审：subagent（glm-5.3）全分支评审，verdict fix-first——C1（布局身份键
+  非单射 → 静默栈腐坏）、I1（比较/逻辑算子崩编译器）、I2（typedef 误拒）、
+  I3（typedef 返回 rvalue 成员崩后端）、I4（三元聚合分支）、I5（rvalue 赋
+  值）单轮修复，测试 +13，全量 940/940。
+- 遗留（评审 minors，挂账待裁决）：M1 双重诊断、M2 函数指针无参检（既有）、
+  M3 `Optional <` 歧义、M4 codegen 混映射、M5 return 位 {}、M6 T?? 文案；
+  三元标量根因独立缺陷轮。
