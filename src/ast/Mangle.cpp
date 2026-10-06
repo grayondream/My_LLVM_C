@@ -84,10 +84,13 @@ std::string typeToMangled(Type* type) {
             return tv->name;
         }
         case TypeKind::TypeInstance: {
-            // P1-03: parse 期占位——正常实例化后不存在；出现即内部未解析，
-            // 以 `模板名` 兜底（避免 "unknown" 掩盖问题来源）。
+            // P1-03: parse 期占位——拼写 = 模板名 + 各实参递归拼写，与实例
+            // 名规则一致（`Box<Box<i32>>` → `Box$Box$i32`），保证单射。
             auto* ti = static_cast<TypeInstanceType*>(type);
-            return ti->templateName;
+            std::string s = ti->templateName;
+            for (auto* a : ti->typeArgs) s += "$" + typeToMangled(a);
+            for (auto v : ti->valueArgs) s += "$" + std::to_string(v);
+            return s;
         }
         default: return "unknown";
     }
