@@ -88,6 +88,15 @@ void TypeContext::removeClass(const std::string& name) {
     m_classes.erase(name);
 }
 
+// P1-04 / CT-03: compile_time.if 死分支占位撤销。
+void TypeContext::removeUnion(const std::string& name) {
+    m_unions.erase(name);
+}
+
+void TypeContext::removeEnum(const std::string& name) {
+    m_enums.erase(name);
+}
+
 void TypeContext::removeInstanceTypes() {
     for (auto it = m_structs.begin(); it != m_structs.end();) {
         if (it->first.find('$') != std::string::npos)

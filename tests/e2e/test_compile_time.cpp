@@ -188,3 +188,49 @@ int32 main() { return 0; }
 )", "ct_static_assert.c");
     EXPECT_EQ(r, 0);
 }
+
+// ---- P1-04 / CT-03 / SEM-07: compile_time.if 条件编译 ----
+
+TEST_F(CompileTimeE2E, CompileTimeIfSelectsThen) {
+    // 假分支引用未定义符号——若被出码，链接/验证必失败（死代码消除证据）。
+    int r = runSource(R"(
+compile_time.if (compile_time.target.os == "linux") {
+    int32 f() { return 42; }
+} else {
+    int32 f() { return NoSuchSymbolAnywhere(); }
+}
+int32 main() { return f(); }
+)", "ct_if_then.c");
+    EXPECT_EQ(r, 42);
+}
+
+TEST_F(CompileTimeE2E, CompileTimeIfSelectsElse) {
+    int r = runSource(R"(
+compile_time.if (1 == 2) {
+    int32 g() { return NoSuchSymbolAnywhere(); }
+} else {
+    int32 g() { return 7; }
+}
+int32 main() { return g(); }
+)", "ct_if_else.c");
+    EXPECT_EQ(r, 7);
+}
+
+TEST_F(CompileTimeE2E, DeadBranchTypeUseDiagnosed) {
+    // Review Focus 1: 未选分支 parse 期注册的类型名被使用 → 诊断不崩溃。
+    Lexer lexer("ct_if_dead.c", R"(
+compile_time.if (1 == 2) {
+    struct Ghost { int32 x; }
+} else {
+    int32 h() { return 1; }
+}
+int32 main() { Ghost g; return g.x; }
+)");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    EXPECT_FALSE(analyzer.getErrors().empty());
+}

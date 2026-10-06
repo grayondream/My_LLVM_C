@@ -2315,6 +2315,18 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
     // AGG-11/DS5: naming a private nested type outside its class is E2009.
     node.type = resolveTypeInstance(node.type, node);
     checkNestedTypeAccess(node.type, node);
+    // P1-04 / CT-03: 毒化类型（仅在 compile_time.if 未选中分支声明）拒绝。
+    if (node.type && node.type->ctDeadBranch) {
+        std::string name;
+        switch (node.type->kind) {
+            case TypeKind::Struct:
+            case TypeKind::Class:  name = static_cast<StructType*>(node.type)->name; break;
+            case TypeKind::Union:  name = static_cast<UnionType*>(node.type)->name; break;
+            case TypeKind::Enum:   name = static_cast<EnumType*>(node.type)->name; break;
+            default: break;
+        }
+        emitError("use of type '" + name + "' from a non-selected compile_time.if branch", node);
+    }
     node.name = scopedName(node.name);
     if (node.isConstexpr) {
         if (!node.initExpr) {
@@ -2979,6 +2991,66 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
     currentFunction = prevFunc;
 }
 
+void SemanticAnalyzer::visit(CompileTimeIfDeclAST& node) {
+    // P1-04 / CT-03: 条件求值与分支选择（诊断文案 spec §3 钉死）。
+    auto cond = evalCompileTime(node.cond.get(), node);
+    if (!cond) {
+        emitError("compile_time.if condition must be a compile-time constant", node);
+        return;
+    }
+    if (cond->type != ConstValue::INT) {
+        emitError("compile_time.if condition must be a boolean", node);
+        return;
+    }
+    node.ctResolved = true;
+    node.selectedThen = cond->intVal != 0;
+
+    auto& deadDecls = node.selectedThen ? node.elseDecls : node.thenDecls;
+    auto& liveDecls = node.selectedThen ? node.thenDecls : node.elseDecls;
+    auto collectTypeNames = [](std::vector<std::unique_ptr<DeclAST>>& ds) {
+        std::unordered_set<std::string> names;
+        for (auto& d : ds) {
+            if (auto* s = dynamic_cast<StructDeclAST*>(d.get())) names.insert(s->name);
+            else if (auto* u = dynamic_cast<UnionDeclAST*>(d.get())) names.insert(u->name);
+            else if (auto* e = dynamic_cast<EnumDeclAST*>(d.get())) names.insert(e->name);
+        }
+        return names;
+    };
+    auto liveNames = collectTypeNames(liveDecls);
+    // 未选分支 parse 期注册的类型占位须撤销/毒化（Review Focus 1：占位不得
+    // 被活代码静默使用）。类型引用在 parse 期已绑定为指针，故除 TypeContext
+    // 注销外还须毒化对象；活分支的 sema 注册创建新对象，天然解毒。两分支
+    // 都声明的同名类型（变体选择）不支持——毒化使使用处得到明确诊断。
+    for (auto& d : deadDecls) {
+        if (auto* s = dynamic_cast<StructDeclAST*>(d.get())) {
+            TypeContext& tc = TypeContext::instance();
+            Type* poison = s->isClassDecl
+                ? static_cast<Type*>(tc.getClass(s->name))
+                : static_cast<Type*>(tc.getStruct(s->name));
+            if (!liveNames.count(s->name)) {
+                if (s->isClassDecl) tc.removeClass(s->name);
+                else tc.removeStruct(s->name);
+            }
+            if (poison) poison->ctDeadBranch = true;
+        } else if (auto* u = dynamic_cast<UnionDeclAST*>(d.get())) {
+            TypeContext& tc = TypeContext::instance();
+            Type* poison = tc.getUnion(u->name);
+            if (!liveNames.count(u->name)) tc.removeUnion(u->name);
+            if (poison) poison->ctDeadBranch = true;
+        } else if (auto* e = dynamic_cast<EnumDeclAST*>(d.get())) {
+            TypeContext& tc = TypeContext::instance();
+            Type* poison = tc.getEnum(e->name);
+            if (!liveNames.count(e->name)) tc.removeEnum(e->name);
+            if (poison) poison->ctDeadBranch = true;
+        }
+    }
+
+    auto& decls = node.selectedThen ? node.thenDecls : node.elseDecls;
+    for (auto& d : decls) {
+        if (d) analyzeTopLevelDecl(*d);
+    }
+}
+
 void SemanticAnalyzer::analyzeTopLevelDecl(DeclAST& decl) {
     // Visibility applies per declaration (MOD-05/06). `main` is always
     // externally visible (program entry point); an exported namespace makes
@@ -3027,6 +3099,9 @@ void SemanticAnalyzer::analyzeTopLevelDecl(DeclAST& decl) {
         if (auto* call = dynamic_cast<MethodCallExprAST*>(ctAssert->call.get())) {
             visit(*call);
         }
+    } else if (auto* ctIf = dynamic_cast<CompileTimeIfDeclAST*>(&decl)) {
+        // P1-04 / CT-03: 条件编译——选中分支原位展开进声明序列。
+        visit(*ctIf);
     }
 
     currentDeclExported = savedExported;

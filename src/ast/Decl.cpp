@@ -705,9 +705,20 @@ llvm::Value* NamespaceDeclAST::codegen(CodegenContext& ctx) {
 
 // P1-04 / CT-01: compile_time 顶层声明节点不直接出码——static_assert 无值，
 // compile_time.if 由 sema 选中分支后、codegen 阶段另行处理（CT-03/SEM-07）。
+// P1-04 / CT-03: compile_time.if——sema 已选择分支（ctResolved/selectedThen），
+// codegen 只出选中分支；未解析（诊断已发、编译将中止）时不出码。
 llvm::Value* CompileTimeIfDeclAST::codegen(CodegenContext& ctx) {
-    (void)ctx;
-    return nullptr;
+    if (!ctResolved) {
+        return nullptr;
+    }
+    auto& decls = selectedThen ? thenDecls : elseDecls;
+    llvm::Value* last = nullptr;
+    for (auto& decl : decls) {
+        if (decl) {
+            last = decl->codegen(ctx);
+        }
+    }
+    return last;
 }
 
 llvm::Value* CompileTimeAssertDeclAST::codegen(CodegenContext& ctx) {

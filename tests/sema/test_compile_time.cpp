@@ -246,3 +246,43 @@ TEST_F(CompileTimeEval, UnknownTypeArgDiagnosed) {
     }
     EXPECT_TRUE(found);
 }
+
+// ---- P1-04 / CT-03: compile_time.if 条件诊断 ----
+
+TEST_F(CompileTimeEval, CTIfNonConstantCond) {
+    Lexer lexer("ct_if_nonconst.c", R"(
+int32 main() { int32 x = 1; return x; }
+compile_time.if (x == 1) { int32 a; } else { int32 b; }
+)");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_FALSE(analyzer.getErrors().empty());
+    bool found = false;
+    for (const auto& d : analyzer.getErrors()) {
+        if (d.message.find("compile_time.if condition must be a compile-time constant") != std::string::npos) found = true;
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(CompileTimeEval, CTIfNonBoolCond) {
+    Lexer lexer("ct_if_nonbool.c", R"(
+compile_time.if ("str") { int32 a; } else { int32 b; }
+int32 main() { return 0; }
+)");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_FALSE(analyzer.getErrors().empty());
+    bool found = false;
+    for (const auto& d : analyzer.getErrors()) {
+        if (d.message.find("compile_time.if condition must be a boolean") != std::string::npos) found = true;
+    }
+    EXPECT_TRUE(found);
+}

@@ -282,6 +282,9 @@ public:
     std::unique_ptr<ExprAST> cond;
     std::vector<std::unique_ptr<DeclAST>> thenDecls;
     std::vector<std::unique_ptr<DeclAST>> elseDecls;
+    // sema 求值条件后写入；codegen 只出选中分支（SEM-07 死代码消除）。
+    bool ctResolved = false;
+    bool selectedThen = true;
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 

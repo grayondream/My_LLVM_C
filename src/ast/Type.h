@@ -61,6 +61,11 @@ public:
     Type* base{};
     bool isVolatile{};
     bool isConst{};
+    // P1-04 / CT-03: 该类型仅在 compile_time.if 未选中分支被声明（parse 期
+    // 占位毒化）。类型引用在 parse 期绑定指针，仅靠 TypeContext 注销无法
+    // 阻断使用；sema 在变量声明处拒绝毒化类型（活分支的 sema 注册创建新
+    // 对象，天然解毒）。
+    bool ctDeadBranch{false};
 };
 
 class ArrayType : public Type {
@@ -284,6 +289,9 @@ public:
     // 注册时须撤销，保证裸模板名（无实参）在类型位置不可解析。
     void removeStruct(const std::string& name);
     void removeClass(const std::string& name);
+    // P1-04 / CT-03: compile_time.if 死分支占位撤销（同上先例）。
+    void removeUnion(const std::string& name);
+    void removeEnum(const std::string& name);
 
     // 仅测试用：清除所有模板实例类型（名字含 '$'）。
     void removeInstanceTypes();
