@@ -577,3 +577,25 @@
 - Ruling：M1（size_of→usize）实测引发 E2007 重载匹配回归，回退挂账。
 - 验证：ctest 1037/1037；新增测试 38 个（parse 4 + sema 21 + e2e 13）。
 - 遗留：CT-07/08/13 反射另轮；M1/M2/M4 deferred；OptionalBranchExec 偶发 SEGFAULT（LLJIT flaky）。
+
+## 2026-10-07 22:19 P1-05 注解系统（ANN）代码评审（子代理会话）
+
+- 评审范围：`review-592049c..29935c2.diff`（P1-05 六提交）、spec `docs/superpowers/specs/2026-10-07-annotations-design.md`、plan `docs/superpowers/plans/2026-10-07-annotations.md`。
+- 方法：通读 diff 与相关源码（LayoutBuilder、SemanticAnalyzer、Parser、CodegenContext、CompileTimeEvaluator），并用基线 worktree（592049c）+ 现有构建实证复现可疑路径；验证后已删除 worktree、恢复全部临时插桩（工作区 clean，`git diff` 为空）。
+- 主要结论（详见评审输出）：
+  1. **Critical（已复现）**：`[[packed]]`/`[[align]]` + 带基类 struct + `compile_time.size_of` → `report_fatal_error`（self-check failed），编译器崩溃；根因 `src/ast/LayoutBuilder.cpp:55-104` 物化时基类伪字段进 `padded` 但 cursor 从 0 起算，且 106-118 行又显式推一次基类（双基类）。
+  2. **Critical（已复现，回归）**：无注解 `struct S { int32 x; void m() {} }` 在基线 592049c 编译通过，HEAD 上 SIGTRAP（`DataLayout::getPrefTypeAlign`）——LayoutBuilder 对所有聚合急切计算 DataLayout 布局，layout 非法字段（struct 成员位置的 `void m()` 被解析为 void 字段）从"惰性容忍"变为崩溃。
+  3. **Important（已复现）**：带基类的注解 struct 走 codegen 路径时 `StructDeclAST::codegen` 的 `isClass = !methods.empty() || !baseClass.empty()` 误路由到 `getClass`，取不到 StructType → 回退旧路径，packed/align **静默丢失**（IR `{ %B, i16 }` 非 packed），与 CT 查询结果互相矛盾。
+  4. **Important**：类型级 `[[align(N)]]` 未传导到该类型变量的对齐（`A l;` alloca align 8，`align_of(A)==64`）——违反 spec §3 与 §4 硬约束。
+  5. **Important**：W3004 键为裸名且 `visit(MethodCallExprAST)` 无检查 → `this->method()`/`obj.method()` 弃用方法漏报（spec §5 明列 MethodCall）；裸名键导致跨命名空间/遮蔽误报；deprecated 类型用于字段/参数/数组未检查（visitStructDeclImpl 字段环只查 ctDeadBranch）。
+  6. 其余 Minor：W3005 只查 NumberExprAST 字面 0（未走 evaluateConstexpr）；offset_of 死代码双环；TU 层 module 特判 rewind 可能造成诊断重复；`new ArrayType` padding 类型泄漏（与代码库风格一致）；using/type 声明注解不校验。
+- 验证方式：`build/bin/my_llvm_c` 对 8 个探针源文件编译/运行/IR 检查；gdb 定位崩溃帧；基线 worktree 对照构建；annotation 相关 gtest 40/40 通过。
+- 遗留问题：上述 Critical/Important 需修复后复审；struct 成员位置方法解析语义（是否允许 struct 带方法）需裁决。
+
+## 2026-10-07 — P1-05 注解系统完成
+
+- 完成事项：ANN-01（解析/AST 挂载，六挂载点）、ANN-06（E2010~E2014）、ANN-02/03（repr(C)/packed/align，LayoutBuilder 单源化）、ANN-04/05（inline/cold/nonnull LLVM 属性 + deprecated W3004 + nonnull W3005）、LEX-10/PAR-07；TODO 收口 14 条。
+- 关键文件：`src/ast/{Annotation.h,LayoutBuilder.{h,cpp},Type.h,Decl.h,Decl.cpp,Expr.cpp}`、`src/frontend/Parser.{h,cpp}`、`src/sema/{SemanticAnalyzer.{h,cpp},Diagnostic.{h,cpp},CompileTimeEvaluator.cpp,TemplateInstantiator.cpp}`、`src/codegen/CodegenContext.cpp`、新测试 4 文件 46 用例。
+- 终审（fresh reviewer）：2C/5I/7M 全部 Critical/Important 修复（每项 RED→GREEN）；途中发现并修复跨 kind 静态转换读垃圾值（C1 同款）与 evaluator 缺 Array case。
+- 验证：ctest 1083/1083（基线 1037 + 46）。
+- 遗留：ANN-07/08、方法 nonnull this 偏移、裸名键误报/漏报、offset_of 继承字段、M2/M3/M4/M5/M6/M7 minors。
