@@ -246,8 +246,8 @@ std::unique_ptr<DeclAST> TemplateInstantiator::cloneDeclInternal(const DeclAST& 
         return std::unique_ptr<DeclAST>(cloned);
     }
     if (auto* st = dynamic_cast<const StructDeclAST*>(&decl)) {
-        std::vector<std::pair<std::string, Type*>> fields;
-        for (auto& f : st->fields) fields.push_back({f.first, rewrite(f.second)});
+        std::vector<FieldInfo> fields;
+        for (auto& f : st->fields) fields.push_back(FieldInfo{f.name, rewrite(f.type), f.annotations});
         auto* cloned = new StructDeclAST(st->name, std::move(fields));
         for (auto& m : st->methods) {
             auto* mc = dynamic_cast<FunctionDeclAST*>(cloneDeclInternal(*m).release());
@@ -298,8 +298,8 @@ std::unique_ptr<DeclAST> TemplateInstantiator::cloneDeclInternal(const DeclAST& 
     }
     // 评审 I4：嵌套 union/enum/type 声明此前被静默丢弃。
     if (auto* un = dynamic_cast<const UnionDeclAST*>(&decl)) {
-        std::vector<std::pair<std::string, Type*>> members;
-        for (auto& m : un->members) members.push_back({m.first, rewrite(m.second)});
+        std::vector<FieldInfo> members;
+        for (auto& m : un->members) members.push_back(FieldInfo{m.name, rewrite(m.type), m.annotations});
         auto* cloned = new UnionDeclAST(un->name, std::move(members));
         cloned->bareName = un->bareName;
         cloned->isForwardDecl = un->isForwardDecl;

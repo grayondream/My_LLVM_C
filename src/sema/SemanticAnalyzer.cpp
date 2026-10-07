@@ -2114,8 +2114,8 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
         int walkDepth = 0;
         for (StructType* cur = structType; cur && !definingStruct;) {
             for (auto& field : cur->fields) {
-                if (field.first == node.memberName) {
-                    node.type = field.second;
+                if (field.name == node.memberName) {
+                    node.type = field.type;
                     node.isLValue = true;
                     definingStruct = cur;
                     break;
@@ -2140,8 +2140,8 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
         int classWalkDepth = 0;
         while (classType) {
             for (auto& field : classType->fields) {
-                if (field.first == node.memberName) {
-                    node.type = field.second;
+                if (field.name == node.memberName) {
+                    node.type = field.type;
                     node.isLValue = true;
                     definingClass = classType;
                     break;
@@ -2173,8 +2173,8 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
     } else if (memberBaseType->kind == TypeKind::Union) {
         auto* unionType = static_cast<UnionType*>(memberBaseType);
         for (auto& member : unionType->members) {
-            if (member.first == node.memberName) {
-                node.type = member.second;
+            if (member.name == node.memberName) {
+                node.type = member.type;
                 node.isLValue = true;
                 return;
             }
@@ -2645,9 +2645,9 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
 void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
     // P1-03 / GEN-03: 实例字段/方法签名中的实例占位先解析。
     for (auto& f : node.fields) {
-        f.second = resolveTypeInstance(f.second, node);
+        f.type = resolveTypeInstance(f.type, node);
         // P1-04 评审 I3: 字段类型不得来自 compile_time.if 死分支。
-        checkCtDeadBranchUse(f.second, node);
+        checkCtDeadBranchUse(f.type, node);
     }
     for (auto& m : node.methods) {
         m->returnType = resolveTypeInstance(m->returnType, node);
@@ -2675,8 +2675,8 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
 
         // Add fields if not already added
         for (auto& field : node.fields) {
-            if (!classType->getFieldType(field.first)) {
-                classType->addField(field.first, field.second);
+            if (!classType->getFieldType(field.name)) {
+                classType->addField(field.name, field.type);
             }
         }
 
@@ -2853,8 +2853,8 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
             structType = new StructType(node.name);
         }
         for (auto& field : node.fields) {
-            if (!structType->getFieldType(field.first)) {
-                structType->addField(field.first, field.second);
+            if (!structType->getFieldType(field.name)) {
+                structType->addField(field.name, field.type);
             }
         }
         // INH-01: single public inheritance — wire the base before layout
@@ -2911,7 +2911,7 @@ void SemanticAnalyzer::visit(UnionDeclAST& node) {
         typeCtx->addUnion(node.name, unionType);
     }
     for (auto& member : node.members) {
-        unionType->addMember(member.first, member.second);
+        unionType->addMember(member.name, member.type);
     }
     // Redef 轮: duplicate definition of the same name (any kind) is E2004.
     if (!node.isForwardDecl && !node.name.empty()) {
@@ -3458,7 +3458,7 @@ void SemanticAnalyzer::visitLazyMethodsOf(const std::string& className) {
 // ——类型尺寸无限，诊断而非编译器崩溃。模板实例化中沿用原文案。
 void SemanticAnalyzer::checkInstanceFieldComplete(StructDeclAST& node) {
     for (auto& field : node.fields) {
-        Type* ft = field.second;
+        Type* ft = field.type;
         while (ft && ft->kind == TypeKind::Typedef) {
             ft = static_cast<TypedefType*>(ft)->aliasedType;
         }
@@ -3470,10 +3470,10 @@ void SemanticAnalyzer::checkInstanceFieldComplete(StructDeclAST& node) {
             m_definingStack.end()) {
             if (!m_instStack.empty()) {
                 emitError("recursive instantiation of template '" + m_instStack.back() +
-                              "': field '" + field.first + "' has value type '" + fname + "'",
+                              "': field '" + field.name + "' has value type '" + fname + "'",
                           node);
             } else {
-                emitError("field '" + field.first + "' of '" + fname +
+                emitError("field '" + field.name + "' of '" + fname +
                               "' cannot have its own type by value",
                           node);
             }

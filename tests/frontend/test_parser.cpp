@@ -1276,10 +1276,10 @@ TEST_F(ParserDeclTest, StructDecl) {
     ASSERT_NE(strct, nullptr);
     EXPECT_EQ(strct->name, "Point");
     EXPECT_EQ(strct->fields.size(), 2u);
-    EXPECT_EQ(strct->fields[0].first, "x");
-    EXPECT_EQ(strct->fields[0].second->kind, TypeKind::Int32);
-    EXPECT_EQ(strct->fields[1].first, "y");
-    EXPECT_EQ(strct->fields[1].second->kind, TypeKind::Int32);
+    EXPECT_EQ(strct->fields[0].name, "x");
+    EXPECT_EQ(strct->fields[0].type->kind, TypeKind::Int32);
+    EXPECT_EQ(strct->fields[1].name, "y");
+    EXPECT_EQ(strct->fields[1].type->kind, TypeKind::Int32);
 }
 
 TEST_F(ParserDeclTest, StructVarDecl) {
@@ -1309,8 +1309,8 @@ TEST_F(ParserDeclTest, StructWithPointerField) {
     auto strct = dynamic_cast<StructDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(strct, nullptr);
     EXPECT_EQ(strct->fields.size(), 2u);
-    EXPECT_EQ(strct->fields[1].second->kind, TypeKind::Pointer);
-    EXPECT_EQ(strct->fields[1].second->base->kind, TypeKind::Struct);
+    EXPECT_EQ(strct->fields[1].type->kind, TypeKind::Pointer);
+    EXPECT_EQ(strct->fields[1].type->base->kind, TypeKind::Struct);
 }
 
 // ========== Union Declarations ==========
@@ -1323,10 +1323,10 @@ TEST_F(ParserDeclTest, UnionDecl) {
     ASSERT_NE(un, nullptr);
     EXPECT_EQ(un->name, "Data");
     EXPECT_EQ(un->members.size(), 2u);
-    EXPECT_EQ(un->members[0].first, "i");
-    EXPECT_EQ(un->members[0].second->kind, TypeKind::Int32);
-    EXPECT_EQ(un->members[1].first, "f");
-    EXPECT_EQ(un->members[1].second->kind, TypeKind::Float32);
+    EXPECT_EQ(un->members[0].name, "i");
+    EXPECT_EQ(un->members[0].type->kind, TypeKind::Int32);
+    EXPECT_EQ(un->members[1].name, "f");
+    EXPECT_EQ(un->members[1].type->kind, TypeKind::Float32);
 }
 
 TEST_F(ParserDeclTest, UnionVarDecl) {
@@ -1345,8 +1345,8 @@ TEST_F(ParserDeclTest, StructArrayMember) {
     auto strct = dynamic_cast<StructDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(strct, nullptr);
     ASSERT_EQ(strct->fields.size(), 2u);
-    ASSERT_EQ(strct->fields[1].second->kind, TypeKind::Array);
-    auto* arr = static_cast<ArrayType*>(strct->fields[1].second);
+    ASSERT_EQ(strct->fields[1].type->kind, TypeKind::Array);
+    auto* arr = static_cast<ArrayType*>(strct->fields[1].type);
     EXPECT_EQ(arr->size, 20);
     EXPECT_EQ(arr->elementType->kind, TypeKind::Char);
 }
@@ -1357,8 +1357,8 @@ TEST_F(ParserDeclTest, UnionArrayMember) {
     auto un = dynamic_cast<UnionDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(un, nullptr);
     ASSERT_EQ(un->members.size(), 2u);
-    ASSERT_EQ(un->members[1].second->kind, TypeKind::Array);
-    auto* arr = static_cast<ArrayType*>(un->members[1].second);
+    ASSERT_EQ(un->members[1].type->kind, TypeKind::Array);
+    auto* arr = static_cast<ArrayType*>(un->members[1].type);
     EXPECT_EQ(arr->size, 8);
     EXPECT_EQ(arr->elementType->kind, TypeKind::Char);
 }
@@ -1536,10 +1536,10 @@ TEST_F(ParserDeclTest, NestedStructDecl) {
     ASSERT_NE(strct, nullptr);
     EXPECT_EQ(strct->name, "Outer");
     EXPECT_EQ(strct->fields.size(), 2u);
-    EXPECT_EQ(strct->fields[0].first, "inner");
-    EXPECT_EQ(strct->fields[0].second->kind, TypeKind::Struct);
-    EXPECT_EQ(strct->fields[1].first, "y");
-    EXPECT_EQ(strct->fields[1].second->kind, TypeKind::Int32);
+    EXPECT_EQ(strct->fields[0].name, "inner");
+    EXPECT_EQ(strct->fields[0].type->kind, TypeKind::Struct);
+    EXPECT_EQ(strct->fields[1].name, "y");
+    EXPECT_EQ(strct->fields[1].type->kind, TypeKind::Int32);
 }
 
 TEST_F(ParserDeclTest, EnumForwardDecl) {
@@ -1621,10 +1621,10 @@ TEST_F(ParserDeclTest, StructWithArrayField) {
     auto strct = dynamic_cast<StructDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(strct, nullptr);
     EXPECT_EQ(strct->fields.size(), 2u);
-    EXPECT_EQ(strct->fields[0].first, "size");
-    EXPECT_EQ(strct->fields[0].second->kind, TypeKind::Int32);
-    EXPECT_EQ(strct->fields[1].first, "data");
-    EXPECT_EQ(strct->fields[1].second->kind, TypeKind::Pointer);
+    EXPECT_EQ(strct->fields[0].name, "size");
+    EXPECT_EQ(strct->fields[0].type->kind, TypeKind::Int32);
+    EXPECT_EQ(strct->fields[1].name, "data");
+    EXPECT_EQ(strct->fields[1].type->kind, TypeKind::Pointer);
 }
 
 TEST_F(ParserDeclTest, FunctionDeclPointerReturn) {

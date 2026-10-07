@@ -1589,7 +1589,7 @@ TEST(SliceSemTest, INHStructInheritParses) {
     ASSERT_NE(d1, nullptr);
     EXPECT_EQ(d1->baseClass, "B1");
     ASSERT_EQ(d1->fields.size(), 1u);
-    EXPECT_EQ(d1->fields[0].first, "y");
+    EXPECT_EQ(d1->fields[0].name, "y");
 }
 
 TEST(SliceSemTest, INHMultiInheritRejected) {

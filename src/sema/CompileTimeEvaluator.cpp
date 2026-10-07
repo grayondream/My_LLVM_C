@@ -407,7 +407,7 @@ llvm::Type* CompileTimeEvaluator::toLLVMType(Type* t) {
                 }
             }
             for (auto& f : st->fields) {
-                if (llvm::Type* ft = toLLVMType(f.second)) {
+                if (llvm::Type* ft = toLLVMType(f.type)) {
                     fieldTypes.push_back(ft);
                 }
             }
@@ -437,7 +437,7 @@ llvm::Type* CompileTimeEvaluator::toLLVMType(Type* t) {
                 }
             }
             for (auto& f : ct->fields) {
-                if (llvm::Type* ft = toLLVMType(f.second)) {
+                if (llvm::Type* ft = toLLVMType(f.type)) {
                     fieldTypes.push_back(ft);
                 }
             }
@@ -462,7 +462,7 @@ llvm::Type* CompileTimeEvaluator::toLLVMType(Type* t) {
             llvm::Type* alignType = nullptr;
             uint64_t maxAlign = 0;
             for (auto& m : ut->members) {
-                llvm::Type* mt = toLLVMType(m.second);
+                llvm::Type* mt = toLLVMType(m.type);
                 if (!mt) continue;
                 uint64_t sz = dl.getTypeAllocSize(mt);
                 uint64_t al = dl.getABITypeAlign(mt).value();
@@ -539,7 +539,7 @@ CompileTimeEvaluator::evalLayoutQuery(MethodCallExprAST& node, ASTNode& at) {
             return std::nullopt;
         }
         // 字段序与 codegen GEP 一致：基类子对象占槽 0。
-        std::vector<std::pair<std::string, Type*>> fields;
+        std::vector<FieldInfo> fields;
         bool hasBase = false;
         if (queriedType->kind == TypeKind::Struct) {
             auto* st = static_cast<StructType*>(queriedType);
@@ -551,7 +551,7 @@ CompileTimeEvaluator::evalLayoutQuery(MethodCallExprAST& node, ASTNode& at) {
             hasBase = !ct->baseClass.empty();
         }
         for (size_t i = 0; i < fields.size(); ++i) {
-            if (fields[i].first == field->value) {
+            if (fields[i].name == field->value) {
                 cv.intVal = static_cast<long long>(
                     dl.getStructLayout(structTy)->getElementOffset(i + (hasBase ? 1 : 0)));
                 return cv;

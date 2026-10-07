@@ -26,8 +26,8 @@ TEST_F(TypeNodeTest, StructType) {
     EXPECT_EQ(structType->kind, TypeKind::Struct);
     EXPECT_EQ(structType->name, "Point");
     EXPECT_EQ(structType->fields.size(), 2);
-    EXPECT_EQ(structType->fields[0].first, "x");
-    EXPECT_EQ(structType->fields[1].first, "y");
+    EXPECT_EQ(structType->fields[0].name, "x");
+    EXPECT_EQ(structType->fields[1].name, "y");
 }
 
 TEST_F(TypeNodeTest, UnionType) {
@@ -123,8 +123,8 @@ TEST_F(TypeNodeTest, ClassTypeWithFields) {
     EXPECT_EQ(classType->kind, TypeKind::Class);
     EXPECT_EQ(classType->name, "Person");
     EXPECT_EQ(classType->fields.size(), 2);
-    EXPECT_EQ(classType->fields[0].first, "name");
-    EXPECT_EQ(classType->fields[1].first, "age");
+    EXPECT_EQ(classType->fields[0].name, "name");
+    EXPECT_EQ(classType->fields[1].name, "age");
 }
 
 TEST_F(TypeNodeTest, ClassTypeGetMethod) {

@@ -23,7 +23,7 @@ protected:
 static std::unique_ptr<TemplateDeclAST> makeBoxTemplate() {
     auto* T = TypeContext::instance().getTypeVar("T");
     auto st = std::make_unique<StructDeclAST>("Box",
-        std::vector<std::pair<std::string, Type*>>{{"value", T}});
+        std::vector<FieldInfo>{{"value", T}});
     auto tpl = std::make_unique<TemplateDeclAST>();
     tpl->params.push_back({"T", true, nullptr});
     tpl->decl = std::move(st);
@@ -38,8 +38,8 @@ TEST_F(TemplateRegistryTest, ClassInstanceNaming) {
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(inst->name, "Box$int32");
     ASSERT_EQ(inst->fields.size(), 1u);
-    ASSERT_NE(inst->fields[0].second, nullptr);
-    EXPECT_EQ(inst->fields[0].second->kind, TypeKind::Int32);
+    ASSERT_NE(inst->fields[0].type, nullptr);
+    EXPECT_EQ(inst->fields[0].type->kind, TypeKind::Int32);
 }
 
 TEST_F(TemplateRegistryTest, InstanceDedup) {
@@ -59,7 +59,7 @@ TEST_F(TemplateRegistryTest, NestedTypeRewrite) {
     Type* opt = TypeContext::instance().getOptionalType(T);
     Type* ptr = new Type(TypeKind::Pointer, T);
     auto st = std::make_unique<StructDeclAST>("H",
-        std::vector<std::pair<std::string, Type*>>{{"o", opt}, {"p", ptr}});
+        std::vector<FieldInfo>{{"o", opt}, {"p", ptr}});
     auto tpl = std::make_unique<TemplateDeclAST>();
     tpl->params.push_back({"T", true, nullptr});
     tpl->decl = std::move(st);
@@ -69,11 +69,11 @@ TEST_F(TemplateRegistryTest, NestedTypeRewrite) {
         "H", {TypeContext::instance().getFloat64()}, {});
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(inst->fields.size(), 2u);
-    EXPECT_EQ(inst->fields[0].second->kind, TypeKind::Optional);
-    EXPECT_EQ(static_cast<OptionalType*>(inst->fields[0].second)->elementType->kind,
+    EXPECT_EQ(inst->fields[0].type->kind, TypeKind::Optional);
+    EXPECT_EQ(static_cast<OptionalType*>(inst->fields[0].type)->elementType->kind,
               TypeKind::Float64);
-    EXPECT_EQ(inst->fields[1].second->kind, TypeKind::Pointer);
-    EXPECT_EQ(inst->fields[1].second->base->kind, TypeKind::Float64);
+    EXPECT_EQ(inst->fields[1].type->kind, TypeKind::Pointer);
+    EXPECT_EQ(inst->fields[1].type->base->kind, TypeKind::Float64);
 }
 
 TEST_F(TemplateRegistryTest, ValueParamSubstitution) {
@@ -82,7 +82,7 @@ TEST_F(TemplateRegistryTest, ValueParamSubstitution) {
     auto* arr = new ArrayType(T, 0);
     static_cast<ArrayType*>(arr)->sizeParam = "N";
     auto st = std::make_unique<StructDeclAST>("Arr",
-        std::vector<std::pair<std::string, Type*>>{{"data", arr}});
+        std::vector<FieldInfo>{{"data", arr}});
     auto tpl = std::make_unique<TemplateDeclAST>();
     tpl->params.push_back({"T", true, nullptr});
     tpl->params.push_back({"N", false, TypeContext::instance().getUSize()});
@@ -93,7 +93,7 @@ TEST_F(TemplateRegistryTest, ValueParamSubstitution) {
         "Arr", {TypeContext::instance().getInt32()}, {4});
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(inst->name, "Arr$int32$4");
-    auto* fieldArr = static_cast<ArrayType*>(inst->fields[0].second);
+    auto* fieldArr = static_cast<ArrayType*>(inst->fields[0].type);
     EXPECT_EQ(fieldArr->size, 4);
     EXPECT_TRUE(fieldArr->sizeParam.empty());
     EXPECT_EQ(fieldArr->elementType->kind, TypeKind::Int32);
@@ -105,7 +105,7 @@ TEST_F(TemplateRegistryTest, RecursiveInstantiationRejected) {
     auto* self = new TypeInstanceType("Node");
     self->typeArgs.push_back(T);
     auto st = std::make_unique<StructDeclAST>("Node",
-        std::vector<std::pair<std::string, Type*>>{{"next", self}});
+        std::vector<FieldInfo>{{"next", self}});
     auto tpl = std::make_unique<TemplateDeclAST>();
     tpl->params.push_back({"T", true, nullptr});
     tpl->decl = std::move(st);

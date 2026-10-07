@@ -441,7 +441,7 @@ TEST_F(CodegenContextTest, ArrayDecl) {
 }
 
 TEST_F(CodegenContextTest, StructDecl) {
-    std::vector<std::pair<std::string, Type*>> fields;
+    std::vector<FieldInfo> fields;
     fields.push_back({"x", typeCtx->getInt32()});
     fields.push_back({"y", typeCtx->getInt32()});
     auto structDecl = std::make_unique<StructDeclAST>("Point", std::move(fields));

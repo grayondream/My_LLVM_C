@@ -969,7 +969,7 @@ static llvm::Value* emitClassFieldGEP(CodegenContext& ctx, Type* aggType,
     int walkDepth = 0;
 
     while (cur) {
-        std::vector<std::pair<std::string, Type*>>* fields = nullptr;
+        std::vector<FieldInfo>* fields = nullptr;
         std::string baseClassName;
         Type* baseType = nullptr;
         if (cur->kind == TypeKind::Class) {
@@ -987,7 +987,7 @@ static llvm::Value* emitClassFieldGEP(CodegenContext& ctx, Type* aggType,
         }
 
         for (size_t i = 0; i < fields->size(); ++i) {
-            if ((*fields)[i].first == memberName) {
+            if ((*fields)[i].name == memberName) {
                 unsigned idx = static_cast<unsigned>(i);
                 // Base sub-object occupies field index 0.
                 if (!baseClassName.empty()) idx += 1;
@@ -1100,7 +1100,7 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
             return gep;
         }
         for (size_t i = 0; i < structType->fields.size(); ++i) {
-            if (structType->fields[i].first == memberName) {
+            if (structType->fields[i].name == memberName) {
                 fieldIndex = i;
                 break;
             }
@@ -1127,7 +1127,7 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
             return gep;
         }
         for (size_t i = 0; i < structType->fields.size(); ++i) {
-            if (structType->fields[i].first == memberName) {
+            if (structType->fields[i].name == memberName) {
                 fieldIndex = i;
                 break;
             }

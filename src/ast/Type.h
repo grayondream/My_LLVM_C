@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "Annotation.h"
+
 // PAR-04/SEM-04/DEC-01: member access levels. `class` members default to
 // Private, `struct` members to Public (unrecorded members fall back to
 // Public, which keeps the struct path unchanged).
@@ -92,27 +94,27 @@ public:
     // P1-03 / GEN: 模板体 parse 经普通声明路径注册的占位类型——裸模板名
     // （无实参）使用时由 sema 诊断。
     bool isTemplatePattern = false;
-    std::vector<std::pair<std::string, Type*>> fields;
+    std::vector<FieldInfo> fields;
 
     StructType(const std::string& n)
         : Type(TypeKind::Struct), name(n) {}
 
     Type* getFieldType(const std::string& fieldName) const {
-        for (auto& [name, type] : fields) {
-            if (name == fieldName) return type;
+        for (auto& f : fields) {
+            if (f.name == fieldName) return f.type;
         }
         return nullptr;
     }
 
     void addField(const std::string& fieldName, Type* fieldType) {
-        fields.push_back({fieldName, fieldType});
+        fields.push_back(FieldInfo{fieldName, fieldType, {}});
     }
 };
 
 class UnionType : public Type {
 public:
     std::string name;
-    std::vector<std::pair<std::string, Type*>> members;
+    std::vector<FieldInfo> members;
     // Redef 轮: completion tracking (mirrors ClassType::isComplete) — a
     // forward declaration leaves the placeholder incomplete.
     bool isComplete{};
@@ -121,7 +123,7 @@ public:
         : Type(TypeKind::Union), name(n) {}
 
     void addMember(const std::string& memberName, Type* memberType) {
-        members.push_back({memberName, memberType});
+        members.push_back(FieldInfo{memberName, memberType, {}});
     }
 };
 
@@ -211,7 +213,7 @@ public:
 class ClassType : public Type {
 public:
     std::string name;
-    std::vector<std::pair<std::string, Type*>> fields;
+    std::vector<FieldInfo> fields;
     std::vector<std::pair<std::string, FunctionType*>> methods;
     std::string baseClass;
 
@@ -239,7 +241,7 @@ public:
     }
 
     void addField(const std::string& fieldName, Type* fieldType) {
-        fields.push_back({fieldName, fieldType});
+        fields.push_back(FieldInfo{fieldName, fieldType, {}});
     }
 
     void addMethod(const std::string& methodName, FunctionType* methodType) {
@@ -247,8 +249,8 @@ public:
     }
 
     Type* getFieldType(const std::string& fieldName) const {
-        for (auto& [name, type] : fields) {
-            if (name == fieldName) return type;
+        for (auto& f : fields) {
+            if (f.name == fieldName) return f.type;
         }
         return nullptr;
     }

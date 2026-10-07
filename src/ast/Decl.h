@@ -123,7 +123,7 @@ public:
 class StructDeclAST : public DeclAST {
 public:
     std::string name;
-    std::vector<std::pair<std::string, Type*>> fields;
+    std::vector<FieldInfo> fields;
     std::vector<std::unique_ptr<FunctionDeclAST>> methods;
     // AGG-10: static data members — parser-built VarDeclASTs. Never part of
     // `fields` (no object layout); sema rewrites the name to the desugared
@@ -147,7 +147,7 @@ public:
     std::vector<std::unique_ptr<DeclAST>> nestedTypes;
     bool isClassDecl = false;
 
-    StructDeclAST(const std::string& n, std::vector<std::pair<std::string, Type*>> flds)
+    StructDeclAST(const std::string& n, std::vector<FieldInfo> flds)
         : name(n), fields(std::move(flds)) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
     void emitStaticMembers(CodegenContext& ctx);
@@ -156,7 +156,7 @@ public:
 class UnionDeclAST : public DeclAST {
 public:
     std::string name;
-    std::vector<std::pair<std::string, Type*>> members;
+    std::vector<FieldInfo> members;
     // AGG-11: nested type declarations, in source order.
     std::vector<std::unique_ptr<DeclAST>> nestedTypes;
     // AGG-11: union name before qualifyTypeDeclName's namespace prefixing
@@ -166,7 +166,7 @@ public:
     // it to keep UnionType::isComplete accurate (mirrors StructDeclAST).
     bool isForwardDecl = false;
 
-    UnionDeclAST(const std::string& n, std::vector<std::pair<std::string, Type*>> mems)
+    UnionDeclAST(const std::string& n, std::vector<FieldInfo> mems)
         : name(n), members(std::move(mems)) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };

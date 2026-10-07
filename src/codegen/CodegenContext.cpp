@@ -495,7 +495,7 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
                 }
             }
             for (auto& f : st->fields) {
-                fieldTypes.push_back(getLLVMType(f.second));
+                fieldTypes.push_back(getLLVMType(f.type));
             }
             return llvm::StructType::create(*context, fieldTypes, st->name);
         }
@@ -512,7 +512,7 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
             uint64_t maxAlign = 0;
             llvm::Type* alignType = nullptr;
             for (auto& m : ut->members) {
-                llvm::Type* mt = getLLVMType(m.second);
+                llvm::Type* mt = getLLVMType(m.type);
                 if (!mt) continue;
                 uint64_t sz = dl.getTypeAllocSize(mt);
                 uint64_t al = dl.getABITypeAlign(mt).value();
@@ -551,7 +551,7 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
                 }
             }
             for (auto& f : ct->fields) {
-                fieldTypes.push_back(getLLVMType(f.second));
+                fieldTypes.push_back(getLLVMType(f.type));
             }
             return llvm::StructType::create(*context, fieldTypes, ct->name);
         }

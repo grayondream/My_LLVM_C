@@ -9,14 +9,16 @@
 #include <string>
 #include <vector>
 
-#include "Expr.h"
-
+// 评审前裁决（T2）：expr 用 shared_ptr——Annotation.h 被 Type.h 包含，而
+// Expr.h 需要完整 Type（无法互相包含完整类型）；shared_ptr 的析构不依赖
+// 完整 ExprAST，同时使 AnnotationArg 可拷贝（多字段共享注解向量）。
+class ExprAST;
 class Type;
 
 struct AnnotationArg {
     enum class Kind { Expr, Type, Ident, String };
     Kind kind;
-    std::unique_ptr<ExprAST> expr; // Kind::Expr
+    std::shared_ptr<ExprAST> expr; // Kind::Expr
     Type* type{};                  // Kind::Type
     std::string text;              // Kind::Ident / Kind::String
     int line{0};

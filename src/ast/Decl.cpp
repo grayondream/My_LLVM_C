@@ -75,7 +75,7 @@ static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
             auto* ut = static_cast<UnionType*>(type);
             if (ut->members.empty() || init->initializers.empty()) return;
             llvm::Value* memberPtr = builder.CreateStructGEP(destLLVM, dest, 0, "unioninit");
-            Type* mtype = ut->members[0].second;
+            Type* mtype = ut->members[0].type;
             auto& item = *init->initializers[0];
             if (auto* nested = dynamic_cast<InitializerListExprAST*>(&item)) {
                 emitAggregateInitializer(ctx, memberPtr, mtype, nested);
@@ -112,7 +112,7 @@ static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
         }
         case TypeKind::Struct:
         case TypeKind::Class: {
-            std::vector<std::pair<std::string, Type*>>* fields = nullptr;
+            std::vector<FieldInfo>* fields = nullptr;
             unsigned baseOffset = 0;
             if (type->kind == TypeKind::Struct) {
                 fields = &static_cast<StructType*>(type)->fields;
@@ -123,7 +123,7 @@ static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
             }
             for (size_t i = 0; i < fields->size() && i < init->initializers.size(); ++i) {
                 auto& item = *init->initializers[i];
-                Type* ftype = (*fields)[i].second;
+                Type* ftype = (*fields)[i].type;
                 llvm::Value* fptr = builder.CreateStructGEP(
                     destLLVM, dest, baseOffset + (unsigned)i, "fieldinit");
                 if (auto* nested = dynamic_cast<InitializerListExprAST*>(&item)) {
@@ -215,7 +215,7 @@ static llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
         }
         case TypeKind::Struct:
         case TypeKind::Class: {
-            std::vector<std::pair<std::string, Type*>>* fields = nullptr;
+            std::vector<FieldInfo>* fields = nullptr;
             bool hasBase = false;
             if (type->kind == TypeKind::Struct) {
                 fields = &static_cast<StructType*>(type)->fields;
@@ -235,9 +235,9 @@ static llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
                 llvm::Constant* c = nullptr;
                 if (i < init->initializers.size()) {
                     if (auto* nested = dynamic_cast<InitializerListExprAST*>(init->initializers[i].get())) {
-                        c = buildAggregateConstant(ctx, (*fields)[i].second, nested);
+                        c = buildAggregateConstant(ctx, (*fields)[i].type, nested);
                     } else {
-                        c = constFor(*init->initializers[i], (*fields)[i].second);
+                        c = constFor(*init->initializers[i], (*fields)[i].type);
                     }
                 }
                 if (!c) c = llvm::Constant::getNullValue(stTy->getElementType(elemIdx));
@@ -253,9 +253,9 @@ static llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
             std::vector<llvm::Constant*> elems;
             llvm::Constant* first = nullptr;
             if (auto* nested = dynamic_cast<InitializerListExprAST*>(init->initializers[0].get())) {
-                first = buildAggregateConstant(ctx, ut->members[0].second, nested);
+                first = buildAggregateConstant(ctx, ut->members[0].type, nested);
             } else {
-                first = constFor(*init->initializers[0], ut->members[0].second);
+                first = constFor(*init->initializers[0], ut->members[0].type);
             }
             if (!first) first = llvm::Constant::getNullValue(stTy->getElementType(0));
             elems.push_back(first);
@@ -600,7 +600,7 @@ llvm::Value* StructDeclAST::codegen(CodegenContext& ctx) {
     }
 
     for (auto& field : fields) {
-        fieldTypes.push_back(ctx.getLLVMType(field.second));
+        fieldTypes.push_back(ctx.getLLVMType(field.type));
     }
 
     llvm::StructType* structType = llvm::StructType::create(ctx.getContext(), fieldTypes, name);

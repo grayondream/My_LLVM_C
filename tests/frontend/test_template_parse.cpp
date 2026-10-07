@@ -55,8 +55,8 @@ TEST_F(TemplateParse, ClassTemplateParses) {
     auto* st = dynamic_cast<StructDeclAST*>(tpl->decl.get());
     ASSERT_NE(st, nullptr);
     ASSERT_EQ(st->fields.size(), 1u);
-    ASSERT_NE(st->fields[0].second, nullptr);
-    EXPECT_EQ(st->fields[0].second->kind, TypeKind::TypeVar);
+    ASSERT_NE(st->fields[0].type, nullptr);
+    EXPECT_EQ(st->fields[0].type->kind, TypeKind::TypeVar);
 }
 
 TEST_F(TemplateParse, MixedParamsParse) {
@@ -71,8 +71,8 @@ TEST_F(TemplateParse, MixedParamsParse) {
     auto* st = dynamic_cast<StructDeclAST*>(tpl->decl.get());
     ASSERT_NE(st, nullptr);
     ASSERT_EQ(st->fields.size(), 1u);
-    ASSERT_NE(st->fields[0].second, nullptr);
-    EXPECT_EQ(st->fields[0].second->kind, TypeKind::Array);
+    ASSERT_NE(st->fields[0].type, nullptr);
+    EXPECT_EQ(st->fields[0].type->kind, TypeKind::Array);
 }
 
 TEST_F(TemplateParse, AliasTemplateParses) {

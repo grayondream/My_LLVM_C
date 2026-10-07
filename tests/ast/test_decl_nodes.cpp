@@ -30,7 +30,7 @@ TEST_F(DeclNodeTest, ArrayDeclASTWithInit) {
 }
 
 TEST_F(DeclNodeTest, StructDeclAST) {
-    std::vector<std::pair<std::string, Type*>> fields;
+    std::vector<FieldInfo> fields;
     fields.push_back({"x", typeCtx->getInt32()});
     fields.push_back({"y", typeCtx->getInt32()});
 
@@ -38,12 +38,12 @@ TEST_F(DeclNodeTest, StructDeclAST) {
 
     EXPECT_EQ(structDecl->name, "Point");
     EXPECT_EQ(structDecl->fields.size(), 2);
-    EXPECT_EQ(structDecl->fields[0].first, "x");
-    EXPECT_EQ(structDecl->fields[1].first, "y");
+    EXPECT_EQ(structDecl->fields[0].name, "x");
+    EXPECT_EQ(structDecl->fields[1].name, "y");
 }
 
 TEST_F(DeclNodeTest, UnionDeclAST) {
-    std::vector<std::pair<std::string, Type*>> members;
+    std::vector<FieldInfo> members;
     members.push_back({"i", typeCtx->getInt32()});
     members.push_back({"f", typeCtx->getFloat32()});
 

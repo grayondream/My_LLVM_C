@@ -108,3 +108,33 @@ TEST_F(AnnotationParse, AnnotationNamesAreNotKeywords) {
     (void)tu2;
     (void)tu;
 }
+
+TEST_F(AnnotationParse, FieldAnnotationParses) {
+    auto tu = parse("struct S { [[packed]] int32 x; }");
+    ASSERT_NE(tu, nullptr);
+    auto* s = dynamic_cast<StructDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(s, nullptr);
+    ASSERT_EQ(s->fields.size(), 1u);
+    ASSERT_EQ(s->fields[0].annotations.size(), 1u);
+    EXPECT_EQ(s->fields[0].annotations[0].name, "packed");
+}
+
+TEST_F(AnnotationParse, ParamAnnotationParses) {
+    auto tu = parse("int32 f([[nonnull]] int32* p) { return 0; }");
+    ASSERT_NE(tu, nullptr);
+    auto* fn = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(fn, nullptr);
+    ASSERT_EQ(fn->params.size(), 1u);
+    ASSERT_EQ(fn->params[0]->annotations.size(), 1u);
+    EXPECT_EQ(fn->params[0]->annotations[0].name, "nonnull");
+}
+
+TEST_F(AnnotationParse, UnionFieldAnnotationParses) {
+    auto tu = parse("union U { [[deprecated]] int32 i; }");
+    ASSERT_NE(tu, nullptr);
+    auto* u = dynamic_cast<UnionDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(u, nullptr);
+    ASSERT_EQ(u->members.size(), 1u);
+    ASSERT_EQ(u->members[0].annotations.size(), 1u);
+    EXPECT_EQ(u->members[0].annotations[0].name, "deprecated");
+}

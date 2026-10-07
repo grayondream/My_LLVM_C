@@ -331,14 +331,14 @@ static bool isAnonymousAggregate(Type* t) {
 
 // AGG-03: promote the fields/members of an anonymous struct/union into `out`
 // (C11 member promotion). Returns false on a member-name collision.
-static bool promoteAnonymousMembers(std::vector<std::pair<std::string, Type*>>& out, Type* agg) {
-    const std::vector<std::pair<std::string, Type*>>* src = nullptr;
+static bool promoteAnonymousMembers(std::vector<FieldInfo>& out, Type* agg) {
+    std::vector<FieldInfo>* src = nullptr;
     if (agg->kind == TypeKind::Struct) src = &static_cast<StructType*>(agg)->fields;
     else if (agg->kind == TypeKind::Union) src = &static_cast<UnionType*>(agg)->members;
     if (!src) return false;
     for (const auto& m : *src) {
         for (const auto& existing : out) {
-            if (existing.first == m.first) return false;
+            if (existing.name == m.name) return false;
         }
         out.push_back(m);
     }
@@ -2040,7 +2040,7 @@ std::vector<Annotation> Parser::parseAnnotations() {
                     auto expr = parseExpr(2);
                     if (!expr) return result;
                     arg.kind = AnnotationArg::Kind::Expr;
-                    arg.expr = std::move(expr);
+                    arg.expr = std::shared_ptr<ExprAST>(expr.release());
                 }
                 ann.args.push_back(std::move(arg));
                 if (!match(TokenType::TOKEN_COMMA)) break;
@@ -2156,7 +2156,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
         if (!structDecl->fields.empty() || !structDecl->nestedTypes.empty()) {
             auto structType = new StructType(structDecl->name);
             for (auto& field : structDecl->fields) {
-                structType->addField(field.first, field.second);
+                structType->addField(field.name, field.type);
             }
             TypeContext::instance().addStruct(structDecl->name, structType);
         }
@@ -2198,7 +2198,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
         if (!existingType) {
             auto* classType = new ClassType(classDecl->name);
             for (auto& field : classDecl->fields) {
-                classType->addField(field.first, field.second);
+                classType->addField(field.name, field.type);
             }
             TypeContext::instance().addClass(classDecl->name, classType);
         }
@@ -2227,7 +2227,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
         if (!unionDecl->members.empty() || !unionDecl->nestedTypes.empty()) {
             auto unionType = new UnionType(unionDecl->name);
             for (auto& member : unionDecl->members) {
-                unionType->addMember(member.first, member.second);
+                unionType->addMember(member.name, member.type);
             }
             TypeContext::instance().addUnion(unionDecl->name, unionType);
         }
@@ -2618,13 +2618,17 @@ std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string
 }
 
 std::unique_ptr<ParamDeclAST> Parser::parseParamDecl() {
+    // P1-05 / ANN-01: 参数注解（[[nonnull]] 等）。
+    auto anns = parseAnnotations();
     Type* type = parseType();
     if (!type) return nullptr;
 
     // Parameter may itself be a function pointer: `int (*cb)(int, int)`.
     std::string name;
     if (Type* ptrType = parseFunctionPointerDeclarator(type, name, /*requireName=*/false)) {
-        return std::make_unique<ParamDeclAST>(name, ptrType);
+        auto fpParam = std::make_unique<ParamDeclAST>(name, ptrType);
+        fpParam->annotations = std::move(anns);
+        return fpParam;
     }
 
     if (check(TokenType::TOKEN_IDENTIFIER)) {
@@ -2677,7 +2681,9 @@ std::unique_ptr<ParamDeclAST> Parser::parseParamDecl() {
         }
     }
 
-    return std::make_unique<ParamDeclAST>(name, type);
+    auto param = std::make_unique<ParamDeclAST>(name, type);
+    param->annotations = std::move(anns);
+    return param;
 }
 
 // P1-03 / GEN-01 / PAR-21: 解析 `template<...>` 声明。
@@ -2956,7 +2962,7 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
 
     if (!check(TokenType::TOKEN_LBRACE)) {
         // Forward declaration
-        auto fwd = std::make_unique<StructDeclAST>(name, std::vector<std::pair<std::string, Type*>>{});
+        auto fwd = std::make_unique<StructDeclAST>(name, std::vector<FieldInfo>{});
         fwd->bareName = bareName;
         fwd->baseClass = std::move(baseClass);
         fwd->isForwardDecl = true;
@@ -2971,11 +2977,14 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
     std::string savedPrefix = m_typeNamespacePrefix;
     m_typeNamespacePrefix += mangleQualifiedTypeName(bareName) + "_";
 
-    std::vector<std::pair<std::string, Type*>> fields;
+    std::vector<FieldInfo> fields;
     std::vector<std::unique_ptr<VarDeclAST>> staticMembers;
     // AGG-11: nested type declarations, in source order.
     std::vector<std::unique_ptr<DeclAST>> nestedTypes;
     while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
+        // P1-05 / ANN-01: 字段/嵌套类型/静态成员注解（成员起始位置）。
+        std::vector<Annotation> memberAnns = parseAnnotations();
+
         // AGG-11: a nested type declaration is `keyword IDENT {` (a forward
         // `class D;` and an inherited `class D : Base` also route here);
         // `keyword {` stays an anonymous inline member (AGG-03) and any other
@@ -3037,6 +3046,9 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
                         return nullptr;
                     }
                     registerNestedDeclType(nested.get());
+                    if (!memberAnns.empty()) {
+                        nested->annotations = std::move(memberAnns);
+                    }
                     nestedTypes.push_back(std::move(nested));
                     continue;
                 }
@@ -3082,13 +3094,14 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
                 m_typeNamespacePrefix = savedPrefix;
                 return nullptr;
             }
-            staticMembers.push_back(
-                std::make_unique<VarDeclAST>(fieldName, fieldType, std::move(init)));
+            auto staticVar = std::make_unique<VarDeclAST>(fieldName, fieldType, std::move(init));
+            staticVar->annotations = std::move(memberAnns);
+            staticMembers.push_back(std::move(staticVar));
             continue;
         }
         fieldType = parseMemberArraySuffix(fieldType);
 
-        fields.push_back({fieldName, fieldType});
+        fields.push_back(FieldInfo{fieldName, fieldType, std::move(memberAnns)});
 
         match(TokenType::TOKEN_SEMICOLON);
     }
@@ -3115,12 +3128,12 @@ void Parser::registerNestedDeclType(DeclAST* decl) {
         if (sd->isClassDecl) {
             if (!tc.getClass(sd->name)) {
                 auto* classType = new ClassType(sd->name);
-                for (auto& f : sd->fields) classType->addField(f.first, f.second);
+                for (auto& f : sd->fields) classType->addField(f.name, f.type);
                 tc.addClass(sd->name, classType);
             }
         } else if (!tc.getStruct(sd->name)) {
             auto* structType = new StructType(sd->name);
-            for (auto& f : sd->fields) structType->addField(f.first, f.second);
+            for (auto& f : sd->fields) structType->addField(f.name, f.type);
             tc.addStruct(sd->name, structType);
         }
         return;
@@ -3137,7 +3150,7 @@ void Parser::registerNestedDeclType(DeclAST* decl) {
     if (auto* ud = dynamic_cast<UnionDeclAST*>(decl)) {
         if (!tc.getUnion(ud->name)) {
             auto* unionType = new UnionType(ud->name);
-            for (auto& m : ud->members) unionType->addMember(m.first, m.second);
+            for (auto& m : ud->members) unionType->addMember(m.name, m.type);
             tc.addUnion(ud->name, unionType);
         }
         return;
@@ -3236,7 +3249,7 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
 
     if (!check(TokenType::TOKEN_LBRACE)) {
         // Forward declaration
-        auto decl = std::make_unique<StructDeclAST>(name, std::vector<std::pair<std::string, Type*>>{});
+        auto decl = std::make_unique<StructDeclAST>(name, std::vector<FieldInfo>{});
         decl->baseClass = std::move(baseClass);
         decl->bareName = bareName;
         decl->isForwardDecl = true;
@@ -3256,7 +3269,7 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
     std::string savedPrefix = m_typeNamespacePrefix;
     m_typeNamespacePrefix += mangleQualifiedTypeName(bareName) + "_";
 
-    std::vector<std::pair<std::string, Type*>> fields;
+    std::vector<FieldInfo> fields;
     std::vector<std::unique_ptr<FunctionDeclAST>> methods;
     std::vector<std::unique_ptr<VarDeclAST>> staticMembers;
     std::unordered_map<std::string, AccessLevel> memberAccess;
@@ -3272,6 +3285,9 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
     };
 
     while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
+        // P1-05 / ANN-01: 字段/方法/嵌套类型/静态成员注解。
+        std::vector<Annotation> memberAnns = parseAnnotations();
+
         // Access specifier section: `public:` / `private:` / `protected:`.
         // `public`/`private` are keywords; `protected` is contextual, so it
         // only counts when directly followed by ':'.
@@ -3353,6 +3369,9 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                     }
                     memberAccess["type:" + nestedName] = currentAccess;
                     registerNestedDeclType(nested.get());
+                    if (!memberAnns.empty()) {
+                        nested->annotations = std::move(memberAnns);
+                    }
                     nestedTypes.push_back(std::move(nested));
                     continue;
                 }
@@ -3381,6 +3400,7 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                     // Member function declaration
                     auto func = parseFunctionDecl(declType, memberName);
                     if (func) {
+                        func->annotations = std::move(memberAnns);
                         func->isStatic = memberIsStatic;
                         methods.push_back(std::move(func));
                         // I1: static methods are keyed separately so a
@@ -3405,15 +3425,16 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                         m_typeNamespacePrefix = savedPrefix;
                         return nullptr;
                     }
-                    staticMembers.push_back(
-                        std::make_unique<VarDeclAST>(memberName, declType, std::move(init)));
+                    auto staticVar = std::make_unique<VarDeclAST>(memberName, declType, std::move(init));
+                    staticVar->annotations = std::move(memberAnns);
+                    staticMembers.push_back(std::move(staticVar));
                     // I1: access level keyed separately from instance members
                     // so same-name static/instance members stay independent.
                     memberAccess["static:" + memberName] = currentAccess;
                 } else {
                     // Field declaration
                     declType = parseMemberArraySuffix(declType);
-                    fields.push_back({memberName, declType});
+                    fields.push_back(FieldInfo{memberName, declType, std::move(memberAnns)});
                     memberAccess[memberName] = currentAccess;
                     match(TokenType::TOKEN_SEMICOLON);
                 }
@@ -3426,6 +3447,7 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                     advance(); // consume operator symbol
                     auto func = parseFunctionDecl(declType, opName);
                     if (func) {
+                        func->annotations = std::move(memberAnns);
                         methods.push_back(std::move(func));
                     }
                 }
@@ -3441,7 +3463,7 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                     return nullptr;
                 }
                 for (size_t i = before; i < fields.size(); ++i) {
-                    memberAccess[fields[i].first] = currentAccess;
+                    memberAccess[fields[i].name] = currentAccess;
                 }
             } else {
                 m_currentTokenPos = savedPos;
@@ -3517,7 +3539,7 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
 
     if (!check(TokenType::TOKEN_LBRACE)) {
         // Forward declaration
-        auto fwd = std::make_unique<UnionDeclAST>(name, std::vector<std::pair<std::string, Type*>>{});
+        auto fwd = std::make_unique<UnionDeclAST>(name, std::vector<FieldInfo>{});
         fwd->bareName = bareName;
         fwd->isForwardDecl = true;
         return fwd;
@@ -3530,10 +3552,13 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
     std::string savedPrefix = m_typeNamespacePrefix;
     m_typeNamespacePrefix += mangleQualifiedTypeName(bareName) + "_";
 
-    std::vector<std::pair<std::string, Type*>> members;
+    std::vector<FieldInfo> members;
     // AGG-11: nested type declarations, in source order.
     std::vector<std::unique_ptr<DeclAST>> nestedTypes;
     while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
+        // P1-05 / ANN-01: union 成员注解。
+        std::vector<Annotation> memberAnns = parseAnnotations();
+
         // AGG-11: a nested type declaration is `keyword IDENT {`; `keyword {`
         // stays an anonymous inline member (AGG-03), any other shape a field.
         {
@@ -3593,6 +3618,9 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
                         return nullptr;
                     }
                     registerNestedDeclType(nested.get());
+                    if (!memberAnns.empty()) {
+                        nested->annotations = std::move(memberAnns);
+                    }
                     nestedTypes.push_back(std::move(nested));
                     continue;
                 }
@@ -3618,7 +3646,7 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
         std::string memberName = advance()->lexeme;
         memberType = parseMemberArraySuffix(memberType);
 
-        members.push_back({memberName, memberType});
+        members.push_back(FieldInfo{memberName, memberType, std::move(memberAnns)});
 
         match(TokenType::TOKEN_SEMICOLON);
     }
