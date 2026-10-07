@@ -36,6 +36,8 @@ enum class DiagnosticCode {
     WarnUnusedVariable,
     WarnUnreachableCode,
     WarnDeprecated,
+    // P1-05 / ANN-05
+    WarnNullNonnull,
 };
 
 // Human-readable metadata for a code (the registry, INF-13).

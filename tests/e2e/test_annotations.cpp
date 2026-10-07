@@ -153,3 +153,59 @@ TEST_F(AnnotationLayoutE2E, GlobalVarAlignIR) {
     }
     EXPECT_TRUE(found);
 }
+
+// ---- P1-05 / ANN-04/05: LLVM 属性落盘 ----
+
+static bool moduleHasFnAttr(const std::string& source, llvm::Attribute::AttrKind kind) {
+    Lexer lexer("ann_attr.c", source);
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    if (!ast) return false;
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    if (!analyzer.getErrors().empty()) return false;
+    CodegenContext ctx;
+    ctx.setSourceFile("ann_attr.c");
+    ast->codegen(ctx);
+    for (auto& fn : ctx.getModule().getFunctionList()) {
+        if (fn.isDeclaration()) continue;
+        if (fn.hasFnAttribute(kind)) return true;
+    }
+    return false;
+}
+
+TEST_F(AnnotationLayoutE2E, InlineAttrIR) {
+    EXPECT_TRUE(moduleHasFnAttr(
+        "[[inline]] int32 f() { return 1; }\n"
+        "int32 main() { return f(); }", llvm::Attribute::AlwaysInline));
+}
+
+TEST_F(AnnotationLayoutE2E, ColdAttrIR) {
+    EXPECT_TRUE(moduleHasFnAttr(
+        "[[cold]] int32 f() { return 1; }\n"
+        "int32 main() { return f(); }", llvm::Attribute::Cold));
+}
+
+TEST_F(AnnotationLayoutE2E, NonNullParamAttrIR) {
+    // 经 param attr 检查：遍历函数参数。
+    Lexer lexer("ann_nn_attr.c",
+                "int32 f([[nonnull]] int32* p) { return *p; }\n"
+                "int32 main() { return f(null); }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_TRUE(analyzer.getErrors().empty());
+    CodegenContext ctx;
+    ctx.setSourceFile("ann_nn_attr.c");
+    ast->codegen(ctx);
+    bool found = false;
+    for (auto& fn : ctx.getModule().getFunctionList()) {
+        if (fn.isDeclaration() || fn.arg_empty()) continue;
+        if (fn.getArg(0)->hasAttribute(llvm::Attribute::NonNull)) found = true;
+    }
+    EXPECT_TRUE(found);
+}

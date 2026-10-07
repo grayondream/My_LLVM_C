@@ -71,6 +71,14 @@ public:
     // nonnull 指针检查。
     void validateAnnotations(const std::vector<Annotation>& anns, ASTNode& at,
                              const std::string& target, Type* paramType = nullptr);
+    // P1-05 / ANN-05: 弃用类型使用检查（Type::deprecated 折叠，包装层穿透）。
+    void checkDeprecatedTypeUse(Type* t, ASTNode& at);
+    // 弃用函数/变量记录（键 = 声明名；msg 供 W3004 文本）。
+    std::unordered_set<std::string> m_deprecatedFuncs;
+    std::unordered_set<std::string> m_deprecatedVars;
+    std::unordered_map<std::string, std::string> m_deprecatedMsgs;
+    // nonnull 形参：函数名 → (参数下标, 参数名)。
+    std::unordered_map<std::string, std::vector<std::pair<size_t, std::string>>> m_nonnullParams;
     // 整树交给编译期求值器（含 compile_time 成员值与 constexpr 委托）。
     std::optional<ConstValue> evalCompileTime(ExprAST* expr, ASTNode& at);
     // MethodCall 形态（compile_time.static_assert/size_of/...）钩子：返回 true

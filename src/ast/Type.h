@@ -68,6 +68,9 @@ public:
     // 阻断使用；sema 在变量声明处拒绝毒化类型（活分支的 sema 注册创建新
     // 对象，天然解毒）。
     bool ctDeadBranch{false};
+    // P1-05 / ANN-05: [[deprecated]] 类型（sema 折叠；使用点 W3004）。
+    bool deprecated{false};
+    std::string deprecatedMsg;
 };
 
 class ArrayType : public Type {
@@ -99,6 +102,8 @@ public:
     bool reprC = false;
     uint64_t forcedAlign = 0;
     std::unordered_map<std::string, uint64_t> fieldAligns;
+    std::unordered_map<std::string, bool> fieldDeprecated;
+    std::unordered_map<std::string, std::string> fieldDeprecatedMsg;
     // LayoutBuilder 首次构造时插入的 padding 伪字段（name=""）已落盘。
     bool layoutMaterialized = false;
     std::vector<FieldInfo> fields;
@@ -244,6 +249,8 @@ public:
     bool reprC = false;
     uint64_t forcedAlign = 0;
     std::unordered_map<std::string, uint64_t> fieldAligns;
+    std::unordered_map<std::string, bool> fieldDeprecated;
+    std::unordered_map<std::string, std::string> fieldDeprecatedMsg;
     bool layoutMaterialized = false;
 
     ClassType(const std::string& n)

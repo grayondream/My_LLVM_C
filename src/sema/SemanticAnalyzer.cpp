@@ -734,6 +734,47 @@ static bool ctIsPoisonedType(Type* t, std::string& name) {
     return poisoned;
 }
 
+// P1-05 / ANN-05: 沿 typedef/指针/数组层检查弃用标志。
+void SemanticAnalyzer::checkDeprecatedTypeUse(Type* t, ASTNode& at) {
+    std::string name;
+    while (t) {
+        if (t->deprecated) {
+            if (t->deprecatedMsg.empty()) {
+                emitWarning(DiagnosticCode::WarnDeprecated,
+                            "'" + name + "' is deprecated", at);
+            } else {
+                emitWarning(DiagnosticCode::WarnDeprecated,
+                            "'" + name + "' is deprecated: " + t->deprecatedMsg, at);
+            }
+            return;
+        }
+        switch (t->kind) {
+            case TypeKind::Typedef:
+                name = static_cast<TypedefType*>(t)->name;
+                t = static_cast<TypedefType*>(t)->aliasedType;
+                continue;
+            case TypeKind::Pointer:
+                t = t->base;
+                continue;
+            case TypeKind::Array:
+                t = static_cast<ArrayType*>(t)->elementType;
+                continue;
+            case TypeKind::Struct:
+            case TypeKind::Class:
+                name = static_cast<StructType*>(t)->name;
+                return;
+            case TypeKind::Union:
+                name = static_cast<UnionType*>(t)->name;
+                return;
+            case TypeKind::Enum:
+                name = static_cast<EnumType*>(t)->name;
+                return;
+            default:
+                return;
+        }
+    }
+}
+
 void SemanticAnalyzer::checkCtDeadBranchUse(Type* t, ASTNode& at) {
     if (!t) return;
     std::string name;
@@ -1304,6 +1345,19 @@ void SemanticAnalyzer::visit(VariableExprAST& node) {
     // declaring class before the ordinary symbol resolution proceeds.
     checkStaticMemberAccess(node.name, node);
 
+    // P1-05 / ANN-05: 弃用变量使用（W3004）。
+    if (m_deprecatedVars.count(node.name)) {
+        std::string msg = m_deprecatedMsgs.count("var:" + node.name)
+            ? m_deprecatedMsgs["var:" + node.name] : "";
+        if (msg.empty()) {
+            emitWarning(DiagnosticCode::WarnDeprecated,
+                        "'" + node.name + "' is deprecated", node);
+        } else {
+            emitWarning(DiagnosticCode::WarnDeprecated,
+                        "'" + node.name + "' is deprecated: " + msg, node);
+        }
+    }
+
     // Enumerator (possibly namespace-qualified, e.g. `A::Red`)?
     for (const auto& candidate : namespaceCandidates(node.name)) {
         auto it = enumConstants.find(candidate);
@@ -1748,6 +1802,33 @@ void SemanticAnalyzer::visit(CallExprAST& node) {
     if (funcType) {
         node.resolvedParamTypes = funcType->paramTypes;
     }
+    // P1-05 / ANN-05: deprecated 函数使用（W3004）。
+    if (m_deprecatedFuncs.count(node.callee)) {
+        std::string msg = m_deprecatedMsgs.count(node.callee)
+            ? m_deprecatedMsgs[node.callee] : "";
+        if (msg.empty()) {
+            emitWarning(DiagnosticCode::WarnDeprecated,
+                        "'" + node.callee + "' is deprecated", node);
+        } else {
+            emitWarning(DiagnosticCode::WarnDeprecated,
+                        "'" + node.callee + "' is deprecated: " + msg, node);
+        }
+    }
+    // P1-05 / ANN-05: nonnull 形参传字面空（W3005；null 字面量即 0）。
+    auto npIt = m_nonnullParams.find(node.callee);
+    if (npIt != m_nonnullParams.end()) {
+        for (auto& [pidx, pname] : npIt->second) {
+            if (pidx < node.args.size()) {
+                if (auto* num = dynamic_cast<NumberExprAST*>(node.args[pidx].get())) {
+                    if (num->value == 0) {
+                        emitWarning(DiagnosticCode::WarnNullNonnull,
+                                    "null passed to nonnull parameter '" + pname
+                                        + "' of '" + node.callee + "'", node);
+                    }
+                }
+            }
+        }
+    }
     node.isLValue = false;
 }
 
@@ -2082,6 +2163,26 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
         node.type = nullptr;
         node.isLValue = false;
         return;
+    }
+
+    // P1-05 / ANN-05: 弃用字段使用（W3004）。
+    {
+        Type* stripped = objType;
+        while (stripped && stripped->kind == TypeKind::Typedef) {
+            stripped = static_cast<TypedefType*>(stripped)->aliasedType;
+        }
+        if (stripped && stripped->kind == TypeKind::Struct
+            && static_cast<StructType*>(stripped)->fieldDeprecated.count(node.memberName)) {
+            auto* st = static_cast<StructType*>(stripped);
+            const std::string& msg = st->fieldDeprecatedMsg[node.memberName];
+            if (msg.empty()) {
+                emitWarning(DiagnosticCode::WarnDeprecated,
+                            "'" + node.memberName + "' is deprecated", node);
+            } else {
+                emitWarning(DiagnosticCode::WarnDeprecated,
+                            "'" + node.memberName + "' is deprecated: " + msg, node);
+            }
+        }
     }
 
     Type* memberBaseType = nullptr;
@@ -2491,6 +2592,18 @@ void SemanticAnalyzer::visit(NullStmtAST& node) {}
 void SemanticAnalyzer::visit(VarDeclAST& node) {
     // P1-05 / ANN-06: 变量注解验证。
     validateAnnotations(node.annotations, node, "variable");
+    // P1-05 / ANN-05: 弃用类型使用（W3004）与弃用变量记录。
+    checkDeprecatedTypeUse(node.type, node);
+    for (const auto& ann : node.annotations) {
+        if (ann.name == "deprecated") {
+            std::string msg;
+            if (ann.args.size() == 1 && ann.args[0].kind == AnnotationArg::Kind::String) {
+                msg = ann.args[0].text;
+            }
+            m_deprecatedVars.insert(node.name);
+            m_deprecatedMsgs["var:" + node.name] = msg;
+        }
+    }
     // P1-05 / ANN-03: [[align(N)]] 折叠至 declAlign（codegen setAlignment）。
     for (const auto& ann : node.annotations) {
         if (ann.name == "align" && ann.args.size() == 1
@@ -2781,11 +2894,24 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
                 if (ann.name == "packed") st->isPacked = true;
                 else if (ann.name == "repr") st->reprC = true;
                 else if (ann.name == "align") st->forcedAlign = ctAlignArg(ann, *this);
+                else if (ann.name == "deprecated") {
+                    st->deprecated = true;
+                    if (ann.args.size() == 1
+                        && ann.args[0].kind == AnnotationArg::Kind::String) {
+                        st->deprecatedMsg = ann.args[0].text;
+                    }
+                }
             }
             for (const auto& f : node.fields) {
                 for (const auto& ann : f.annotations) {
                     if (ann.name == "align") {
                         st->fieldAligns[f.name] = ctAlignArg(ann, *this);
+                    } else if (ann.name == "deprecated") {
+                        st->fieldDeprecated[f.name] = true;
+                        if (ann.args.size() == 1
+                            && ann.args[0].kind == AnnotationArg::Kind::String) {
+                            st->fieldDeprecatedMsg[f.name] = ann.args[0].text;
+                        }
                     }
                 }
             }
@@ -3046,6 +3172,13 @@ void SemanticAnalyzer::visit(UnionDeclAST& node) {
             for (const auto& ann : node.annotations) {
                 if (ann.name == "align") unionType->forcedAlign = ctAlignArg(ann, *this);
                 else if (ann.name == "repr") unionType->reprC = true;
+                else if (ann.name == "deprecated") {
+                    unionType->deprecated = true;
+                    if (ann.args.size() == 1
+                        && ann.args[0].kind == AnnotationArg::Kind::String) {
+                        unionType->deprecatedMsg = ann.args[0].text;
+                    }
+                }
             }
         }
     }
@@ -3120,6 +3253,18 @@ void SemanticAnalyzer::visit(EnumDeclAST& node) {
 void SemanticAnalyzer::visit(TypedefDeclAST& node) {
     // P1-05 / ANN-06: typedef 注解验证。
     validateAnnotations(node.annotations, node, "typedef");
+    // P1-05 / ANN-05: typedef 弃用折叠。
+    for (const auto& ann : node.annotations) {
+        if (ann.name == "deprecated") {
+            if (Type* td = typeCtx->getTypedef(node.name)) {
+                td->deprecated = true;
+                if (ann.args.size() == 1
+                    && ann.args[0].kind == AnnotationArg::Kind::String) {
+                    td->deprecatedMsg = ann.args[0].text;
+                }
+            }
+        }
+    }
     typeCtx->addTypedef(node.name, node.aliasedType);
     // A typedef of an inline enum (`typedef enum { A, B } E;`) exposes its
     // enumerators in the enclosing scope (TYP-25).
@@ -3163,6 +3308,26 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
     validateAnnotations(node.annotations, node, "function");
     for (auto& p : node.params) {
         validateAnnotations(p->annotations, node, "parameter", p->type);
+    }
+    // P1-05 / ANN-05: deprecated 函数与 nonnull 形参记录（使用点查询）。
+    for (const auto& ann : node.annotations) {
+        if (ann.name == "deprecated") {
+            std::string msg;
+            if (ann.args.size() == 1 && ann.args[0].kind == AnnotationArg::Kind::String) {
+                msg = ann.args[0].text;
+            }
+            m_deprecatedFuncs.insert(node.name);
+            m_deprecatedMsgs[node.name] = msg;
+        }
+    }
+    {
+        std::vector<std::pair<size_t, std::string>> nn;
+        for (size_t i = 0; i < node.params.size(); ++i) {
+            for (const auto& ann : node.params[i]->annotations) {
+                if (ann.name == "nonnull") nn.push_back({i, node.params[i]->name});
+            }
+        }
+        if (!nn.empty()) m_nonnullParams[node.name] = std::move(nn);
     }
     // Namespace members are registered/emitted under a mangled key.
     node.name = scopedName(node.name);

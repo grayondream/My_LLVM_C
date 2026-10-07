@@ -394,6 +394,22 @@ llvm::Value* FunctionDeclAST::codegenPrototype(CodegenContext& ctx) {
         function = llvm::Function::Create(
             funcType, llvm::Function::ExternalLinkage, mangledName, ctx.getModule());
     }
+    // P1-05 / ANN-04/05: 函数属性（inline→alwaysinline、cold→cold、
+    // 参数 nonnull→NonNull）。幂等：重复 add 去重。
+    for (auto& ann : annotations) {
+        if (ann.name == "inline") {
+            function->addFnAttr(llvm::Attribute::AlwaysInline);
+        } else if (ann.name == "cold") {
+            function->addFnAttr(llvm::Attribute::Cold);
+        }
+    }
+    for (size_t i = 0; i < params.size(); ++i) {
+        for (const auto& ann : params[i]->annotations) {
+            if (ann.name == "nonnull") {
+                function->addParamAttr(static_cast<unsigned>(i), llvm::Attribute::NonNull);
+            }
+        }
+    }
     return function;
 }
 
