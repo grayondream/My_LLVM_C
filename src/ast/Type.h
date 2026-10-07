@@ -99,6 +99,8 @@ public:
     bool reprC = false;
     uint64_t forcedAlign = 0;
     std::unordered_map<std::string, uint64_t> fieldAligns;
+    // LayoutBuilder 首次构造时插入的 padding 伪字段（name=""）已落盘。
+    bool layoutMaterialized = false;
     std::vector<FieldInfo> fields;
 
     StructType(const std::string& n)
@@ -242,6 +244,7 @@ public:
     bool reprC = false;
     uint64_t forcedAlign = 0;
     std::unordered_map<std::string, uint64_t> fieldAligns;
+    bool layoutMaterialized = false;
 
     ClassType(const std::string& n)
         : Type(TypeKind::Class), name(n) {}

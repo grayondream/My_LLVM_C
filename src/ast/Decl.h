@@ -34,6 +34,8 @@ public:
     std::unique_ptr<ExprAST> initExpr;
     bool isConstexpr = false;
     std::optional<FoldedValue> foldedValue;
+    // P1-05 / ANN-03: [[align(N)]] 折叠值（sema 写入，codegen setAlignment）。
+    uint64_t declAlign = 0;
 
     VarDeclAST(const std::string& n, Type* t, std::unique_ptr<ExprAST> init = nullptr, bool constexpr_ = false)
         : name(n), type(t), initExpr(std::move(init)), isConstexpr(constexpr_) {}

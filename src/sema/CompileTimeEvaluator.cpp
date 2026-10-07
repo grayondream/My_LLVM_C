@@ -380,6 +380,15 @@ llvm::Type* CompileTimeEvaluator::toLLVMType(Type* t) {
         case TypeKind::Float16: result = llvm::Type::getHalfTy(ctx); break;
         case TypeKind::Float128:result = llvm::Type::getFP128Ty(ctx); break;
         case TypeKind::Pointer: result = llvm::PointerType::get(ctx, 0); break;
+        case TypeKind::Array: {
+            // P1-05 / ANN-03: 数组字段（含 LayoutBuilder 的 i8 padding 伪字段）
+            // ——缺失会使 padding 被 conv 跳过、布局自检/查询错位。
+            auto* at = static_cast<ArrayType*>(t);
+            if (llvm::Type* elem = toLLVMType(at->elementType)) {
+                result = llvm::ArrayType::get(elem, at->size);
+            }
+            break;
+        }
         case TypeKind::Enum: {
             auto* et = static_cast<EnumType*>(t);
             result = et->underlyingType ? toLLVMType(et->underlyingType)
@@ -511,6 +520,27 @@ CompileTimeEvaluator::evalLayoutQuery(MethodCallExprAST& node, ASTNode& at) {
     if (!lt) {
         m_sema.emitError("unknown type in compile_time." + node.methodName + " expression", at);
         return std::nullopt;
+    }
+    // P1-05 / ANN-03: 聚合查询走 LayoutBuilder（size 含尾部补齐、align 含
+    // forcedAlign）；标量仍用 DataLayout。
+    bool isAgg = queriedType->kind == TypeKind::Struct
+        || queriedType->kind == TypeKind::Class || queriedType->kind == TypeKind::Union;
+    if (isAgg) {
+        bool isUnion = queriedType->kind == TypeKind::Union;
+        auto LR = isUnion
+            ? LayoutBuilder::buildUnion(static_cast<UnionType*>(queriedType), *m_llvmCtx,
+                  m_module->getDataLayout(),
+                  [this](Type* tt) { return toLLVMType(tt); })
+            : LayoutBuilder::buildAggregate(queriedType, *m_llvmCtx,
+                  m_module->getDataLayout(),
+                  [this](Type* tt) { return toLLVMType(tt); },
+                  [this](const std::string& n) -> Type* { return m_sema.resolveTypeByName(n); });
+        if (node.methodName == "size_of") {
+            cv.intVal = static_cast<long long>(LR.size);
+        } else {
+            cv.intVal = static_cast<long long>(LR.align);
+        }
+        return cv;
     }
     if (node.methodName == "size_of") {
         cv.intVal = static_cast<long long>(dl.getTypeAllocSize(lt));

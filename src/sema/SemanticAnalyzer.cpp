@@ -745,6 +745,19 @@ void SemanticAnalyzer::checkCtDeadBranchUse(Type* t, ASTNode& at) {
     }
 }
 
+// P1-05 / ANN-02/03: [[align(N)]] 实参折叠（validateAnnotations 已保证常量
+// 且 2 的幂；此处仅取值）。
+static uint64_t ctAlignArg(const Annotation& ann, SemanticAnalyzer& sema) {
+    if (ann.args.size() == 1 && ann.args[0].kind == AnnotationArg::Kind::Expr
+        && ann.args[0].expr) {
+        if (auto v = sema.evaluateConstexpr(ann.args[0].expr.get());
+            v && v->type == SemanticAnalyzer::ConstValue::INT) {
+            return static_cast<uint64_t>(v->intVal);
+        }
+    }
+    return 0;
+}
+
 // P1-05 / ANN-06: 注解验证——未知名/重复/目标/实参（文案 spec §5 逐字）。
 void SemanticAnalyzer::validateAnnotations(const std::vector<Annotation>& anns,
                                            ASTNode& at, const std::string& target,
@@ -2478,6 +2491,16 @@ void SemanticAnalyzer::visit(NullStmtAST& node) {}
 void SemanticAnalyzer::visit(VarDeclAST& node) {
     // P1-05 / ANN-06: 变量注解验证。
     validateAnnotations(node.annotations, node, "variable");
+    // P1-05 / ANN-03: [[align(N)]] 折叠至 declAlign（codegen setAlignment）。
+    for (const auto& ann : node.annotations) {
+        if (ann.name == "align" && ann.args.size() == 1
+            && ann.args[0].kind == AnnotationArg::Kind::Expr && ann.args[0].expr) {
+            if (auto v = evaluateConstexpr(ann.args[0].expr.get());
+                v && v->type == ConstValue::INT) {
+                node.declAlign = static_cast<uint64_t>(v->intVal);
+            }
+        }
+    }
     // AGG-11/DS5: naming a private nested type outside its class is E2009.
     node.type = resolveTypeInstance(node.type, node);
     checkNestedTypeAccess(node.type, node);
@@ -2748,6 +2771,27 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
     // 不符（spec：仅 struct/union）。
     validateAnnotations(node.annotations, node, isClass ? "class" : "struct");
 
+    // P1-05 / ANN-02/03: 布局注解折叠进 Type（LayoutBuilder 消费）。
+    {
+        Type* agg = isClass ? static_cast<Type*>(typeCtx->getClass(node.name))
+                            : static_cast<Type*>(typeCtx->getStruct(node.name));
+        if (agg) {
+            auto* st = static_cast<StructType*>(agg);
+            for (const auto& ann : node.annotations) {
+                if (ann.name == "packed") st->isPacked = true;
+                else if (ann.name == "repr") st->reprC = true;
+                else if (ann.name == "align") st->forcedAlign = ctAlignArg(ann, *this);
+            }
+            for (const auto& f : node.fields) {
+                for (const auto& ann : f.annotations) {
+                    if (ann.name == "align") {
+                        st->fieldAligns[f.name] = ctAlignArg(ann, *this);
+                    }
+                }
+            }
+        }
+    }
+
     if (isClass) {
         auto* classType = typeCtx->getOrCreateClass(node.name);
         // Redef 轮: a definition completes the class; forward declarations
@@ -2994,6 +3038,16 @@ void SemanticAnalyzer::visit(UnionDeclAST& node) {
     validateAnnotations(node.annotations, node, "union");
     for (auto& member : node.members) {
         validateAnnotations(member.annotations, node, "field");
+    }
+    // P1-05 / ANN-02/03: union 仅 align 有效（packed 无填充语义，spec §4）。
+    {
+        auto* unionType = node.name.empty() ? nullptr : typeCtx->getUnion(node.name);
+        if (unionType) {
+            for (const auto& ann : node.annotations) {
+                if (ann.name == "align") unionType->forcedAlign = ctAlignArg(ann, *this);
+                else if (ann.name == "repr") unionType->reprC = true;
+            }
+        }
     }
     // Redef 轮: reuse an existing registration for named unions (mirrors the
     // struct branch) so the completion state is observable across visits.

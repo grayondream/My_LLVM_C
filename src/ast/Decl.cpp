@@ -303,11 +303,19 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
             : llvm::GlobalVariable::ExternalLinkage;
         llvm::GlobalVariable* global = new llvm::GlobalVariable(
             ctx.getModule(), llvmType, type->isConst, linkage, initConstant, name);
+        // P1-05 / ANN-03: [[align(N)]] 全局变量对齐。
+        if (declAlign) {
+            global->setAlignment(llvm::Align(declAlign));
+        }
         ctx.declareVariable(name, global, type);
         return global;
     }
     
     llvm::AllocaInst* alloca = ctx.getBuilder().CreateAlloca(llvmType, nullptr, name);
+    // P1-05 / ANN-03: [[align(N)]] 局部变量对齐。
+    if (declAlign) {
+        alloca->setAlignment(llvm::Align(declAlign));
+    }
 
     // TYP-12 D3: uninitialized slices are the empty slice {null, 0}.
     {
