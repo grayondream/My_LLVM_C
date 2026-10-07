@@ -983,9 +983,23 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
         return std::make_unique<NullStmtAST>();
     }
 
+    // P1-05 / ANN-01: 语句位置注解——仅声明语句合法（其余语句 E1002 兜底）。
+    std::vector<Annotation> stmtAnns;
+    if (isAnnotationStart()) {
+        stmtAnns = parseAnnotations();
+        if (!(isTypeStart() || check(TokenType::TOKEN_CONST) ||
+              check(TokenType::TOKEN_VOLATILE) || check(TokenType::TOKEN_CONSTEXPR))) {
+            errorUnexpected("annotations are only allowed on declarations");
+            return nullptr;
+        }
+    }
+
     // Stamp declaration statements with the location of their first token
     // (INF-03 / P0-06), so sema diagnostics on the statement carry a position.
     auto makeDeclStmt = [&](std::unique_ptr<DeclAST> decl) {
+        if (!stmtAnns.empty()) {
+            decl->annotations = std::move(stmtAnns);
+        }
         auto stmt = std::make_unique<DeclStmtAST>(std::move(decl));
         if (stmtStart) {
             stmt->setLocation(stmtStart->filename, stmtStart->line, stmtStart->column);
@@ -1338,6 +1352,18 @@ std::unique_ptr<TranslationUnitAST> Parser::parse() {
     std::vector<std::string> exports;
     
     while (!eof()) {
+        // P1-05 / ANN-01: `[[...]] module ...;` ——模块注解中转至 ModuleDeclAST；
+        // 其余声明交由 parseDeclaration 统一解析注解（此处回退）。
+        if (isAnnotationStart()) {
+            size_t saved = m_currentTokenPos;
+            auto anns = parseAnnotations();
+            if (check(TokenType::TOKEN_MODULE)) {
+                m_pendingModuleAnnotations = std::move(anns);
+            } else {
+                m_currentTokenPos = saved;
+            }
+        }
+
         // namespace declaration
         if (check(TokenType::TOKEN_NAMESPACE)) {
             auto decl = parseNamespaceDecl();
@@ -1434,8 +1460,9 @@ std::unique_ptr<TranslationUnitAST> Parser::parse() {
 
     // 如果有模块声明，创建模块声明节点（imports 已记录在 TU 上）
     if (!moduleName.empty()) {
-        tu->declarations.push_back(
-            std::make_unique<ModuleDeclAST>(moduleName, imports, std::move(exports)));
+        auto mod = std::make_unique<ModuleDeclAST>(moduleName, imports, std::move(exports));
+        mod->annotations = std::move(m_pendingModuleAnnotations);
+        tu->declarations.push_back(std::move(mod));
     }
 
     // Tag this unit's own declarations with the owning module so the semantic
@@ -1962,9 +1989,83 @@ Type* Parser::parseType() {
     return baseType;
 }
 
+// P1-05 / ANN-01: `[[` 判定（连续两个 LBRACKET；注解名非关键字）。
+bool Parser::isAnnotationStart() const {
+    if (eof() || peek()->type != TokenType::TOKEN_LBRACKET) return false;
+    if (m_currentTokenPos + 1 >= m_tokens.size()) return false;
+    return m_tokens[m_currentTokenPos + 1].type == TokenType::TOKEN_LBRACKET;
+}
+
+// P1-05 / ANN-01: 注解序列解析——`[[name]]` / `[[name(arg, ...)]]`，可连写。
+// 实参按文法 §7：string→String、type（isTypeStart）→Type、identifier→Ident、
+// 其余 const-expr→Expr（parseExpr(2)：',' 分隔惯例）。
+std::vector<Annotation> Parser::parseAnnotations() {
+    std::vector<Annotation> result;
+    while (isAnnotationStart()) {
+        Token open = *peek();
+        advance(); // [
+        advance(); // [
+        // P1-05 Ruling: `inline` 已是关键字（TOKEN_INLINE），注解名额外接受
+        // 它；其余注解名均为 identifier。cost: 若未来新增关键字形式注解名需扩此集合。
+        if (!check(TokenType::TOKEN_IDENTIFIER) && !check(TokenType::TOKEN_INLINE)) {
+            errorUnexpected("expected annotation name after '[['");
+            return result;
+        }
+        Annotation ann;
+        ann.name = advance()->lexeme;
+        ann.line = open.line;
+        ann.column = open.column;
+        if (match(TokenType::TOKEN_LPAREN)) {
+            while (!check(TokenType::TOKEN_RPAREN) && !eof()) {
+                AnnotationArg arg;
+                if (peek()) {
+                    arg.line = peek()->line;
+                    arg.column = peek()->column;
+                }
+                if (check(TokenType::TOKEN_STRING)) {
+                    std::string lex = advance()->lexeme;
+                    if (lex.size() >= 2 && lex.front() == '"' && lex.back() == '"') {
+                        lex = lex.substr(1, lex.size() - 2);
+                    }
+                    arg.kind = AnnotationArg::Kind::String;
+                    arg.text = lex;
+                } else if (isTypeStart()) {
+                    arg.kind = AnnotationArg::Kind::Type;
+                    arg.type = parseType();
+                    if (!arg.type) return result;
+                } else if (check(TokenType::TOKEN_IDENTIFIER)) {
+                    arg.kind = AnnotationArg::Kind::Ident;
+                    arg.text = advance()->lexeme;
+                } else {
+                    auto expr = parseExpr(2);
+                    if (!expr) return result;
+                    arg.kind = AnnotationArg::Kind::Expr;
+                    arg.expr = std::move(expr);
+                }
+                ann.args.push_back(std::move(arg));
+                if (!match(TokenType::TOKEN_COMMA)) break;
+            }
+            if (!expect(TokenType::TOKEN_RPAREN, "expected ')' after annotation arguments")) {
+                return result;
+            }
+        }
+        if (!expect(TokenType::TOKEN_RBRACKET, "expected ']]' after annotation") ||
+            !expect(TokenType::TOKEN_RBRACKET, "expected ']]' after annotation")) {
+            return result;
+        }
+        result.push_back(std::move(ann));
+    }
+    return result;
+}
+
 std::unique_ptr<DeclAST> Parser::parseDeclaration() {
     auto startTok = peek();
+    // P1-05 / ANN-01: 声明头注解（顶层/namespace 成员/局部声明统一入口）。
+    auto anns = parseAnnotations();
     auto decl = parseDeclarationImpl();
+    if (decl && !anns.empty()) {
+        decl->annotations = std::move(anns);
+    }
     if (decl) {
         applyLocation(decl.get(), startTok ? &*startTok : nullptr);
     }

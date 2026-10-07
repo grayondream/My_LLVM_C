@@ -5,6 +5,7 @@
 #include <optional>
 #include <unordered_map>
 #include "Stmt.h"
+#include "Annotation.h"
 
 struct FoldedValue {
     enum Type { INT, DOUBLE, CHAR } type;
@@ -19,6 +20,9 @@ public:
     // marked `export`/`public` (`isExported`). See docs/spec/modules.md §4.
     bool isExported = false;
     std::string moduleName;
+
+    // P1-05 / ANN-01: 声明头注解（`[[...]]`，可叠加）。
+    std::vector<Annotation> annotations;
 
     virtual llvm::Value* codegen(CodegenContext& ctx) = 0;
 };
@@ -40,6 +44,8 @@ class ParamDeclAST : public ASTNode {
 public:
     std::string name;
     Type* type;
+    // P1-05 / ANN-01: 参数注解（[[nonnull]] 等）。
+    std::vector<Annotation> annotations;
 
     ParamDeclAST(const std::string& n, Type* t)
         : name(n), type(t) {}

@@ -45,6 +45,13 @@ private:
     // P1-03 / GEN-01 / PAR-21: `template<...>` 声明（函数/struct/class/别名）。
     std::unique_ptr<DeclAST> parseTemplateDecl();
 
+    // P1-05 / ANN-01: 注解序列解析（光标处无 `[[` 返回空）与判定。
+    bool isAnnotationStart() const;
+    std::vector<Annotation> parseAnnotations();
+    // P1-05 / ANN-01: `[[...]] module ...;` 的模块注解中转（ModuleDeclAST
+    // 在 parse() 尾部统一创建）。
+    std::vector<Annotation> m_pendingModuleAnnotations;
+
     // P1-04 / CT-01: `compile_time.if` / `compile_time.static_assert` 顶层声明。
     // `compile_time` 非关键字；仅成员名 ∈ {if, static_assert} 的根链在此特判。
     bool isCompileTimeDeclStart() const;
