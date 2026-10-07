@@ -25,6 +25,12 @@ enum class DiagnosticCode {
     SemUnresolvedCall,
     SemAmbiguousCall,
     SemPrivateMemberAccess,
+    // P1-05 / ANN-06
+    SemUnknownAnnotation,
+    SemInvalidAnnotationTarget,
+    SemDuplicateAnnotation,
+    SemAlignNotPowerOfTwo,
+    SemAnnotationArgNotConstant,
 
     WarnUninitializedVariable,
     WarnUnusedVariable,

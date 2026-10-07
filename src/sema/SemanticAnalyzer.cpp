@@ -745,6 +745,84 @@ void SemanticAnalyzer::checkCtDeadBranchUse(Type* t, ASTNode& at) {
     }
 }
 
+// P1-05 / ANN-06: 注解验证——未知名/重复/目标/实参（文案 spec §5 逐字）。
+void SemanticAnalyzer::validateAnnotations(const std::vector<Annotation>& anns,
+                                           ASTNode& at, const std::string& target,
+                                           Type* paramType) {
+    static const std::unordered_set<std::string> kKnown = {
+        "repr", "packed", "align", "inline", "cold", "nonnull", "deprecated"};
+    std::unordered_set<std::string> seen;
+    for (const auto& ann : anns) {
+        if (!kKnown.count(ann.name)) {
+            emitError(DiagnosticCode::SemUnknownAnnotation,
+                      "unknown annotation '" + ann.name + "'", at);
+            continue;
+        }
+        if (!seen.insert(ann.name).second) {
+            emitError(DiagnosticCode::SemDuplicateAnnotation,
+                      "duplicate annotation '" + ann.name + "'", at);
+            continue;
+        }
+        bool ok = false;
+        if (ann.name == "repr") ok = (target == "struct" || target == "union");
+        else if (ann.name == "packed") ok = (target == "struct" || target == "union" || target == "field");
+        else if (ann.name == "align") ok = (target == "struct" || target == "union" || target == "field" || target == "variable");
+        else if (ann.name == "inline" || ann.name == "cold") ok = (target == "function");
+        else if (ann.name == "nonnull") ok = (target == "parameter");
+        else if (ann.name == "deprecated") ok = true;
+        if (!ok) {
+            emitError(DiagnosticCode::SemInvalidAnnotationTarget,
+                      "annotation '" + ann.name + "' is not valid on " + target, at);
+            continue;
+        }
+        if (ann.name == "repr") {
+            // 实参须为 Ident "C"（E2011 码位，文案独立——评审可读性）。
+            if (ann.args.size() != 1 || ann.args[0].kind != AnnotationArg::Kind::Ident
+                || ann.args[0].text != "C") {
+                emitError(DiagnosticCode::SemInvalidAnnotationTarget,
+                          "repr argument must be 'C'", at);
+            }
+        }
+        if (ann.name == "nonnull" && target == "parameter") {
+            Type* t = paramType;
+            while (t && t->kind == TypeKind::Typedef) {
+                t = static_cast<TypedefType*>(t)->aliasedType;
+            }
+            if (!t || t->kind != TypeKind::Pointer) {
+                emitError(DiagnosticCode::SemInvalidAnnotationTarget,
+                          "annotation 'nonnull' is not valid on parameter", at);
+            }
+        }
+        if (ann.name == "align") {
+            if (ann.args.size() != 1 || ann.args[0].kind != AnnotationArg::Kind::Expr
+                || !ann.args[0].expr) {
+                emitError(DiagnosticCode::SemAnnotationArgNotConstant,
+                          "annotation argument must be a compile-time constant", at);
+                continue;
+            }
+            auto v = evaluateConstexpr(ann.args[0].expr.get());
+            long long n = 0;
+            bool isConst = false;
+            if (v && v->type == ConstValue::INT) {
+                n = v->intVal;
+                isConst = true;
+            } else if (v && v->type == ConstValue::DOUBLE) {
+                n = static_cast<long long>(v->doubleVal);
+                isConst = true;
+            }
+            if (!isConst) {
+                emitError(DiagnosticCode::SemAnnotationArgNotConstant,
+                          "annotation argument must be a compile-time constant", at);
+                continue;
+            }
+            if (n < 1 || (n & (n - 1)) != 0) {
+                emitError(DiagnosticCode::SemAlignNotPowerOfTwo,
+                          "align argument must be a power of two", at);
+            }
+        }
+    }
+}
+
 std::optional<SemanticAnalyzer::ConstValue>
 SemanticAnalyzer::evalCompileTime(ExprAST* expr, ASTNode& at) {
     return ctEval().eval(expr, at);
@@ -2398,6 +2476,8 @@ void SemanticAnalyzer::visit(ContinueStmtAST& node) {}
 void SemanticAnalyzer::visit(NullStmtAST& node) {}
 
 void SemanticAnalyzer::visit(VarDeclAST& node) {
+    // P1-05 / ANN-06: 变量注解验证。
+    validateAnnotations(node.annotations, node, "variable");
     // AGG-11/DS5: naming a private nested type outside its class is E2009.
     node.type = resolveTypeInstance(node.type, node);
     checkNestedTypeAccess(node.type, node);
@@ -2521,6 +2601,8 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
 }
 
 void SemanticAnalyzer::visit(ArrayDeclAST& node) {
+    // P1-05 / ANN-06: 数组变量注解验证。
+    validateAnnotations(node.annotations, node, "variable");
     // AGG-11 评审 I2: array declarations are var declarations (DS5) — a
     // private nested type must not slip through as the element type.
     node.elementType = resolveTypeInstance(node.elementType, node);
@@ -2645,6 +2727,7 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
 void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
     // P1-03 / GEN-03: 实例字段/方法签名中的实例占位先解析。
     for (auto& f : node.fields) {
+        validateAnnotations(f.annotations, node, "field");
         f.type = resolveTypeInstance(f.type, node);
         // P1-04 评审 I3: 字段类型不得来自 compile_time.if 死分支。
         checkCtDeadBranchUse(f.type, node);
@@ -2660,6 +2743,10 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
     // INH-01: struct declarations with a base stay structs — only classes
     // (isClassDecl) or method-bearing declarations route to the class branch.
     bool isClass = node.isClassDecl || !node.methods.empty();
+
+    // P1-05 / ANN-06: struct/class 与字段注解验证——class 的 repr(C) 目标
+    // 不符（spec：仅 struct/union）。
+    validateAnnotations(node.annotations, node, isClass ? "class" : "struct");
 
     if (isClass) {
         auto* classType = typeCtx->getOrCreateClass(node.name);
@@ -2903,6 +2990,11 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
 }
 
 void SemanticAnalyzer::visit(UnionDeclAST& node) {
+    // P1-05 / ANN-06: union 与成员注解验证。
+    validateAnnotations(node.annotations, node, "union");
+    for (auto& member : node.members) {
+        validateAnnotations(member.annotations, node, "field");
+    }
     // Redef 轮: reuse an existing registration for named unions (mirrors the
     // struct branch) so the completion state is observable across visits.
     auto* unionType = node.name.empty() ? nullptr : typeCtx->getUnion(node.name);
@@ -2929,6 +3021,8 @@ void SemanticAnalyzer::visit(UnionDeclAST& node) {
 }
 
 void SemanticAnalyzer::visit(EnumDeclAST& node) {
+    // P1-05 / ANN-06: enum 注解验证。
+    validateAnnotations(node.annotations, node, "enum");
     // Reuse the enum type registered by the parser (which carries the explicit
     // underlying type) so variable references and this declaration agree.
     EnumType* enumType = node.name.empty() ? nullptr : typeCtx->getEnum(node.name);
@@ -2970,6 +3064,8 @@ void SemanticAnalyzer::visit(EnumDeclAST& node) {
 }
 
 void SemanticAnalyzer::visit(TypedefDeclAST& node) {
+    // P1-05 / ANN-06: typedef 注解验证。
+    validateAnnotations(node.annotations, node, "typedef");
     typeCtx->addTypedef(node.name, node.aliasedType);
     // A typedef of an inline enum (`typedef enum { A, B } E;`) exposes its
     // enumerators in the enclosing scope (TYP-25).
@@ -3009,6 +3105,11 @@ void SemanticAnalyzer::visit(DeclStmtAST& node) {
 }
 
 void SemanticAnalyzer::visit(FunctionDeclAST& node) {
+    // P1-05 / ANN-06: 函数与参数注解验证。
+    validateAnnotations(node.annotations, node, "function");
+    for (auto& p : node.params) {
+        validateAnnotations(p->annotations, node, "parameter", p->type);
+    }
     // Namespace members are registered/emitted under a mangled key.
     node.name = scopedName(node.name);
     // P1-03 / GEN-03: 返回类型与参数类型中的实例占位先解析。
@@ -3646,8 +3747,8 @@ void SemanticAnalyzer::visit(TypeDeclAST& node) {
 }
 
 void SemanticAnalyzer::visit(ModuleDeclAST& node) {
-    // 模块声明：在语义分析阶段不需要做任何事情
-    // 模块系统将在后续版本中实现
+    // P1-05 / ANN-06: 模块注解验证（本轮仅解析记录语义，不做目标限制）。
+    validateAnnotations(node.annotations, node, "module");
 }
 
 void SemanticAnalyzer::visit(DeferStmtAST& node) {

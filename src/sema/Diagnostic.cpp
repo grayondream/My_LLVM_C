@@ -22,6 +22,11 @@ const DiagnosticInfo kRegistry[] = {
     {DiagnosticCode::SemUnresolvedCall,          "E2007", "unresolved call"},
     {DiagnosticCode::SemAmbiguousCall,           "E2008", "ambiguous call"},
     {DiagnosticCode::SemPrivateMemberAccess,     "E2009", "private member access"},
+    {DiagnosticCode::SemUnknownAnnotation,        "E2010", "unknown annotation"},
+    {DiagnosticCode::SemInvalidAnnotationTarget,  "E2011", "annotation target mismatch"},
+    {DiagnosticCode::SemDuplicateAnnotation,      "E2012", "duplicate annotation"},
+    {DiagnosticCode::SemAlignNotPowerOfTwo,       "E2013", "align must be a power of two"},
+    {DiagnosticCode::SemAnnotationArgNotConstant, "E2014", "annotation argument not constant"},
 
     {DiagnosticCode::WarnUninitializedVariable,  "W3001", "variable may be uninitialized"},
     {DiagnosticCode::WarnUnusedVariable,         "W3002", "unused variable"},

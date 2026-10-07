@@ -66,6 +66,11 @@ public:
     bool containsCompileTimeRoot(const ExprAST* expr);
     // P1-04 评审 I3: 毒化类型（仅 compile_time.if 未选中分支声明）使用检查。
     void checkCtDeadBranchUse(Type* t, ASTNode& at);
+    // P1-05 / ANN-06: 注解目标验证与冲突检测。target: function/variable/
+    // field/parameter/struct/union/enum/typedef/module。paramType 供
+    // nonnull 指针检查。
+    void validateAnnotations(const std::vector<Annotation>& anns, ASTNode& at,
+                             const std::string& target, Type* paramType = nullptr);
     // 整树交给编译期求值器（含 compile_time 成员值与 constexpr 委托）。
     std::optional<ConstValue> evalCompileTime(ExprAST* expr, ASTNode& at);
     // MethodCall 形态（compile_time.static_assert/size_of/...）钩子：返回 true
