@@ -94,6 +94,11 @@ public:
     // P1-03 / GEN: 模板体 parse 经普通声明路径注册的占位类型——裸模板名
     // （无实参）使用时由 sema 诊断。
     bool isTemplatePattern = false;
+    // P1-05 / ANN-02/03: 布局注解折叠（sema 写入，LayoutBuilder 消费）。
+    bool isPacked = false;
+    bool reprC = false;
+    uint64_t forcedAlign = 0;
+    std::unordered_map<std::string, uint64_t> fieldAligns;
     std::vector<FieldInfo> fields;
 
     StructType(const std::string& n)
@@ -114,6 +119,10 @@ public:
 class UnionType : public Type {
 public:
     std::string name;
+    // P1-05 / ANN-02/03: 布局注解折叠（packed 对 union 无填充语义，仅 align 有效）。
+    bool isPacked = false;
+    bool reprC = false;
+    uint64_t forcedAlign = 0;
     std::vector<FieldInfo> members;
     // Redef 轮: completion tracking (mirrors ClassType::isComplete) — a
     // forward declaration leaves the placeholder incomplete.
@@ -227,6 +236,12 @@ public:
 
     // P1-03 / GEN: 模板体 parse 的占位注册（同 StructType::isTemplatePattern）。
     bool isTemplatePattern = false;
+
+    // P1-05 / ANN-02/03: 布局注解折叠（sema 写入，LayoutBuilder 消费）。
+    bool isPacked = false;
+    bool reprC = false;
+    uint64_t forcedAlign = 0;
+    std::unordered_map<std::string, uint64_t> fieldAligns;
 
     ClassType(const std::string& n)
         : Type(TypeKind::Class), name(n) {}

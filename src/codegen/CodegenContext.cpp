@@ -1,5 +1,6 @@
 #include "CodegenContext.h"
 #include "ast/Type.h"
+#include "ast/LayoutBuilder.h"
 #include "ast/Mangle.h"
 #include "ast/Expr.h"
 #include "ast/Symbol.h"
@@ -485,56 +486,30 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
             if (auto* existing = llvm::StructType::getTypeByName(*context, st->name)) {
                 return existing;
             }
+            // P1-05 / ANN: 布局单源化（LayoutBuilder；基类槽 0）。
+            auto LR = LayoutBuilder::buildAggregate(st, *context, module->getDataLayout(),
+                [this](Type* t) { return getLLVMType(t); },
+                [](const std::string& n) -> Type* {
+                    TypeContext& tc = TypeContext::instance();
+                    if (auto* s = tc.getStruct(n)) return s;
+                    if (auto* c = tc.getClass(n)) return c;
+                    if (auto* u = tc.getUnion(n)) return u;
+                    return nullptr;
+                });
             std::vector<llvm::Type*> fieldTypes;
-            // INH-01: base sub-object occupies field slot 0 (mirror of the
-            // Class case below; StructDeclAST::codegen normally pre-creates
-            // this layout — this is the lazy-creation fallback).
-            if (!st->baseClass.empty()) {
-                if (auto* baseLLVM = llvm::StructType::getTypeByName(*context, st->baseClass)) {
-                    fieldTypes.push_back(baseLLVM);
-                }
-            }
-            for (auto& f : st->fields) {
-                fieldTypes.push_back(getLLVMType(f.type));
-            }
-            return llvm::StructType::create(*context, fieldTypes, st->name);
+            for (auto& f : LR.fields) fieldTypes.push_back(f.type);
+            return llvm::StructType::create(*context, fieldTypes, st->name, LR.isPacked);
         }
         case TypeKind::Union: {
-            // A union is laid out as a chunk at least as large as its largest
-            // member and aligned like its most-aligned member. All members
-            // start at offset 0, so member access is a GEP to field 0.
+            // P1-05 / ANN: 布局单源化（LayoutBuilder；最大成员块 + 填充）。
             auto* ut = static_cast<UnionType*>(type);
             if (auto* existing = llvm::StructType::getTypeByName(*context, ut->name)) {
                 return existing;
             }
-            const llvm::DataLayout& dl = module->getDataLayout();
-            uint64_t maxSize = 0;
-            uint64_t maxAlign = 0;
-            llvm::Type* alignType = nullptr;
-            for (auto& m : ut->members) {
-                llvm::Type* mt = getLLVMType(m.type);
-                if (!mt) continue;
-                uint64_t sz = dl.getTypeAllocSize(mt);
-                uint64_t al = dl.getABITypeAlign(mt).value();
-                if (sz > maxSize) maxSize = sz;
-                if (al > maxAlign) {
-                    maxAlign = al;
-                    alignType = mt;
-                }
-            }
-            if (maxSize == 0) maxSize = 1;
+            auto LR = LayoutBuilder::buildUnion(ut, *context, module->getDataLayout(),
+                [this](Type* t) { return getLLVMType(t); });
             std::vector<llvm::Type*> fields;
-            if (alignType) {
-                fields.push_back(alignType);
-                uint64_t alignSize = dl.getTypeAllocSize(alignType);
-                if (maxSize > alignSize) {
-                    fields.push_back(llvm::ArrayType::get(
-                        llvm::Type::getInt8Ty(*context), maxSize - alignSize));
-                }
-            } else {
-                fields.push_back(llvm::ArrayType::get(
-                    llvm::Type::getInt8Ty(*context), maxSize));
-            }
+            for (auto& f : LR.fields) fields.push_back(f.type);
             return llvm::StructType::create(*context, fields, ut->name);
         }
         case TypeKind::Class: {
@@ -543,17 +518,19 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
             if (auto* existing = llvm::StructType::getTypeByName(*context, ct->name)) {
                 return existing;
             }
+            // P1-05 / ANN: 布局单源化（LayoutBuilder；基类槽 0）。
+            auto LR = LayoutBuilder::buildAggregate(ct, *context, module->getDataLayout(),
+                [this](Type* t) { return getLLVMType(t); },
+                [](const std::string& n) -> Type* {
+                    TypeContext& tc = TypeContext::instance();
+                    if (auto* s = tc.getStruct(n)) return s;
+                    if (auto* c = tc.getClass(n)) return c;
+                    if (auto* u = tc.getUnion(n)) return u;
+                    return nullptr;
+                });
             std::vector<llvm::Type*> fieldTypes;
-            // For inheritance, add base class struct as first field
-            if (!ct->baseClass.empty()) {
-                if (auto* baseType = llvm::StructType::getTypeByName(*context, ct->baseClass)) {
-                    fieldTypes.push_back(baseType);
-                }
-            }
-            for (auto& f : ct->fields) {
-                fieldTypes.push_back(getLLVMType(f.type));
-            }
-            return llvm::StructType::create(*context, fieldTypes, ct->name);
+            for (auto& f : LR.fields) fieldTypes.push_back(f.type);
+            return llvm::StructType::create(*context, fieldTypes, ct->name, LR.isPacked);
         }
         case TypeKind::Array: {
             auto* at = static_cast<ArrayType*>(type);

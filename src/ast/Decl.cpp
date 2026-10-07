@@ -1,4 +1,5 @@
 #include "Decl.h"
+#include "LayoutBuilder.h"
 #include "codegen/CodegenContext.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/BasicBlock.h"
@@ -590,20 +591,39 @@ llvm::Value* StructDeclAST::codegen(CodegenContext& ctx) {
     }
 
     bool isClass = !methods.empty() || !baseClass.empty();
+    // P1-05 / ANN: 布局单源化——经注册的聚合 Type 走 LayoutBuilder（与
+    // getLLVMType 同一实现）。类型注册缺失时回退旧内联构造（懒路径）。
+    Type* aggType = nullptr;
+    if (isClass) aggType = TypeContext::instance().getClass(name);
+    else aggType = TypeContext::instance().getStruct(name);
     std::vector<llvm::Type*> fieldTypes;
-
-    // For classes with inheritance, add base class struct as first field
-    if (isClass && !baseClass.empty()) {
-        if (auto* baseType = llvm::StructType::getTypeByName(ctx.getContext(), baseClass)) {
-            fieldTypes.push_back(baseType);
+    bool isPacked = false;
+    if (aggType && (aggType->kind == TypeKind::Struct || aggType->kind == TypeKind::Class)) {
+        auto LR = LayoutBuilder::buildAggregate(aggType, ctx.getContext(),
+            ctx.getModule().getDataLayout(),
+            [&ctx](Type* t) { return ctx.getLLVMType(t); },
+            [](const std::string& n) -> Type* {
+                TypeContext& tc = TypeContext::instance();
+                if (auto* st = tc.getStruct(n)) return st;
+                if (auto* ct = tc.getClass(n)) return ct;
+                if (auto* ut = tc.getUnion(n)) return ut;
+                return nullptr;
+            });
+        for (auto& f : LR.fields) fieldTypes.push_back(f.type);
+        isPacked = LR.isPacked;
+    } else {
+        // For classes with inheritance, add base class struct as first field
+        if (isClass && !baseClass.empty()) {
+            if (auto* baseType = llvm::StructType::getTypeByName(ctx.getContext(), baseClass)) {
+                fieldTypes.push_back(baseType);
+            }
+        }
+        for (auto& field : fields) {
+            fieldTypes.push_back(ctx.getLLVMType(field.type));
         }
     }
 
-    for (auto& field : fields) {
-        fieldTypes.push_back(ctx.getLLVMType(field.type));
-    }
-
-    llvm::StructType* structType = llvm::StructType::create(ctx.getContext(), fieldTypes, name);
+    llvm::StructType* structType = llvm::StructType::create(ctx.getContext(), fieldTypes, name, isPacked);
 
     // AGG-11: nested types first — outer method bodies may reference their
     // members (same ordering rule as sema: nestedTypes -> statics -> methods).
