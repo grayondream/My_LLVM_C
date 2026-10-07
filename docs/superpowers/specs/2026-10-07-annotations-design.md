@@ -68,8 +68,8 @@ struct Annotation {
 | 注解 | 合法目标 | 语义 | 备注 |
 |---|---|---|---|
 | `repr(C)` | struct/union | 固化 C ABI 兼容承诺（本轮 struct 布局已自然 C 兼容，故为 marker + 校验）；class/含继承类型 → E2011 | 与 packed/align 可组合 |
-| `packed` | struct/union/字段 | 类型级=字段间无填充（LLVM packed literal struct）；字段级=该字段对齐 1 | |
-| `align(N)` | struct/union/字段/变量（全局/局部） | 类型级=变量声明 `setAlignment(N)` + sizeof 补齐至 N 倍数（尾部 padding 字节）；字段级=字段对齐提升（前置 padding） | N 须常量折叠且 ≥1、2 的幂，否则 E2013/E2014 |
+| `packed` | struct/class/union/字段 | 类型级=字段间无填充（LLVM packed literal struct）；字段级=该字段对齐 1 | 带方法的聚合（路由为 class 目标）同样合法（终审 I5 裁决） |
+| `align(N)` | struct/class/union/字段/变量（全局/局部） | 类型级=变量声明 `setAlignment(N)` + sizeof 补齐至 N 倍数（尾部 padding 字节）；字段级=字段对齐提升（前置 padding）；类型级 align 传导到该类型变量的声明对齐（终审 I2） | N 须常量折叠且 ≥1、2 的幂，否则 E2013/E2014 |
 | `inline` | 函数（自由/成员/static 成员） | LLVM `alwaysinline` 属性 | 声明与定义处均可挂 |
 | `cold` | 函数 | LLVM `cold` 属性 | 同上 |
 | `nonnull` | 仅指针参数 | LLVM `nonnull` 参数属性 + 调用点静态检查（见 §5 W3005） | 非指针参数 → E2011 |

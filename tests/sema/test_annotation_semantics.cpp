@@ -123,3 +123,51 @@ TEST_F(AnnotationSemantics, NonNullLiteralNullW3005) {
         "int32 main() { return f(null); }",
         "null passed to nonnull parameter 'p' of 'f'"));
 }
+
+// ---- P1-05 / T7 硬化（回归 pin）----
+
+TEST_F(AnnotationSemantics, ReprCOnTypedefE2011) {
+    EXPECT_TRUE(hasError("[[repr(C)]] typedef int32 T;",
+                         "annotation 'repr' is not valid on typedef"));
+}
+
+TEST_F(AnnotationSemantics, ReprCUnionOk) {
+    // union 合法目标：不产生错误（ReprC 语义为 marker）。
+    Lexer lexer("ann_repr_union.c", "[[repr(C)]] union U { int32 i; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    EXPECT_TRUE(analyzer.getErrors().empty());
+}
+
+TEST_F(AnnotationSemantics, ExternDeprecatedUse) {
+    EXPECT_TRUE(hasWarning(
+        "[[deprecated]] int32 ext();\n"
+        "int32 main() { return ext(); }",
+        "is deprecated"));
+}
+
+TEST_F(AnnotationSemantics, DeprecatedMethodW3004) {
+    // I3: MethodCall 路径的弃用方法使用警告（this->/obj.m()）。
+    EXPECT_TRUE(hasWarning(
+        "class S { public: [[deprecated]] int32 m() { return 1; } }\n"
+        "int32 main() { S s; return s.m(); }",
+        "is deprecated"));
+}
+
+TEST_F(AnnotationSemantics, DeprecatedTypeInFieldAndParam) {
+    // I4: 弃用类型用于字段与参数。
+    EXPECT_TRUE(hasWarning(
+        "[[deprecated]] struct Old { int32 x; }\n"
+        "struct T { Old o; }\n"
+        "int32 main() { return 0; }",
+        "is deprecated"));
+    EXPECT_TRUE(hasWarning(
+        "[[deprecated]] struct Old { int32 x; }\n"
+        "int32 f(Old* p) { return 0; }\n"
+        "int32 main() { return 0; }",
+        "is deprecated"));
+}

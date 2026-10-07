@@ -55,7 +55,7 @@
 - `[ ]` **LEX-07** `(已实现)` 注释：行注释/块注释；补文档注释。
 - `[x]` **LEX-08** `(改)` 泛型 `template<...>` 与比较运算符 `<`、`>>` 拆分的歧义消解（2026-10-06）。类型位置 `<` 跟随标识符 → 实参列表；调用位置投机解析 `name<args>(`，失败回滚按比较（歧义取比较，C++ 立场）；`>>` 按嵌套深度拆分。
 - `[ ]` **LEX-09** Slice 语法 `T[]` 的 token 与解析支持（当前已有 `SliceType`，核对）。
-- `[ ]` **LEX-10** 注解 token：`[[repr(C)]]/[[packed]]/[[align(64)]]/[[inline]]/[[cold]]/[[nonnull]]/[[deprecated]]`。
+- `[x]` **LEX-10** 注解 token——不新增 token；`[[` = 两个 TOKEN_LBRACKET，parser 声明位置前瞻特判（2026-10-07）。
 - `[x]` **LEX-11** `static_cast<T>(x)` / `reinterpret_cast<T>(x)` 等转换关键字（为 INH/CRTP 铺路）。已实现为**上下文关键字**（紧跟 `<类型>` 时解析），见 PAR-18。
 - `[ ]` **LEX-12** 内联汇编 `asm` token。
 - `[x]` **LEX-13** 错误恢复与词法诊断（非法字符、未闭合字面量、整型溢出）。已实现：`Lexer::getDiagnostics()` 产出 E0001（非法字符，跳过并继续）、E0002（未闭合字符串/字符/块注释，含原始字符串）、E0003（整型字面量超过 64 位）；`skipTrivia` 统一跳过空白与注释（修复行注释后空行被误判）；诊断在 `CompilerDriver`/`ModuleLoader`/`StdPrelude` 中上报并使编译失败（`tests/frontend/test_lexer.cpp`、`tests/driver/test_compiler_driver.cpp`、`tests/diagnostics/snapshots/lexical_invalid_character.txt`）。
@@ -75,7 +75,7 @@
 - `[x]` **PAR-04** class 成员：`public/private/protected` 段、成员变量/函数、`static` 成员、嵌套类型。**完成**（2026-10-05）：访问段解析与访问级别记录（DEC-01）、static 成员（AGG-10）、嵌套类型（AGG-11）全部落地。
 - `[ ]` **PAR-05** 类型语法：基础类型、指针 `T*`、数组 `T[N]`、Slice `T[]`、模板实例 `Box<i32>`。
 - `[ ]` **PAR-06** `(新)` 指针限定符：`const/volatile/restrict/atomic`。
-- `[ ]` **PAR-07** `(新)` 注解挂载点：类型/字段/函数/参数/变量/模块。
+- `[x]` **PAR-07** `(新)` 注解挂载点：六处全落地（模块仅解析记录）（2026-10-07）。
 - `[ ]` **PAR-08** `(已实现)` 表达式：字面量/标识符/调用/成员访问/下标/一元/二元/三元/强转；补切片表达式。
 - `[x]` **PAR-09** `(改)` 语句：块、if/else、while、do-while、for、switch/case、return、break、continue、声明。（**不含 goto/label**，见 Non-goals；已移除 goto/标签解析）
 - `[ ]` **PAR-10** `(新)` 位域声明：`T name : N;`（struct/union 成员），含零宽位域。
@@ -178,7 +178,7 @@
 - `[ ]` **SEM-08** 格式字符串类型检查：`{}`、`{:x}`、`{:f}`、`{:02}`、`{:.2f}`（`print/println`）。
 - `[ ]` **SEM-09** 数组/Slice 边界检查策略：静态可证明或运行时检查（见 DEC-06）。
 - `[ ]` **SEM-10** 整数溢出检查策略：Debug 检查 / Release 行为（见 DEC-07）。
-- `[~]` **SEM-11** 警告：未使用变量（W3002）与不可达代码（W3003）已实现（`tests/sema/test_warnings.cpp`；任一引用算使用，`defer` 不影响可达性）；弃用 API（W3004，依赖注解 ANN-05）与 enum 穷尽性（依赖 DEC-13）待定；未初始化变量见 SEM-01/02（W3001）。
+- `[~]` **SEM-11** 警告：未使用变量（W3002）与不可达代码（W3003）已实现（`tests/sema/test_warnings.cpp`；任一引用算使用，`defer` 不影响可达性）；**W3004 弃用 API 已随 ANN-05 落地**（2026-10-07）；enum 穷尽性（依赖 DEC-13）待定；未初始化变量见 SEM-01/02（W3001）。
 - `[ ]` **SEM-12** 位域语义检查：宽度合法、跨存储单元规则。
 - `[ ]` **SEM-13** UB 清单（**对齐 C 标准**）：为 SEM-09/10/11 与 UBSan 提供依据；不引入所有权/生命周期模型。
 - `[~]` **SEM-14** 静态分析诊断：错误码、源码位置、修复建议。主要检查点已带错误码与 fix 字段（见 `src/sema/Diagnostic.*`）。
@@ -293,16 +293,16 @@
 
 ## 13. 注解系统（ANN）
 
-- `[ ]` **ANN-01** 注解语法 `[[attribute]]`、解析与 AST 挂载。
-- `[ ]` **ANN-02** `[[repr(C)]]`：布局与 ABI。
-- `[ ]` **ANN-03** `[[packed]]`、`[[align(64)]]`。
-- `[ ]` **ANN-04** `[[inline]]`、`[[cold]]`。
-- `[ ]` **ANN-05** `[[nonnull]]`、`[[deprecated]]`。
-- `[ ]` **ANN-06** 注解目标验证、冲突检测。
-- `[ ]` **ANN-07** 注解反射：可由 `compile_time` 读取。
-- `[ ]` **ANN-08** 自定义注解预留机制。
-- `[ ]` **ANN-09** `(新)` 各注解语义与默认行为：`repr(C)`/`packed`/`align`/`inline`/`cold`/`nonnull`/`deprecated`（细化 ANN-02~05）。
-- `[ ]` **ANN-10** `(新)` 无注解时的默认行为规范：默认布局、默认可见性、默认调用约定（配合 DEC-01/DEC-08）。
+- `[x]` **ANN-01** 注解语法 `[[attribute]]`、解析与 AST 挂载——`Annotation/AnnotationArg/FieldInfo` 值类型，DeclAST/ParamDeclAST/字段直挂（2026-10-07）。
+- `[x]` **ANN-02** `[[repr(C)]]`——仅 struct/union（class 报 E2011）；本轮布局已自然 C 兼容，语义为固化承诺 + 组合校验；TYP-21/MEM-09 复查落点（2026-10-07）。
+- `[x]` **ANN-03** `[[packed]]`/`[[align(N)]]`——LayoutBuilder 单源化：packed=无填充、类型级 align=变量 setAlignment + sizeof 补齐、字段级 align=前置 padding（伪字段物化）；union 仅 align 有效（2026-10-07）。
+- `[x]` **ANN-04** `[[inline]]`→alwaysinline、`[[cold]]`→cold（LLVM 函数属性）（2026-10-07）。
+- `[x]` **ANN-05** `[[nonnull]]`（LLVM 参数属性 + 调用点字面空 W3005）、`[[deprecated]]`（使用处 W3004：函数/变量/类型/字段）（2026-10-07）。方法 nonnull 与 this 偏移挂账。
+- `[x]` **ANN-06** 注解目标验证、冲突检测——E2010 未知注解 / E2011 目标不符 / E2012 重复 / E2013 align 非 2 的幂 / E2014 实参非常量（2026-10-07）。
+- `[ ]` **ANN-07** 注解反射：可由 `compile_time` 读取——另轮（依赖 `attributes_of` + `Slice<Annotation>`，随 P1-06 str）。
+- `[ ]` **ANN-08** 自定义注解预留机制——本轮保守策略：未知注解名 E2010；落地时降级注册制。
+- `[x]` **ANN-09** `(新)` 各注解语义与默认行为——并入 `docs/superpowers/specs/2026-10-07-annotations-design.md` §3（2026-10-07）。
+- `[x]` **ANN-10** `(新)` 无注解默认行为——并入同 spec §3（默认=现状逐字节不变，回归 pin）（2026-10-07）。
 
 ---
 
@@ -509,7 +509,7 @@
 - `[x]` **P1-02** Optional / Result 显式访问（TYP-13/14/STD-02）。完成（2026-10-06）：内建魔术类型（同 Slice 先例）；`Optional<T>`/`Result<T,E>` 类型位置尖括号 + `T?` 糖；严格类型相等；codegen 全通路（e2e 7 项）；DEC-03 随此轮裁决；spec `docs/superpowers/specs/2026-10-06-optional-result-design.md`，plan `docs/superpowers/plans/2026-10-06-optional-result.md`。
 - `[x]` **P1-03** **泛型 + CRTP**（GEN、INH-05、PAR-17/18、CG-07/08）。2026-10-06 完成：989/989。
 - `[x]` **P1-04** `compile_time` 与反射——核心纵向切片完成（2026-10-06）：CT-01/02/03/04/05/06/12/14 + PAR-15 部分 + SEM-07 + DEC-05；反射 CT-07/08/13 另轮（与 P1-06 str 排序协调）。
-- `[ ]` **P1-05** 注解系统（ANN）。
+- `[x]` **P1-05** 注解系统（ANN）——核心纵向完成（2026-10-07）：ANN-01~06/09/10 + LEX-10/PAR-07 + W3004/W3005；ANN-07/08 挂账。
 - `[ ]` **P1-06** str / String / format（FMT、STD-10/11）。
 - `[ ]` **P1-07** 位域、匿名类型、指定初始化器、lambda（AGG-03~06、PAR-10~13）。
 - `[~]` **P1-08** `static_cast` / 内联 `asm`（PAR-18、CG-10）。`static_cast`/`reinterpret_cast` 已完成（LEX-11/PAR-18）；内联 `asm`（CG-10/DEC-09）待定。

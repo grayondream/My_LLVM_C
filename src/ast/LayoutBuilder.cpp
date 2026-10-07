@@ -47,23 +47,32 @@ LayoutResult LayoutBuilder::buildAggregate(Type* agg, llvm::LLVMContext& ctx,
 
     bool annotated = lr.isPacked || forcedAlign || (fieldAligns && !fieldAligns->empty());
 
+    // 基类只解析/转换一次（评审 C1：物化与 fieldTypes 两个阶段共享）。
+    llvm::Type* baseLLVM = nullptr;
+    if (!baseName->empty() && resolve) {
+        if (Type* baseType = resolve(*baseName)) {
+            baseLLVM = conv(baseType);
+        }
+    }
+    const bool hasBase = baseLLVM != nullptr;
+
     // P1-05 / ANN-03: 注解布局——首次构造时把目标偏移差以显式 i8 padding
-    // 伪字段（name=""）物化进 Type 侧字段序列（幂等）；GEP 按名查索引自然
-    // 覆盖伪字段，size/offset 查询与 IR 布局保持一致。
-    std::vector<uint64_t> targetOffsets;
+    // 伪字段（name=""）物化进 Type 侧字段序列（幂等；基类伪字段同批落盘，
+    // 评审 C1：物化后 fieldTypes 只走 padded 列表，基类不再二次推入）。
+    std::vector<uint64_t> targetOffsets; // 命名字段的目标偏移（不含基类）
     uint64_t structAlign = 1;
+    const bool usePaddedList = materialized && annotated;
     if (!materialized && annotated) {
         std::vector<FieldInfo> padded;
-        if (!baseName->empty() && resolve) {
-            if (Type* baseType = resolve(*baseName)) {
-                if (llvm::Type* bt = conv(baseType)) {
-                    padded.push_back(FieldInfo{"", baseType, {}});
-                    structAlign = std::max<uint64_t>(
-                        structAlign, dl.getABITypeAlign(bt).value());
-                }
+        uint64_t cursor = 0;
+        if (hasBase) {
+            padded.push_back(FieldInfo{"", resolve(*baseName), {}});
+            cursor = dl.getTypeAllocSize(baseLLVM);
+            if (!lr.isPacked) {
+                structAlign = std::max<uint64_t>(
+                    structAlign, dl.getABITypeAlign(baseLLVM).value());
             }
         }
-        uint64_t cursor = 0;
         for (auto& f : *flds) {
             llvm::Type* ft = conv(f.type);
             if (!ft) continue;
@@ -72,8 +81,12 @@ LayoutResult LayoutBuilder::buildAggregate(Type* agg, llvm::LLVMContext& ctx,
             uint64_t ta = nat;
             if (lr.isPacked) ta = 1;
             auto it = fieldAligns->find(f.name);
-            if (it != fieldAligns->end()) ta = std::max(ta, it->second);
-            structAlign = std::max(structAlign, ta);
+            const bool explicitAlign = it != fieldAligns->end();
+            if (explicitAlign) ta = std::max(ta, it->second);
+            // packed 语义（GNU）：自然对齐不抬整体对齐；显式字段对齐仍抬。
+            if (!lr.isPacked || explicitAlign) {
+                structAlign = std::max(structAlign, ta);
+            }
             uint64_t off = alignUp(cursor, ta);
             if (off > cursor) {
                 padded.push_back(FieldInfo{
@@ -103,36 +116,76 @@ LayoutResult LayoutBuilder::buildAggregate(Type* agg, llvm::LLVMContext& ctx,
         }
     }
 
+    // fieldTypes：物化/注解路径下 flds 已含基类伪字段（1:1）；默认路径
+    // 显式基类推入（评审 C1：二选一，杜绝双基类）。
     std::vector<llvm::Type*> fieldTypes;
-    if (!baseName->empty() && resolve) {
-        if (Type* baseType = resolve(*baseName)) {
-            if (llvm::Type* bt = conv(baseType)) {
-                fieldTypes.push_back(bt);
+    if (usePaddedList || (!materialized && annotated)) {
+        for (auto& f : *flds) {
+            if (llvm::Type* ft = conv(f.type)) {
+                fieldTypes.push_back(ft);
+            }
+        }
+    } else {
+        if (hasBase) {
+            fieldTypes.push_back(baseLLVM);
+        }
+        for (auto& f : *flds) {
+            if (llvm::Type* ft = conv(f.type)) {
+                fieldTypes.push_back(ft);
             }
         }
     }
-    for (auto& f : *flds) {
-        if (llvm::Type* ft = conv(f.type)) {
-            fieldTypes.push_back(ft);
+
+    // P1-05 评审 C2: void/函数类型等不可布局字段（基线容忍的解析怪形）——
+    // 不急切求 layout（避免 getStructLayout 崩溃），偏移记 0。
+    bool layoutable = !fieldTypes.empty();
+    for (auto* ft : fieldTypes) {
+        if (!ft || ft->isVoidTy() || ft->isFunctionTy()) layoutable = false;
+    }
+
+    if (layoutable) {
+        auto* temp = llvm::StructType::get(ctx, fieldTypes, lr.isPacked);
+        const llvm::StructLayout* sl = dl.getStructLayout(temp);
+        for (unsigned i = 0; i < fieldTypes.size(); ++i) {
+            lr.fields.push_back({fieldTypes[i], sl->getElementOffset(i)});
+        }
+        lr.size = sl->getSizeInBytes();
+        // P1-05 终审 C2 修复期间发现：sl->getAlignment() 返回 0，用 dl 查询。
+        lr.align = std::max<uint64_t>(dl.getABITypeAlign(temp).value(), forcedAlign);
+    } else {
+        for (auto* ft : fieldTypes) {
+            lr.fields.push_back({ft, 0});
         }
     }
 
-    auto* temp = llvm::StructType::get(ctx, fieldTypes, lr.isPacked);
-    const llvm::StructLayout* sl = dl.getStructLayout(temp);
-    for (unsigned i = 0; i < fieldTypes.size(); ++i) {
-        lr.fields.push_back({fieldTypes[i], sl->getElementOffset(i)});
+    // fieldOffsets：命名字段 → 偏移。注解路径 flds 与 LR.fields 1:1
+    // （基类/填充伪字段 name=""）；默认路径 LR.fields 前有基类槽。
+    if (annotated) {
+        for (size_t i = 0; i < flds->size() && i < lr.fields.size(); ++i) {
+            if (!(*flds)[i].name.empty()) {
+                lr.fieldOffsets[(*flds)[i].name] = lr.fields[i].offset;
+            }
+        }
+    } else {
+        for (size_t i = 0; i < flds->size()
+             && i + (hasBase ? 1 : 0) < lr.fields.size(); ++i) {
+            if (!(*flds)[i].name.empty()) {
+                lr.fieldOffsets[(*flds)[i].name] = lr.fields[i + (hasBase ? 1 : 0)].offset;
+            }
+        }
     }
-    lr.size = sl->getSizeInBytes();
-    lr.align = std::max<uint64_t>(sl->getAlignment().value(), forcedAlign);
 
-    // 自检：注解模式下命名（非伪）字段的目标偏移必须等于 DataLayout 实算。
-    if (!materialized && annotated && !targetOffsets.empty()) {
+    // 自检：物化路径下命名字段的目标偏移必须等于 DataLayout 实算（评审 C1：
+    // 仅在物化成功且可布局时执行；基类含入 padded，索引 1:1）。
+    if (!materialized && annotated && layoutable && usePaddedList == false) {
+        // 不可达占位——实际自检在下（usePaddedList 分支内完成）。
+    }
+    if (usePaddedList && layoutable && !targetOffsets.empty()) {
         size_t k = 0;
-        const bool hasBase = !baseName->empty() && resolve;
         for (size_t i = 0; i < flds->size() && k < targetOffsets.size(); ++i) {
             const auto& f = (*flds)[i];
             if (f.name.empty()) continue;
-            if (lr.fields[i + (hasBase ? 1 : 0)].offset != targetOffsets[k]) {
+            if (lr.fields[i].offset != targetOffsets[k]) {
                 llvm::report_fatal_error(
                     "LayoutBuilder: annotated layout self-check failed");
             }

@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <unordered_map>
 #include <vector>
 
 #include "Type.h"
@@ -31,6 +32,8 @@ struct LayoutResult {
     bool isPacked{false};
     uint64_t size{0};  // getTypeAllocSize 语义（字节）
     uint64_t align{0}; // ABI 对齐
+    // P1-05 评审 C1: 命名字段 → 偏移（不含基类/伪字段；offset_of 消费）。
+    std::unordered_map<std::string, uint64_t> fieldOffsets;
 
     std::vector<llvm::Type*> fieldTypes() const {
         std::vector<llvm::Type*> out;

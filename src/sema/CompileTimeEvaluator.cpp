@@ -482,35 +482,19 @@ CompileTimeEvaluator::evalLayoutQuery(MethodCallExprAST& node, ASTNode& at) {
             m_sema.emitError("unknown type '" + queriedName + "' in compile_time expression", at);
             return std::nullopt;
         }
-        // P1-05 / ANN: 字段偏移来自 LayoutBuilder（与 IR 一致；基类槽 0）。
+        // P1-05 / ANN: 字段偏移来自 LayoutBuilder fieldOffsets（与 IR 一致）。
         auto LR = LayoutBuilder::buildAggregate(queriedType, *m_llvmCtx,
             m_module->getDataLayout(),
             [this](Type* tt) { return toLLVMType(tt); },
             [this](const std::string& n) -> Type* { return m_sema.resolveTypeByName(n); });
-        std::vector<FieldInfo> fields;
-        bool hasBase = false;
-        if (queriedType->kind == TypeKind::Struct) {
-            auto* st = static_cast<StructType*>(queriedType);
-            fields = st->fields;
-            hasBase = !st->baseClass.empty();
-        } else if (queriedType->kind == TypeKind::Class) {
-            auto* ct = static_cast<ClassType*>(queriedType);
-            fields = ct->fields;
-            hasBase = !ct->baseClass.empty();
+        auto offIt = LR.fieldOffsets.find(field->value);
+        if (offIt == LR.fieldOffsets.end()) {
+            m_sema.emitError("unknown field '" + field->value
+                                 + "' in compile_time.offset_of expression", at);
+            return std::nullopt;
         }
-        for (size_t i = 0; i < fields.size(); ++i) {
-            if (fields[i].name == field->value) {
-                cv.intVal = static_cast<long long>(LR.fields[i + (hasBase ? 1 : 0)].offset);
-                return cv;
-            }
-        }
-        for (size_t i = 0; i < fields.size(); ++i) {
-            if (fields[i].name == field->value) {
-                cv.intVal = static_cast<long long>(
-                    dl.getStructLayout(structTy)->getElementOffset(i + (hasBase ? 1 : 0)));
-                return cv;
-            }
-        }
+        cv.intVal = static_cast<long long>(offIt->second);
+        return cv;
         m_sema.emitError("unknown field '" + field->value
                          + "' in compile_time.offset_of expression", at);
         return std::nullopt;

@@ -617,9 +617,11 @@ llvm::Value* StructDeclAST::codegen(CodegenContext& ctx) {
     bool isClass = !methods.empty() || !baseClass.empty();
     // P1-05 / ANN: 布局单源化——经注册的聚合 Type 走 LayoutBuilder（与
     // getLLVMType 同一实现）。类型注册缺失时回退旧内联构造（懒路径）。
-    Type* aggType = nullptr;
-    if (isClass) aggType = TypeContext::instance().getClass(name);
-    else aggType = TypeContext::instance().getStruct(name);
+    // P1-05 评审 I1: 按注册对象实际 kind 探测（带基类 struct 注册为
+    // StructType，isClass 门控会误走 getClass 拿到 null → 回退丢注解）。
+    (void)isClass;
+    Type* aggType = TypeContext::instance().getStruct(name);
+    if (!aggType) aggType = TypeContext::instance().getClass(name);
     std::vector<llvm::Type*> fieldTypes;
     bool isPacked = false;
     if (aggType && (aggType->kind == TypeKind::Struct || aggType->kind == TypeKind::Class)) {

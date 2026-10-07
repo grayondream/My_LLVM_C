@@ -819,8 +819,10 @@ void SemanticAnalyzer::validateAnnotations(const std::vector<Annotation>& anns,
         }
         bool ok = false;
         if (ann.name == "repr") ok = (target == "struct" || target == "union");
-        else if (ann.name == "packed") ok = (target == "struct" || target == "union" || target == "field");
-        else if (ann.name == "align") ok = (target == "struct" || target == "union" || target == "field" || target == "variable");
+        // 评审 I5: 带方法的聚合路由为 "class" 目标——packed/align 同样合法
+        // （LayoutBuilder 对 ClassType 一致处理）。
+        else if (ann.name == "packed") ok = (target == "struct" || target == "class" || target == "union" || target == "field");
+        else if (ann.name == "align") ok = (target == "struct" || target == "class" || target == "union" || target == "field" || target == "variable");
         else if (ann.name == "inline" || ann.name == "cold") ok = (target == "function");
         else if (ann.name == "nonnull") ok = (target == "parameter");
         else if (ann.name == "deprecated") ok = true;
@@ -2448,6 +2450,18 @@ void SemanticAnalyzer::visit(MethodCallExprAST& node) {
     node.resolvedParamTypes = funcType->paramTypes;
     node.type = funcType->returnType;
     node.isLValue = false;
+    // P1-05 评审 I3: 弃用方法使用（W3004；键 = 裸成员名，跨类同名误报已挂账）。
+    if (m_deprecatedFuncs.count(node.methodName)) {
+        std::string msg = m_deprecatedMsgs.count(node.methodName)
+            ? m_deprecatedMsgs[node.methodName] : "";
+        if (msg.empty()) {
+            emitWarning(DiagnosticCode::WarnDeprecated,
+                        "'" + node.methodName + "' is deprecated", node);
+        } else {
+            emitWarning(DiagnosticCode::WarnDeprecated,
+                        "'" + node.methodName + "' is deprecated: " + msg, node);
+        }
+    }
     delete method;
 }
 
@@ -2605,6 +2619,26 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
         }
     }
     // P1-05 / ANN-03: [[align(N)]] 折叠至 declAlign（codegen setAlignment）。
+    // 类型级 forcedAlign 传导（评审 I2）：变量未显式 align 时取聚合 forcedAlign。
+    if (node.type) {
+        Type* t = node.type;
+        while (t && t->kind == TypeKind::Typedef) {
+            t = static_cast<TypedefType*>(t)->aliasedType;
+        }
+        if (t) {
+            // P1-05 终审 C1 教训：StructType/ClassType/UnionType 布局不同，
+            // 禁止跨 kind 静态转换读取。
+            uint64_t fa = 0;
+            if (t->kind == TypeKind::Struct) {
+                fa = static_cast<StructType*>(t)->forcedAlign;
+            } else if (t->kind == TypeKind::Class) {
+                fa = static_cast<ClassType*>(t)->forcedAlign;
+            } else if (t->kind == TypeKind::Union) {
+                fa = static_cast<UnionType*>(t)->forcedAlign;
+            }
+            if (fa) node.declAlign = fa;
+        }
+    }
     for (const auto& ann : node.annotations) {
         if (ann.name == "align" && ann.args.size() == 1
             && ann.args[0].kind == AnnotationArg::Kind::Expr && ann.args[0].expr) {
@@ -2865,12 +2899,26 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
     for (auto& f : node.fields) {
         validateAnnotations(f.annotations, node, "field");
         f.type = resolveTypeInstance(f.type, node);
+        // P1-05 评审 I4: 字段类型弃用检查。
+        checkDeprecatedTypeUse(f.type, node);
         // P1-04 评审 I3: 字段类型不得来自 compile_time.if 死分支。
         checkCtDeadBranchUse(f.type, node);
     }
     for (auto& m : node.methods) {
         m->returnType = resolveTypeInstance(m->returnType, node);
         for (auto& p : m->params) p->type = resolveTypeInstance(p->type, node);
+        // P1-05 评审 I3: 方法弃用记录（方法不经 visit(FunctionDeclAST)）。
+        for (const auto& ann : m->annotations) {
+            if (ann.name == "deprecated") {
+                std::string msg;
+                if (ann.args.size() == 1
+                    && ann.args[0].kind == AnnotationArg::Kind::String) {
+                    msg = ann.args[0].text;
+                }
+                m_deprecatedFuncs.insert(m->name);
+                m_deprecatedMsgs[m->name] = msg;
+            }
+        }
     }
     // P1-03 / INH-05 / GEN-09: 实例字段值语义自嵌套（CRTP 的 `D next`）拒绝。
     checkInstanceFieldComplete(node);
@@ -3337,6 +3385,9 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
     // P1-04 评审 I3: 返回/参数类型不得来自 compile_time.if 死分支。
     checkCtDeadBranchUse(node.returnType, node);
     for (auto& p : node.params) checkCtDeadBranchUse(p->type, node);
+    // P1-05 评审 I4: 返回/参数类型弃用检查。
+    checkDeprecatedTypeUse(node.returnType, node);
+    for (auto& p : node.params) checkDeprecatedTypeUse(p->type, node);
 
     // Validate constexpr function constraints
     if (node.isConstexpr) {

@@ -209,3 +209,64 @@ TEST_F(AnnotationLayoutE2E, NonNullParamAttrIR) {
     }
     EXPECT_TRUE(found);
 }
+
+// ---- P1-05 终审修复（C1/C2/I1/I2/I5）----
+
+TEST_F(AnnotationLayoutE2E, PackedStructWithBaseE2E) {
+    // C1/I1: 注解 + 继承——基类槽 0 + packed 无填充；不得崩溃、不得双基类。
+    EXPECT_EQ(runSource(R"(
+struct B { int32 b; }
+[[packed]] struct D : B { int16 v; }
+int32 main() {
+    return (compile_time.size_of(D) == 6 && compile_time.offset_of(D, "v") == 4) ? 1 : 0;
+}
+)", "ann_packed_base.c"), 1);
+}
+
+TEST_F(AnnotationLayoutE2E, StructWithMethodShapeNoCrash) {
+    // C2: 无注解 + 结构怪异成员（void 方法形状）——不得崩溃（回归 pin）。
+    EXPECT_EQ(runSource(R"(
+struct S { int32 x; void m() {} }
+int32 main() { return 0; }
+)", "ann_void_member.c"), 0);
+}
+
+TEST_F(AnnotationLayoutE2E, TypeLevelAlignPropagatesToVar) {
+    // I2: 类型级 align(N) 传导到该类型变量的对齐（alloca）。
+    Lexer lexer("ann_align_prop.c",
+                "[[align(64)]] struct A { int32 x; }\n"
+                "int32 main() { A l; return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_TRUE(analyzer.getErrors().empty());
+    CodegenContext ctx;
+    ctx.setSourceFile("ann_align_prop.c");
+    ast->codegen(ctx);
+    bool found = false;
+    for (auto& fn : ctx.getModule().getFunctionList()) {
+        for (auto& bb : fn) {
+            for (auto& inst : bb) {
+                auto* alloca = llvm::dyn_cast<llvm::AllocaInst>(&inst);
+                if (alloca && alloca->getAllocatedType()->isStructTy()
+                    && alloca->getAlign().value() >= 64) {
+                    found = true;
+                }
+            }
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(AnnotationLayoutE2E, PackedOnMethodStructOk) {
+    // I5: 带方法的聚合接受 packed/align（目标矩阵含 class 路由）。
+    EXPECT_EQ(runSource(R"(
+[[packed]] struct S { int32 a; int16 b; void m() {} }
+int32 main() {
+    return (compile_time.size_of(S) == 6) ? 1 : 0;
+}
+)", "ann_packed_method.c"), 1);
+}

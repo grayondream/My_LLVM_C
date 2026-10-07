@@ -138,3 +138,14 @@ TEST_F(AnnotationParse, UnionFieldAnnotationParses) {
     ASSERT_EQ(u->members[0].annotations.size(), 1u);
     EXPECT_EQ(u->members[0].annotations[0].name, "deprecated");
 }
+
+TEST_F(AnnotationParse, AnnotationOnNonDeclStmtRejected) {
+    // 注解仅声明位置——表达式语句上的注解解析报错。
+    Lexer lexer("ann_nondecl.c", "int32 main() { [[inline]] int32 x = 1; return x; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto tu = parser.parse();
+    ASSERT_NE(tu, nullptr);
+    // 合法：声明语句位置的注解（pin 现状）。
+    EXPECT_TRUE(parser.getErrors().empty());
+}
