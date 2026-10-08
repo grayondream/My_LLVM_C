@@ -314,3 +314,59 @@ TEST_F(StringE2E, SubscriptExec) {
         }
     )", "str17.c"), 0);
 }
+
+// P1-06 / T5: str_from_c over a runtime buffer validates UTF-8 and panics on
+// invalid input (E2015's runtime companion). Panic terminates, so we pin the
+// IR shape instead of executing it.
+static std::string compileStringIR(const std::string& source, const std::string& filename) {
+    Lexer lexer(filename, source);
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    if (!ast) return "";
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    if (!analyzer.getErrors().empty()) return "";
+    CodegenContext ctx;
+    ctx.setSourceFile(filename);
+    ast->codegen(ctx);
+    std::string ir;
+    llvm::raw_string_ostream os(ir);
+    ctx.getModule().print(os, nullptr);
+    return ir;
+}
+
+TEST_F(StringE2E, StrFromCRuntimeValidates) {
+    std::string ir = compileStringIR(R"(
+        int32 fill(char* buf) {
+            buf[0] = 'a';
+            buf[1] = static_cast<char>(0xFF);
+            return 2;
+        }
+        int32 main() {
+            char buf[4];
+            buf[2] = 0;
+            fill(buf);
+            str s = str_from_c(buf);
+            return 0;
+        }
+    )", "str18.c");
+    ASSERT_FALSE(ir.empty());
+    EXPECT_NE(ir.find("smc.utf8.validate"), std::string::npos);
+}
+
+TEST_F(StringE2E, StrFromCRuntimeValidExec) {
+    // Valid runtime buffer: strlen path, no panic.
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            char buf[4];
+            buf[0] = 'a';
+            buf[1] = 'b';
+            buf[2] = 'c';
+            buf[3] = 0;
+            str s = str_from_c(buf);
+            if (s.len() != 3) { return 1; }
+            return 0;
+        }
+    )", "str19.c"), 0);
+}

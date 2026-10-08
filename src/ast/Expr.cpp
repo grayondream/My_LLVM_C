@@ -1550,11 +1550,36 @@ static llvm::Value* codegenStrFromC(CodegenContext& ctx, CallExprAST& node) {
         return arg; // identity view
     }
 
+    // P1-06 (FMT-04): runtime buffers are validated (E2015's runtime
+    // companion) — an invalid sequence panics, never silently mis-decodes.
+    // Helper synthesis re-points the shared builder; save/restore around it.
+    auto savedIP = builder.saveIP();
+    auto* validateFn = ctx.getUtf8ValidateFn();
     auto* strlenTy = llvm::FunctionType::get(i64Ty, {llvm::PointerType::get(c, 0)}, false);
     llvm::FunctionCallee strlenFn =
         ctx.getModule().getOrInsertFunction("strlen", strlenTy);
-    llvm::Value* len =
-        builder.CreateCall(strlenFn, {arg}, "strfromc.len");
+    builder.restoreIP(savedIP);
+
+    llvm::Value* len = builder.CreateCall(strlenFn, {arg}, "strfromc.len");
+    llvm::Value* valid = builder.CreateCall(validateFn, {arg, len}, "strfromc.valid");
+
+    llvm::Function* fn = builder.GetInsertBlock()->getParent();
+    llvm::BasicBlock* okBB = llvm::BasicBlock::Create(c, "utf8.ok", fn);
+    llvm::BasicBlock* badBB = llvm::BasicBlock::Create(c, "utf8.bad", fn);
+    builder.CreateCondBr(valid, okBB, badBB);
+
+    builder.SetInsertPoint(badBB);
+    {
+        std::string prefix = nodeSourcePrefix(node);
+        std::string fmtStr = prefix.empty()
+            ? "panic: invalid UTF-8 sequence\n"
+            : prefix + ": panic: invalid UTF-8 sequence\n";
+        llvm::Value* fmt = builder.CreateGlobalString(fmtStr, ".utf8fmt");
+        emitDprintfAndAbort(ctx, fmt, {});
+        builder.CreateUnreachable();
+    }
+
+    builder.SetInsertPoint(okBB);
     llvm::Value* v = llvm::Constant::getNullValue(ctx.getLLVMType(TypeContext::instance().getStrType()));
     v = builder.CreateInsertValue(v, arg, {0});
     return builder.CreateInsertValue(v, len, {1});

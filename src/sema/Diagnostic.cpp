@@ -27,6 +27,7 @@ const DiagnosticInfo kRegistry[] = {
     {DiagnosticCode::SemDuplicateAnnotation,      "E2012", "duplicate annotation"},
     {DiagnosticCode::SemAlignNotPowerOfTwo,       "E2013", "align must be a power of two"},
     {DiagnosticCode::SemAnnotationArgNotConstant, "E2014", "annotation argument not constant"},
+    {DiagnosticCode::SemInvalidUtf8,              "E2015", "invalid UTF-8 sequence"},
 
     {DiagnosticCode::WarnUninitializedVariable,  "W3001", "variable may be uninitialized"},
     {DiagnosticCode::WarnUnusedVariable,         "W3002", "unused variable"},

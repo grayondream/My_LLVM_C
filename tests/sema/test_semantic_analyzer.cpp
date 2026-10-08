@@ -2234,3 +2234,44 @@ TEST_F(SemanticAnalyzerTest, StringNoImplicitAllocation) {
     check("int32 main() { string s = \"a\"; return 0; }", "string.new");
     check("int32 main() { char* p; string s = p; return 0; }", "string.new");
 }
+
+// P1-06 / T5 (FMT-04): UTF-8 validation at the literal point (E2015).
+TEST_F(SemanticAnalyzerTest, Utf8LiteralValidation) {
+    auto e2015 = [&](const std::string& src) {
+        Lexer lexer("t.c", src);
+        auto tokens = lexer.tokenize();
+        Parser parser(tokens);
+        auto ast = parser.parse();
+        if (!ast) return false;
+        SemanticAnalyzer analyzer;
+        analyzer.analyze(*ast);
+        bool found = false;
+        for (const auto& d : analyzer.getErrors()) {
+            if (diagnosticId(d.code) == "E2015") found = true;
+        }
+        return found;
+    };
+    // RFC 3629 subset: overlong, lone continuation, surrogate, out of range.
+    EXPECT_TRUE(e2015("str s = \"\xC0\x80\";"));       // overlong NUL (C0 80)
+    EXPECT_TRUE(e2015("str s = \"\x80\";"));           // lone continuation byte
+    EXPECT_TRUE(e2015("str s = \"\xED\xA0\x80\";"));   // U+D800 surrogate
+    EXPECT_TRUE(e2015("str s = \"\xF5\x80\x80\x80\";"));// > U+10FFFF
+    EXPECT_TRUE(e2015("str s = r\"(\xFF)\";"));        // raw string is checked too
+    EXPECT_FALSE(e2015("str s = \"\xE4\xB8\xAD\xF0\x9F\x8E\x89\";")); // 中🎉 valid
+}
+
+// P1-06 / T5: str_from_c validates a literal argument statically.
+TEST_F(SemanticAnalyzerTest, StrFromCLiteralValidation) {
+    Lexer lexer("t.c", "int32 main() { str s = str_from_c(\"\xFF\"); return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    bool found = false;
+    for (const auto& d : analyzer.getErrors()) {
+        if (diagnosticId(d.code) == "E2015") found = true;
+    }
+    EXPECT_TRUE(found);
+}

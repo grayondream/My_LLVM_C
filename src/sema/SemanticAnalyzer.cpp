@@ -6,6 +6,7 @@
 #include "ast/Type.h"
 #include "ast/Mangle.h"
 #include "sema/TemplateRegistry.h"
+#include "support/Utf8.h"
 #include "sema/TemplateInstantiator.h"
 #include <algorithm>
 
@@ -1391,6 +1392,13 @@ void SemanticAnalyzer::visit(CharExprAST& node) {
 }
 
 void SemanticAnalyzer::visit(StringExprAST& node) {
+    // P1-06 (FMT-04): literals are validated at their single point of
+    // creation — invalid sequences are a compile error (E2015), never a
+    // runtime surprise.
+    if (!smc_utf8::valid(node.value)) {
+        emitError(DiagnosticCode::SemInvalidUtf8,
+                  "invalid UTF-8 sequence in string literal", node);
+    }
     // P1-06 (FMT-03): string literals are `str` (non-owning UTF-8 view).
     node.type = typeCtx->getStrType();
     node.isLValue = false;
@@ -1827,11 +1835,24 @@ bool SemanticAnalyzer::tryAnalyzeStrFromCCall(CallExprAST& node) {
     }
     const bool isCharPointer = t && t->kind == TypeKind::Pointer &&
                                t->base && t->base->kind == TypeKind::Char;
-    if (!isCharPointer && (!t || t->kind != TypeKind::Str)) {
+    // char arrays decay to char* (C semantics; loadValue performs the decay).
+    const bool isCharArray = t && t->kind == TypeKind::Array &&
+                             static_cast<ArrayType*>(t)->elementType &&
+                             static_cast<ArrayType*>(t)->elementType->kind == TypeKind::Char;
+    if (!isCharPointer && !isCharArray && (!t || t->kind != TypeKind::Str)) {
         emitError("'str_from_c' requires a char* (or str) argument, got '" +
                       typeToString(argType) + "'",
                   node);
         return true;
+    }
+    // P1-06 (FMT-04): a literal argument is validated statically (E2015);
+    // runtime buffers are validated at codegen (smc.utf8.validate + panic).
+    if (auto* lit = dynamic_cast<StringExprAST*>(node.args[0].get())) {
+        if (!smc_utf8::valid(lit->value)) {
+            emitError(DiagnosticCode::SemInvalidUtf8,
+                      "invalid UTF-8 sequence passed to str_from_c", node);
+            return true;
+        }
     }
     node.isStrFromC = true;
     node.type = typeCtx->getStrType();

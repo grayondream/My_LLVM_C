@@ -723,3 +723,129 @@ llvm::Function* CodegenContext::getUtf8CharCountFn() {
     return fn;
 }
 
+
+llvm::Function* CodegenContext::getUtf8ValidateFn() {
+    if (utf8ValidateFn) return utf8ValidateFn;
+    llvm::LLVMContext& c = *context;
+    auto* i8Ty = llvm::Type::getInt8Ty(c);
+    auto* i64Ty = llvm::Type::getInt64Ty(c);
+    auto* i1Ty = llvm::Type::getInt1Ty(c);
+    auto* fnTy = llvm::FunctionType::get(i1Ty,
+        {llvm::PointerType::get(c, 0), i64Ty}, false);
+    auto* fn = llvm::Function::Create(fnTy, llvm::Function::InternalLinkage,
+                                      "smc.utf8.validate", module.get());
+    auto* p = fn->getArg(0);
+    auto* len = fn->getArg(1);
+
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(c, "entry", fn);
+    llvm::BasicBlock* loop = llvm::BasicBlock::Create(c, "loop", fn);
+    llvm::BasicBlock* body = llvm::BasicBlock::Create(c, "body", fn);
+    llvm::BasicBlock* chk2 = llvm::BasicBlock::Create(c, "chk2", fn);
+    llvm::BasicBlock* chk3 = llvm::BasicBlock::Create(c, "chk3", fn);
+    llvm::BasicBlock* chk4 = llvm::BasicBlock::Create(c, "chk4", fn);
+    llvm::BasicBlock* contInit = llvm::BasicBlock::Create(c, "cont.init", fn);
+    llvm::BasicBlock* contBody = llvm::BasicBlock::Create(c, "cont.body", fn);
+    llvm::BasicBlock* contCheck = llvm::BasicBlock::Create(c, "cont.check", fn);
+    llvm::BasicBlock* contDone = llvm::BasicBlock::Create(c, "cont.done", fn);
+    llvm::BasicBlock* step1 = llvm::BasicBlock::Create(c, "step1", fn);
+    llvm::BasicBlock* bad = llvm::BasicBlock::Create(c, "bad", fn);
+    llvm::BasicBlock* ok = llvm::BasicBlock::Create(c, "ok", fn);
+
+    builder.SetInsertPoint(entry);
+    builder.CreateBr(loop);
+
+    // loop: dispatch on the lead byte.
+    builder.SetInsertPoint(loop);
+    auto* iPhi = builder.CreatePHI(i64Ty, 3, "i");
+    auto* scanDone = builder.CreateICmpUGE(iPhi, len, "scan.done");
+    builder.CreateCondBr(scanDone, ok, body);
+
+    // body: the scan is in-bounds here — load the lead and decode.
+    builder.SetInsertPoint(body);
+    auto* bytePtr = builder.CreateGEP(i8Ty, p, iPhi, "seq.p");
+    auto* lead = builder.CreateLoad(i8Ty, bytePtr, "seq.lead");
+    auto* ascii = builder.CreateICmpULT(lead, llvm::ConstantInt::get(i8Ty, 0x80), "lead.ascii");
+
+    // Lead-shape masks must precede the terminator — chk2/chk3/chk4 use them.
+    auto* m2 = builder.CreateAnd(lead, llvm::ConstantInt::get(i8Ty, 0xE0));
+    auto* m3 = builder.CreateAnd(lead, llvm::ConstantInt::get(i8Ty, 0xF0));
+    auto* m4 = builder.CreateAnd(lead, llvm::ConstantInt::get(i8Ty, 0xF8));
+    auto* is2 = builder.CreateICmpEQ(m2, llvm::ConstantInt::get(i8Ty, 0xC0));
+    auto* is3 = builder.CreateICmpEQ(m3, llvm::ConstantInt::get(i8Ty, 0xE0));
+    auto* is4 = builder.CreateICmpEQ(m4, llvm::ConstantInt::get(i8Ty, 0xF0));
+    builder.CreateCondBr(ascii, step1, chk2);
+
+    builder.SetInsertPoint(chk2);
+    builder.CreateCondBr(is2, contInit, chk3);
+    builder.SetInsertPoint(chk3);
+    builder.CreateCondBr(is3, contInit, chk4);
+    builder.SetInsertPoint(chk4);
+    builder.CreateCondBr(is4, contInit, bad);
+
+    // cont.init: k = 1; then the per-continuation-byte loop.
+    builder.SetInsertPoint(contInit);
+    // width recomputed from the lead's shape (2/3/4; one of is2/is3/is4 held).
+    auto* w2 = builder.CreateSelect(is2, llvm::ConstantInt::get(i64Ty, 2),
+                                    llvm::ConstantInt::get(i64Ty, 0), "v.w2");
+    auto* w23 = builder.CreateSelect(is3, llvm::ConstantInt::get(i64Ty, 3), w2, "v.w23");
+    auto* width = builder.CreateSelect(is4, llvm::ConstantInt::get(i64Ty, 4), w23, "v.width");
+    builder.CreateBr(contBody);
+
+    builder.SetInsertPoint(contBody);
+    auto* kPhi = builder.CreatePHI(i64Ty, 2, "v.k");
+    auto* offset = builder.CreateAdd(iPhi, kPhi, "v.off");
+    auto* have = builder.CreateICmpULT(offset, len, "v.have");
+    auto* bp = builder.CreateGEP(i8Ty, p, offset, "v.bp");
+    auto* b = builder.CreateLoad(i8Ty, bp, "v.b");
+    auto* inCont = builder.CreateAnd(
+        builder.CreateICmpUGE(b, llvm::ConstantInt::get(i8Ty, 0x80)),
+        builder.CreateICmpULE(b, llvm::ConstantInt::get(i8Ty, 0xBF)), "v.incont");
+    // First byte carries the RFC 3629 boundary constraints (E0/ED/F0/F4).
+    auto* kIs1 = builder.CreateICmpEQ(kPhi, llvm::ConstantInt::get(i64Ty, 1), "v.kis1");
+    auto* e0ok = builder.CreateOr(builder.CreateICmpNE(lead, llvm::ConstantInt::get(i8Ty, 0xE0)),
+        builder.CreateICmpUGE(b, llvm::ConstantInt::get(i8Ty, 0xA0)));
+    auto* edok = builder.CreateOr(builder.CreateICmpNE(lead, llvm::ConstantInt::get(i8Ty, 0xED)),
+        builder.CreateICmpULT(b, llvm::ConstantInt::get(i8Ty, 0xA0)));
+    auto* f0ok = builder.CreateOr(builder.CreateICmpNE(lead, llvm::ConstantInt::get(i8Ty, 0xF0)),
+        builder.CreateICmpUGE(b, llvm::ConstantInt::get(i8Ty, 0x90)));
+    auto* f4ok = builder.CreateOr(builder.CreateICmpNE(lead, llvm::ConstantInt::get(i8Ty, 0xF4)),
+        builder.CreateICmpULE(b, llvm::ConstantInt::get(i8Ty, 0x8F)));
+    // C0/C1 are 2-byte overlong prefixes.
+    auto* c2ok = builder.CreateOr(builder.CreateNot(is2),
+        builder.CreateICmpUGE(lead, llvm::ConstantInt::get(i8Ty, 0xC2)));
+    auto* firstOk = builder.CreateOr(
+        builder.CreateNot(kIs1),
+        builder.CreateAnd(
+            builder.CreateAnd(e0ok, edok),
+            builder.CreateAnd(f0ok, builder.CreateAnd(f4ok, c2ok))), "v.firstok");
+    auto* byteOk = builder.CreateAnd(builder.CreateAnd(have, inCont), firstOk, "v.byteok");
+    builder.CreateCondBr(byteOk, contCheck, bad);
+
+    builder.SetInsertPoint(contCheck);
+    auto* kNext = builder.CreateAdd(kPhi, llvm::ConstantInt::get(i64Ty, 1), "v.knext");
+    auto* more = builder.CreateICmpULT(kNext, width, "v.more");
+    builder.CreateCondBr(more, contBody, contDone);
+
+    builder.SetInsertPoint(contDone);
+    auto* iNext = builder.CreateAdd(iPhi, width, "v.inext");
+    builder.CreateBr(loop);
+
+    // ASCII fast path: advance by one byte.
+    builder.SetInsertPoint(step1);
+    auto* iNext1 = builder.CreateAdd(iPhi, llvm::ConstantInt::get(i64Ty, 1), "v.inext1");
+    builder.CreateBr(loop);
+
+    builder.SetInsertPoint(ok);
+    builder.CreateRet(llvm::ConstantInt::getTrue(c));
+    builder.SetInsertPoint(bad);
+    builder.CreateRet(llvm::ConstantInt::getFalse(c));
+
+    iPhi->addIncoming(llvm::ConstantInt::get(i64Ty, 0), entry);
+    iPhi->addIncoming(iNext1, step1);
+    iPhi->addIncoming(iNext, contDone);
+    kPhi->addIncoming(llvm::ConstantInt::get(i64Ty, 1), contInit);
+    kPhi->addIncoming(kNext, contCheck);
+
+    utf8ValidateFn = fn;
+    return fn;
+}

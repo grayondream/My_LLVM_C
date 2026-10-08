@@ -31,6 +31,8 @@ enum class DiagnosticCode {
     SemDuplicateAnnotation,
     SemAlignNotPowerOfTwo,
     SemAnnotationArgNotConstant,
+    // P1-06 / FMT-04
+    SemInvalidUtf8,
 
     WarnUninitializedVariable,
     WarnUnusedVariable,
