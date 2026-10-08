@@ -24,8 +24,8 @@
 | `T*` | `ptr` (opaque) | 指针 | 指针 | `[impl]` | 多级 = 多 ptr |
 | `T[N]` | `[N x T]` | N×size | align(T) | `[impl]` | |
 | `T[]` (Slice) | `{ ptr, i64 }` | 16(64 位) | 8 | `[impl]` | **目标** `{ptr, usize}`，TYP-12 |
-| `T?` (Optional) | `{ i1, T }` | — | — | `[impl]` | `{ bool valid; T value; }`（TYP-13，2026-10-06 落地：判别标志在前） |
-| `Result<T,E>` | `{ i1, T, E }` | — | — | `[impl]` | `{ bool ok; T value; E error; }`（DEC-03 裁决，2026-10-06：加判别标志） |
+| `T?` (optional) | `{ i1, T }` | — | — | `[impl]` | `{ bool valid; T value; }`（TYP-13，2026-10-06 落地：判别标志在前） |
+| `result<T,E>` | `{ i1, T, E }` | — | — | `[impl]` | `{ bool ok; T value; E error; }`（DEC-03 裁决，2026-10-06：加判别标志） |
 
 ## 2. 聚合布局
 
@@ -60,7 +60,7 @@
 | 标量参数/返回 | 直接按 LLVM 标量 | C 约定（MEM-16） |
 | 指针 | `ptr` | 同 C |
 | struct/class/union 按值 | 作为 LLVM 聚合值传递 | 需明确 `byval`/`sret` 与寄存器分类（MEM-14） |
-| Slice/Optional/Result | 作为 LLVM `{...}` 聚合值 | 冻结布局后再定 |
+| Slice/optional/result | 作为 LLVM `{...}` 聚合值 | 冻结布局后再定 |
 | 可变参数 | `isVarArg`（FUN-06） | 与 C varargs 兼容 |
 | 调用约定 | LLVM 默认（宿主） | C 调用约定；可选其他（MEM-11/MEM-16） |
 
@@ -94,7 +94,7 @@
 | `int8..int128` | 同名 | `uint8..uint128` | 同名 |
 | `isize/usize` | 同名 | `float32/float64` | 同名 |
 | `A[N]` | `<A>arr` | `T[]` | `<T>slice` |
-| `T?` | `<T>opt` | `Result<T,E>` | `<T>res<E>` |
+| `T?` | `<T>opt` | `result<T,E>` | `<T>res<E>` |
 | struct/class/union | 类型名 | enum | `int32` |
 | typedef | 展开到底层 | | |
 

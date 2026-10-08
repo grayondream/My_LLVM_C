@@ -2002,3 +2002,24 @@ TEST_F(ParserErrorTest, LegacyKeywordNamesAreUsableAsIdentifiers) {
     auto [tu, errors] = parseWithErrors("int32 main() { int32 int = 5; return int; }");
     EXPECT_TRUE(errors.empty());
 }
+
+// P1-06 / T1: builtin polymorphic type names are lowercase (`optional`,
+// `result`); the old capitalized spellings are no longer types (DEC-18
+// hard-rename precedent).
+TEST_F(ParserTest, OptionalLowercaseParses) {
+    auto tu = parse("optional<int32> x;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1);
+    auto* var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->type->kind, TypeKind::Optional);
+}
+
+TEST_F(ParserTest, ResultLowercaseParses) {
+    auto tu = parse("result<int32, bool> r;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1);
+    auto* var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->type->kind, TypeKind::Result);
+}

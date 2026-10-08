@@ -116,13 +116,13 @@ TEST_F(OptionalResultE2E, OptionalRvalueMember) {
 
 TEST_F(OptionalResultE2E, ResultErrorPath) {
     EXPECT_EQ(runSource(R"(
-        Result<int32, int32> divide(int32 a, int32 b) {
-            if (b == 0) { Result<int32, int32> e = {false, 0, -1}; return e; }
-            Result<int32, int32> s = {true, a / b, 0};
+        result<int32, int32> divide(int32 a, int32 b) {
+            if (b == 0) { result<int32, int32> e = {false, 0, -1}; return e; }
+            result<int32, int32> s = {true, a / b, 0};
             return s;
         }
         int32 main() {
-            Result<int32, int32> r = divide(10, 2);
+            result<int32, int32> r = divide(10, 2);
             if (r.ok) { return r.value; }
             return r.error;
         }
@@ -131,13 +131,13 @@ TEST_F(OptionalResultE2E, ResultErrorPath) {
 
 TEST_F(OptionalResultE2E, ResultErrorValue) {
     EXPECT_EQ(runSource(R"(
-        Result<int32, int32> divide(int32 a, int32 b) {
-            if (b == 0) { Result<int32, int32> e = {false, 0, -1}; return e; }
-            Result<int32, int32> s = {true, a / b, 0};
+        result<int32, int32> divide(int32 a, int32 b) {
+            if (b == 0) { result<int32, int32> e = {false, 0, -1}; return e; }
+            result<int32, int32> s = {true, a / b, 0};
             return s;
         }
         int32 main() {
-            Result<int32, int32> r = divide(10, 0);
+            result<int32, int32> r = divide(10, 0);
             if (r.ok) { return r.value; }
             return r.error;
         }
@@ -160,7 +160,7 @@ TEST_F(OptionalResultE2E, GlobalZeroInit) {
     // Review Focus #5：全局零初始化 valid=false。
     EXPECT_EQ(runSource(R"(
         int32? g;
-        Result<int32, int32> gr;
+        result<int32, int32> gr;
         int32 main() {
             if (g.valid || gr.ok) { return -1; }
             return 1;
@@ -171,7 +171,7 @@ TEST_F(OptionalResultE2E, GlobalZeroInit) {
 TEST_F(OptionalResultE2E, NestedOptional) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
-            Optional<Optional<int32>> o = {true, {false, 0}};
+            optional<optional<int32>> o = {true, {false, 0}};
             if (o.valid) { if (o.value.valid) { return o.value.value; } return 2; }
             return 3;
         }
@@ -184,8 +184,8 @@ TEST_F(OptionalResultE2E, EnumUnderlyingCoexist) {
         enum SmallColor : uint8 { SC0, SC1 };
         enum BigColor : uint64 { BC0, BC1 };
         int32 main() {
-            Optional<SmallColor> a = {true, SC1};
-            Optional<BigColor> b = {true, BC1};
+            optional<SmallColor> a = {true, SC1};
+            optional<BigColor> b = {true, BC1};
             if (a.valid && b.valid) {
                 if (a.value == SC1 && b.value == BC1) { return 1; }
             }
@@ -195,7 +195,7 @@ TEST_F(OptionalResultE2E, EnumUnderlyingCoexist) {
 }
 
 TEST_F(OptionalResultE2E, EnumOverloadDistinct) {
-    // 评审 C1：f(Optional<int32>) 与 f(Optional<SmallColor>) 符号不得碰撞。
+    // 评审 C1：f(optional<int32>) 与 f(optional<SmallColor>) 符号不得碰撞。
     EXPECT_EQ(runSource(R"(
         enum SmallColor : uint8 { SC0, SC1 };
         int32 f(int32? o) { if (o.valid) { return o.value; } return 100; }

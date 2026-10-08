@@ -155,10 +155,10 @@ TEST_F(TernaryE2E, OptionalBranch) {
 TEST_F(TernaryE2E, ResultBranch) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
-            Result<int32, int32> ok = {true, 9, 0};
-            Result<int32, int32> err = {false, 0, -3};
+            result<int32, int32> ok = {true, 9, 0};
+            result<int32, int32> err = {false, 0, -3};
             int32 t = 0;
-            Result<int32, int32> c = t ? ok : err;
+            result<int32, int32> c = t ? ok : err;
             if (c.ok) { return c.value; }
             return -c.error;
         }

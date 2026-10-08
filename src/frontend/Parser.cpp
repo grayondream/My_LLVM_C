@@ -1529,10 +1529,10 @@ bool Parser::isTypeStart() const {
                 name += "::" + m_tokens[i + 2].lexeme;
                 i += 2;
             }
-            // P1-02: builtin polymorphic types `Optional<T>` / `Result<T, E>`
-            // are type starts even though no named type is registered (GEN
-            // templates do not exist yet; see parseBaseType).
-            if ((name == "Optional" || name == "Result") &&
+            // P1-06: builtin polymorphic type names are lowercase —
+            // `optional<T>` / `result<T, E>` (DEC-18 hard-rename precedent;
+            // the old capitalized spellings are ordinary unknown identifiers).
+            if ((name == "optional" || name == "result") &&
                 i + 1 < m_tokens.size() &&
                 m_tokens[i + 1].type == TokenType::TOKEN_LT) {
                 return true;
@@ -1814,11 +1814,12 @@ Type* Parser::parseBaseType() {
                 m_templateScopes.back().typeParams.count(name)) {
                 return TypeContext::instance().getTypeVar(name);
             }
-            // P1-02 (TYP-13/14): builtin polymorphic types `Optional<T>` and
-            // `Result<T,E>` — special-cased here (type positions only) since
-            // the general template system (GEN) does not exist yet; mirrors
-            // the template-instance grammar. `T?` remains the Optional sugar.
-            if ((name == "Optional" || name == "Result") && check(TokenType::TOKEN_LT)) {
+            // P1-02 (TYP-13/14) / P1-06: builtin polymorphic types
+            // `optional<T>` and `result<T,E>` — special-cased here (type
+            // positions only) since the general template system (GEN) does
+            // not exist yet; mirrors the template-instance grammar. `T?`
+            // remains the optional sugar.
+            if ((name == "optional" || name == "result") && check(TokenType::TOKEN_LT)) {
                 advance(); // consume '<'
                 auto closeBracket = [this]() -> bool {
                     if (check(TokenType::TOKEN_GT)) {
@@ -1835,23 +1836,23 @@ Type* Parser::parseBaseType() {
                     }
                     return false;
                 };
-                if (name == "Optional") {
+                if (name == "optional") {
                     Type* elem = parseType();
                     if (!elem || !closeBracket()) {
-                        errorUnexpected("expected type argument list for 'Optional<T>'");
+                        errorUnexpected("expected type argument list for 'optional<T>'");
                         return nullptr;
                     }
                     return TypeContext::instance().getOptionalType(elem);
                 }
                 Type* successType = parseType();
                 if (!successType || !check(TokenType::TOKEN_COMMA)) {
-                    errorUnexpected("expected ',' in 'Result<T, E>'");
+                    errorUnexpected("expected ',' in 'result<T, E>'");
                     return nullptr;
                 }
                 advance(); // consume ','
                 Type* errorType = parseType();
                 if (!errorType || !closeBracket()) {
-                    errorUnexpected("expected type argument list for 'Result<T, E>'");
+                    errorUnexpected("expected type argument list for 'result<T, E>'");
                     return nullptr;
                 }
                 return TypeContext::instance().getResultType(successType, errorType);

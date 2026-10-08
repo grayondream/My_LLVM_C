@@ -54,7 +54,7 @@ TEST_F(TemplateRegistryTest, InstanceDedup) {
 }
 
 TEST_F(TemplateRegistryTest, NestedTypeRewrite) {
-    // `template<typename T> struct H { Optional<T> o; T* p; };`
+    // `template<typename T> struct H { optional<T> o; T* p; };`
     auto* T = TypeContext::instance().getTypeVar("T");
     Type* opt = TypeContext::instance().getOptionalType(T);
     Type* ptr = new Type(TypeKind::Pointer, T);

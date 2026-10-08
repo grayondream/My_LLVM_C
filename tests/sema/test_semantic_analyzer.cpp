@@ -1790,32 +1790,32 @@ TEST(SliceSemTest, RedefNestedSameInnerNamePin) {
 // ========== OPT/RES: P1-02 Optional/Result（Task 1 语法） ==========
 
 TEST(SliceSemTest, OptResParseNamedOptional) {
-    // `Optional<T>` 显式形式必须与 `T?` 同型（spec §4.1）。
-    EXPECT_TRUE(analyzeOk("int32 main() { Optional<int32> o; return 0; }"));
+    // `optional<T>` 显式形式必须与 `T?` 同型（spec §4.1）。
+    EXPECT_TRUE(analyzeOk("int32 main() { optional<int32> o; return 0; }"));
 }
 
 TEST(SliceSemTest, OptResParseResult) {
     // 语法聚焦：Result 声明/形参/返回解析（成员访问属 Task 4，初始化属
     // Task 4/5 的聚合初始化语义）。
     EXPECT_TRUE(analyzeOk(
-        "Result<int32, int32> take(Result<int32, int32> r) { return r; } "
-        "int32 main() { Result<int32, int32> x; return 0; }"));
+        "result<int32, int32> take(result<int32, int32> r) { return r; } "
+        "int32 main() { result<int32, int32> x; return 0; }"));
 }
 
 TEST(SliceSemTest, OptResParseNestedArgs) {
     EXPECT_TRUE(analyzeOk(
-        "int32 main() { Result<int32, int32?> r; Optional<Optional<int32>> o; return 0; }"));
+        "int32 main() { result<int32, int32?> r; optional<optional<int32>> o; return 0; }"));
 }
 
 TEST(SliceSemTest, OptMismatchRejected) {
-    // 同 kind 泛化规则今天会误放行：Optional<int32> ≠ Optional<float64>。
+    // 同 kind 泛化规则今天会误放行：optional<int32> ≠ optional<float64>。
     EXPECT_FALSE(analyzeOk(
         "int32 main() { int32? a = {true, 5}; float64? b = a; return 0; }"));
 }
 
 TEST(SliceSemTest, ResMismatchRejected) {
     EXPECT_FALSE(analyzeOk(
-        "int32 main() { Result<int32, int32> a; Result<int32, float64> b = a; return 0; }"));
+        "int32 main() { result<int32, int32> a; result<int32, float64> b = a; return 0; }"));
 }
 
 TEST(SliceSemTest, OptToPlainRejected) {
@@ -1844,13 +1844,13 @@ TEST(SliceSemTest, OptUnknownMemberRejected) {
 
 TEST(SliceSemTest, ResMemberFieldTypes) {
     EXPECT_TRUE(analyzeOk(
-        "int32 main() { Result<int32, int32> r = {false, 0, 1}; bool ok = r.ok; "
+        "int32 main() { result<int32, int32> r = {false, 0, 1}; bool ok = r.ok; "
         "int32 v = r.value; int32 e = r.error; return e; }"));
 }
 
 TEST(SliceSemTest, ResUnknownMemberRejected) {
     EXPECT_FALSE(analyzeOk(
-        "int32 main() { Result<int32, int32> r; int32 x = r.valid; return x; }"));
+        "int32 main() { result<int32, int32> r; int32 x = r.valid; return x; }"));
 }
 
 TEST(SliceSemTest, OptInitListArityRejected) {
@@ -1867,7 +1867,7 @@ TEST(SliceSemTest, OptInitListValueMismatchRejected) {
 
 TEST(SliceSemTest, ResInitListArityRejected) {
     EXPECT_FALSE(analyzeOk(
-        "int32 main() { Result<int32, int32> r = {false, 0}; return 0; }"));
+        "int32 main() { result<int32, int32> r = {false, 0}; return 0; }"));
 }
 
 TEST(SliceSemTest, OptMemberWritablePin) {
@@ -1896,7 +1896,7 @@ TEST(SliceSemTest, OptLogicalRejected) {
 TEST(SliceSemTest, OptTypedefArgPin) {
     // 评审 I2：init-list 校验须剥 typedef。
     EXPECT_TRUE(analyzeOk(
-        "typedef int32 MyInt; int32 main() { Optional<MyInt> o = {true, 5}; return 0; }"));
+        "typedef int32 MyInt; int32 main() { optional<MyInt> o = {true, 5}; return 0; }"));
 }
 
 TEST(SliceSemTest, OptTypedefValuePin) {
@@ -2153,4 +2153,11 @@ TEST(TplFixSemTest, DeepNestingDepthLimit) {
             found = true;
     }
     EXPECT_TRUE(found);
+}
+
+// P1-06 / T1: the capitalized builtin spellings are no longer types — parse
+// yields a template-instance placeholder (P1-03), and sema rejects it.
+TEST_F(SemanticAnalyzerTest, UppercaseBuiltinNoLongerAType) {
+    EXPECT_FALSE(analyzeFullyOk("Optional<int32> x;"));
+    EXPECT_FALSE(analyzeFullyOk("Result<int32, bool> r;"));
 }

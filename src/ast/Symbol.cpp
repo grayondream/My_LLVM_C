@@ -7,14 +7,14 @@ bool typesEqual(Type* a, Type* b) {
         case TypeKind::Pointer:
             return typesEqual(a->base, b->base);
         case TypeKind::Optional: {
-            // P1-02 (TYP-13): Optional<T> matches by element type only —
+            // P1-02 (TYP-13): optional<T> matches by element type only —
             // int32? != float64? (the generic same-kind rule would mis-accept).
             auto* oa = static_cast<OptionalType*>(a);
             auto* ob = static_cast<OptionalType*>(b);
             return typesEqual(oa->elementType, ob->elementType);
         }
         case TypeKind::Result: {
-            // P1-02 (TYP-14): Result<T,E> matches by both arguments.
+            // P1-02 (TYP-14): result<T,E> matches by both arguments.
             auto* ra = static_cast<ResultType*>(a);
             auto* rb = static_cast<ResultType*>(b);
             return typesEqual(ra->successType, rb->successType) &&

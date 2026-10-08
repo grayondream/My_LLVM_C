@@ -81,8 +81,8 @@ namespace 前缀，`namespace std { void abort() { abort(); } }` 会自递归，
 | `std::max` | `constexpr int32 max(int32, int32)` | 较大值 |
 | `std::clamp` | `int32 clamp(int32 v, int32 lo, int32 hi)` | 区间截断 |
 
-`Optional<T>`/`Result<T,E>`（STD-02，2026-10-06）由**语言内建**承载：伪字段
-访问器 `.valid`/`.value`（Optional）、`.ok`/`.value`/`.error`（Result）可自由
+`optional<T>`/`result<T,E>`（STD-02，2026-10-06）由**语言内建**承载：伪字段
+访问器 `.valid`/`.value`（optional）、`.ok`/`.value`/`.error`（result）可自由
 读写（显式判断，无 `?` 传播，NG-05）；无 trait/泛型前 stdlib 不另设包装函数。
 
 ## 7. `std.io` `[impl]`

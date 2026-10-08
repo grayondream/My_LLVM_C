@@ -1,7 +1,7 @@
 // P1-02 (TYP-13/14): Optional/Result LLVM 布局单元测试。
 // DS4（spec 2026-10-06-optional-result-design.md §4.2）：
 //   T?           -> { i1 valid, T value }     （valid 在前）
-//   Result<T,E>  -> { i1 ok, T value, E error }
+//   result<T,E>  -> { i1 ok, T value, E error }
 // 且不同类型实参不得共享 LLVM 具名结构体。
 
 #include "gtest/gtest.h"
@@ -55,7 +55,7 @@ TEST(OptResLayoutTest, EnumUnderlyingDistinctLayouts) {
 }
 
 TEST(OptResLayoutTest, ResultNameCollisionInjective) {
-    // 评审 C1：Result<My_Err, x> 与 Result<My, Err_x> 不得同名。
+    // 评审 C1：result<My_Err, x> 与 result<My, Err_x> 不得同名。
     spdlog::set_level(spdlog::level::off);
     CodegenContext ctx;
     Type* r1 = TypeContext::instance().getResultType(
