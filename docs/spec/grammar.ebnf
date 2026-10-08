@@ -188,7 +188,8 @@ primitive-type      = 'void' | 'bool' | 'char'
                     | 'uint8' | 'uint16' | 'uint32' | 'uint64' | 'uint128'
                     | 'isize' | 'usize'
                     | 'float16' | 'float32' | 'float64' | 'float128'
-                    | 'f16' | 'f32' | 'f64' | 'f128' ;             (* [plan] f16/f128 TYP-04 *)
+                    | 'f16' | 'f32' | 'f64' | 'f128'               (* [plan] f16/f128 TYP-04 *)
+                    | 'str' | 'string' ;                           (* [impl] P1-06 FMT-01/02: identifier 特判，非关键字 *)
 
 named-type          = qualified-name ;
 record-body         = struct-decl | union-decl ;                    (* 内联定义 *)

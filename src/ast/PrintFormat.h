@@ -18,6 +18,9 @@ enum class PrintArgKind {
     Pointer,
     Bool,
     ToString,
+    // P1-06 (FMT-03): str prints via `%.*s` — TWO printf arguments
+    // ((int)len, ptr); the codegen print loop pushes both.
+    Str,
 };
 
 // Classify a value of `type` for direct printf formatting. Returns false when

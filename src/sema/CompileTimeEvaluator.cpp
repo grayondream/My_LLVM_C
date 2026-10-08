@@ -205,12 +205,10 @@ CompileTimeEvaluator::evalBinary(ConstValue& left, ConstValue& right, int op) {
     const BinaryOp binOp = static_cast<BinaryOp>(op);
 
     if (left.type == ConstValue::STR && right.type == ConstValue::STR) {
+        // P1-06 (spec §2.5): `+` (concat) was removed with the language-level
+        // `str + str` operator; == / != (byte compare semantics) still fold.
         ConstValue cv;
         switch (binOp) {
-            case BinaryOp::Add:
-                cv.type = ConstValue::STR;
-                cv.strVal = left.strVal + right.strVal;
-                return cv;
             case BinaryOp::Eq:
                 cv.type = ConstValue::INT;
                 cv.intVal = left.strVal == right.strVal;
@@ -431,6 +429,29 @@ llvm::Type* CompileTimeEvaluator::toLLVMType(Type* t) {
                 [this](Type* tt) { return toLLVMType(tt); });
             st->setBody(LR.fieldTypes());
             result = st;
+            break;
+        }
+        case TypeKind::Str: {
+            // P1-06 (FMT-01): 布局与 CodegenContext::getLLVMType 一致——
+            // {ptr, len}，size_of(str) = 16。
+            auto* st = llvm::StructType::getTypeByName(ctx, "str");
+            result = st ? st
+                        : llvm::StructType::create(ctx,
+                              {llvm::PointerType::get(ctx, 0),
+                               llvm::Type::getInt64Ty(ctx)},
+                              "str");
+            break;
+        }
+        case TypeKind::String: {
+            // P1-06 (FMT-02): {ptr, len, capacity}，size_of(string) = 24
+            // （string 本身不参与 constexpr，但 size_of 布局查询合法）。
+            auto* st = llvm::StructType::getTypeByName(ctx, "string");
+            result = st ? st
+                        : llvm::StructType::create(ctx,
+                              {llvm::PointerType::get(ctx, 0),
+                               llvm::Type::getInt64Ty(ctx),
+                               llvm::Type::getInt64Ty(ctx)},
+                              "string");
             break;
         }
         default:

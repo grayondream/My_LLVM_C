@@ -25,6 +25,7 @@ std::string conversionFor(PrintArgKind kind, const std::string& spec, std::strin
         case PrintArgKind::Char:   def = "c";   acceptsSpec = false; break;
         case PrintArgKind::Float:  def = "g";   isFloat = true; break;
         case PrintArgKind::CString: def = "s";  acceptsSpec = false; break;
+        case PrintArgKind::Str:     def = ".*s"; acceptsSpec = false; break;
         case PrintArgKind::Pointer: def = "p";  acceptsSpec = false; break;
         case PrintArgKind::Bool:    def = "s";  acceptsSpec = false; break;
         case PrintArgKind::ToString: def = "s"; acceptsSpec = false; break;
@@ -100,6 +101,7 @@ bool builtinPrintKind(Type* type, PrintArgKind& outKind) {
         case TypeKind::Float16:
         case TypeKind::Float128: outKind = PrintArgKind::Float;   return true;
         case TypeKind::Enum:    outKind = PrintArgKind::Int32;   return true;
+        case TypeKind::Str:     outKind = PrintArgKind::Str;     return true;
         case TypeKind::Pointer:
             outKind = (type->base && type->base->kind == TypeKind::Char)
                           ? PrintArgKind::CString

@@ -183,7 +183,8 @@ TEST_F(SemanticAnalyzerTest, BinaryOpErrorMessageIncludesTypes) {
     TranslationUnitAST tu(std::move(decls));
     analyzer->analyze(tu);
     ASSERT_FALSE(analyzer->getErrors().empty());
-    EXPECT_NE(analyzer->getErrors()[0].message.find("char*"), std::string::npos);
+    // P1-06 (FMT-03): string literals type as `str`.
+    EXPECT_NE(analyzer->getErrors()[0].message.find("str"), std::string::npos);
 }
 
 TEST_F(SemanticAnalyzerTest, AssignmentTypeMismatchErrorMessageIncludesTypes) {
@@ -205,7 +206,8 @@ TEST_F(SemanticAnalyzerTest, AssignmentTypeMismatchErrorMessageIncludesTypes) {
     analyzer->analyze(tu);
     ASSERT_FALSE(analyzer->getErrors().empty());
     EXPECT_NE(analyzer->getErrors()[0].message.find("int"), std::string::npos);
-    EXPECT_NE(analyzer->getErrors()[0].message.find("char*"), std::string::npos);
+    // P1-06 (FMT-03): string literals type as `str`.
+    EXPECT_NE(analyzer->getErrors()[0].message.find("str"), std::string::npos);
 }
 
 TEST_F(SemanticAnalyzerTest, UndeclaredVariableErrorMessageIncludesName) {
@@ -238,7 +240,8 @@ TEST_F(SemanticAnalyzerTest, ReturnTypeErrorIncludesTypes) {
     analyzer->analyze(tu);
     ASSERT_FALSE(analyzer->getErrors().empty());
     EXPECT_NE(analyzer->getErrors()[0].message.find("float"), std::string::npos);
-    EXPECT_NE(analyzer->getErrors()[0].message.find("char*"), std::string::npos);
+    // P1-06 (FMT-03): string literals type as `str`.
+    EXPECT_NE(analyzer->getErrors()[0].message.find("str"), std::string::npos);
 }
 
 TEST_F(SemanticAnalyzerTest, DiagnosticHasSourceLocation) {
@@ -392,7 +395,8 @@ TEST_F(SemanticAnalyzerTest, AssignmentErrorMessageContainsBothTypes) {
     analyzer->analyze(tu);
     ASSERT_FALSE(analyzer->getErrors().empty());
     EXPECT_NE(analyzer->getErrors()[0].message.find("int"), std::string::npos);
-    EXPECT_NE(analyzer->getErrors()[0].message.find("char*"), std::string::npos);
+    // P1-06 (FMT-03): string literals type as `str`.
+    EXPECT_NE(analyzer->getErrors()[0].message.find("str"), std::string::npos);
 }
 
 TEST_F(SemanticAnalyzerTest, ReturnTypeErrorContainsFunctionName) {
@@ -2160,4 +2164,21 @@ TEST(TplFixSemTest, DeepNestingDepthLimit) {
 TEST_F(SemanticAnalyzerTest, UppercaseBuiltinNoLongerAType) {
     EXPECT_FALSE(analyzeFullyOk("Optional<int32> x;"));
     EXPECT_FALSE(analyzeFullyOk("Result<int32, bool> r;"));
+}
+
+// P1-06 / T2: a string literal's type is `str` (FMT-03 retype).
+TEST_F(SemanticAnalyzerTest, StringLiteralIsStr) {
+    Lexer lexer("t.c", "str s = \"hi\";");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    EXPECT_TRUE(analyzer.getErrors().empty());
+    auto* var = dynamic_cast<VarDeclAST*>(ast->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    ASSERT_NE(var->initExpr, nullptr);
+    ASSERT_NE(var->initExpr->type, nullptr);
+    EXPECT_EQ(var->initExpr->type->kind, TypeKind::Str);
 }

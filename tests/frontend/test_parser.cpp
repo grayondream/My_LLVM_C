@@ -2023,3 +2023,22 @@ TEST_F(ParserTest, ResultLowercaseParses) {
     ASSERT_NE(var, nullptr);
     EXPECT_EQ(var->type->kind, TypeKind::Result);
 }
+
+// P1-06 / T2: `str` (UTF-8 view) and `string` (dynamic) builtin types.
+TEST_F(ParserTest, StrTypeParses) {
+    auto tu = parse("str s;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1);
+    auto* var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->type->kind, TypeKind::Str);
+}
+
+TEST_F(ParserTest, StringTypeParses) {
+    auto tu = parse("string s;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1);
+    auto* var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->type->kind, TypeKind::String);
+}

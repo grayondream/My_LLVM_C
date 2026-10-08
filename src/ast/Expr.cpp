@@ -195,7 +195,18 @@ llvm::Value* CharExprAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* StringExprAST::codegen(CodegenContext& ctx) {
-    return ctx.getBuilder().CreateGlobalString(value, ".str");
+    // P1-06 (FMT-03): literal is a `str` — {ptr, len} of a static global
+    // (CreateGlobalString product); non-owning, globally alive (DEC-20).
+    llvm::LLVMContext& c = ctx.getContext();
+    auto* strTy = llvm::StructType::getTypeByName(c, "str");
+    if (!strTy) {
+        strTy = llvm::StructType::create(c,
+            {llvm::PointerType::get(c, 0), llvm::Type::getInt64Ty(c)}, "str");
+    }
+    llvm::Value* ptr = ctx.getBuilder().CreateGlobalString(value, ".str");
+    return llvm::ConstantStruct::get(strTy,
+        {llvm::dyn_cast<llvm::Constant>(ptr),
+         llvm::ConstantInt::get(llvm::Type::getInt64Ty(c), value.size())});
 }
 
 llvm::Value* VariableExprAST::codegen(CodegenContext& ctx) {
@@ -251,6 +262,43 @@ llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
     rhs = emitRValue(ctx, *right, rhs);
 
     auto& builder = ctx.getBuilder();
+
+    // P1-06 (FMT-01): str == / != compare bytes — length first, then memcmp
+    // over the (equal) length; never read past either view.
+    {
+        Type* lTy = left->type;
+        Type* rTy = right->type;
+        auto isStrT = [](Type* t) {
+            while (t && t->kind == TypeKind::Typedef)
+                t = static_cast<TypedefType*>(t)->aliasedType;
+            return t && t->kind == TypeKind::Str;
+        };
+        if ((op == BinaryOp::Eq || op == BinaryOp::NotEq) &&
+            isStrT(lTy) && isStrT(rTy) &&
+            lhs->getType()->isStructTy() && rhs->getType()->isStructTy()) {
+            llvm::LLVMContext& c = ctx.getContext();
+            llvm::Value* lenL = builder.CreateExtractValue(lhs, 1, "strlen.l");
+            llvm::Value* lenR = builder.CreateExtractValue(rhs, 1, "strlen.r");
+            llvm::Value* lenEq = builder.CreateICmpEQ(lenL, lenR, "strlen.eq");
+            llvm::Value* ptrL = builder.CreateExtractValue(lhs, 0, "strptr.l");
+            llvm::Value* ptrR = builder.CreateExtractValue(rhs, 0, "strptr.r");
+            llvm::FunctionType* memcmpTy = llvm::FunctionType::get(
+                llvm::Type::getInt32Ty(c),
+                {llvm::PointerType::get(c, 0), llvm::PointerType::get(c, 0),
+                 llvm::Type::getInt64Ty(c)},
+                false);
+            llvm::FunctionCallee memcmpFn =
+                ctx.getModule().getOrInsertFunction("memcmp", memcmpTy);
+            llvm::Value* bytesEq = builder.CreateICmpEQ(
+                builder.CreateCall(memcmpFn, {ptrL, ptrR, lenL}, "memcmp"),
+                llvm::ConstantInt::get(llvm::Type::getInt32Ty(c), 0), "bytes.eq");
+            // Lengths differ → Eq false, Ne true; memcmp must not run
+            // (reading past the shorter view would touch foreign memory).
+            llvm::Value* eq = builder.CreateSelect(lenEq, bytesEq,
+                llvm::ConstantInt::getFalse(c), "str.eq");
+            return op == BinaryOp::Eq ? eq : builder.CreateNot(eq, "str.ne");
+        }
+    }
 
     // Pointer arithmetic (ptr +/- int, int + ptr) must use GEP, not add/sub.
     auto pointerLike = [](Type* t) {
@@ -522,7 +570,11 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
         if (!userMsg) return nullptr;
         if (args[0]->isLValue) userMsg = ctx.loadValue(userMsg, args[0]->type);
         if (!userMsg) return nullptr;
-        if (!userMsg->getType()->isPointerTy()) {
+        // P1-06 (FMT-03): a str message is viewed as its char* bytes.
+        if (args[0]->type && args[0]->type->kind == TypeKind::Str) {
+            userMsg = ctx.castValue(userMsg, args[0]->type,
+                                    llvm::PointerType::get(c, 0));
+        } else if (!userMsg->getType()->isPointerTy()) {
             userMsg = ctx.castValue(userMsg, llvm::PointerType::get(c, 0));
         }
 
@@ -556,6 +608,17 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
             if (!v) return nullptr;
             if (args[k]->isLValue) v = ctx.loadValue(v, args[k]->type);
             if (k - 1 < printArgKinds.size()) {
+                // P1-06 (FMT-03): str prints via `%.*s` — TWO printf
+                // arguments ((int)len, ptr); push both and skip the loop's
+                // single-value promote.
+                if (printArgKinds[k - 1] == PrintArgKind::Str) {
+                    llvm::Value* len = builder.CreateExtractValue(v, 1, "printfmt.len");
+                    llvm::Value* ptr = builder.CreateExtractValue(v, 0, "printfmt.ptr");
+                    callArgs.push_back(builder.CreateTrunc(
+                        len, llvm::Type::getInt32Ty(c), "printfmt.len32"));
+                    callArgs.push_back(ptr);
+                    continue;
+                }
                 v = promotePrintArg(ctx, v, printArgKinds[k - 1]);
             }
             if (!v) return nullptr;

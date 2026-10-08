@@ -265,6 +265,20 @@ ResultType* TypeContext::getResultType(Type* successType, Type* errorType) {
     return new ResultType(successType, errorType);
 }
 
+StrType* TypeContext::getStrType() {
+    if (m_types.find(TypeKind::Str) == m_types.end()) {
+        m_types[TypeKind::Str] = new StrType();
+    }
+    return static_cast<StrType*>(m_types[TypeKind::Str]);
+}
+
+StringType* TypeContext::getStringType() {
+    if (m_types.find(TypeKind::String) == m_types.end()) {
+        m_types[TypeKind::String] = new StringType();
+    }
+    return static_cast<StringType*>(m_types[TypeKind::String]);
+}
+
 TypeVarType* TypeContext::getTypeVar(const std::string& name) {
     auto it = m_typeVars.find(name);
     if (it != m_typeVars.end()) return it->second;

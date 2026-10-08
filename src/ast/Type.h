@@ -46,6 +46,10 @@ enum class TypeKind {
     Slice,
     Optional,
     Result,
+    // P1-06 (FMT-01/02): str = 不拥有的 UTF-8 字节视图 {ptr, len}；string =
+    // 动态字符串 {ptr, len, capacity}（C 语义显式 new/destroy，DEC-20）。
+    Str,
+    String,
     // P1-03 / GEN: 模板类型参数占位与模板使用占位。TypeVar 仅合法存在于
     // 模板体 AST 内；TypeInstance 是 parse 期 `Name<args>` 的占位，sema 在
     // 使用点解析为具体实例类型后不再残留。
@@ -204,6 +208,18 @@ public:
         : Type(TypeKind::Result), successType(success), errorType(error) {}
 };
 
+// P1-06 (FMT-01): str — 不拥有的 UTF-8 字节视图，布局 {ptr, len(字节)}。
+class StrType : public Type {
+public:
+    StrType() : Type(TypeKind::Str) {}
+};
+
+// P1-06 (FMT-02): string — 动态字符串，布局 {ptr, len(字节), capacity}。
+class StringType : public Type {
+public:
+    StringType() : Type(TypeKind::String) {}
+};
+
 // P1-03 / GEN-01: 模板类型参数占位（`template<typename T>` 中的 T）。
 // 仅合法存在于模板体 AST；实例化（克隆替换）后不得残留。
 class TypeVarType : public Type {
@@ -344,6 +360,9 @@ public:
     SliceType* getSliceType(Type* elementType);
     OptionalType* getOptionalType(Type* elementType);
     ResultType* getResultType(Type* successType, Type* errorType);
+    // P1-06 (FMT-01/02): monomorphic singletons (m_types keyed by TypeKind).
+    StrType* getStrType();
+    StringType* getStringType();
 
     // P1-03 / GEN-01: 模板类型参数占位，同名同指针（单射）。
     TypeVarType* getTypeVar(const std::string& name);

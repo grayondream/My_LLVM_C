@@ -67,14 +67,34 @@ TEST_F(CompileTimeEval, EvalArithmetic) {
     EXPECT_EQ(v->intVal, 14);
 }
 
-TEST_F(CompileTimeEval, EvalStringCompareConcat) {
+// P1-06: CT-06 keeps ==/!= folding; `+` (concat) was removed with the
+// language-level `str + str` operator (spec §2.5).
+TEST_F(CompileTimeEval, EvalStringCompare) {
     Extracted ex;
-    ASSERT_NO_FATAL_FAILURE(extract(ex, "", "\"a\" + \"b\" == \"ab\""));
+    ASSERT_NO_FATAL_FAILURE(extract(ex, "", "\"a\" == \"a\""));
     CompileTimeEvaluator ev(*ex.analyzer);
     auto v = ev.eval(ex.expr, *ex.expr);
     ASSERT_TRUE(v.has_value());
     EXPECT_EQ(v->type, ConstValue::INT);
     EXPECT_EQ(v->intVal, 1);
+}
+
+TEST_F(CompileTimeEval, EvalStringNotEqual) {
+    Extracted ex;
+    ASSERT_NO_FATAL_FAILURE(extract(ex, "", "\"a\" != \"b\""));
+    CompileTimeEvaluator ev(*ex.analyzer);
+    auto v = ev.eval(ex.expr, *ex.expr);
+    ASSERT_TRUE(v.has_value());
+    EXPECT_EQ(v->type, ConstValue::INT);
+    EXPECT_EQ(v->intVal, 1);
+}
+
+TEST_F(CompileTimeEval, EvalStringConcatRemoved) {
+    Extracted ex;
+    ASSERT_NO_FATAL_FAILURE(extract(ex, "", "\"a\" + \"b\""));
+    CompileTimeEvaluator ev(*ex.analyzer);
+    auto v = ev.eval(ex.expr, *ex.expr);
+    EXPECT_FALSE(v.has_value());
 }
 
 TEST_F(CompileTimeEval, EvalConstexprVar) {
@@ -379,4 +399,19 @@ TEST_F(CompileTimeEval, CompileTimeInsideNamespaceReal) {
     EXPECT_TRUE(analyzeOk(R"(
 namespace N { constexpr int32 ok = compile_time.build.debug; }
 )"));
+}
+
+// P1-06 (FMT-03): the language layer has no `str + str` (spec §2.3) — the
+// CT-06 literal concat went with it (Ruling: spec §2.5). Comparisons still
+// fold.
+TEST(CompileTimeStrOps, LiteralConcatRejected) {
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { compile_time.static_assert(\"a\" + \"b\" == \"ab\"); return 0; }"));
+    EXPECT_FALSE(analyzeOk(
+        "int32 main() { str a = \"x\"; str b = a + \"y\"; return 0; }"));
+}
+
+TEST(CompileTimeStrOps, LiteralEqStillCT) {
+    EXPECT_TRUE(analyzeOk(
+        "int32 main() { compile_time.static_assert(\"a\" == \"a\"); return 0; }"));
 }

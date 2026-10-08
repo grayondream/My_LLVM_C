@@ -359,6 +359,14 @@ llvm::Value* CodegenContext::castValue(llvm::Value* val, Type* fromAST, llvm::Ty
                             : builder.CreateSIToFP(val, targetLLVMType, "sitofptmp");
     }
 
+    // P1-06 (FMT-03): str -> char* implicit byte view — extract the pointer
+    // field (the length is dropped; the buffer is guaranteed NUL-free UTF-8,
+    // callers needing C-string semantics own that conversion).
+    if (fromAST->kind == TypeKind::Str && targetLLVMType->isPointerTy()) {
+        llvm::Value* ptr = builder.CreateExtractValue(val, 0, "strview.ptr");
+        return castValue(ptr, targetLLVMType);
+    }
+
     // Float -> int, float widening/narrowing and pointer conversions do not
     // depend on the source signedness; reuse the generic implementation.
     return castValue(val, targetLLVMType);
@@ -423,6 +431,10 @@ static std::string layoutKey(Type* t) {
         }
         case TypeKind::Slice:
             return "L" + layoutKey(static_cast<SliceType*>(t)->elementType);
+        case TypeKind::Str:
+            return "STR";
+        case TypeKind::String:
+            return "STRING";
         case TypeKind::Optional:
             return "O" + layoutKey(static_cast<OptionalType*>(t)->elementType);
         case TypeKind::Result: {
@@ -560,6 +572,26 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
                             {llvm::PointerType::get(*context, 0),
                              llvm::Type::getInt64Ty(*context)},
                             "Slice");
+        }
+        case TypeKind::Str: {
+            // P1-06 (FMT-01): str shares ONE canonical named struct
+            // {ptr, i64} — the UTF-8 byte view (same shape as Slice).
+            auto* st = llvm::StructType::getTypeByName(*context, "str");
+            return st ? st
+                      : llvm::StructType::create(*context,
+                            {llvm::PointerType::get(*context, 0),
+                             llvm::Type::getInt64Ty(*context)},
+                            "str");
+        }
+        case TypeKind::String: {
+            // P1-06 (FMT-02): string — canonical named struct {ptr, len, cap}.
+            auto* st = llvm::StructType::getTypeByName(*context, "string");
+            return st ? st
+                      : llvm::StructType::create(*context,
+                            {llvm::PointerType::get(*context, 0),
+                             llvm::Type::getInt64Ty(*context),
+                             llvm::Type::getInt64Ty(*context)},
+                            "string");
         }
         case TypeKind::Optional: {
             // P1-02 (TYP-13) DS4: { i1 valid, T value } — 判别标志在前。

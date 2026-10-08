@@ -1537,6 +1537,10 @@ bool Parser::isTypeStart() const {
                 m_tokens[i + 1].type == TokenType::TOKEN_LT) {
                 return true;
             }
+            // P1-06 (FMT-01/02): builtin monomorphic types `str` / `string`.
+            if (name == "str" || name == "string") {
+                return true;
+            }
             return lookupNamedType(name) != nullptr;
         }
         default:
@@ -1813,6 +1817,15 @@ Type* Parser::parseBaseType() {
             if (!m_templateScopes.empty() &&
                 m_templateScopes.back().typeParams.count(name)) {
                 return TypeContext::instance().getTypeVar(name);
+            }
+            // P1-06 (FMT-01/02): builtin monomorphic types `str` / `string` —
+            // identifier special-cases (same mechanism as optional/result),
+            // not keywords.
+            if (name == "str") {
+                return TypeContext::instance().getStrType();
+            }
+            if (name == "string") {
+                return TypeContext::instance().getStringType();
             }
             // P1-02 (TYP-13/14) / P1-06: builtin polymorphic types
             // `optional<T>` and `result<T,E>` — special-cased here (type

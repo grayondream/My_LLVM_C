@@ -90,7 +90,14 @@ TEST_F(CodegenContextTest, StringExpr) {
     auto expr = std::make_unique<StringExprAST>("hello");
     llvm::Value* val = expr->codegen(*ctx);
     ASSERT_NE(val, nullptr);
-    EXPECT_TRUE(val->getType()->isPointerTy());
+    // P1-06 (FMT-03): a literal is a `str` — canonical struct {ptr, len}.
+    ASSERT_TRUE(val->getType()->isStructTy());
+    auto* st = llvm::cast<llvm::ConstantStruct>(llvm::dyn_cast<llvm::Constant>(val));
+    ASSERT_NE(st, nullptr);
+    EXPECT_EQ(st->getNumOperands(), 2u);
+    auto* len = llvm::dyn_cast<llvm::ConstantInt>(st->getOperand(1));
+    ASSERT_NE(len, nullptr);
+    EXPECT_EQ(len->getZExtValue(), 5u);
 }
 
 TEST_F(CodegenContextTest, BinaryExprAdd) {

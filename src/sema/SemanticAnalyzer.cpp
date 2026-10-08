@@ -292,6 +292,19 @@ bool SemanticAnalyzer::typesCompatible(Type* left, Type* right) const {
                           static_cast<OptionalType*>(right)->elementType);
     if (left->kind == TypeKind::Result && right->kind == TypeKind::Result)
         return typesEqual(left, right);
+    // P1-06 (FMT-03): str is a byte view — implicit str -> char* is allowed
+    // (drops the UTF-8 guarantee and the length). char* -> str is NOT
+    // implicit (length/UTF-8 cannot be recovered; use the str_from_c builtin).
+    // Both orders accepted: callers use (target, source) or (lhs, rhs).
+    if ((left->kind == TypeKind::Str && right->kind == TypeKind::Pointer &&
+         typesEqual(right->base, typeCtx->getChar())) ||
+        (right->kind == TypeKind::Str && left->kind == TypeKind::Pointer &&
+         typesEqual(left->base, typeCtx->getChar())))
+        return true;
+    if (left->kind == TypeKind::Str && right->kind == TypeKind::Str)
+        return true;
+    if (left->kind == TypeKind::String && right->kind == TypeKind::String)
+        return true;
     if (left->kind == right->kind) return true;
     if (isArithmeticType(left) && isArithmeticType(right)) return true;
     if (left->kind == TypeKind::Pointer && right->kind == TypeKind::Pointer) return true;
@@ -341,6 +354,8 @@ std::string SemanticAnalyzer::typeToString(Type* type) const {
         case TypeKind::Slice: return "slice";
         case TypeKind::Optional: return "optional";
         case TypeKind::Result: return "result";
+        case TypeKind::Str: return "str";
+        case TypeKind::String: return "string";
         case TypeKind::Pointer: {
             std::string baseStr = typeToString(type->base);
             if (type->isConst) baseStr = "const " + baseStr;
@@ -452,6 +467,26 @@ Type* SemanticAnalyzer::checkBinaryTypes(BinaryOp op, Type* left, Type* right, E
             if (isArithmeticType(left) && isArithmeticType(right)) {
                 return typeCtx->getInt32();
             }
+            // P1-06 (FMT-01): str compares only against str (byte compare);
+            // mixed str/char* comparisons are rejected — view the str as
+            // char* or convert explicitly. `string` does not compare (T4
+            // owns no == semantics; a same-kind pass-through would emit
+            // ICmp on a struct).
+            {
+                auto stripT = [](Type* t) {
+                    while (t && t->kind == TypeKind::Typedef)
+                        t = static_cast<TypedefType*>(t)->aliasedType;
+                    return t;
+                };
+                Type* ls = stripT(left);
+                Type* rs = stripT(right);
+                if (ls->kind == TypeKind::String || rs->kind == TypeKind::String ||
+                    (ls->kind == TypeKind::Str) != (rs->kind == TypeKind::Str)) {
+                    emitError("comparison of incompatible types: '" + typeToString(left) + "' and '"
+                        + typeToString(right) + "' with '" + binaryOpToString(op) + "'", node);
+                    return nullptr;
+                }
+            }
             if (!typesCompatible(left, right)) {
                 emitError("comparison of incompatible types: '" + typeToString(left) + "' and '" 
                     + typeToString(right) + "' with '" + binaryOpToString(op) + "'", node);
@@ -547,6 +582,12 @@ Type* SemanticAnalyzer::checkAssignmentTypes(Type* lhs, Type* rhs, ExprAST& node
     }
     if (isPointerOrArray(lhsS) && isPointerOrArray(rhsS)) return lhsRaw;
     if (isPointerOrArray(lhsS) && isIntegerType(rhsS)) return lhsRaw;
+    // P1-06 (FMT-03): str -> char* implicit byte view (drops the UTF-8
+    // guarantee and the length); char* -> str is NOT implicit (use
+    // str_from_c). Targets of type str are same-kind (above).
+    if (lhsS->kind == TypeKind::Pointer && rhsS->kind == TypeKind::Str &&
+        typesEqual(lhsS->base, typeCtx->getChar()))
+        return lhsRaw;
 
     emitError(DiagnosticCode::SemIncompatibleAssignment,
               "incompatible types in assignment: cannot assign '" + typeToString(rhs) +
@@ -1330,7 +1371,8 @@ void SemanticAnalyzer::visit(CharExprAST& node) {
 }
 
 void SemanticAnalyzer::visit(StringExprAST& node) {
-    node.type = new Type(TypeKind::Pointer, typeCtx->getChar());
+    // P1-06 (FMT-03): string literals are `str` (non-owning UTF-8 view).
+    node.type = typeCtx->getStrType();
     node.isLValue = false;
 }
 
@@ -1737,7 +1779,8 @@ bool SemanticAnalyzer::tryAnalyzePanicCall(CallExprAST& node) {
     if (!msgType) {
         return true; // already reported
     }
-    if (!isPointerOrArray(msgType)) {
+    // P1-06 (FMT-03): a str message is accepted — viewed as its char* bytes.
+    if (!isPointerOrArray(msgType) && msgType->kind != TypeKind::Str) {
         emitError("'panic' message must be a C string, got '" + typeToString(msgType) + "'", node);
         return true;
     }

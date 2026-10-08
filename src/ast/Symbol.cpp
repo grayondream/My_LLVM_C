@@ -234,6 +234,11 @@ int conversionRank(Type* from, Type* to) {
         typesEqual(static_cast<ArrayType*>(from)->elementType,
                    static_cast<SliceType*>(to)->elementType)) return 1;
 
+    // P1-06 (FMT-03): str decays to a char* byte view (drops the UTF-8
+    // guarantee and the length). char* -> str is NOT implicit.
+    if (from->kind == TypeKind::Str && to->kind == TypeKind::Pointer &&
+        to->base && to->base->kind == TypeKind::Char) return 1;
+
     // Enum types are strongly typed (TYP-09 / TYP-20): enum <-> integer/float
     // and enum <-> other enum require an explicit conversion. Exact-same-enum
     // was already handled by the `typesEqual` checks above.
