@@ -7,6 +7,7 @@
 
 // P1-06: builtin str/string lowering (defined at file bottom).
 static llvm::Value* codegenBuiltinMethod(CodegenContext& ctx, MethodCallExprAST& node);
+static llvm::Value* codegenStringMethod(CodegenContext& ctx, MethodCallExprAST& node);
 static llvm::Value* codegenStrFromC(CodegenContext& ctx, CallExprAST& node);
 
 // TYP-12: build the {ptr, len} view over a statically-sized array (zero-copy;
@@ -1027,6 +1028,13 @@ llvm::Value* ArrayAccessExprAST::codegen(CodegenContext& ctx) {
         if (array->isLValue) arrVal = builder.CreateLoad(sliceTy, arrVal);
         if (st->elementType) elemTy = ctx.getLLVMType(st->elementType);
         arrVal = builder.CreateExtractValue(arrVal, {0}, "slice.ptr");
+    } else if (arrType && arrType->kind == TypeKind::String) {
+        // P1-06 (FMT-02): load the {ptr, len, cap} header, index its buffer.
+        auto* strTy = ctx.getLLVMType(arrType);
+        auto& builder = ctx.getBuilder();
+        if (array->isLValue) arrVal = builder.CreateLoad(strTy, arrVal);
+        elemTy = llvm::Type::getInt8Ty(ctx.getContext());
+        arrVal = builder.CreateExtractValue(arrVal, {0}, "string.ptr");
     }
 
     auto& builder = ctx.getBuilder();
@@ -1316,13 +1324,211 @@ static llvm::Value* codegenBuiltinMethod(CodegenContext& ctx, MethodCallExprAST&
         case BuiltinMethod::StringPush:
         case BuiltinMethod::StringLen:
         case BuiltinMethod::StringCapacity:
-            // T4: string memory/mutation methods.
-            LOGE("string builtin method not implemented yet: {}", node.methodName);
-            return nullptr;
+            return codegenStringMethod(ctx, node);
         case BuiltinMethod::None:
             break;
     }
     return nullptr;
+}
+
+// ===== P1-06 (FMT-02): string memory/mutation lowering =====
+// Mutating methods take the receiver's ADDRESS: an lvalue object already
+// codegens to its storage address; an rvalue (e.g. `string.new("ab")`) is
+// materialized into a temporary alloca first so chains keep working.
+
+// Receiver address for a string method call.
+static llvm::Value* builtinObjectAddr(CodegenContext& ctx, MethodCallExprAST& node) {
+    auto& builder = ctx.getBuilder();
+    llvm::Value* objVal = node.object->codegen(ctx);
+    if (!objVal) return nullptr;
+    if (node.object->isLValue) return objVal; // already the storage address
+    llvm::Type* strTy = objVal->getType();
+    llvm::Value* tmp = builder.CreateAlloca(strTy, nullptr, "string.tmp");
+    builder.CreateStore(objVal, tmp);
+    return tmp;
+}
+
+// str-typed argument value for append/new (String -> str projected here).
+static llvm::Value* builtinStrArg(CodegenContext& ctx, ExprAST* arg) {
+    auto& builder = ctx.getBuilder();
+    llvm::Value* v = arg->codegen(ctx);
+    if (!v) return nullptr;
+    if (arg->isLValue) v = ctx.loadValue(v, arg->type);
+    Type* t = arg->type;
+    while (t && t->kind == TypeKind::Typedef)
+        t = static_cast<TypedefType*>(t)->aliasedType;
+    if (t && t->kind == TypeKind::String) {
+        llvm::Value* ptr = builder.CreateExtractValue(v, 0, "arg.ptr");
+        llvm::Value* len = builder.CreateExtractValue(v, 1, "arg.len");
+        llvm::Value* sv = llvm::Constant::getNullValue(
+            ctx.getLLVMType(TypeContext::instance().getStrType()));
+        sv = builder.CreateInsertValue(sv, ptr, {0});
+        return builder.CreateInsertValue(sv, len, {1});
+    }
+    return v;
+}
+
+static llvm::FunctionCallee declareLibcFn(CodegenContext& ctx, const char* name,
+                                          llvm::Type* ret, llvm::ArrayRef<llvm::Type*> params) {
+    llvm::LLVMContext& c = ctx.getContext();
+    return ctx.getModule().getOrInsertFunction(
+        name, llvm::FunctionType::get(ret, params, false));
+}
+
+static llvm::Value* codegenStringMethod(CodegenContext& ctx, MethodCallExprAST& node) {
+    auto& builder = ctx.getBuilder();
+    llvm::LLVMContext& c = ctx.getContext();
+    auto* i64Ty = llvm::Type::getInt64Ty(c);
+    auto* i8Ty = llvm::Type::getInt8Ty(c);
+    auto* ptrTy = llvm::PointerType::get(c, 0);
+    auto* strLLVM = ctx.getLLVMType(TypeContext::instance().getStringType());
+
+    switch (node.builtinMethod) {
+        case BuiltinMethod::StringLen: {
+            llvm::Value* addr = builtinObjectAddr(ctx, node);
+            if (!addr) return nullptr;
+            llvm::Value* v = builder.CreateLoad(strLLVM, addr, "string.v");
+            return builder.CreateExtractValue(v, 1, "string.len");
+        }
+        case BuiltinMethod::StringCapacity: {
+            llvm::Value* addr = builtinObjectAddr(ctx, node);
+            if (!addr) return nullptr;
+            llvm::Value* v = builder.CreateLoad(strLLVM, addr, "string.v");
+            return builder.CreateExtractValue(v, 2, "string.cap");
+        }
+        case BuiltinMethod::StringNew: {
+            // cap = max(len, 1); malloc(cap); memcpy(ptr, s.ptr, len).
+            auto savedIP = builder.saveIP();
+            auto mallocFn = declareLibcFn(ctx, "malloc", ptrTy, {i64Ty});
+            auto memcpyFn = declareLibcFn(ctx, "memcpy", ptrTy, {ptrTy, ptrTy, i64Ty});
+            builder.restoreIP(savedIP);
+            llvm::Value* s = builtinStrArg(ctx, node.args[0].get());
+            if (!s) return nullptr;
+            llvm::Value* sptr = builder.CreateExtractValue(s, 0, "new.sptr");
+            llvm::Value* slen = builder.CreateExtractValue(s, 1, "new.slen");
+            llvm::Value* one = llvm::ConstantInt::get(i64Ty, 1);
+            llvm::Value* cap = builder.CreateSelect(
+                builder.CreateICmpUGT(slen, one, "new.gt1"), slen, one, "new.cap");
+            llvm::Value* ptr = builder.CreateCall(mallocFn, {cap}, "new.ptr");
+            builder.CreateCall(memcpyFn, {ptr, sptr, slen});
+            llvm::Value* v = llvm::Constant::getNullValue(strLLVM);
+            v = builder.CreateInsertValue(v, ptr, {0});
+            v = builder.CreateInsertValue(v, slen, {1});
+            return builder.CreateInsertValue(v, cap, {2});
+        }
+        case BuiltinMethod::StringDestroy: {
+            auto savedIP = builder.saveIP();
+            auto freeFn = declareLibcFn(ctx, "free", llvm::Type::getVoidTy(c), {ptrTy});
+            builder.restoreIP(savedIP);
+            llvm::Value* addr = builtinObjectAddr(ctx, node);
+            if (!addr) return nullptr;
+            llvm::Value* v = builder.CreateLoad(strLLVM, addr, "destroy.v");
+            llvm::Value* ptr = builder.CreateExtractValue(v, 0, "destroy.ptr");
+            builder.CreateCall(freeFn, {ptr});
+            // Zero the header: a second destroy frees null (harmless) and
+            // len()/capacity() observe the destruction.
+            builder.CreateStore(llvm::Constant::getNullValue(strLLVM), addr);
+            return llvm::Constant::getNullValue(llvm::Type::getInt32Ty(c));
+        }
+        case BuiltinMethod::StringAppend: {
+            auto savedIP = builder.saveIP();
+            auto reallocFn = declareLibcFn(ctx, "realloc", ptrTy, {ptrTy, i64Ty});
+            auto memcpyFn = declareLibcFn(ctx, "memcpy", ptrTy, {ptrTy, ptrTy, i64Ty});
+            builder.restoreIP(savedIP);
+            llvm::Value* addr = builtinObjectAddr(ctx, node);
+            if (!addr) return nullptr;
+            llvm::Value* s = builtinStrArg(ctx, node.args[0].get());
+            if (!s) return nullptr;
+            llvm::Value* v = builder.CreateLoad(strLLVM, addr, "append.v");
+            llvm::Value* ptr = builder.CreateExtractValue(v, 0, "append.ptr");
+            llvm::Value* len = builder.CreateExtractValue(v, 1, "append.len");
+            llvm::Value* cap = builder.CreateExtractValue(v, 2, "append.cap");
+            llvm::Value* sptr = builder.CreateExtractValue(s, 0, "append.sptr");
+            llvm::Value* slen = builder.CreateExtractValue(s, 1, "append.slen");
+            llvm::Value* need = builder.CreateAdd(len, slen, "append.need");
+
+            llvm::Function* fn = builder.GetInsertBlock()->getParent();
+            llvm::BasicBlock* growBB = llvm::BasicBlock::Create(c, "append.grow", fn);
+            llvm::BasicBlock* mergeBB = llvm::BasicBlock::Create(c, "append.merge", fn);
+            llvm::Value* mustGrow = builder.CreateICmpUGT(need, cap, "append.grow?");
+            llvm::BasicBlock* condBB = builder.GetInsertBlock();
+            builder.CreateCondBr(mustGrow, growBB, mergeBB);
+
+            builder.SetInsertPoint(growBB);
+            llvm::Value* doubled = builder.CreateMul(cap, llvm::ConstantInt::get(i64Ty, 2), "append.dbl");
+            llvm::Value* grown = builder.CreateSelect(
+                builder.CreateICmpUGT(doubled, need, "append.dbl?"), doubled, need, "append.cap2");
+            llvm::Value* rptr = builder.CreateCall(reallocFn, {ptr, grown}, "append.rptr");
+            builder.CreateBr(mergeBB);
+
+            builder.SetInsertPoint(mergeBB);
+            llvm::PHINode* ptr2 = builder.CreatePHI(ptrTy, 2, "append.ptr2");
+            llvm::PHINode* cap2 = builder.CreatePHI(i64Ty, 2, "append.cap2");
+            ptr2->addIncoming(ptr, condBB);
+            cap2->addIncoming(cap, condBB);
+            ptr2->addIncoming(rptr, growBB);
+            cap2->addIncoming(grown, growBB);
+
+            llvm::Value* dst = builder.CreateGEP(i8Ty, ptr2, len, "append.dst");
+            builder.CreateCall(memcpyFn, {dst, sptr, slen});
+            llvm::Value* v2 = llvm::Constant::getNullValue(strLLVM);
+            v2 = builder.CreateInsertValue(v2, ptr2, {0});
+            v2 = builder.CreateInsertValue(v2, need, {1});
+            v2 = builder.CreateInsertValue(v2, cap2, {2});
+            builder.CreateStore(v2, addr);
+            return llvm::Constant::getNullValue(llvm::Type::getInt32Ty(c));
+        }
+        case BuiltinMethod::StringPush: {
+            auto savedIP = builder.saveIP();
+            auto reallocFn = declareLibcFn(ctx, "realloc", ptrTy, {ptrTy, i64Ty});
+            builder.restoreIP(savedIP);
+            llvm::Value* addr = builtinObjectAddr(ctx, node);
+            if (!addr) return nullptr;
+            llvm::Value* ch = node.args[0]->codegen(ctx);
+            if (!ch) return nullptr;
+            if (node.args[0]->isLValue) ch = ctx.loadValue(ch, node.args[0]->type);
+            ch = builder.CreateSExtOrTrunc(ch, i8Ty, "push.c8");
+
+            llvm::Value* v = builder.CreateLoad(strLLVM, addr, "push.v");
+            llvm::Value* ptr = builder.CreateExtractValue(v, 0, "push.ptr");
+            llvm::Value* len = builder.CreateExtractValue(v, 1, "push.len");
+            llvm::Value* cap = builder.CreateExtractValue(v, 2, "push.cap");
+            llvm::Value* need = builder.CreateAdd(len, llvm::ConstantInt::get(i64Ty, 1), "push.need");
+
+            llvm::Function* fn = builder.GetInsertBlock()->getParent();
+            llvm::BasicBlock* growBB = llvm::BasicBlock::Create(c, "push.grow", fn);
+            llvm::BasicBlock* mergeBB = llvm::BasicBlock::Create(c, "push.merge", fn);
+            llvm::Value* mustGrow = builder.CreateICmpUGT(need, cap, "push.grow?");
+            llvm::BasicBlock* condBB = builder.GetInsertBlock();
+            builder.CreateCondBr(mustGrow, growBB, mergeBB);
+
+            builder.SetInsertPoint(growBB);
+            llvm::Value* doubled = builder.CreateMul(cap, llvm::ConstantInt::get(i64Ty, 2), "push.dbl");
+            llvm::Value* grown = builder.CreateSelect(
+                builder.CreateICmpUGT(doubled, need, "push.dbl?"), doubled, need, "push.cap2");
+            llvm::Value* rptr = builder.CreateCall(reallocFn, {ptr, grown}, "push.rptr");
+            builder.CreateBr(mergeBB);
+
+            builder.SetInsertPoint(mergeBB);
+            llvm::PHINode* ptr2 = builder.CreatePHI(ptrTy, 2, "push.ptr2");
+            llvm::PHINode* cap2 = builder.CreatePHI(i64Ty, 2, "push.cap2");
+            ptr2->addIncoming(ptr, condBB);
+            cap2->addIncoming(cap, condBB);
+            ptr2->addIncoming(rptr, growBB);
+            cap2->addIncoming(grown, growBB);
+
+            llvm::Value* dst = builder.CreateGEP(i8Ty, ptr2, len, "push.dst");
+            builder.CreateStore(ch, dst);
+            llvm::Value* v2 = llvm::Constant::getNullValue(strLLVM);
+            v2 = builder.CreateInsertValue(v2, ptr2, {0});
+            v2 = builder.CreateInsertValue(v2, need, {1});
+            v2 = builder.CreateInsertValue(v2, cap2, {2});
+            builder.CreateStore(v2, addr);
+            return llvm::Constant::getNullValue(llvm::Type::getInt32Ty(c));
+        }
+        default:
+            return nullptr;
+    }
 }
 
 // P1-06 (FMT-04): str_from_c — strlen over the buffer (or an identity view

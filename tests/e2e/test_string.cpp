@@ -199,3 +199,118 @@ TEST_F(StringE2E, StrFromCExec) {
         }
     )", "str8.c"), 0);
 }
+
+// ---- T4: string 内存与方法 ----
+
+TEST_F(StringE2E, NewLenExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = string.new("hello");
+            if (s.len() != 5) { return 1; }
+            return 0;
+        }
+    )", "str9.c"), 0);
+}
+
+TEST_F(StringE2E, AppendExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = string.new("ab");
+            s.append("cd");
+            if (s.len() != 4) { return 1; }
+            if (s[2] != 'c') { return 2; }
+            return 0;
+        }
+    )", "str10.c"), 0);
+}
+
+TEST_F(StringE2E, AppendGrowthExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = string.new("");
+            int32 i = 0;
+            while (i < 100) {
+                s.append("ab");
+                i = i + 1;
+            }
+            if (s.len() != 200) { return 1; }
+            if (s[198] != 'a' || s[199] != 'b') { return 2; }
+            return 0;
+        }
+    )", "str11.c"), 0);
+}
+
+TEST_F(StringE2E, PushExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = string.new("");
+            s.push('x');
+            s.push('y');
+            s.push('z');
+            if (s.len() != 3) { return 1; }
+            if (s[2] != 'z') { return 2; }
+            return 0;
+        }
+    )", "str12.c"), 0);
+}
+
+TEST_F(StringE2E, CapacityExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = string.new("hi");
+            if (s.capacity() < 2) { return 1; }
+            s.append("abc");
+            if (s.len() != 5) { return 2; }
+            if (s.capacity() < 5) { return 3; }
+            return 0;
+        }
+    )", "str13.c"), 0);
+}
+
+TEST_F(StringE2E, DestroyFrees) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = string.new("data");
+            s.destroy();
+            if (s.len() != 0) { return 1; }
+            if (s.capacity() != 0) { return 2; }
+            return 0;
+        }
+    )", "str14.c"), 0);
+}
+
+TEST_F(StringE2E, StringToStrView) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = string.new("ab");
+            str v = s;
+            if (v.len() != 2) { return 1; }
+            return 0;
+        }
+    )", "str15.c"), 0);
+}
+
+TEST_F(StringE2E, AppendAcceptsString) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string a = string.new("x");
+            string b = string.new("y");
+            a.append(b);
+            if (a.len() != 2) { return 1; }
+            if (a[1] != 'y') { return 2; }
+            return 0;
+        }
+    )", "str16.c"), 0);
+}
+
+TEST_F(StringE2E, SubscriptExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = string.new("abc");
+            if (s[0] != 'a') { return 1; }
+            if (s[1] != 'b') { return 2; }
+            if (s[2] != 'c') { return 3; }
+            return 0;
+        }
+    )", "str17.c"), 0);
+}

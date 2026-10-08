@@ -303,6 +303,10 @@ bool SemanticAnalyzer::typesCompatible(Type* left, Type* right) const {
         return true;
     if (left->kind == TypeKind::Str && right->kind == TypeKind::Str)
         return true;
+    // P1-06 (FMT-02): string -> str is an implicit (non-owning) view;
+    // str -> string is NOT implicit (use string.new).
+    if (left->kind == TypeKind::Str && right->kind == TypeKind::String)
+        return true;
     if (left->kind == TypeKind::String && right->kind == TypeKind::String)
         return true;
     if (left->kind == right->kind) return true;
@@ -588,6 +592,22 @@ Type* SemanticAnalyzer::checkAssignmentTypes(Type* lhs, Type* rhs, ExprAST& node
     if (lhsS->kind == TypeKind::Pointer && rhsS->kind == TypeKind::Str &&
         typesEqual(lhsS->base, typeCtx->getChar()))
         return lhsRaw;
+    // P1-06 (FMT-02): string -> str implicit view. The reverse direction is
+    // rejected below with the DEC-20 guidance (string.new).
+    if (lhsS->kind == TypeKind::Str && rhsS->kind == TypeKind::String)
+        return lhsRaw;
+    // P1-06 (DEC-20): no implicit heap allocation — str/char* values do not
+    // become `string`; construction is explicit.
+    if (lhsS->kind == TypeKind::String &&
+        (rhsS->kind == TypeKind::Str ||
+         (rhsS->kind == TypeKind::Pointer && rhsS->base &&
+          rhsS->base->kind == TypeKind::Char))) {
+        emitError(DiagnosticCode::SemIncompatibleAssignment,
+                  "incompatible types in assignment: cannot assign '" +
+                      typeToString(rhs) + "' to 'string' implicitly; construct explicitly with string.new(...)",
+                  node);
+        return nullptr;
+    }
 
     emitError(DiagnosticCode::SemIncompatibleAssignment,
               "incompatible types in assignment: cannot assign '" + typeToString(rhs) +
@@ -1900,6 +1920,76 @@ void SemanticAnalyzer::analyzeStrMethod(MethodCallExprAST& node, Type* objType) 
     node.type = nullptr;
 }
 
+// P1-06 (FMT-02): string instance methods. Mutating methods (append/push/
+// destroy) require an addressable receiver at codegen; sema records the
+// signatures only.
+void SemanticAnalyzer::analyzeStringMethod(MethodCallExprAST& node, Type* objType) {
+    (void)objType;
+    node.isLValue = false;
+    const std::string& name = node.methodName;
+
+    std::vector<Type*> argTypes;
+    for (auto& arg : node.args) {
+        argTypes.push_back(getExprType(*arg));
+    }
+    for (auto* t : argTypes) {
+        if (!t) {
+            node.type = nullptr; // argument already reported
+            return;
+        }
+    }
+
+    auto isStrLike = [](Type* t) {
+        while (t && t->kind == TypeKind::Typedef)
+            t = static_cast<TypedefType*>(t)->aliasedType;
+        return t && (t->kind == TypeKind::Str || t->kind == TypeKind::String);
+    };
+
+    if (name == "len" || name == "capacity") {
+        if (!argTypes.empty()) {
+            emitError("'" + name + "()' takes no arguments", node);
+            node.type = nullptr;
+            return;
+        }
+        node.builtinMethod =
+            name == "len" ? BuiltinMethod::StringLen : BuiltinMethod::StringCapacity;
+        node.type = typeCtx->getUSize();
+        return;
+    }
+    if (name == "destroy") {
+        if (!argTypes.empty()) {
+            emitError("'destroy()' takes no arguments", node);
+            node.type = nullptr;
+            return;
+        }
+        node.builtinMethod = BuiltinMethod::StringDestroy;
+        node.type = typeCtx->getVoid();
+        return;
+    }
+    if (name == "append") {
+        if (argTypes.size() != 1 || !isStrLike(argTypes[0])) {
+            emitError("'append()' requires exactly one str argument; use str_from_c for char* buffers", node);
+            node.type = nullptr;
+            return;
+        }
+        node.builtinMethod = BuiltinMethod::StringAppend;
+        node.type = typeCtx->getVoid();
+        return;
+    }
+    if (name == "push") {
+        if (argTypes.size() != 1 || !isIntegerType(argTypes[0])) {
+            emitError("'push()' requires exactly one char argument", node);
+            node.type = nullptr;
+            return;
+        }
+        node.builtinMethod = BuiltinMethod::StringPush;
+        node.type = typeCtx->getVoid();
+        return;
+    }
+    emitError("no member named '" + name + "' in string", node);
+    node.type = nullptr;
+}
+
 void SemanticAnalyzer::visit(CallExprAST& node) {
     // AGG-10/DS5: qualified static-method call — access check against the
     // declaring class (uses the pre-resolution callee spelling).
@@ -2310,6 +2400,10 @@ void SemanticAnalyzer::visit(ArrayAccessExprAST& node) {
     } else if (arrayType && arrayType->kind == TypeKind::Slice) {
         // TYP-12: subscripting a slice yields an lvalue of the element type.
         node.type = static_cast<SliceType*>(arrayType)->elementType;
+    } else if (arrayType && arrayType->kind == TypeKind::String) {
+        // P1-06 (FMT-02): subscripting a string yields a byte (char) lvalue;
+        // no bounds check (DEC-06 policy).
+        node.type = typeCtx->getChar();
     } else {
         emitError("subscripted value is neither array, slice nor pointer, but '" + typeToString(arrayType) + "'", node);
         node.type = nullptr;
@@ -2567,6 +2661,10 @@ void SemanticAnalyzer::visit(MethodCallExprAST& node) {
     // class methods). object is an lvalue/rvalue str expression.
     if (objType->kind == TypeKind::Str) {
         return analyzeStrMethod(node, objType);
+    }
+    // P1-06 (FMT-02): string builtin methods.
+    if (objType->kind == TypeKind::String) {
+        return analyzeStringMethod(node, objType);
     }
 
     ClassType* classType = nullptr;
@@ -2927,6 +3025,25 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
             }
         } else {
             Type* initType = getExprType(*node.initExpr);
+            // P1-06 (DEC-20): a clearer message before the generic mismatch —
+            // str/char* values never become `string` implicitly.
+            {
+                Type* initStripped = initType;
+                while (initStripped && initStripped->kind == TypeKind::Typedef)
+                    initStripped = static_cast<TypedefType*>(initStripped)->aliasedType;
+                Type* varStripped = node.type;
+                while (varStripped && varStripped->kind == TypeKind::Typedef)
+                    varStripped = static_cast<TypedefType*>(varStripped)->aliasedType;
+                if (varStripped && varStripped->kind == TypeKind::String && initStripped &&
+                    (initStripped->kind == TypeKind::Str ||
+                     (initStripped->kind == TypeKind::Pointer && initStripped->base &&
+                      initStripped->base->kind == TypeKind::Char))) {
+                    emitError("cannot initialize 'string' from '" + typeToString(initType) +
+                                  "'; construct explicitly with string.new(...) (DEC-20)",
+                              node);
+                    return;
+                }
+            }
             if (initType && !typesCompatible(node.type, initType)) {
                 emitError("type mismatch in initialization of '" + node.name + "': expected '" 
                     + typeToString(node.type) + "', got '" + typeToString(initType) + "'", node);

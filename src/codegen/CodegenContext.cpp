@@ -359,6 +359,16 @@ llvm::Value* CodegenContext::castValue(llvm::Value* val, Type* fromAST, llvm::Ty
                             : builder.CreateSIToFP(val, targetLLVMType, "sitofptmp");
     }
 
+    // P1-06 (FMT-02): string -> str implicit view — project {ptr, len} out
+    // of the {ptr, len, cap} header.
+    if (fromAST->kind == TypeKind::String && targetLLVMType->isStructTy()) {
+        llvm::Value* ptr = builder.CreateExtractValue(val, 0, "view.ptr");
+        llvm::Value* len = builder.CreateExtractValue(val, 1, "view.len");
+        llvm::Value* v = llvm::Constant::getNullValue(targetLLVMType);
+        v = builder.CreateInsertValue(v, ptr, {0});
+        return builder.CreateInsertValue(v, len, {1});
+    }
+
     // P1-06 (FMT-03): str -> char* implicit byte view — extract the pointer
     // field (the length is dropped; the buffer is guaranteed NUL-free UTF-8,
     // callers needing C-string semantics own that conversion).

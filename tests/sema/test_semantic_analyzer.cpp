@@ -2214,3 +2214,23 @@ TEST_F(SemanticAnalyzerTest, StrFromCAcceptsCharPointer) {
     EXPECT_TRUE(analyzeFullyOk(
         "int32 main() { str s = str_from_c(\"abc\"); return 0; }"));
 }
+
+// P1-06 / T4: no implicit heap allocation into `string` (DEC-20).
+TEST_F(SemanticAnalyzerTest, StringNoImplicitAllocation) {
+    auto check = [&](const std::string& src, const std::string& needle) {
+        Lexer lexer("t.c", src);
+        auto tokens = lexer.tokenize();
+        Parser parser(tokens);
+        auto ast = parser.parse();
+        ASSERT_NE(ast, nullptr);
+        SemanticAnalyzer analyzer;
+        analyzer.analyze(*ast);
+        bool found = false;
+        for (const auto& d : analyzer.getErrors()) {
+            if (d.message.find(needle) != std::string::npos) found = true;
+        }
+        EXPECT_TRUE(found) << "missing '" << needle << "' for: " << src;
+    };
+    check("int32 main() { string s = \"a\"; return 0; }", "string.new");
+    check("int32 main() { char* p; string s = p; return 0; }", "string.new");
+}
