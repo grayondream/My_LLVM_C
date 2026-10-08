@@ -599,3 +599,16 @@
 - 终审（fresh reviewer）：2C/5I/7M 全部 Critical/Important 修复（每项 RED→GREEN）；途中发现并修复跨 kind 静态转换读垃圾值（C1 同款）与 evaluator 缺 Array case。
 - 验证：ctest 1083/1083（基线 1037 + 46）。
 - 遗留：ANN-07/08、方法 nonnull this 偏移、裸名键误报/漏报、offset_of 继承字段、M2/M3/M4/M5/M6/M7 minors。
+
+## 2026-10-08 22:45 — P1-06 str/String 核心纵向完成
+- 完成 T1~T6（Native 内联，master 直接开发）：
+  - T1 `optional`/`result` 小写化（`d6366a9`）
+  - T2 str/string 类型骨架 + 字面量重定型（`9db7cb0`）
+  - T3 str 方法 + str_from_c（`1b3e3b4`）
+  - T4 string 内存与方法（`c32d123`）
+  - T5 UTF-8 验证 E2015（`68a328b`）
+  - T6 硬化边界（`7347a34`）
+  - T7 TODO 收口（本次）
+- 验证：全量 ctest 1123/1123 绿（基线 1077 + 新增 46）；每任务 RED→GREEN 全程亲见失败。
+- 涉及：`src/ast/{Type,Expr,Symbol,PrintFormat}.{h,cpp}`、`src/frontend/Parser.cpp`、`src/sema/{SemanticAnalyzer,CompileTimeEvaluator,Diagnostic}.{h,cpp}`、`src/codegen/CodegenContext.{h,cpp}`、`src/support/Utf8.{h,cpp}`（新）、`tests/e2e/test_string.cpp`（新）。
+- 遗留：format（FMT-06~09）与 STD-10 另轮；终审待派。

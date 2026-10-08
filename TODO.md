@@ -144,7 +144,7 @@
 - `[~]` **TYP-23** `(新)` **隐式/显式转换矩阵**：标量、指针、数组、struct/class、enum、Optional/Result 的完整转换表。（规范矩阵见 `docs/spec/conversions.md` §4；`enum` 强类型 TYP-20 与常规算术转换 TYP-22 已落地；隐式**窄化**仍按兼容处理，其余 `[plan]` 项待实现）
 - `[~]` **TYP-24** `(新)` **空指针常量语义**：`nullptr`/`NULL`/`0` 与指针/bool 的转换规则。（草案见 `docs/spec/conversions.md`；`null`/`0` 的 int↔ptr 转换、指针比较、指针真值判断已实现；`nullptr` token 待补）
 - `[x]` **TYP-25** `(新)` enum 默认底层类型、枚举常量作用域与限定访问（细化 TYP-09）。枚举常量可作值/常量表达式（含 `= -1`、`= 1+2+4`），支持限定访问 `A::Red` 与限定类型名 `cfg::Mode`（无需 `enum` 关键字）；显式底层类型 `enum E : uint8`（含 `typedef enum : uint16 {...}`）已实现。
-- `[ ]` **TYP-26** `(新)` 字符串字面量类型、`str`/`String` 生命周期与所有权（细化 FMT-01/02）。
+- `[x]` **TYP-26** `(新)` 字符串字面量类型、`str`/`String` 生命周期与所有权（细化 FMT-01/02）。2026-10-08 完成（随 P1-06）：字面量类型 = `str`；所有权/边界见 DEC-20。
 - `[~]` **TYP-27** `(新)` 聚合类型 ABI：按值传参/返回（byval/sret）、端序、默认对齐与成员内边距（细化 MEM-09）。（草案见 `docs/spec/abi.md`）
 
 ---
@@ -309,11 +309,11 @@
 ## 14. 字符串与格式化（FMT）
 
 ### 字符串
-- `[ ]` **FMT-01** `str`：UTF-8、不拥有、视图语义。
-- `[ ]` **FMT-02** `String`：动态字符串、长度/容量、**C 语义内存管理（显式 `new/destroy`，无析构）**。
-- `[ ]` **FMT-03** 字符串字面量类型与 `char*` 互操作。
-- `[ ]` **FMT-04** UTF-8 验证与遍历；`str`↔`String` 互转。
-- `[ ]` **FMT-05** 切片、连接、比较、查找、替换。
+- `[x]` **FMT-01** `str`：UTF-8、不拥有、视图语义。完成（2026-10-08，随 P1-06）：`TypeKind::Str`，canonical LLVM named struct `"str" {ptr, i64}`；内建方法 `len()/char_count()/char_at(i)/char_len_at(i)`（MethodCall 机制）；`==`/`!=` 字节比较（长度优先，免越界读）。
+- `[x]` **FMT-02** `String`：动态字符串、长度/容量、**C 语义内存管理（显式 `new/destroy`，无析构）**。完成（2026-10-08）：类型名钉死小写 `string`；`string.new(str)`/`destroy()`/`append(str)`/`push(char)`/`len()`/`capacity()`/`s[i]`；增长策略 `cap' = max(cap*2, need)`；`destroy` 清零三字段；无 SSO。
+- `[x]` **FMT-03** 字符串字面量类型与 `char*` 互操作。完成（2026-10-08）：字面量重定型为 `str`；`str → char*` 隐式（`typesCompatible`/`checkAssignmentTypes`/`conversionRank`/`castValue` 四点同步）；`char* → str` 仅经内建 `str_from_c`（char 数组实参衰减）；print/println 的 str 实参走 `%.*s`。
+- `[x]` **FMT-04** UTF-8 验证与遍历；`str`↔`String` 互转。完成（2026-10-08）：验证点 = 字面量与 `str_from_c` 字面量（sema 期，`support/Utf8`，E2015）+ 运行时缓冲（codegen 合成 IR `smc.utf8.validate`，失败 panic）；遍历 = `char_count`/`char_len_at` 步进 API（IR 辅助 `smc.utf8.*`），无 for-in 语法；`string → str` 隐式视图、`str → string` 显式 `string.new`。
+- `[~]` **FMT-05** 切片、连接、比较、查找、替换。部分（2026-10-08）：`==`/`!=` 完成；`str + str` 不提供（拼接 = `string.new(a).append(b)`，CT-06 字面量 `+` 一并移除）；查找/分割/替换挂 STD-10。
 
 ### format
 - `[ ]` **FMT-06** `(已实现)` `print/println` 内建，`{}` 占位符；`(改)` 纳入 `import std.format` 体系。
@@ -469,7 +469,7 @@
 - `[x]` **DEC-17** `(新)` `namespace` 与模块（`module`/`import`）的关系与共存方式：**模块=物理边界，namespace=逻辑边界，二者正交**；同一模块可含多个 namespace，同一 namespace 可跨模块。
 - `[x]` **DEC-18** `(新)` `register`/`cast`/`typeof` 等既有 token 的废弃或保留。→ **决定移除**（一并移除 `comptime`/`generic`）；显式转换改用 `static_cast`/`reinterpret_cast`（LEX-11），类型查询改用 `compile_time` 反射（CT-07）。已同步 `Token.h`/`Lexer.cpp`/`Utils.cpp`/`keywords.md`。
 - `[ ]` **DEC-19** `(新)` `main` 入口签名与返回值约定。
-- `[ ]` **DEC-20** `(新)` 字符串字面量所有权/生命周期与 `str`/`String` 边界。
+- `[x]` **DEC-20** `(新)` 字符串字面量所有权/生命周期与 `str`/`String` 边界。→ **决定**（2026-10-08 随 P1-06）：字面量即 `str`（静态存储、全局生命周期、不拥有）；`string` 拥有其缓冲区，显式 `string.new`/`destroy`，无隐式堆分配（`str`/`char*` 赋给 `string` 编译期拒绝）；`string → str → char*` 视图链隐式、反向一律显式；`destroy` 后字段清零（二次 destroy 走 `free(NULL)` 无害）。spec `docs/superpowers/specs/2026-10-08-str-string-design.md`。
 - `[x]` **DEC-21** `(新)` `panic` 默认可否被捕获、是否直接 `abort`。→ **决定**：不可捕获（语言无异常/无栈展开，NG-05），直接调用 `abort()`；`assert`/`panic` 走同一终止路径，输出带调用点 `file:line`（见 `docs/spec/stdlib.md` §8）。
 
 ---
@@ -510,7 +510,7 @@
 - `[x]` **P1-03** **泛型 + CRTP**（GEN、INH-05、PAR-17/18、CG-07/08）。2026-10-06 完成：989/989。
 - `[x]` **P1-04** `compile_time` 与反射——核心纵向切片完成（2026-10-06）：CT-01/02/03/04/05/06/12/14 + PAR-15 部分 + SEM-07 + DEC-05；反射 CT-07/08/13 另轮（与 P1-06 str 排序协调）。
 - `[x]` **P1-05** 注解系统（ANN）——核心纵向完成（2026-10-07）：ANN-01~06/09/10 + LEX-10/PAR-07 + W3004/W3005；ANN-07/08 挂账。
-- `[ ]` **P1-06** str / String / format（FMT、STD-10/11）。
+- `[x]` **P1-06** str / String / format（FMT、STD-10/11）。核心纵向完成（2026-10-08）：FMT-01/02/03/04 + FMT-05 比较 + TYP-26/DEC-20 + 内建类型小写化（`optional`/`result`，DEC-18 先例）；E2015 新诊断；`grammar.ebnf` 同步。format（FMT-06~09）与 STD-10 高层操作另轮。spec `docs/superpowers/specs/2026-10-08-str-string-design.md`，plan `docs/superpowers/plans/2026-10-08-str-string.md`。挂账：`string` 不参与 constexpr；CT `+` 已移除；SSO 不做。
 - `[ ]` **P1-07** 位域、匿名类型、指定初始化器、lambda（AGG-03~06、PAR-10~13）。
 - `[~]` **P1-08** `static_cast` / 内联 `asm`（PAR-18、CG-10）。`static_cast`/`reinterpret_cast` 已完成（LEX-11/PAR-18）；内联 `asm`（CG-10/DEC-09）待定。
 - `[ ]` **P1-09** std.mem / std.string / std.format / std.math / **std.collections**（STD-05~14）。
