@@ -84,6 +84,14 @@ public:
     // (zero-copy; the elements are never duplicated).
     llvm::Value* emitArrayToSliceDecay(ArrayType* arrayType, llvm::Value* arrayAddr);
 
+    // P1-06 (FMT-01/04): module-internal UTF-8 stepping helpers, synthesized
+    // once on first use (RFC 3629 subset — see the spec's Global Constraints).
+    // char_count: number of code points in [p, p+len);
+    // char_len_at: sequence width at byte i (0 on an invalid lead byte).
+    // (validate lands with T5's E2015 work, driven by its failing tests.)
+    llvm::Function* getUtf8CharCountFn();
+    llvm::Function* getUtf8CharLenAtFn();
+
 private:
     std::unique_ptr<llvm::LLVMContext> context;
     llvm::IRBuilder<> builder;
@@ -102,4 +110,8 @@ private:
     std::vector<std::vector<ExprAST*>> deferScopes;
     std::vector<size_t> breakDeferBoundaries;
     std::vector<size_t> continueDeferBoundaries;
+
+    // P1-06: lazily synthesized UTF-8 helpers (single instance per module).
+    llvm::Function* utf8CharLenAtFn{nullptr};
+    llvm::Function* utf8CharCountFn{nullptr};
 };

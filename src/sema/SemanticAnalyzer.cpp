@@ -1788,6 +1788,118 @@ bool SemanticAnalyzer::tryAnalyzePanicCall(CallExprAST& node) {
     return true;
 }
 
+// P1-06 (FMT-04): builtin `str_from_c(cstr) -> str` — build a view over a
+// NUL-terminated buffer by strlen. Accepts Pointer(char) and `str` (identity
+// view); the length of a char* cannot be known statically, so no implicit
+// char* -> str exists anywhere else.
+bool SemanticAnalyzer::tryAnalyzeStrFromCCall(CallExprAST& node) {
+    node.type = nullptr;
+    node.isLValue = false;
+    if (node.args.size() != 1) {
+        emitError("'str_from_c' takes exactly one argument", node);
+        return true;
+    }
+    Type* argType = getExprType(*node.args[0]);
+    if (!argType) return true; // already reported
+    Type* t = argType;
+    while (t && t->kind == TypeKind::Typedef) {
+        t = static_cast<TypedefType*>(t)->aliasedType;
+    }
+    const bool isCharPointer = t && t->kind == TypeKind::Pointer &&
+                               t->base && t->base->kind == TypeKind::Char;
+    if (!isCharPointer && (!t || t->kind != TypeKind::Str)) {
+        emitError("'str_from_c' requires a char* (or str) argument, got '" +
+                      typeToString(argType) + "'",
+                  node);
+        return true;
+    }
+    node.isStrFromC = true;
+    node.type = typeCtx->getStrType();
+    return true;
+}
+
+// P1-06 (FMT-02): static `string.new(str)` constructor — `string` is a type
+// name, not a variable, so the receiver must be detected before ordinary
+// object resolution reports an undeclared identifier.
+bool SemanticAnalyzer::tryAnalyzeStringStaticCall(MethodCallExprAST& node) {
+    auto* objVar = dynamic_cast<VariableExprAST*>(node.object.get());
+    if (!objVar || objVar->name != "string") return false;
+    // A user-visible symbol named `string` shadows the builtin (defensive;
+    // type names are not declarable as variables since the retype).
+    if (currentScope && currentScope->lookup("string")) return false;
+
+    node.isLValue = false;
+    if (node.methodName != "new") {
+        emitError("unknown static method 'string." + node.methodName + "'", node);
+        node.type = nullptr;
+        return true;
+    }
+    if (node.args.size() != 1) {
+        emitError("'string.new' takes exactly one str argument", node);
+        node.type = nullptr;
+        return true;
+    }
+    Type* argType = getExprType(*node.args[0]);
+    if (!argType) return true; // already reported
+    Type* t = argType;
+    while (t && t->kind == TypeKind::Typedef) {
+        t = static_cast<TypedefType*>(t)->aliasedType;
+    }
+    if (!t || t->kind != TypeKind::Str) {
+        emitError("'string.new' requires a str argument; use str_from_c for char* buffers", node);
+        node.type = nullptr;
+        return true;
+    }
+    node.builtinMethod = BuiltinMethod::StringNew;
+    node.type = typeCtx->getStringType();
+    return true;
+}
+
+// P1-06 (FMT-01): str builtin methods. len/char_count/char_len_at yield
+// usize; char_at yields the raw byte (no codepoint-boundary validation,
+// DEC-06 policy).
+void SemanticAnalyzer::analyzeStrMethod(MethodCallExprAST& node, Type* objType) {
+    (void)objType;
+    node.isLValue = false;
+    const std::string& name = node.methodName;
+
+    std::vector<Type*> argTypes;
+    for (auto& arg : node.args) {
+        argTypes.push_back(getExprType(*arg));
+    }
+    for (auto* t : argTypes) {
+        if (!t) {
+            node.type = nullptr; // argument already reported
+            return;
+        }
+    }
+
+    if (name == "len" || name == "char_count") {
+        if (!argTypes.empty()) {
+            emitError("'" + name + "()' takes no arguments", node);
+            node.type = nullptr;
+            return;
+        }
+        node.builtinMethod =
+            name == "len" ? BuiltinMethod::StrLen : BuiltinMethod::StrCharCount;
+        node.type = typeCtx->getUSize();
+        return;
+    }
+    if (name == "char_at" || name == "char_len_at") {
+        if (argTypes.size() != 1 || !isIntegerType(argTypes[0])) {
+            emitError("'" + name + "()' requires exactly one integer argument", node);
+            node.type = nullptr;
+            return;
+        }
+        node.builtinMethod =
+            name == "char_at" ? BuiltinMethod::StrCharAt : BuiltinMethod::StrCharLenAt;
+        node.type = name == "char_at" ? typeCtx->getChar() : typeCtx->getUSize();
+        return;
+    }
+    emitError("no member named '" + name + "' in str", node);
+    node.type = nullptr;
+}
+
 void SemanticAnalyzer::visit(CallExprAST& node) {
     // AGG-10/DS5: qualified static-method call — access check against the
     // declaring class (uses the pre-resolution callee spelling).
@@ -1814,6 +1926,16 @@ void SemanticAnalyzer::visit(CallExprAST& node) {
             } else {
                 tryAnalyzePanicCall(node);
             }
+            return;
+        }
+    }
+
+    // P1-06 (FMT-04): builtin `str_from_c(char*) -> str` (only when the user
+    // has not declared a function of that name).
+    if (node.callee == "str_from_c") {
+        OverloadSet* userDefined = currentScope->lookupOverload(node.callee);
+        if (!userDefined || userDefined->empty()) {
+            tryAnalyzeStrFromCCall(node);
             return;
         }
     }
@@ -2428,11 +2550,23 @@ void SemanticAnalyzer::visit(MethodCallExprAST& node) {
         return;
     }
 
+    // P1-06 (FMT-02): static `string.new` — `string` is a type name; detect
+    // before object resolution (mirrors the compile_time chain special case).
+    if (tryAnalyzeStringStaticCall(node)) {
+        return;
+    }
+
     Type* objType = getExprType(*node.object);
     if (!objType) {
         node.type = nullptr;
         node.isLValue = false;
         return;
+    }
+
+    // P1-06 (FMT-01): str builtin methods (identifier-based builtins, not
+    // class methods). object is an lvalue/rvalue str expression.
+    if (objType->kind == TypeKind::Str) {
+        return analyzeStrMethod(node, objType);
     }
 
     ClassType* classType = nullptr;

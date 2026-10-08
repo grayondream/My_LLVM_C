@@ -191,6 +191,9 @@ public:
     // with the call site's file:line embedded at compile time.
     bool isAssert = false;
     bool isPanic = false;
+    // P1-06 (FMT-04): builtin `str_from_c(char*) -> str` (semantics: strlen
+    // over the NUL-terminated buffer; UTF-8 validation at literal points).
+    bool isStrFromC = false;
 
     CallExprAST(const std::string& name, std::vector<std::unique_ptr<ExprAST>> arguments)
         : callee(name), args(std::move(arguments)) {}
@@ -283,6 +286,23 @@ public:
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
+// P1-06 (FMT-01/02): builtin methods dispatched by sema, lowered by codegen.
+enum class BuiltinMethod {
+    None,
+    // str views
+    StrLen,
+    StrCharCount,
+    StrCharAt,
+    StrCharLenAt,
+    // string dynamic
+    StringNew,
+    StringDestroy,
+    StringAppend,
+    StringPush,
+    StringLen,
+    StringCapacity,
+};
+
 class MethodCallExprAST : public ExprAST {
 public:
     std::unique_ptr<ExprAST> object;
@@ -292,6 +312,10 @@ public:
     // Declared parameter types (incl. this at index 0) filled by sema so
     // codegen mangles against the definition site. Mirror of CallExprAST.
     std::vector<Type*> resolvedParamTypes;
+
+    // P1-06: set by sema when this is a builtin str/string method; codegen
+    // dispatches on it before the class-method path.
+    BuiltinMethod builtinMethod = BuiltinMethod::None;
 
     MethodCallExprAST(std::unique_ptr<ExprAST> obj, const std::string& method,
                       std::vector<std::unique_ptr<ExprAST>> arguments)

@@ -142,3 +142,60 @@ TEST_F(StringE2E, StrCompareRuntime) {
         }
     )", "str3.c"), 0);
 }
+
+// ---- T3: str 内建方法与 str_from_c ----
+
+TEST_F(StringE2E, StrLen) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            str s = "hello";
+            if (s.len() != 5) { return 1; }
+            return 0;
+        }
+    )", "str4.c"), 0);
+}
+
+TEST_F(StringE2E, StrCharCount) {
+    // "héllo" = 6 bytes / 5 code points (é is 2 bytes).
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            str s = "h\xc3\xa9llo";
+            if (s.len() != 6) { return 1; }
+            if (s.char_count() != 5) { return 2; }
+            return 0;
+        }
+    )", "str5.c"), 0);
+}
+
+TEST_F(StringE2E, StrCharAt) {
+    // Byte indexing: byte 1 of "héllo" is the lead byte 0xC3.
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            str s = "h\xc3\xa9llo";
+            if (s.char_at(1) != '\xC3') { return 1; }
+            return 0;
+        }
+    )", "str6.c"), 0);
+}
+
+TEST_F(StringE2E, StrCharLenAt) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            str s = "h\xc3\xa9llo";
+            if (s.char_len_at(0) != 1) { return 1; }
+            if (s.char_len_at(1) != 2) { return 2; }
+            return 0;
+        }
+    )", "str7.c"), 0);
+}
+
+TEST_F(StringE2E, StrFromCExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            char* p = "abc";
+            str s = str_from_c(p);
+            if (s.len() != 3) { return 1; }
+            return 0;
+        }
+    )", "str8.c"), 0);
+}

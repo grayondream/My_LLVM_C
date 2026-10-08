@@ -136,6 +136,10 @@ private:
     bool tryAnalyzeTemplateCall(CallExprAST& node);
     bool tryAnalyzeAssertCall(CallExprAST& node);
     bool tryAnalyzePanicCall(CallExprAST& node);
+    bool tryAnalyzeStrFromCCall(CallExprAST& node);
+    // P1-06 (FMT-01/02): builtin str methods and the static `string.new`.
+    bool tryAnalyzeStringStaticCall(MethodCallExprAST& node);
+    void analyzeStrMethod(MethodCallExprAST& node, Type* objType);
     bool lowerToString(CallExprAST& node, size_t argIndex, Type* argType);
     bool hasCircularInheritance(const std::string& className, const std::string& baseClass) const;
 

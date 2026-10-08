@@ -803,3 +803,14 @@ TEST_F(CodegenContextTest, LiteralCodegenUsesTypeWidth) {
     ASSERT_NE(cd, nullptr);
     EXPECT_EQ(cd->getType()->getIntegerBitWidth(), 32u);
 }
+
+// P1-06 regression: a byte literal >= 0x80 must not crash APInt (char is
+// signed on x86-64; the value must be truncated, not sign-extended).
+TEST_F(CodegenContextTest, CharExprHighByte) {
+    auto expr = std::make_unique<CharExprAST>('\xC3');
+    llvm::Value* val = expr->codegen(*ctx);
+    ASSERT_NE(val, nullptr);
+    auto* ci = llvm::dyn_cast<llvm::ConstantInt>(val);
+    ASSERT_NE(ci, nullptr);
+    EXPECT_EQ(ci->getZExtValue(), 0xC3u);
+}

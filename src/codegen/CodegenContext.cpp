@@ -624,3 +624,92 @@ llvm::Type* CodegenContext::getLLVMType(Type* type) {
         default:               return llvm::Type::getInt32Ty(*context);
     }
 }
+
+// ===== P1-06 (FMT-01/04): synthesized UTF-8 stepping helpers =====
+// RFC 3629 subset shared with sema (support/Utf8, T5): reject overlong
+// encodings, surrogates U+D800..DFFF, values above U+10FFFF, and malformed
+// continuation bytes. Internal linkage; synthesized once per module.
+
+llvm::Function* CodegenContext::getUtf8CharLenAtFn() {
+    if (utf8CharLenAtFn) return utf8CharLenAtFn;
+    llvm::LLVMContext& c = *context;
+    auto* fnTy = llvm::FunctionType::get(llvm::Type::getInt64Ty(c),
+        {llvm::PointerType::get(c, 0), llvm::Type::getInt64Ty(c)}, false);
+    auto* fn = llvm::Function::Create(fnTy, llvm::Function::InternalLinkage,
+                                      "smc.utf8.char_len_at", module.get());
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(c, "entry", fn);
+    builder.SetInsertPoint(entry);
+
+    auto* i8Ty = llvm::Type::getInt8Ty(c);
+    auto* i64Ty = llvm::Type::getInt64Ty(c);
+    llvm::Value* p = fn->getArg(0);
+    llvm::Value* idx = fn->getArg(1);
+    llvm::Value* bytePtr = builder.CreateGEP(i8Ty, p, idx, "seq.p");
+    llvm::Value* lead = builder.CreateLoad(i8Ty, bytePtr, "seq.lead");
+    auto* m2 = builder.CreateAnd(lead, llvm::ConstantInt::get(i8Ty, 0xE0));
+    auto* m3 = builder.CreateAnd(lead, llvm::ConstantInt::get(i8Ty, 0xF0));
+    auto* m4 = builder.CreateAnd(lead, llvm::ConstantInt::get(i8Ty, 0xF8));
+    auto* is1 = builder.CreateICmpULT(
+        lead, llvm::ConstantInt::get(i8Ty, 0x80), "lead.ascii");
+    auto* is2 = builder.CreateICmpEQ(m2, llvm::ConstantInt::get(i8Ty, 0xC0), "lead.c2");
+    auto* is3 = builder.CreateICmpEQ(m3, llvm::ConstantInt::get(i8Ty, 0xE0), "lead.e0");
+    auto* is4 = builder.CreateICmpEQ(m4, llvm::ConstantInt::get(i8Ty, 0xF0), "lead.f0");
+    auto* w1 = llvm::ConstantInt::get(i8Ty, 1);
+    auto* w2 = llvm::ConstantInt::get(i8Ty, 2);
+    auto* w3 = llvm::ConstantInt::get(i8Ty, 3);
+    auto* w4 = llvm::ConstantInt::get(i8Ty, 4);
+    auto* w0 = llvm::ConstantInt::get(i8Ty, 0);
+    auto* sel4 = builder.CreateSelect(is4, w4, w0);
+    auto* sel3 = builder.CreateSelect(is3, w3, sel4);
+    auto* sel2 = builder.CreateSelect(is2, w2, sel3);
+    auto* width8 = builder.CreateSelect(is1, w1, sel2, "seq.width");
+    builder.CreateRet(builder.CreateZExt(width8, i64Ty));
+    utf8CharLenAtFn = fn;
+    return fn;
+}
+
+llvm::Function* CodegenContext::getUtf8CharCountFn() {
+    if (utf8CharCountFn) return utf8CharCountFn;
+    llvm::LLVMContext& c = *context;
+    auto* i64Ty = llvm::Type::getInt64Ty(c);
+    auto* fnTy = llvm::FunctionType::get(i64Ty,
+        {llvm::PointerType::get(c, 0), i64Ty}, false);
+    auto* fn = llvm::Function::Create(fnTy, llvm::Function::InternalLinkage,
+                                      "smc.utf8.char_count", module.get());
+    // Synthesize the callee FIRST — it re-points the shared builder.
+    llvm::Function* lenFn = getUtf8CharLenAtFn();
+
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(c, "entry", fn);
+    llvm::BasicBlock* loop = llvm::BasicBlock::Create(c, "loop", fn);
+    llvm::BasicBlock* body = llvm::BasicBlock::Create(c, "body", fn);
+    llvm::BasicBlock* exit = llvm::BasicBlock::Create(c, "exit", fn);
+
+    builder.SetInsertPoint(entry);
+    builder.CreateBr(loop);
+    builder.SetInsertPoint(loop);
+    auto* iPhi = builder.CreatePHI(i64Ty, 2, "i");
+    auto* nPhi = builder.CreatePHI(i64Ty, 2, "n");
+    auto* done = builder.CreateICmpUGE(iPhi, fn->getArg(1), "scan.done");
+    builder.CreateCondBr(done, exit, body);
+
+    builder.SetInsertPoint(body);
+    auto* width = builder.CreateCall(lenFn, {fn->getArg(0), iPhi}, "scan.width");
+    // Defensive: an invalid lead byte (width 0, unreachable on validated
+    // views) must still advance, or the loop would not terminate.
+    auto* step = builder.CreateSelect(
+        builder.CreateICmpEQ(width, llvm::ConstantInt::get(i64Ty, 0)),
+        llvm::ConstantInt::get(i64Ty, 1), width, "scan.step");
+    auto* iNext = builder.CreateAdd(iPhi, step, "scan.inext");
+    auto* nNext = builder.CreateAdd(nPhi, llvm::ConstantInt::get(i64Ty, 1), "scan.nnext");
+    iPhi->addIncoming(llvm::ConstantInt::get(i64Ty, 0), entry);
+    nPhi->addIncoming(llvm::ConstantInt::get(i64Ty, 0), entry);
+    iPhi->addIncoming(iNext, body);
+    nPhi->addIncoming(nNext, body);
+    builder.CreateBr(loop);
+
+    builder.SetInsertPoint(exit);
+    builder.CreateRet(nPhi);
+    utf8CharCountFn = fn;
+    return fn;
+}
+

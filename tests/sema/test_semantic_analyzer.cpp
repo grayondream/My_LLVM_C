@@ -2182,3 +2182,35 @@ TEST_F(SemanticAnalyzerTest, StringLiteralIsStr) {
     ASSERT_NE(var->initExpr->type, nullptr);
     EXPECT_EQ(var->initExpr->type->kind, TypeKind::Str);
 }
+
+// P1-06 / T3: str builtin method diagnostics.
+TEST_F(SemanticAnalyzerTest, StrMethodDiagnostics) {
+    auto check = [&](const std::string& src, const std::string& needle) {
+        Lexer lexer("t.c", src);
+        auto tokens = lexer.tokenize();
+        Parser parser(tokens);
+        auto ast = parser.parse();
+        ASSERT_NE(ast, nullptr);
+        SemanticAnalyzer analyzer;
+        analyzer.analyze(*ast);
+        bool found = false;
+        for (const auto& d : analyzer.getErrors()) {
+            if (d.message.find(needle) != std::string::npos) found = true;
+        }
+        EXPECT_TRUE(found) << "missing '" << needle << "' for: " << src;
+    };
+    check("int32 main() { str s = \"a\"; return s.bogus(); }",
+          "no member named 'bogus' in str");
+    check("int32 main() { str s = \"a\"; return s.len(1); }",
+          "takes no arguments");
+    check("int32 main() { str s = \"a\"; return str_from_c(42); }",
+          "str_from_c");
+}
+
+// P1-06 / T3: str_from_c accepts char* only (no implicit str -> str_from_c).
+TEST_F(SemanticAnalyzerTest, StrFromCAcceptsCharPointer) {
+    EXPECT_TRUE(analyzeFullyOk(
+        "int32 main() { char* p = \"abc\"; str s = str_from_c(p); return 0; }"));
+    EXPECT_TRUE(analyzeFullyOk(
+        "int32 main() { str s = str_from_c(\"abc\"); return 0; }"));
+}

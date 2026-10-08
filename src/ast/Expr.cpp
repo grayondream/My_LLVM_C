@@ -5,6 +5,10 @@
 #include "support/Log.h"
 #include "Mangle.h"
 
+// P1-06: builtin str/string lowering (defined at file bottom).
+static llvm::Value* codegenBuiltinMethod(CodegenContext& ctx, MethodCallExprAST& node);
+static llvm::Value* codegenStrFromC(CodegenContext& ctx, CallExprAST& node);
+
 // TYP-12: build the {ptr, len} view over a statically-sized array (zero-copy;
 // the elements are never duplicated). Array operands already yield the
 // address of their first element.
@@ -191,7 +195,10 @@ llvm::Value* FloatExprAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* CharExprAST::codegen(CodegenContext& ctx) {
-    return llvm::ConstantInt::get(ctx.getContext(), llvm::APInt(8, value));
+    // P1-06: char is signed on x86-64 — a byte literal >= 0x80 must be
+    // truncated to 8 bits, not sign-extended into the APInt (assert crash).
+    return llvm::ConstantInt::get(ctx.getContext(),
+        llvm::APInt(8, static_cast<unsigned char>(value)));
 }
 
 llvm::Value* StringExprAST::codegen(CodegenContext& ctx) {
@@ -531,6 +538,10 @@ static std::string nodeSourcePrefix(const ASTNode& node) {
 }
 
 llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
+    // P1-06 (FMT-04): builtin str_from_c — strlen + {ptr, len} assembly.
+    if (isStrFromC) {
+        return codegenStrFromC(ctx, *this);
+    }
     // Builtin `assert(cond)`: on a false condition, report the call site and
     // abort; on success, fall through. Never silently recovers.
     if (isAssert) {
@@ -730,6 +741,10 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
 
 llvm::Value* MethodCallExprAST::codegen(CodegenContext& ctx) {
     if (auto* ct = ctConstantOrNull(ctx, *this)) return ct;
+    // P1-06: builtin str/string methods lower through their own path.
+    if (builtinMethod != BuiltinMethod::None) {
+        return codegenBuiltinMethod(ctx, *this);
+    }
     llvm::Value* objVal = object->codegen(ctx);
     if (!objVal) return nullptr;
 
@@ -1233,4 +1248,108 @@ llvm::Value* SizeofExprAST::codegen(CodegenContext& ctx) {
 llvm::Value* InitializerListExprAST::codegen(CodegenContext& ctx) {
     if (initializers.empty()) return nullptr;
     return initializers.back()->codegen(ctx);
+}
+
+// ===== P1-06 (FMT-01/02/04): builtin str/string method lowering =====
+
+// Materialize the receiver as an rvalue `str`/`string` struct value.
+static llvm::Value* builtinObjectValue(CodegenContext& ctx, MethodCallExprAST& node) {
+    llvm::Value* objVal = node.object->codegen(ctx);
+    if (!objVal) return nullptr;
+    if (node.object->isLValue) objVal = ctx.loadValue(objVal, node.object->type);
+    return objVal;
+}
+
+static llvm::Value* codegenBuiltinMethod(CodegenContext& ctx, MethodCallExprAST& node) {
+    auto& builder = ctx.getBuilder();
+    llvm::LLVMContext& c = ctx.getContext();
+    auto* i8Ty = llvm::Type::getInt8Ty(c);
+    auto* i64Ty = llvm::Type::getInt64Ty(c);
+
+    switch (node.builtinMethod) {
+        case BuiltinMethod::StrLen: {
+            llvm::Value* obj = builtinObjectValue(ctx, node);
+            if (!obj) return nullptr;
+            return builder.CreateExtractValue(obj, 1, "str.len");
+        }
+        case BuiltinMethod::StrCharCount: {
+            // NOTE: getUtf8CharCountFn() may synthesize IR and re-point the
+            // shared builder — save/restore the caller's insertion point.
+            auto savedIP = builder.saveIP();
+            llvm::Function* cntFn = ctx.getUtf8CharCountFn();
+            builder.restoreIP(savedIP);
+            llvm::Value* obj = builtinObjectValue(ctx, node);
+            if (!obj) return nullptr;
+            llvm::Value* ptr = builder.CreateExtractValue(obj, 0, "str.ptr");
+            llvm::Value* len = builder.CreateExtractValue(obj, 1, "str.len");
+            return builder.CreateCall(cntFn, {ptr, len}, "str.count");
+        }
+        case BuiltinMethod::StrCharAt: {
+            llvm::Value* obj = builtinObjectValue(ctx, node);
+            if (!obj) return nullptr;
+            llvm::Value* ptr = builder.CreateExtractValue(obj, 0, "str.ptr");
+            llvm::Value* idx = node.args[0]->codegen(ctx);
+            if (!idx) return nullptr;
+            if (node.args[0]->isLValue) idx = ctx.loadValue(idx, node.args[0]->type);
+            idx = builder.CreateSExtOrTrunc(idx, i64Ty, "str.idx64");
+            llvm::Value* bytePtr =
+                builder.CreateGEP(i8Ty, ptr, idx, "str.bytep");
+            return builder.CreateLoad(i8Ty, bytePtr, "str.byte");
+        }
+        case BuiltinMethod::StrCharLenAt: {
+            // Same builder-hijack caveat as StrCharCount above.
+            auto savedIP = builder.saveIP();
+            llvm::Function* lenAtFn = ctx.getUtf8CharLenAtFn();
+            builder.restoreIP(savedIP);
+            llvm::Value* obj = builtinObjectValue(ctx, node);
+            if (!obj) return nullptr;
+            llvm::Value* ptr = builder.CreateExtractValue(obj, 0, "str.ptr");
+            llvm::Value* idx = node.args[0]->codegen(ctx);
+            if (!idx) return nullptr;
+            if (node.args[0]->isLValue) idx = ctx.loadValue(idx, node.args[0]->type);
+            idx = builder.CreateSExtOrTrunc(idx, i64Ty, "str.idx64");
+            return builder.CreateCall(lenAtFn, {ptr, idx}, "str.width");
+        }
+        case BuiltinMethod::StringNew:
+        case BuiltinMethod::StringDestroy:
+        case BuiltinMethod::StringAppend:
+        case BuiltinMethod::StringPush:
+        case BuiltinMethod::StringLen:
+        case BuiltinMethod::StringCapacity:
+            // T4: string memory/mutation methods.
+            LOGE("string builtin method not implemented yet: {}", node.methodName);
+            return nullptr;
+        case BuiltinMethod::None:
+            break;
+    }
+    return nullptr;
+}
+
+// P1-06 (FMT-04): str_from_c — strlen over the buffer (or an identity view
+// for a str argument), assembled into the canonical `str` struct.
+static llvm::Value* codegenStrFromC(CodegenContext& ctx, CallExprAST& node) {
+    auto& builder = ctx.getBuilder();
+    llvm::LLVMContext& c = ctx.getContext();
+    auto* i64Ty = llvm::Type::getInt64Ty(c);
+
+    llvm::Value* arg = node.args[0]->codegen(ctx);
+    if (!arg) return nullptr;
+    if (node.args[0]->isLValue) arg = ctx.loadValue(arg, node.args[0]->type);
+
+    Type* argTy = node.args[0]->type;
+    while (argTy && argTy->kind == TypeKind::Typedef) {
+        argTy = static_cast<TypedefType*>(argTy)->aliasedType;
+    }
+    if (argTy && argTy->kind == TypeKind::Str) {
+        return arg; // identity view
+    }
+
+    auto* strlenTy = llvm::FunctionType::get(i64Ty, {llvm::PointerType::get(c, 0)}, false);
+    llvm::FunctionCallee strlenFn =
+        ctx.getModule().getOrInsertFunction("strlen", strlenTy);
+    llvm::Value* len =
+        builder.CreateCall(strlenFn, {arg}, "strfromc.len");
+    llvm::Value* v = llvm::Constant::getNullValue(ctx.getLLVMType(TypeContext::instance().getStrType()));
+    v = builder.CreateInsertValue(v, arg, {0});
+    return builder.CreateInsertValue(v, len, {1});
 }
