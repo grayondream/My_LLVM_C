@@ -2275,3 +2275,18 @@ TEST_F(SemanticAnalyzerTest, StrFromCLiteralValidation) {
     }
     EXPECT_TRUE(found);
 }
+
+// P1-06 / T6: DEC-18 semantics are TYPE-POSITION-ONLY — `str`/`string`/
+// `optional`/`result` stay ordinary identifiers in value positions (same
+// precedent as LegacyKeywordNamesAreUsableAsIdentifiers), and the builtins
+// still recognize them in type positions.
+TEST_F(SemanticAnalyzerTest, TypeNamesRemainUsableAsIdentifiers) {
+    EXPECT_TRUE(analyzeFullyOk("int32 main() { int32 str = 1; return str; }"));
+    EXPECT_TRUE(analyzeFullyOk("int32 main() { int32 string = 1; return string; }"));
+    EXPECT_TRUE(analyzeFullyOk("str g = \"x\"; int32 main() { string l = string.new(\"y\"); return 0; }"));
+}
+
+// P1-06 / T6: the empty literal is a valid (zero-length) str.
+TEST_F(SemanticAnalyzerTest, EmptyLiteralIsStr) {
+    EXPECT_TRUE(analyzeFullyOk("int32 main() { str s = \"\"; if (s.len() != 0) { return 1; } return 0; }"));
+}

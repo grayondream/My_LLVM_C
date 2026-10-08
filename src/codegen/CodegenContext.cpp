@@ -369,6 +369,12 @@ llvm::Value* CodegenContext::castValue(llvm::Value* val, Type* fromAST, llvm::Ty
         return builder.CreateInsertValue(v, len, {1});
     }
 
+    // P1-06: string -> char* direct byte view — extract the pointer field.
+    if (fromAST->kind == TypeKind::String && targetLLVMType->isPointerTy()) {
+        llvm::Value* ptr = builder.CreateExtractValue(val, 0, "strview.ptr");
+        return castValue(ptr, targetLLVMType);
+    }
+
     // P1-06 (FMT-03): str -> char* implicit byte view — extract the pointer
     // field (the length is dropped; the buffer is guaranteed NUL-free UTF-8,
     // callers needing C-string semantics own that conversion).

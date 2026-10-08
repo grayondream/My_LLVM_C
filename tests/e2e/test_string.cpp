@@ -370,3 +370,46 @@ TEST_F(StringE2E, StrFromCRuntimeValidExec) {
         }
     )", "str19.c"), 0);
 }
+
+// ---- T6: 硬化与边界（Review Focus pin）----
+
+TEST_F(StringE2E, DoubleDestroySafe) {
+    // destroy() 清零字段 → 第二次 destroy 走 free(NULL)，不崩。
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = string.new("data");
+            s.destroy();
+            s.destroy();
+            if (s.len() != 0) { return 1; }
+            if (s.capacity() != 0) { return 2; }
+            return 0;
+        }
+    )", "str21.c"), 0);
+}
+
+TEST_F(StringE2E, EmptyStringInvariants) {
+    // 空串：len 0、cap >= 1（ptr 保证非空，str→char* 视图安全）。
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = string.new("");
+            if (s.len() != 0) { return 1; }
+            if (s.capacity() < 1) { return 2; }
+            char* p = s;
+            // malloc 不清零：p[0] 内容未定义。不变量 = p 非空（cap>=1 保证）。
+            if (p == null) { return 3; }
+            return 0;
+        }
+    )", "str22.c"), 0);
+}
+
+TEST_F(StringE2E, SubscriptCompilesWithoutBoundsCheck) {
+    // DEC-06 未决：不加运行时边界检查。只编译执行合法下标；
+    // 越界行为本测试不执行（结果未定义，DEC-06 落地时另行裁决）。
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = string.new("abc");
+            if (s[2] != 'c') { return 1; }
+            return 0;
+        }
+    )", "str23.c"), 0);
+}

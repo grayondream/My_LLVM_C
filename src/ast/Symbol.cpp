@@ -241,6 +241,9 @@ int conversionRank(Type* from, Type* to) {
 
     // P1-06 (FMT-02): string converts to a str view (non-owning).
     if (from->kind == TypeKind::String && to->kind == TypeKind::Str) return 1;
+    // P1-06: and directly to a char* byte view of its buffer.
+    if (from->kind == TypeKind::String && to->kind == TypeKind::Pointer &&
+        to->base && to->base->kind == TypeKind::Char) return 2;
 
     // Enum types are strongly typed (TYP-09 / TYP-20): enum <-> integer/float
     // and enum <-> other enum require an explicit conversion. Exact-same-enum

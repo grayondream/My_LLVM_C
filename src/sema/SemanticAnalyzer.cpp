@@ -308,6 +308,15 @@ bool SemanticAnalyzer::typesCompatible(Type* left, Type* right) const {
     // str -> string is NOT implicit (use string.new).
     if (left->kind == TypeKind::Str && right->kind == TypeKind::String)
         return true;
+    // P1-06: a string may also be viewed directly as char* (its buffer is
+    // valid; the view is non-owning either way). Both orders accepted —
+    // callers use (target, source) or (lhs, rhs); the String side is always
+    // the conversion source.
+    if ((left->kind == TypeKind::String && right->kind == TypeKind::Pointer &&
+         typesEqual(right->base, typeCtx->getChar())) ||
+        (right->kind == TypeKind::String && left->kind == TypeKind::Pointer &&
+         typesEqual(left->base, typeCtx->getChar())))
+        return true;
     if (left->kind == TypeKind::String && right->kind == TypeKind::String)
         return true;
     if (left->kind == right->kind) return true;
@@ -596,6 +605,10 @@ Type* SemanticAnalyzer::checkAssignmentTypes(Type* lhs, Type* rhs, ExprAST& node
     // P1-06 (FMT-02): string -> str implicit view. The reverse direction is
     // rejected below with the DEC-20 guidance (string.new).
     if (lhsS->kind == TypeKind::Str && rhsS->kind == TypeKind::String)
+        return lhsRaw;
+    // P1-06: string -> char* direct view (composes string->str->char*).
+    if (lhsS->kind == TypeKind::Pointer && lhsS->base &&
+        lhsS->base->kind == TypeKind::Char && rhsS->kind == TypeKind::String)
         return lhsRaw;
     // P1-06 (DEC-20): no implicit heap allocation — str/char* values do not
     // become `string`; construction is explicit.
