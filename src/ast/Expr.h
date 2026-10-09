@@ -188,6 +188,12 @@ public:
     std::vector<PrintArgKind> printArgKinds;  // one per `{}` slot
     // P1-09 (FMT-08): parsed spec per `{}` slot, parallel to printArgKinds.
     std::vector<PrintSpec> printSpecs;
+    // P1-09 (FMT-07): builtin `format(fmt, args...)`. With a literal format
+    // string, formatLiteral/formatSpecs carry the compile-time parse; a
+    // dynamic str format leaves formatLiteral empty (runtime scan).
+    bool isFormat = false;
+    std::string formatLiteral;
+    std::vector<PrintSpec> formatSpecs;
     // Set by semantic analysis when this is the builtin terminator `assert` or
     // `panic` (STD-01 / STD-27 / DEC-21). Lowered to a stderr message + abort(),
     // with the call site's file:line embedded at compile time.

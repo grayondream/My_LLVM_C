@@ -2330,3 +2330,61 @@ TEST_F(SemanticAnalyzerTest, FormatSpecDiagnosticCodes) {
     EXPECT_TRUE(analyzeFullyOk(
         "int32 main() { println(\"{:x} {:>8} {:02} {:b}\", 255, 42, 5, 5); return 0; }"));
 }
+
+// P1-09 / FMT-07/09/10/11: builtin format() -> string, shared spec pipeline.
+static std::string formatDiagId(const std::string& src) {
+    Lexer lexer("t.c", src);
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    if (!ast) return "PARSE_FAIL";
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    for (const auto& d : analyzer.getErrors()) {
+        std::string id = diagnosticId(d.code);
+        if (id == "E2020" || id == "E2021" || id == "E2022") return id;
+    }
+    return "NONE";
+}
+
+TEST_F(SemanticAnalyzerTest, BuiltinFormatSema) {
+    // Literal format string with valid args.
+    EXPECT_TRUE(analyzeFullyOk(
+        "int32 main() { string s = format(\"x={}\", 1); return 0; }"));
+    // Dynamic format string: legal, no compile-time spec checks (FMT-09).
+    EXPECT_TRUE(analyzeFullyOk(
+        "int32 main() { str f = \"{}\"; string s = format(f, 1); return 0; }"));
+    // Custom types lower through to_string (FMT-10).
+    EXPECT_TRUE(analyzeFullyOk(
+        "class C { public: char* to_string() { return \"C\"; } };"
+        "int32 main() { C c; string s = format(\"{}\", c); return 0; }"));
+    // A class without to_string cannot be formatted.
+    EXPECT_FALSE(analyzeFullyOk(
+        "class D { public: int32 x; };"
+        "int32 main() { D d; string s = format(\"{}\", d); return 0; }"));
+    // First argument must be str-typed.
+    EXPECT_FALSE(analyzeFullyOk(
+        "int32 main() { string s = format(1, 2); return 0; }"));
+    // User-defined format shadows the builtin.
+    EXPECT_TRUE(analyzeFullyOk(
+        "string format(str f, int32 v) { return string.new(f); }"
+        "int32 main() { string s = format(\"{}\", 1); return 0; }"));
+}
+
+TEST_F(SemanticAnalyzerTest, BuiltinFormatDiagnosticCodes) {
+    // E2020: placeholder/argument count mismatch (literal fmt only).
+    EXPECT_EQ(formatDiagId(
+        "int32 main() { string s = format(\"{} {}\", 1); return 0; }"), "E2020");
+    EXPECT_EQ(formatDiagId(
+        "int32 main() { string s = format(\"{}\", 1, 2); return 0; }"), "E2020");
+    // E2021: spec vs argument kind.
+    EXPECT_EQ(formatDiagId(
+        "int32 main() { string s = format(\"{:x}\", 1.5); return 0; }"), "E2021");
+    EXPECT_EQ(formatDiagId(
+        "int32 main() { string s = format(\"{:s}\", 1); return 0; }"), "E2021");
+    // E2022: malformed or excluded spec text.
+    EXPECT_EQ(formatDiagId(
+        "int32 main() { string s = format(\"{:d}\", 1); return 0; }"), "E2022");
+    EXPECT_EQ(formatDiagId(
+        "int32 main() { string s = format(\"{:z}\", 1); return 0; }"), "E2022");
+}

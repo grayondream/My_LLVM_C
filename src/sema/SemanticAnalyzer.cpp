@@ -1803,8 +1803,81 @@ bool SemanticAnalyzer::tryAnalyzePrintCall(CallExprAST& node) {
     return true;
 }
 
-bool SemanticAnalyzer::tryAnalyzeAssertCall(CallExprAST& node) {
-    node.type = typeCtx->getVoid();
+// P1-09 (FMT-07/09/10/11): builtin `format(fmt, args...) -> string`. The
+// first argument is a str (literal or dynamic); literal formats get the full
+// compile-time spec/arity checks, dynamic formats only classify their
+// arguments (runtime contract documented in stdlib.md).
+bool SemanticAnalyzer::tryAnalyzeFormatCall(CallExprAST& node) {
+    node.type = nullptr;
+    node.isLValue = false;
+
+    if (node.args.empty()) {
+        emitError("'format' requires a format string argument", node);
+        return true;
+    }
+
+    Type* fmtType = getExprType(*node.args[0]);
+    if (!fmtType) return true; // already reported
+    Type* stripped = fmtType;
+    while (stripped && stripped->kind == TypeKind::Typedef) {
+        stripped = static_cast<TypedefType*>(stripped)->aliasedType;
+    }
+    if (!stripped ||
+        (stripped->kind != TypeKind::Str && stripped->kind != TypeKind::String)) {
+        emitError("the format argument to 'format' must be a str", node);
+        return true;
+    }
+
+    std::vector<PrintArgKind> kinds;
+    kinds.reserve(node.args.size() - 1);
+    for (size_t k = 1; k < node.args.size(); ++k) {
+        Type* argType = getExprType(*node.args[k]);
+        if (!argType) return true; // already reported
+
+        PrintArgKind kind;
+        if (builtinPrintKind(argType, kind)) {
+            kinds.push_back(kind);
+            continue;
+        }
+        if (lowerToString(node, k, argType)) {
+            kinds.push_back(PrintArgKind::ToString);
+            continue;
+        }
+        emitError("cannot format value of type '" + typeToString(argType) +
+                      "' with '{}'; define a to_string for it",
+                  node);
+        return true;
+    }
+
+    node.isFormat = true;
+    node.printArgKinds = std::move(kinds);
+    node.type = typeCtx->getStringType();
+    node.isLValue = false;
+
+    if (auto* literal = dynamic_cast<StringExprAST*>(node.args[0].get())) {
+        std::string error;
+        std::vector<PrintSpec> specs;
+        PrintFormatError errKind = PrintFormatError::None;
+        std::string out; // format() assembles at codegen; only validate here.
+        if (!buildPrintFormat(literal->value, node.printArgKinds, /*newline=*/false,
+                              out, error, &specs, &errKind)) {
+            DiagnosticCode code = DiagnosticCode::None;
+            switch (errKind) {
+                case PrintFormatError::ArgCount:  code = DiagnosticCode::SemFormatArgCount;  break;
+                case PrintFormatError::SpecType:  code = DiagnosticCode::SemFormatSpecType;  break;
+                case PrintFormatError::SpecSyntax: code = DiagnosticCode::SemFormatSpecSyntax; break;
+                case PrintFormatError::None: break;
+            }
+            emitError(code, error, node);
+            return true;
+        }
+        node.formatLiteral = literal->value;
+        node.formatSpecs = std::move(specs);
+    }
+    return true;
+}
+
+bool SemanticAnalyzer::tryAnalyzeAssertCall(CallExprAST& node) {    node.type = typeCtx->getVoid();
     node.isLValue = false;
     if (node.args.size() != 1) {
         emitError("'assert' takes exactly one condition", node);
@@ -2082,6 +2155,16 @@ void SemanticAnalyzer::visit(CallExprAST& node) {
         OverloadSet* userDefined = currentScope->lookupOverload(node.callee);
         if (!userDefined || userDefined->empty()) {
             tryAnalyzePrintCall(node);
+            return;
+        }
+    }
+
+    // P1-09 (FMT-07): builtin `format(fmt, args...) -> string` (only when the
+    // user has not declared it). Shares print's spec/argument pipeline.
+    if (node.callee == "format") {
+        OverloadSet* userDefined = currentScope->lookupOverload(node.callee);
+        if (!userDefined || userDefined->empty()) {
+            tryAnalyzeFormatCall(node);
             return;
         }
     }
