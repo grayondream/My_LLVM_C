@@ -612,3 +612,12 @@
 - 验证：全量 ctest 1123/1123 绿（基线 1077 + 新增 46）；每任务 RED→GREEN 全程亲见失败。
 - 涉及：`src/ast/{Type,Expr,Symbol,PrintFormat}.{h,cpp}`、`src/frontend/Parser.cpp`、`src/sema/{SemanticAnalyzer,CompileTimeEvaluator,Diagnostic}.{h,cpp}`、`src/codegen/CodegenContext.{h,cpp}`、`src/support/Utf8.{h,cpp}`（新）、`tests/e2e/test_string.cpp`（新）。
 - 遗留：format（FMT-06~09）与 STD-10 另轮；终审待派。
+
+## 2026-10-09 20:41 — 终审修复轮复审（commit 3f17eb7）
+- 复审四个修复（只读验证，工作区 HEAD = 3f17eb7，构建最新）：
+  - C1（typesCompatible 单向 str↔char*）：已修。`str s = p;` 与 `return p;` 被拒，`char* p = s;` 仍过；函数参数路径经 conversionRank 未动。测试 CharPointerToStrStillExplicit / LiteralToCharPointer / StrFromCAcceptsCharPointer 3/3 绿。
+  - I1（str ==/!= 条件 memcmp）：已修。condBr + PHI 结构正确（lenEq→cmpBB memcmp→doneBB；不等→doneBB 常量 false；Ne 取反），Eq/Ne 均正确。
+  - I2（F5..F7 拒绝）：已修。实证：F5 80 80 80 00 缓冲经 str_from_c → "panic: invalid UTF-8 sequence" + abort（exit 134）；F0 9F 8E 89（🎉）→ exit 0。IR 中 f4bound = !is4 || lead<=0xF4 就位。
+  - I3（append 自别名）：已修（覆盖语言可表达的别名形态）。谓词 sptr∈[ptr,ptr+cap)（UGE/ULT GEP），自别名后重投影 ptr2 + memmove；非别名仍走 sptr。测试 AppendSelfAlias/AppendExec/AppendGrowthExec/AppendAcceptsString 4/4 绿。残余：若未来引入带偏移的 str 子视图（s[k..]），重投影会丢偏移——当前语言无此构造，不算缺陷。
+- 验证：目标 gtest 7/7 绿；全量 ctest -j4：1123/1125，2 个 ModuleVisibility 失败为并行 LLJIT 抖动（隔离重跑均过，与已知 flaky 同类）；ConstexprFunctionE2E 2 个为源码内 GTEST_SKIP（既有遗留）。
+- 结论：通过。新引入问题：无阻塞项；轻微不对称——三元分支 `cond ? str : char*` 现被拒（`? char* : str` 可过），系单向规则的连带效应，可接受。
