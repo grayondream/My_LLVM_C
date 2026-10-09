@@ -288,6 +288,16 @@ llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
             llvm::Value* lenL = builder.CreateExtractValue(lhs, 1, "strlen.l");
             llvm::Value* lenR = builder.CreateExtractValue(rhs, 1, "strlen.r");
             llvm::Value* lenEq = builder.CreateICmpEQ(lenL, lenR, "strlen.eq");
+            // Lengths differ → Eq false / Ne true, and memcmp must NOT run
+            // (select does not short-circuit: it would read past the shorter
+            // view — final review I1). Branch instead.
+            llvm::Function* fn = builder.GetInsertBlock()->getParent();
+            llvm::BasicBlock* condBB = builder.GetInsertBlock();
+            llvm::BasicBlock* cmpBB = llvm::BasicBlock::Create(c, "str.cmp", fn);
+            llvm::BasicBlock* doneBB = llvm::BasicBlock::Create(c, "str.done", fn);
+            builder.CreateCondBr(lenEq, cmpBB, doneBB);
+
+            builder.SetInsertPoint(cmpBB);
             llvm::Value* ptrL = builder.CreateExtractValue(lhs, 0, "strptr.l");
             llvm::Value* ptrR = builder.CreateExtractValue(rhs, 0, "strptr.r");
             llvm::FunctionType* memcmpTy = llvm::FunctionType::get(
@@ -300,11 +310,14 @@ llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
             llvm::Value* bytesEq = builder.CreateICmpEQ(
                 builder.CreateCall(memcmpFn, {ptrL, ptrR, lenL}, "memcmp"),
                 llvm::ConstantInt::get(llvm::Type::getInt32Ty(c), 0), "bytes.eq");
-            // Lengths differ → Eq false, Ne true; memcmp must not run
-            // (reading past the shorter view would touch foreign memory).
-            llvm::Value* eq = builder.CreateSelect(lenEq, bytesEq,
-                llvm::ConstantInt::getFalse(c), "str.eq");
-            return op == BinaryOp::Eq ? eq : builder.CreateNot(eq, "str.ne");
+            builder.CreateBr(doneBB);
+
+            builder.SetInsertPoint(doneBB);
+            auto* eq = builder.CreatePHI(llvm::Type::getInt1Ty(c), 2, "str.eq");
+            eq->addIncoming(llvm::ConstantInt::getFalse(c), condBB);
+            eq->addIncoming(bytesEq, cmpBB);
+            return op == BinaryOp::Eq ? static_cast<llvm::Value*>(eq)
+                                      : builder.CreateNot(eq, "str.ne");
         }
     }
 
@@ -1433,7 +1446,7 @@ static llvm::Value* codegenStringMethod(CodegenContext& ctx, MethodCallExprAST& 
         case BuiltinMethod::StringAppend: {
             auto savedIP = builder.saveIP();
             auto reallocFn = declareLibcFn(ctx, "realloc", ptrTy, {ptrTy, i64Ty});
-            auto memcpyFn = declareLibcFn(ctx, "memcpy", ptrTy, {ptrTy, ptrTy, i64Ty});
+            auto memmoveFn = declareLibcFn(ctx, "memmove", ptrTy, {ptrTy, ptrTy, i64Ty});
             builder.restoreIP(savedIP);
             llvm::Value* addr = builtinObjectAddr(ctx, node);
             if (!addr) return nullptr;
@@ -1470,7 +1483,17 @@ static llvm::Value* codegenStringMethod(CodegenContext& ctx, MethodCallExprAST& 
             cap2->addIncoming(grown, growBB);
 
             llvm::Value* dst = builder.CreateGEP(i8Ty, ptr2, len, "append.dst");
-            builder.CreateCall(memcpyFn, {dst, sptr, slen});
+            // 终审 I3: the source view may alias the receiver's own buffer
+            // (`s.append(s)`, or any view into it). After a moving realloc
+            // the old pointer is dangling — re-project a self-aliased source
+            // onto the (content-preserving) realloc result, and use memmove
+            // for the (now possible) overlap with dst.
+            llvm::Value* capEnd = builder.CreateGEP(i8Ty, ptr, cap, "append.cepend");
+            llvm::Value* selfAlias = builder.CreateAnd(
+                builder.CreateICmpUGE(sptr, ptr, "append.alias1"),
+                builder.CreateICmpULT(sptr, capEnd, "append.alias2"), "append.alias");
+            llvm::Value* src = builder.CreateSelect(selfAlias, ptr2, sptr, "append.src");
+            builder.CreateCall(memmoveFn, {dst, src, slen});
             llvm::Value* v2 = llvm::Constant::getNullValue(strLLVM);
             v2 = builder.CreateInsertValue(v2, ptr2, {0});
             v2 = builder.CreateInsertValue(v2, need, {1});

@@ -816,14 +816,17 @@ llvm::Function* CodegenContext::getUtf8ValidateFn() {
         builder.CreateICmpUGE(b, llvm::ConstantInt::get(i8Ty, 0x90)));
     auto* f4ok = builder.CreateOr(builder.CreateICmpNE(lead, llvm::ConstantInt::get(i8Ty, 0xF4)),
         builder.CreateICmpULE(b, llvm::ConstantInt::get(i8Ty, 0x8F)));
-    // C0/C1 are 2-byte overlong prefixes.
+    // C0/C1 are 2-byte overlong prefixes; F5..F7 encode > U+10FFFF.
     auto* c2ok = builder.CreateOr(builder.CreateNot(is2),
         builder.CreateICmpUGE(lead, llvm::ConstantInt::get(i8Ty, 0xC2)));
+    auto* f4bound = builder.CreateOr(builder.CreateNot(is4),
+        builder.CreateICmpULE(lead, llvm::ConstantInt::get(i8Ty, 0xF4)));
     auto* firstOk = builder.CreateOr(
         builder.CreateNot(kIs1),
         builder.CreateAnd(
             builder.CreateAnd(e0ok, edok),
-            builder.CreateAnd(f0ok, builder.CreateAnd(f4ok, c2ok))), "v.firstok");
+            builder.CreateAnd(f0ok, builder.CreateAnd(f4ok, builder.CreateAnd(c2ok, f4bound)))),
+        "v.firstok");
     auto* byteOk = builder.CreateAnd(builder.CreateAnd(have, inCont), firstOk, "v.byteok");
     builder.CreateCondBr(byteOk, contCheck, bad);
 

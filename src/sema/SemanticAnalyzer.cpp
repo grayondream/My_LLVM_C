@@ -295,12 +295,14 @@ bool SemanticAnalyzer::typesCompatible(Type* left, Type* right) const {
         return typesEqual(left, right);
     // P1-06 (FMT-03): str is a byte view — implicit str -> char* is allowed
     // (drops the UTF-8 guarantee and the length). char* -> str is NOT
-    // implicit (length/UTF-8 cannot be recovered; use the str_from_c builtin).
-    // Both orders accepted: callers use (target, source) or (lhs, rhs).
-    if ((left->kind == TypeKind::Str && right->kind == TypeKind::Pointer &&
-         typesEqual(right->base, typeCtx->getChar())) ||
-        (right->kind == TypeKind::Str && left->kind == TypeKind::Pointer &&
-         typesEqual(left->base, typeCtx->getChar())))
+    // implicit (length/UTF-8 cannot be recovered; use the str_from_c
+    // builtin). ONE direction only: left is the conversion TARGET, right the
+    // source — callers (VarDecl init, return, init-lists) pass
+    // (target, source); a symmetric rule silently admitted `str s = p;`
+    // with an uninitialized length field (final review C1). The reverse
+    // direction falls through to the final `return false`.
+    if (left->kind == TypeKind::Pointer && right->kind == TypeKind::Str &&
+        typesEqual(left->base, typeCtx->getChar()))
         return true;
     if (left->kind == TypeKind::Str && right->kind == TypeKind::Str)
         return true;

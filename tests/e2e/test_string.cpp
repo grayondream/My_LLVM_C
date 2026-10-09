@@ -413,3 +413,16 @@ TEST_F(StringE2E, SubscriptCompilesWithoutBoundsCheck) {
         }
     )", "str23.c"), 0);
 }
+
+// 终审 I3（修复轮守卫）：自别名 append —— 源缓冲区可能与接收者相同。
+TEST_F(StringE2E, AppendSelfAlias) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = string.new("ab");
+            s.append(s);
+            if (s.len() != 4) { return 1; }
+            if (s[2] != 'a' || s[3] != 'b') { return 2; }
+            return 0;
+        }
+    )", "str24.c"), 0);
+}

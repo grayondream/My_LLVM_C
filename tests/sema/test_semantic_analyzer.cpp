@@ -2290,3 +2290,12 @@ TEST_F(SemanticAnalyzerTest, TypeNamesRemainUsableAsIdentifiers) {
 TEST_F(SemanticAnalyzerTest, EmptyLiteralIsStr) {
     EXPECT_TRUE(analyzeFullyOk("int32 main() { str s = \"\"; if (s.len() != 0) { return 1; } return 0; }"));
 }
+
+// 终审 C1（修复轮）：char* -> str 不得经初始化/return 隐式转换（spec §1.4：
+// 仅经 str_from_c）。双向规则曾放行并产生垃圾 len。
+TEST_F(SemanticAnalyzerTest, CharPointerToStrStillExplicit) {
+    EXPECT_FALSE(analyzeFullyOk(
+        "int32 main() { char* p = \"abc\"; str s = p; return 0; }"));
+    EXPECT_FALSE(analyzeFullyOk(
+        "str f(char* p) { return p; }\nint32 main() { return 0; }"));
+}
