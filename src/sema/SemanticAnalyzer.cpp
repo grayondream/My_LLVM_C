@@ -1778,8 +1778,18 @@ bool SemanticAnalyzer::tryAnalyzePrintCall(CallExprAST& node) {
     }
 
     std::string format, error;
-    if (!buildPrintFormat(literal->value, kinds, newline, format, error)) {
-        emitError(error, node);
+    std::vector<PrintSpec> specs;
+    PrintFormatError errKind = PrintFormatError::None;
+    if (!buildPrintFormat(literal->value, kinds, newline, format, error,
+                          &specs, &errKind)) {
+        DiagnosticCode code = DiagnosticCode::None;
+        switch (errKind) {
+            case PrintFormatError::ArgCount:  code = DiagnosticCode::SemFormatArgCount;  break;
+            case PrintFormatError::SpecType:  code = DiagnosticCode::SemFormatSpecType;  break;
+            case PrintFormatError::SpecSyntax: code = DiagnosticCode::SemFormatSpecSyntax; break;
+            case PrintFormatError::None: break;
+        }
+        emitError(code, error, node);
         return true;
     }
 
@@ -1787,6 +1797,7 @@ bool SemanticAnalyzer::tryAnalyzePrintCall(CallExprAST& node) {
     node.printNewline = newline;
     node.printCFormat = std::move(format);
     node.printArgKinds = std::move(kinds);
+    node.printSpecs = std::move(specs);
     node.type = typeCtx->getVoid();
     node.isLValue = false;
     return true;

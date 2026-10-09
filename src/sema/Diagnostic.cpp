@@ -28,6 +28,9 @@ const DiagnosticInfo kRegistry[] = {
     {DiagnosticCode::SemAlignNotPowerOfTwo,       "E2013", "align must be a power of two"},
     {DiagnosticCode::SemAnnotationArgNotConstant, "E2014", "annotation argument not constant"},
     {DiagnosticCode::SemInvalidUtf8,              "E2015", "invalid UTF-8 sequence"},
+    {DiagnosticCode::SemFormatArgCount,           "E2020", "format argument count mismatch"},
+    {DiagnosticCode::SemFormatSpecType,           "E2021", "format spec does not match argument type"},
+    {DiagnosticCode::SemFormatSpecSyntax,         "E2022", "invalid format spec"},
 
     {DiagnosticCode::WarnUninitializedVariable,  "W3001", "variable may be uninitialized"},
     {DiagnosticCode::WarnUnusedVariable,         "W3002", "unused variable"},

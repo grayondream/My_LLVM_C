@@ -9,73 +9,220 @@ Type* stripTypedefs(Type* type) {
     return type;
 }
 
-// Map one placeholder to a printf conversion. `spec` is the text after ':'
-// inside the braces, empty for the default conversion.
-std::string conversionFor(PrintArgKind kind, const std::string& spec, std::string& error) {
+// Default conversion for a `{}` placeholder (no spec text).
+static std::string defaultConversionFor(PrintArgKind kind) {
     const char* def = "d";
-    bool isFloat = false;
-    bool is64 = false;
-    bool acceptsSpec = true;
-
     switch (kind) {
         case PrintArgKind::Int32:  def = "d";   break;
-        case PrintArgKind::Int64:  def = "lld"; is64 = true; break;
+        case PrintArgKind::Int64:  def = "lld"; break;
         case PrintArgKind::UInt32: def = "u";   break;
-        case PrintArgKind::UInt64: def = "llu"; is64 = true; break;
-        case PrintArgKind::Char:   def = "c";   acceptsSpec = false; break;
-        case PrintArgKind::Float:  def = "g";   isFloat = true; break;
-        case PrintArgKind::CString: def = "s";  acceptsSpec = false; break;
-        case PrintArgKind::Str:     def = ".*s"; acceptsSpec = false; break;
-        case PrintArgKind::Pointer: def = "p";  acceptsSpec = false; break;
-        case PrintArgKind::Bool:    def = "s";  acceptsSpec = false; break;
-        case PrintArgKind::ToString: def = "s"; acceptsSpec = false; break;
+        case PrintArgKind::UInt64: def = "llu"; break;
+        case PrintArgKind::Char:   def = "c";   break;
+        case PrintArgKind::Float:  def = "g";   break;
+        case PrintArgKind::CString: def = "s";  break;
+        case PrintArgKind::Str:     def = ".*s"; break;
+        case PrintArgKind::Pointer: def = "p";  break;
+        case PrintArgKind::Bool:    def = "s";  break;
+        case PrintArgKind::ToString: def = "s"; break;
     }
+    return std::string("%") + def;
+}
+} // namespace
 
-    if (spec.empty()) {
-        return std::string("%") + def;
-    }
-    if (!acceptsSpec) {
-        error = "format spec is not supported for this argument type";
-        return "";
-    }
-
-    const char conv = spec.back();
-    const bool validConv = isFloat
-        ? (conv == 'f' || conv == 'F' || conv == 'e' || conv == 'E' ||
-           conv == 'g' || conv == 'G' || conv == 'a' || conv == 'A')
-        : (conv == 'd' || conv == 'i' || conv == 'u' || conv == 'o' ||
-           conv == 'x' || conv == 'X');
-    if (!validConv) {
+bool parsePrintSpec(const std::string& spec, PrintSpec& out, std::string& error) {
+    const auto syntaxError = [&spec, &error]() {
         error = "invalid format spec ':" + spec + "'";
-        return "";
+        return false;
+    };
+
+    out = PrintSpec{};
+    size_t i = 0;
+
+    // [fill]align? — fill only applies when directly followed by an align char
+    // (and never conflicts with the '0' flag or digits).
+    if (i < spec.size() &&
+        (spec[i] == '<' || spec[i] == '>' || spec[i] == '^')) {
+        out.align = spec[i];
+        ++i;
+    } else if (i + 1 < spec.size() && spec[i] != '{' && spec[i] != '}' &&
+               spec[i] != ':' && !(spec[i] >= '0' && spec[i] <= '9') &&
+               (spec[i + 1] == '<' || spec[i + 1] == '>' || spec[i + 1] == '^')) {
+        out.fill = spec[i];
+        out.align = spec[i + 1];
+        i += 2;
     }
 
-    for (size_t i = 0; i + 1 < spec.size(); ++i) {
-        const char c = spec[i];
-        const bool ok = c == '+' || c == '-' || c == ' ' || c == '#' || c == '0' ||
-                        c == '.' || c == '*' || (c >= '0' && c <= '9') ||
-                        c == 'h' || c == 'l' || c == 'L' || c == 'z' || c == 'j' || c == 't';
-        if (!ok) {
-            error = "invalid format spec ':" + spec + "'";
-            return "";
-        }
+    // sign?
+    if (i < spec.size() &&
+        (spec[i] == '+' || spec[i] == '-' || spec[i] == ' ')) {
+        out.sign = spec[i];
+        ++i;
     }
 
-    std::string s = spec;
-    // 64-bit values need a length modifier matching the promoted argument.
-    if (is64) {
-        const bool hasLength = s.find('l') != std::string::npos ||
-                               s.find('z') != std::string::npos ||
-                               s.find('j') != std::string::npos ||
-                               s.find('t') != std::string::npos;
-        if (!hasLength) {
-            s.insert(s.size() - 1, "ll");
+    // '0'? (zero fill)
+    if (i < spec.size() && spec[i] == '0') {
+        out.zero = true;
+        ++i;
+    }
+
+    // width?
+    const size_t wStart = i;
+    while (i < spec.size() && spec[i] >= '0' && spec[i] <= '9') ++i;
+    if (i > wStart) out.width = std::stoi(spec.substr(wStart, i - wStart));
+
+    // ('.' precision)?
+    if (i < spec.size() && spec[i] == '.') {
+        ++i;
+        const size_t pStart = i;
+        while (i < spec.size() && spec[i] >= '0' && spec[i] <= '9') ++i;
+        if (i == pStart) return syntaxError();
+        out.precision = std::stoi(spec.substr(pStart, i - pStart));
+    }
+
+    // '0' fill conflicts with left/center alignment (checked before the type
+    // position so an align character here reports the real conflict).
+    if (out.zero && i < spec.size() &&
+        (spec[i] == '<' || spec[i] == '^')) {
+        error = "zero fill requires right alignment";
+        return false;
+    }
+
+    // type?
+    if (i < spec.size()) {
+        const char t = spec[i];
+        if (t == 'x' || t == 'X' || t == 'o' || t == 'b' || t == 'f' ||
+            t == 'e' || t == 's') {
+            out.type = t;
+            ++i;
+        } else {
+            return syntaxError();
         }
     }
-    return "%" + s;
+    if (i != spec.size()) return syntaxError();
+
+    // Cross-field conflicts (SpecSyntax).
+    if (out.zero) {
+        if (out.align == '<' || out.align == '^') {
+            error = "zero fill requires right alignment";
+            return false;
+        }
+        if (out.width == 0) {
+            error = "'0' fill requires a width";
+            return false;
+        }
+    }
+    if (out.align != 0 && out.width == 0) {
+        error = "alignment requires a width";
+        return false;
+    }
+    if (out.width > 200 || out.precision > 200) {
+        error = "format spec width/precision too large";
+        return false;
+    }
+    return true;
 }
 
-} // namespace
+bool specToPrintfConversion(PrintArgKind kind, const PrintSpec& spec,
+                            std::string& outConv, bool& outNeedsRender,
+                            std::string& error) {
+    outConv.clear();
+    outNeedsRender = false;
+    error.clear();
+
+    const bool isInt = kind == PrintArgKind::Int32 ||
+                       kind == PrintArgKind::Int64 ||
+                       kind == PrintArgKind::UInt32 ||
+                       kind == PrintArgKind::UInt64;
+    const bool is64 =
+        kind == PrintArgKind::Int64 || kind == PrintArgKind::UInt64;
+    const bool isFloat = kind == PrintArgKind::Float;
+    const bool isStr = kind == PrintArgKind::Str;
+    const bool isStrLike =
+        isStr || kind == PrintArgKind::Bool || kind == PrintArgKind::ToString;
+
+    // Char literals, char* buffers and raw pointers take no spec at all.
+    if (kind == PrintArgKind::Char || kind == PrintArgKind::CString ||
+        kind == PrintArgKind::Pointer) {
+        error = "format spec is not supported for this argument type";
+        return false;
+    }
+
+    // Type legality against the kind.
+    if (spec.type) {
+        const bool okType =
+            (isInt && (spec.type == 'x' || spec.type == 'X' ||
+                       spec.type == 'o' || spec.type == 'b')) ||
+            (isFloat && (spec.type == 'f' || spec.type == 'e')) ||
+            (isStrLike && spec.type == 's');
+        if (!okType) {
+            error = "format spec is not supported for this argument type";
+            return false;
+        }
+    }
+
+    // Precision is a floating-point-only component.
+    if (spec.precision >= 0 && !isFloat) {
+        error = "format spec is not supported for this argument type";
+        return false;
+    }
+
+    // '0' fill applies to numeric conversions only.
+    if (spec.zero && !isInt && !isFloat) {
+        error = "format spec is not supported for this argument type";
+        return false;
+    }
+
+    // Centering or a custom fill character is not expressible in printf:
+    // the caller renders the bare value and pads it.
+    if (spec.align == '^' || (spec.fill != ' ' && spec.fill != '\0')) {
+        outNeedsRender = true;
+        outConv = "%s";
+        return true;
+    }
+
+    std::string flags;
+    if (spec.sign == '+') flags += '+';
+    else if (spec.sign == ' ') flags += ' ';
+    if (spec.zero) flags += '0';
+    // Strings default to left alignment when a width is present; numbers
+    // default to printf's right alignment.
+    const bool leftAlign =
+        spec.align == '<' ||
+        (spec.align == 0 && spec.width > 0 && isStrLike);
+    if (leftAlign) flags += '-';
+
+    std::string tail;
+    if (isInt) {
+        if (spec.type) {
+            tail = std::string(is64 ? "ll" : "");
+            tail += spec.type;
+        } else {
+            tail = kind == PrintArgKind::Int32   ? "d"
+                   : kind == PrintArgKind::Int64   ? "lld"
+                   : kind == PrintArgKind::UInt32  ? "u"
+                                                   : "llu";
+        }
+    } else if (isFloat) {
+        // Non-empty spec without a type infers 'f'; the empty `{}` default
+        // ('g', FMT-06) never reaches this function.
+        tail = spec.type ? std::string(1, spec.type) : "f";
+    } else if (isStr) {
+        tail = ".*s"; // two printf arguments: (int)len, ptr
+    } else {
+        tail = "s";
+    }
+
+    std::string out = "%";
+    out += flags;
+    if (spec.width > 0) out += std::to_string(spec.width);
+    if (spec.precision >= 0) {
+        out += '.';
+        out += std::to_string(spec.precision);
+    }
+    out += tail;
+    outConv = std::move(out);
+    return true;
+}
 
 bool builtinPrintKind(Type* type, PrintArgKind& outKind) {
     type = stripTypedefs(type);
@@ -102,6 +249,8 @@ bool builtinPrintKind(Type* type, PrintArgKind& outKind) {
         case TypeKind::Float128: outKind = PrintArgKind::Float;   return true;
         case TypeKind::Enum:    outKind = PrintArgKind::Int32;   return true;
         case TypeKind::Str:     outKind = PrintArgKind::Str;     return true;
+        // P1-09: `string` projects to its str view for print/format.
+        case TypeKind::String:  outKind = PrintArgKind::Str;     return true;
         case TypeKind::Pointer:
             outKind = (type->base && type->base->kind == TypeKind::Char)
                           ? PrintArgKind::CString
@@ -122,9 +271,13 @@ bool buildPrintFormat(const std::string& literal,
                       const std::vector<PrintArgKind>& kinds,
                       bool newline,
                       std::string& outFormat,
-                      std::string& error) {
+                      std::string& error,
+                      std::vector<PrintSpec>* outSpecs,
+                      PrintFormatError* errKind) {
     outFormat.clear();
     error.clear();
+    if (outSpecs) outSpecs->clear();
+    if (errKind) *errKind = PrintFormatError::None;
 
     size_t slot = 0;
     for (size_t i = 0; i < literal.size();) {
@@ -145,16 +298,35 @@ bool buildPrintFormat(const std::string& literal,
             }
             if (i >= literal.size() || literal[i] != '}') {
                 error = "unterminated '{' in print format";
+                if (errKind) *errKind = PrintFormatError::ArgCount;
                 return false;
             }
             ++i; // consume '}'
             if (slot >= kinds.size()) {
                 error = "too few arguments for print format";
+                if (errKind) *errKind = PrintFormatError::ArgCount;
                 return false;
             }
-            std::string conversion = conversionFor(kinds[slot++], spec, error);
-            if (!error.empty()) return false;
+            std::string conversion;
+            if (spec.empty()) {
+                conversion = defaultConversionFor(kinds[slot]);
+                if (outSpecs) outSpecs->push_back(PrintSpec{});
+            } else {
+                PrintSpec parsed;
+                if (!parsePrintSpec(spec, parsed, error)) {
+                    if (errKind) *errKind = PrintFormatError::SpecSyntax;
+                    return false;
+                }
+                bool needsRender = false;
+                if (!specToPrintfConversion(kinds[slot], parsed, conversion,
+                                            needsRender, error)) {
+                    if (errKind) *errKind = PrintFormatError::SpecType;
+                    return false;
+                }
+                if (outSpecs) outSpecs->push_back(parsed);
+            }
             outFormat += conversion;
+            ++slot;
         } else if (c == '}') {
             if (i + 1 < literal.size() && literal[i + 1] == '}') {
                 outFormat += '}';
@@ -162,6 +334,7 @@ bool buildPrintFormat(const std::string& literal,
                 continue;
             }
             error = "single '}' in print format; use '}}' for a literal brace";
+            if (errKind) *errKind = PrintFormatError::ArgCount;
             return false;
         } else if (c == '%') {
             outFormat += "%%";
@@ -174,6 +347,7 @@ bool buildPrintFormat(const std::string& literal,
 
     if (slot != kinds.size()) {
         error = "too many arguments for print format";
+        if (errKind) *errKind = PrintFormatError::ArgCount;
         return false;
     }
     if (newline) {

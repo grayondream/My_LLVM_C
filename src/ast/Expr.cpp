@@ -148,6 +148,86 @@ static llvm::Value* promotePrintArg(CodegenContext& ctx, llvm::Value* v, PrintAr
     }
 }
 
+// P1-09 (FMT-08): render a placeholder value into a padded, NUL-terminated
+// stack buffer for specs printf cannot express (centering or a custom fill
+// character). Returns the buffer to pass through printf's "%s". When outLen
+// is non-null it receives the padded byte count (max(rendered, width)).
+static llvm::Value* emitPaddedValue(CodegenContext& ctx, const PrintSpec& spec,
+                                    PrintArgKind kind, llvm::Value* v,
+                                    llvm::Value** outLen = nullptr) {
+    auto& builder = ctx.getBuilder();
+    llvm::LLVMContext& c = ctx.getContext();
+    auto* i8Ty = llvm::Type::getInt8Ty(c);
+    auto* i32Ty = llvm::Type::getInt32Ty(c);
+    auto* i64Ty = llvm::Type::getInt64Ty(c);
+
+    // 1) Render the bare value (no width/fill/align) into a fixed buffer.
+    //    Bounds: ints/binary <= 64 bytes; floats <= ~311 digits + precision.
+    PrintSpec bare = spec;
+    bare.align = 0;
+    bare.fill = ' ';
+    bare.width = 0;
+    llvm::Value* srcPtr = nullptr;
+    llvm::Value* len = nullptr;
+    if (kind == PrintArgKind::Str) {
+        // str/string values carry their own bytes; copy straight from the view.
+        srcPtr = builder.CreateExtractValue(v, 0, "pad.ptr");
+        len = builder.CreateExtractValue(v, 1, "pad.len");
+    } else {
+        llvm::Value* promoted = promotePrintArg(ctx, v, kind);
+        if (!promoted) return nullptr;
+        std::string bareConv, err;
+        bool needsRender = false;
+        if (!specToPrintfConversion(kind, bare, bareConv, needsRender, err)) {
+            bareConv = "%s";
+        }
+        const int bufSize = 512 + (spec.precision > 0 ? spec.precision : 0);
+        llvm::Value* buf1 = builder.CreateAlloca(
+            i8Ty, llvm::ConstantInt::get(i32Ty, bufSize), "pad.buf");
+        llvm::Value* fmt = builder.CreateGlobalString(bareConv, ".padfmt");
+        llvm::FunctionCallee snprintfFn = ctx.getModule().getOrInsertFunction(
+            "snprintf",
+            llvm::FunctionType::get(
+                i32Ty, {llvm::PointerType::get(c, 0), i64Ty,
+                        llvm::PointerType::get(c, 0)},
+                true));
+        llvm::Value* ret = builder.CreateCall(
+            snprintfFn.getFunctionType(), snprintfFn.getCallee(),
+            {buf1, llvm::ConstantInt::get(i64Ty, bufSize), fmt, promoted});
+        len = builder.CreateZExt(ret, i64Ty, "pad.len");
+        // Clamp defensively: a negative snprintf return means encoding failure.
+        len = builder.CreateSelect(
+            builder.CreateICmpSLT(ret, llvm::ConstantInt::get(i32Ty, 0)),
+            llvm::ConstantInt::get(i64Ty, 0), len, "pad.len.clamp");
+        srcPtr = buf1;
+    }
+
+    // 2) Pad into a runtime-sized buffer: memset(fill) + memcpy at offset.
+    llvm::Value* widthV =
+        llvm::ConstantInt::get(i64Ty, static_cast<uint64_t>(spec.width));
+    llvm::Value* total = builder.CreateSelect(
+        builder.CreateICmpULT(len, widthV), widthV, len, "pad.total");
+    llvm::Value* buf2 = builder.CreateAlloca(
+        i8Ty, builder.CreateAdd(total, llvm::ConstantInt::get(i64Ty, 1)),
+        "pad.out");
+    builder.CreateMemSet(buf2, llvm::ConstantInt::get(i8Ty, spec.fill), total,
+                         std::nullopt);
+    llvm::Value* off = llvm::ConstantInt::get(i64Ty, 0);
+    if (spec.align == '^') {
+        off = builder.CreateLShr(builder.CreateSub(total, len),
+                                 llvm::ConstantInt::get(i64Ty, 1), "pad.off");
+    } else if (spec.align == '>') {
+        off = builder.CreateSub(total, len, "pad.off");
+    }
+    llvm::Value* dst =
+        builder.CreateGEP(i8Ty, buf2, off, "pad.dst");
+    builder.CreateMemCpy(dst, std::nullopt, srcPtr, std::nullopt, len);
+    builder.CreateStore(llvm::ConstantInt::get(i8Ty, 0),
+                        builder.CreateGEP(i8Ty, buf2, total, "pad.nul"));
+    if (outLen) *outLen = total;
+    return buf2;
+}
+
 llvm::Value* NumberExprAST::codegen(CodegenContext& ctx) {
     // LEX-15: emit the integer constant at the literal's own width and
     // signedness (from sema), instead of always truncating to i32.
@@ -633,6 +713,19 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
             if (!v) return nullptr;
             if (args[k]->isLValue) v = ctx.loadValue(v, args[k]->type);
             if (k - 1 < printArgKinds.size()) {
+                // P1-09 (FMT-08): specs printf cannot express (centering or a
+                // custom fill) pre-render the value into a padded buffer.
+                const bool renderSlot =
+                    k - 1 < printSpecs.size() &&
+                    (printSpecs[k - 1].align == '^' ||
+                     (printSpecs[k - 1].fill != ' ' && printSpecs[k - 1].fill != '\0'));
+                if (renderSlot) {
+                    llvm::Value* padded = emitPaddedValue(
+                        ctx, printSpecs[k - 1], printArgKinds[k - 1], v);
+                    if (!padded) return nullptr;
+                    callArgs.push_back(padded);
+                    continue;
+                }
                 // P1-06 (FMT-03): str prints via `%.*s` — TWO printf
                 // arguments ((int)len, ptr); push both and skip the loop's
                 // single-value promote.

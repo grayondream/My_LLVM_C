@@ -33,6 +33,10 @@ enum class DiagnosticCode {
     SemAnnotationArgNotConstant,
     // P1-06 / FMT-04
     SemInvalidUtf8,
+    // P1-09 / FMT-11
+    SemFormatArgCount,
+    SemFormatSpecType,
+    SemFormatSpecSyntax,
 
     WarnUninitializedVariable,
     WarnUnusedVariable,

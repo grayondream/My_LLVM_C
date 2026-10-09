@@ -2299,3 +2299,34 @@ TEST_F(SemanticAnalyzerTest, CharPointerToStrStillExplicit) {
     EXPECT_FALSE(analyzeFullyOk(
         "str f(char* p) { return p; }\nint32 main() { return 0; }"));
 }
+
+// P1-09 / FMT-11: print/format spec failures carry stable codes E2020-E2022.
+TEST_F(SemanticAnalyzerTest, FormatSpecDiagnosticCodes) {
+    auto diagOf = [](const std::string& src) {
+        Lexer lexer("t.c", src);
+        auto tokens = lexer.tokenize();
+        Parser parser(tokens);
+        auto ast = parser.parse();
+        if (!ast) return std::string("PARSE_FAIL");
+        SemanticAnalyzer analyzer;
+        analyzer.analyze(*ast);
+        for (const auto& d : analyzer.getErrors()) {
+            std::string id = diagnosticId(d.code);
+            if (id == "E2020" || id == "E2021" || id == "E2022") return id;
+        }
+        return std::string("NONE");
+    };
+
+    // E2020: placeholder/argument count mismatch.
+    EXPECT_EQ(diagOf("int32 main() { println(\"{} {}\", 1); return 0; }"), "E2020");
+    EXPECT_EQ(diagOf("int32 main() { println(\"{}\", 1, 2); return 0; }"), "E2020");
+    // E2021: spec does not match the argument kind.
+    EXPECT_EQ(diagOf("int32 main() { println(\"{:x}\", 1.5); return 0; }"), "E2021");
+    EXPECT_EQ(diagOf("int32 main() { println(\"{:.2}\", 1); return 0; }"), "E2021");
+    // E2022: malformed or excluded spec text.
+    EXPECT_EQ(diagOf("int32 main() { println(\"{:d}\", 1); return 0; }"), "E2022");
+    EXPECT_EQ(diagOf("int32 main() { println(\"{:z}\", 1); return 0; }"), "E2022");
+    // Legal specs still pass.
+    EXPECT_TRUE(analyzeFullyOk(
+        "int32 main() { println(\"{:x} {:>8} {:02} {:b}\", 255, 42, 5, 5); return 0; }"));
+}

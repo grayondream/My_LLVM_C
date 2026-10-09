@@ -103,3 +103,96 @@ TEST(PrintFormatTest, SpecOnStringIsError) {
     EXPECT_EQ(build("{:x}", {PrintArgKind::CString}),
               "ERR:format spec is not supported for this argument type");
 }
+
+// ===== P1-09 (FMT-08): PrintSpec 规格集 =====
+
+TEST(PrintFormatTest, IntegerSpecsHexOctBin) {
+    EXPECT_EQ(build("{:x} {:X} {:o} {:b}",
+                    {PrintArgKind::Int32, PrintArgKind::Int32,
+                     PrintArgKind::Int32, PrintArgKind::Int32}),
+              "%x %X %o %b");
+}
+
+TEST(PrintFormatTest, BinaryNeeds64BitModifier) {
+    EXPECT_EQ(build("{:b}", {PrintArgKind::Int64}), "%llb");
+}
+
+TEST(PrintFormatTest, ZeroPadWidth) {
+    EXPECT_EQ(build("{:02}", {PrintArgKind::Int32}), "%02d");
+    EXPECT_EQ(build("{:05x}", {PrintArgKind::UInt32}), "%05x");
+}
+
+TEST(PrintFormatTest, FloatPrecisionAndExponent) {
+    EXPECT_EQ(build("{:.2f} {:.0e}", {PrintArgKind::Float, PrintArgKind::Float}),
+              "%.2f %.0e");
+}
+
+TEST(PrintFormatTest, FloatWithoutTypeInfersF) {
+    EXPECT_EQ(build("{:.2}", {PrintArgKind::Float}), "%.2f");
+}
+
+TEST(PrintFormatTest, IntegerWidthAlignment) {
+    EXPECT_EQ(build("{:>8} {:<8}", {PrintArgKind::Int32, PrintArgKind::Int32}),
+              "%8d %-8d");
+}
+
+TEST(PrintFormatTest, SignFlags) {
+    EXPECT_EQ(build("{:+}", {PrintArgKind::Int32}), "%+d");
+    EXPECT_EQ(build("{:-}", {PrintArgKind::Int32}), "%d");
+    EXPECT_EQ(build("{: 5}", {PrintArgKind::Int32}), "% 5d");
+}
+
+TEST(PrintFormatTest, StrWidthDefaultsLeft) {
+    EXPECT_EQ(build("{:6}", {PrintArgKind::Str}), "%-6.*s");
+    EXPECT_EQ(build("{:<6}", {PrintArgKind::Str}), "%-6.*s");
+    EXPECT_EQ(build("{:>6}", {PrintArgKind::Str}), "%6.*s");
+}
+
+TEST(PrintFormatTest, BoolWidth) {
+    EXPECT_EQ(build("{:>6}", {PrintArgKind::Bool}), "%6s");
+    EXPECT_EQ(build("{:6}", {PrintArgKind::Bool}), "%-6s");
+}
+
+TEST(PrintFormatTest, RenderPathOutputsS) {
+    EXPECT_EQ(build("{:*<5}", {PrintArgKind::Int32}), "%s");
+    EXPECT_EQ(build("{:^6}", {PrintArgKind::Str}), "%s");
+}
+
+TEST(PrintFormatTest, ExplicitDecimalRejected) {
+    EXPECT_EQ(build("{:d}", {PrintArgKind::Int32}),
+              "ERR:invalid format spec ':d'");
+}
+
+TEST(PrintFormatTest, SpecKindMismatches) {
+    EXPECT_EQ(build("{:x}", {PrintArgKind::Float}),
+              "ERR:format spec is not supported for this argument type");
+    EXPECT_EQ(build("{:f}", {PrintArgKind::Int32}),
+              "ERR:format spec is not supported for this argument type");
+    EXPECT_EQ(build("{:s}", {PrintArgKind::Int32}),
+              "ERR:format spec is not supported for this argument type");
+    EXPECT_EQ(build("{:.2}", {PrintArgKind::Int32}),
+              "ERR:format spec is not supported for this argument type");
+    EXPECT_EQ(build("{:.2}", {PrintArgKind::Str}),
+              "ERR:format spec is not supported for this argument type");
+    EXPECT_EQ(build("{:x}", {PrintArgKind::Bool}),
+              "ERR:format spec is not supported for this argument type");
+    EXPECT_EQ(build("{:x}", {PrintArgKind::Pointer}),
+              "ERR:format spec is not supported for this argument type");
+}
+
+TEST(PrintFormatTest, SpecSyntaxErrors) {
+    EXPECT_EQ(build("{:z}", {PrintArgKind::Int32}),
+              "ERR:invalid format spec ':z'");
+    EXPECT_EQ(build("{:0<5}", {PrintArgKind::Int32}),
+              "ERR:zero fill requires right alignment");
+    EXPECT_EQ(build("{:0}", {PrintArgKind::Int32}),
+              "ERR:'0' fill requires a width");
+    EXPECT_EQ(build("{:>}", {PrintArgKind::Int32}),
+              "ERR:alignment requires a width");
+    EXPECT_EQ(build("{:201}", {PrintArgKind::Int32}),
+              "ERR:format spec width/precision too large");
+}
+
+TEST(PrintFormatTest, EmptySpecFloatStillG) {
+    EXPECT_EQ(build("{}", {PrintArgKind::Float}), "%g");
+}
