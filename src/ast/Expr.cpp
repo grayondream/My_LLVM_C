@@ -745,6 +745,207 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
         return builder.CreateCall(printfTy, printfFn.getCallee(), callArgs);
     }
 
+    // P1-09 (FMT-07/12): builtin `format(fmt, args...) -> string`. Literal
+    // formats assemble straight-line (global segments + snprintf/padded slot
+    // buffers, one malloc, no realloc); dynamic formats render each argument
+    // with its default conversion into chunks and let smc.format.dyn scan.
+    if (isFormat) {
+        llvm::LLVMContext& c = ctx.getContext();
+        auto& builder = ctx.getBuilder();
+        auto* i8Ty = llvm::Type::getInt8Ty(c);
+        auto* i32Ty = llvm::Type::getInt32Ty(c);
+        auto* i64Ty = llvm::Type::getInt64Ty(c);
+        auto* ptrTy = llvm::PointerType::get(c, 0);
+        auto* strLLVM = ctx.getLLVMType(TypeContext::instance().getStringType());
+
+        auto mallocFn = ctx.getModule().getOrInsertFunction(
+            "malloc", llvm::FunctionType::get(ptrTy, {i64Ty}, false));
+        auto memcpyFn = ctx.getModule().getOrInsertFunction(
+            "memcpy",
+            llvm::FunctionType::get(llvm::Type::getVoidTy(c),
+                                    {ptrTy, ptrTy, i64Ty}, false));
+        auto snprintfFn = ctx.getModule().getOrInsertFunction(
+            "snprintf",
+            llvm::FunctionType::get(i32Ty, {ptrTy, i64Ty, ptrTy}, true));
+
+        // Render one scalar with `conv` into a stack buffer -> {buf, len}.
+        auto renderScalar = [&](llvm::Value* v, PrintArgKind kind,
+                                const std::string& conv,
+                                int bufSize) -> std::pair<llvm::Value*, llvm::Value*> {
+            llvm::Value* promoted = promotePrintArg(ctx, v, kind);
+            llvm::Value* buf = builder.CreateAlloca(
+                i8Ty, llvm::ConstantInt::get(i32Ty, bufSize), "fmt.buf");
+            llvm::Value* cv = builder.CreateGlobalString(conv, ".fmt.cv");
+            llvm::Value* ret = builder.CreateCall(
+                snprintfFn.getFunctionType(), snprintfFn.getCallee(),
+                {buf, llvm::ConstantInt::get(i64Ty, bufSize), cv, promoted});
+            return {buf, builder.CreateSExt(ret, i64Ty, "fmt.len")};
+        };
+        auto defaultConvText = [](PrintArgKind kind) {
+            switch (kind) {
+                case PrintArgKind::Int32:   return "d";
+                case PrintArgKind::Int64:   return "lld";
+                case PrintArgKind::UInt32:  return "u";
+                case PrintArgKind::UInt64:  return "llu";
+                case PrintArgKind::Char:    return "c";
+                case PrintArgKind::Float:   return "g";
+                case PrintArgKind::Pointer: return "p";
+                default:                    return "s";
+            }
+        };
+
+        if (!formatLiteral.empty()) {
+            std::vector<std::pair<llvm::Value*, llvm::Value*>> chunks;
+            std::string lit;
+            size_t argK = 1; // args[0] is the format string itself
+            size_t slotIdx = 0;
+            auto flushLit = [&]() {
+                if (lit.empty()) return;
+                llvm::Value* g = builder.CreateGlobalString(lit, ".fmt.seg");
+                chunks.emplace_back(g, llvm::ConstantInt::get(i64Ty, lit.size()));
+                lit.clear();
+            };
+            for (size_t i = 0; i < formatLiteral.size();) {
+                const char ch = formatLiteral[i];
+                if (ch == '{') {
+                    if (i + 1 < formatLiteral.size() && formatLiteral[i + 1] == '{') {
+                        lit += '{';
+                        i += 2;
+                        continue;
+                    }
+                    ++i; // consume '{'
+                    if (i < formatLiteral.size() && formatLiteral[i] == ':') {
+                        ++i;
+                        while (i < formatLiteral.size() && formatLiteral[i] != '}') ++i;
+                    }
+                    while (i < formatLiteral.size() && formatLiteral[i] != '}') ++i;
+                    ++i; // consume '}'
+                    flushLit();
+                    if (argK >= args.size() || slotIdx >= printArgKinds.size()) break;
+                    llvm::Value* v = args[argK]->codegen(ctx);
+                    if (!v) return nullptr;
+                    if (args[argK]->isLValue) v = ctx.loadValue(v, args[argK]->type);
+                    const PrintArgKind kind = printArgKinds[slotIdx];
+                    const PrintSpec& spec = slotIdx < formatSpecs.size()
+                                                ? formatSpecs[slotIdx]
+                                                : PrintSpec{};
+                    const bool renderSlot =
+                        spec.align == '^' ||
+                        (spec.fill != ' ' && spec.fill != '\0');
+                    if (renderSlot) {
+                        llvm::Value* len = nullptr;
+                        llvm::Value* padded =
+                            emitPaddedValue(ctx, spec, kind, v, &len);
+                        if (!padded) return nullptr;
+                        chunks.emplace_back(padded, len);
+                    } else if (kind == PrintArgKind::Str) {
+                        // Zero-copy byte fidelity (NUL-safe): the chunk IS
+                        // the argument's bytes.
+                        chunks.emplace_back(
+                            builder.CreateExtractValue(v, 0, "fmt.sptr"),
+                            builder.CreateExtractValue(v, 1, "fmt.slen"));
+                    } else {
+                        std::string conv, err;
+                        bool needsRender = false;
+                        if (!specToPrintfConversion(kind, spec, conv,
+                                                    needsRender, err)) {
+                            conv = "%s";
+                        }
+                        const int bufSize = 344 + spec.width +
+                                            (spec.precision > 0 ? spec.precision : 0);
+                        auto rendered = renderScalar(v, kind, conv, bufSize);
+                        chunks.emplace_back(rendered.first, rendered.second);
+                    }
+                    ++argK;
+                    ++slotIdx;
+                } else if (ch == '}') {
+                    if (i + 1 < formatLiteral.size() && formatLiteral[i + 1] == '}') {
+                        lit += '}';
+                        i += 2;
+                        continue;
+                    }
+                    lit += '}';
+                    ++i;
+                } else {
+                    lit += ch;
+                    ++i;
+                }
+            }
+            flushLit();
+
+            llvm::Value* total = llvm::ConstantInt::get(i64Ty, 0);
+            for (auto& chunk : chunks)
+                total = builder.CreateAdd(total, chunk.second, "fmt.t");
+            llvm::Value* cap = builder.CreateSelect(
+                builder.CreateICmpUGT(total, llvm::ConstantInt::get(i64Ty, 64)),
+                total, llvm::ConstantInt::get(i64Ty, 64), "fmt.cap");
+            llvm::Value* start = builder.CreateCall(mallocFn, {cap}, "fmt.ptr");
+            // NOTE: never chain on memcpy's return — LLVM lowers calls to the
+            // memcpy libfunc to an intrinsic DAG node whose return value is
+            // not guaranteed. Advance the destination by explicit offsets.
+            llvm::Value* off = llvm::ConstantInt::get(i64Ty, 0);
+            for (auto& chunk : chunks) {
+                llvm::Value* dst =
+                    builder.CreateGEP(i8Ty, start, off, "fmt.dst");
+                builder.CreateCall(memcpyFn, {dst, chunk.first, chunk.second});
+                off = builder.CreateAdd(off, chunk.second, "fmt.off");
+            }
+            llvm::Value* out = llvm::Constant::getNullValue(strLLVM);
+            out = builder.CreateInsertValue(out, start, {0});
+            out = builder.CreateInsertValue(out, total, {1});
+            return builder.CreateInsertValue(out, cap, {2});
+        }
+
+        // Dynamic format string: pre-render every argument with its default
+        // conversion, then let smc.format.dyn interleave (FMT-09 contract).
+        llvm::Value* fmtV = args[0]->codegen(ctx);
+        if (!fmtV) return nullptr;
+        if (args[0]->isLValue) fmtV = ctx.loadValue(fmtV, args[0]->type);
+        llvm::Value* fptr = builder.CreateExtractValue(fmtV, 0, "fmt.fptr");
+        llvm::Value* flen = builder.CreateExtractValue(fmtV, 1, "fmt.flen");
+
+        const size_t n = args.size() - 1;
+        auto* arrLen = llvm::ConstantInt::get(i32Ty, n > 0 ? n : 1);
+        auto* ptrArr = builder.CreateAlloca(ptrTy, arrLen, "fmt.ptrs");
+        auto* lenArr = builder.CreateAlloca(i64Ty, arrLen, "fmt.lens");
+        for (size_t k = 1; k < args.size(); ++k) {
+            const PrintArgKind kind = k - 1 < printArgKinds.size()
+                                          ? printArgKinds[k - 1]
+                                          : PrintArgKind::Int32;
+            llvm::Value* v = args[k]->codegen(ctx);
+            if (!v) return nullptr;
+            if (args[k]->isLValue) v = ctx.loadValue(v, args[k]->type);
+            llvm::Value* cptr;
+            llvm::Value* clen;
+            if (kind == PrintArgKind::Str) {
+                cptr = builder.CreateExtractValue(v, 0, "fmt.cptr");
+                clen = builder.CreateExtractValue(v, 1, "fmt.clen");
+            } else {
+                auto rendered = renderScalar(
+                    v, kind, std::string("%") + defaultConvText(kind), 64);
+                cptr = rendered.first;
+                clen = rendered.second;
+            }
+            builder.CreateStore(cptr, builder.CreateGEP(ptrTy, ptrArr,
+                llvm::ConstantInt::get(i64Ty, k - 1), "fmt.pp"));
+            builder.CreateStore(clen, builder.CreateGEP(i64Ty, lenArr,
+                llvm::ConstantInt::get(i64Ty, k - 1), "fmt.lp"));
+        }
+        auto savedIP = builder.saveIP();
+        llvm::Function* dynFn = ctx.getFormatDynFn();
+        builder.restoreIP(savedIP);
+        llvm::Value* res = builder.CreateCall(
+            dynFn, {fptr, flen, ptrArr, lenArr,
+                    llvm::ConstantInt::get(i64Ty, n)});
+        llvm::Value* out = llvm::Constant::getNullValue(strLLVM);
+        out = builder.CreateInsertValue(
+            out, builder.CreateExtractValue(res, 0, "fmt.rptr"), {0});
+        out = builder.CreateInsertValue(
+            out, builder.CreateExtractValue(res, 1, "fmt.rlen"), {1});
+        return builder.CreateInsertValue(
+            out, builder.CreateExtractValue(res, 2, "fmt.rcap"), {2});
+    }
+
     // Indirect call through a function-pointer variable.
     if (isIndirect) {
         llvm::Value* fpAddr = ctx.lookupVariableAddr(callee);

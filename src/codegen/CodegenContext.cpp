@@ -730,6 +730,210 @@ llvm::Function* CodegenContext::getUtf8CharCountFn() {
 }
 
 
+llvm::Function* CodegenContext::getFormatDynFn() {
+    if (formatDynFn) return formatDynFn;
+    llvm::LLVMContext& c = *context;
+    auto* i8Ty = llvm::Type::getInt8Ty(c);
+    auto* i64Ty = llvm::Type::getInt64Ty(c);
+    auto* ptrTy = llvm::PointerType::get(c, 0);
+    auto* retTy = llvm::StructType::get(c, {ptrTy, i64Ty, i64Ty});
+    auto* fnTy = llvm::FunctionType::get(
+        retTy, {ptrTy, i64Ty, ptrTy, ptrTy, i64Ty}, false);
+    auto* fn = llvm::Function::Create(fnTy, llvm::Function::InternalLinkage,
+                                      "smc.format.dyn", module.get());
+    auto mallocFn = module->getOrInsertFunction(
+        "malloc", llvm::FunctionType::get(ptrTy, {i64Ty}, false));
+
+    // Args: fmt, fmtLen, chunkPtrs(i8**), chunkLens(i64*), n.
+    auto* fmt = fn->getArg(0);
+    auto* fmtLen = fn->getArg(1);
+    auto* ptrs = fn->getArg(2);
+    auto* lens = fn->getArg(3);
+    auto* n = fn->getArg(4);
+
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(c, "entry", fn);
+    llvm::BasicBlock* sumLoop = llvm::BasicBlock::Create(c, "sum.loop", fn);
+    llvm::BasicBlock* sumBody = llvm::BasicBlock::Create(c, "sum.body", fn);
+    llvm::BasicBlock* alloc = llvm::BasicBlock::Create(c, "alloc", fn);
+    llvm::BasicBlock* scanLoop = llvm::BasicBlock::Create(c, "scan.loop", fn);
+    llvm::BasicBlock* scanBody = llvm::BasicBlock::Create(c, "scan.body", fn);
+    llvm::BasicBlock* scanNext = llvm::BasicBlock::Create(c, "scan.next", fn);
+    llvm::BasicBlock* openBrace = llvm::BasicBlock::Create(c, "open", fn);
+    llvm::BasicBlock* checkEsc = llvm::BasicBlock::Create(c, "check.esc", fn);
+    llvm::BasicBlock* escaped = llvm::BasicBlock::Create(c, "escaped", fn);
+    llvm::BasicBlock* findEntry = llvm::BasicBlock::Create(c, "find.entry", fn);
+    llvm::BasicBlock* findLoop = llvm::BasicBlock::Create(c, "find.loop", fn);
+    llvm::BasicBlock* findBody = llvm::BasicBlock::Create(c, "find.body", fn);
+    llvm::BasicBlock* consume = llvm::BasicBlock::Create(c, "consume", fn);
+    llvm::BasicBlock* copyChunk = llvm::BasicBlock::Create(c, "copy.chunk", fn);
+    llvm::BasicBlock* closeDone = llvm::BasicBlock::Create(c, "close.done", fn);
+    llvm::BasicBlock* closeBrace = llvm::BasicBlock::Create(c, "close", fn);
+    llvm::BasicBlock* closeDbl = llvm::BasicBlock::Create(c, "close.dbl", fn);
+    llvm::BasicBlock* closeSingle = llvm::BasicBlock::Create(c, "close.single", fn);
+    llvm::BasicBlock* copyByte = llvm::BasicBlock::Create(c, "copy", fn);
+    llvm::BasicBlock* done = llvm::BasicBlock::Create(c, "done", fn);
+
+    auto byteAt = [&](llvm::Value* base, llvm::Value* idx) {
+        return builder.CreateLoad(
+            i8Ty, builder.CreateGEP(i8Ty, base, idx, "fd.p"), "fd.b");
+    };
+
+    // Pass 1: upper-bound capacity = fmtLen + sum(chunkLens).
+    builder.SetInsertPoint(entry);
+    builder.CreateBr(sumLoop);
+    builder.SetInsertPoint(sumLoop);
+    auto* siPhi = builder.CreatePHI(i64Ty, 2, "fd.si");
+    auto* sumPhi = builder.CreatePHI(i64Ty, 2, "fd.sum");
+    auto* sumDone = builder.CreateICmpUGE(siPhi, n, "fd.sum.done");
+    builder.CreateCondBr(sumDone, alloc, sumBody);
+    builder.SetInsertPoint(sumBody);
+    auto* lVal = builder.CreateLoad(
+        i64Ty, builder.CreateGEP(i64Ty, lens, siPhi, "fd.len.p"), "fd.len");
+    auto* sumNext = builder.CreateAdd(sumPhi, lVal, "fd.sum.next");
+    auto* siNext = builder.CreateAdd(siPhi, llvm::ConstantInt::get(i64Ty, 1), "fd.si.next");
+    siPhi->addIncoming(llvm::ConstantInt::get(i64Ty, 0), entry);
+    sumPhi->addIncoming(fmtLen, entry);
+    siPhi->addIncoming(siNext, sumBody);
+    sumPhi->addIncoming(sumNext, sumBody);
+    builder.CreateBr(sumLoop);
+
+    // Single malloc (FMT-12): capacity is a safe upper bound, no realloc.
+    builder.SetInsertPoint(alloc);
+    auto* cap = builder.CreateAdd(sumPhi, llvm::ConstantInt::get(i64Ty, 1), "fd.cap");
+    auto* buf = builder.CreateCall(mallocFn, {cap}, "fd.buf");
+    auto* dstAddr = builder.CreateAlloca(ptrTy, nullptr, "fd.dst.addr");
+    auto* wriAddr = builder.CreateAlloca(i64Ty, nullptr, "fd.wri.addr");
+    auto* fiAddr = builder.CreateAlloca(i64Ty, nullptr, "fd.fi.addr");
+    auto* ciAddr = builder.CreateAlloca(i64Ty, nullptr, "fd.ci.addr");
+    builder.CreateStore(buf, dstAddr);
+    builder.CreateStore(llvm::ConstantInt::get(i64Ty, 0), wriAddr);
+    builder.CreateStore(llvm::ConstantInt::get(i64Ty, 0), fiAddr);
+    builder.CreateStore(llvm::ConstantInt::get(i64Ty, 0), ciAddr);
+    builder.CreateBr(scanLoop);
+
+    // Emit one literal byte, advance fi by `fiNext`, continue scanning.
+    auto emitOne = [&](llvm::Value* ch, llvm::Value* fiNext) {
+        auto* dst = builder.CreateLoad(ptrTy, dstAddr, "fd.dst");
+        builder.CreateStore(ch, dst);
+        builder.CreateStore(
+            builder.CreateGEP(i8Ty, dst, llvm::ConstantInt::get(i64Ty, 1), "fd.dst.next"),
+            dstAddr);
+        builder.CreateStore(
+            builder.CreateAdd(builder.CreateLoad(i64Ty, wriAddr, "fd.wri"),
+                              llvm::ConstantInt::get(i64Ty, 1), "fd.wri.next"),
+            wriAddr);
+        builder.CreateStore(fiNext, fiAddr);
+        builder.CreateBr(scanLoop);
+    };
+
+    builder.SetInsertPoint(scanLoop);
+    auto* fi = builder.CreateLoad(i64Ty, fiAddr, "fd.fi");
+    auto* more = builder.CreateICmpULT(fi, fmtLen, "fd.more");
+    builder.CreateCondBr(more, scanBody, done);
+
+    builder.SetInsertPoint(scanBody);
+    auto* ch = byteAt(fmt, fi);
+    auto* fi1 = builder.CreateAdd(fi, llvm::ConstantInt::get(i64Ty, 1), "fd.fi1");
+    auto* isOpen = builder.CreateICmpEQ(ch, llvm::ConstantInt::get(i8Ty, '{'), "fd.isopen");
+    builder.CreateCondBr(isOpen, openBrace, scanNext);
+    builder.SetInsertPoint(scanNext);
+    auto* isClose = builder.CreateICmpEQ(ch, llvm::ConstantInt::get(i8Ty, '}'), "fd.isclose");
+    builder.CreateCondBr(isClose, closeBrace, copyByte);
+
+    // "{{" escape.
+    builder.SetInsertPoint(openBrace);
+    auto* openHasNext = builder.CreateICmpULT(fi1, fmtLen, "fd.open.hasnext");
+    builder.CreateCondBr(openHasNext, checkEsc, findEntry);
+    builder.SetInsertPoint(checkEsc);
+    auto* nextCh = byteAt(fmt, fi1);
+    auto* isEsc = builder.CreateICmpEQ(nextCh, llvm::ConstantInt::get(i8Ty, '{'), "fd.isesc");
+    builder.CreateCondBr(isEsc, escaped, findEntry);
+
+    builder.SetInsertPoint(escaped);
+    emitOne(ch, builder.CreateAdd(fi, llvm::ConstantInt::get(i64Ty, 2), "fd.fi.esc"));
+
+    // Find the closing '}' (spec text inside dynamic placeholders is ignored).
+    builder.SetInsertPoint(findEntry);
+    builder.CreateBr(findLoop);
+    builder.SetInsertPoint(findLoop);
+    auto* jPhi = builder.CreatePHI(i64Ty, 2, "fd.j");
+    auto* jMore = builder.CreateICmpULT(jPhi, fmtLen, "fd.j.more");
+    // Unterminated '{': the scan stops (documented contract).
+    builder.CreateCondBr(jMore, findBody, done);
+    builder.SetInsertPoint(findBody);
+    auto* jCh = byteAt(fmt, jPhi);
+    auto* jIsClose = builder.CreateICmpEQ(jCh, llvm::ConstantInt::get(i8Ty, '}'), "fd.j.isclose");
+    auto* jNext = builder.CreateAdd(jPhi, llvm::ConstantInt::get(i64Ty, 1), "fd.j.next");
+    builder.CreateCondBr(jIsClose, consume, findLoop);
+    jPhi->addIncoming(fi1, findEntry);
+    jPhi->addIncoming(jNext, findBody);
+
+    // Consume the next chunk as the placeholder's value (missing -> nothing).
+    builder.SetInsertPoint(consume);
+    auto* ci = builder.CreateLoad(i64Ty, ciAddr, "fd.ci");
+    auto* hasChunk = builder.CreateICmpULT(ci, n, "fd.haschunk");
+    builder.CreateCondBr(hasChunk, copyChunk, closeDone);
+
+    builder.SetInsertPoint(copyChunk);
+    {
+        auto* cPtr = builder.CreateLoad(
+            ptrTy, builder.CreateGEP(ptrTy, ptrs, ci, "fd.chunk.p"), "fd.chunk.ptr");
+        auto* cLen = builder.CreateLoad(
+            i64Ty, builder.CreateGEP(i64Ty, lens, ci, "fd.chunk.l"), "fd.chunk.len");
+        auto* dstC = builder.CreateLoad(ptrTy, dstAddr, "fd.dst.c");
+        builder.CreateMemCpy(dstC, std::nullopt, cPtr, std::nullopt, cLen);
+        builder.CreateStore(
+            builder.CreateGEP(i8Ty, dstC, cLen, "fd.dst.chunk"), dstAddr);
+        builder.CreateStore(
+            builder.CreateAdd(builder.CreateLoad(i64Ty, wriAddr, "fd.wri.c"),
+                              cLen, "fd.wri.chunk"),
+            wriAddr);
+        builder.CreateStore(
+            builder.CreateAdd(ci, llvm::ConstantInt::get(i64Ty, 1), "fd.ci.next"),
+            ciAddr);
+        builder.CreateBr(closeDone);
+    }
+
+    builder.SetInsertPoint(closeDone);
+    builder.CreateStore(
+        builder.CreateAdd(jPhi, llvm::ConstantInt::get(i64Ty, 1), "fd.fi.consumed"),
+        fiAddr);
+    builder.CreateBr(scanLoop);
+
+    // Single '}' in a dynamic format is a literal (contract: unvalidated).
+    builder.SetInsertPoint(closeBrace);
+    auto* closeHasNext = builder.CreateICmpULT(fi1, fmtLen, "fd.close.hasnext");
+    builder.CreateCondBr(closeHasNext, closeDbl, closeSingle);
+    builder.SetInsertPoint(closeDbl);
+    {
+        auto* nextC = byteAt(fmt, fi1);
+        auto* isDbl = builder.CreateICmpEQ(nextC, llvm::ConstantInt::get(i8Ty, '}'), "fd.close.isdbl");
+        auto* step = builder.CreateSelect(isDbl,
+            llvm::ConstantInt::get(i64Ty, 2), llvm::ConstantInt::get(i64Ty, 1), "fd.close.step");
+        auto* fiNext = builder.CreateAdd(fi, step, "fd.fi.close");
+        emitOne(ch, fiNext);
+    }
+    builder.SetInsertPoint(closeSingle);
+    emitOne(ch, fi1);
+
+    // Ordinary byte: copy through.
+    builder.SetInsertPoint(copyByte);
+    emitOne(ch, fi1);
+
+    builder.SetInsertPoint(done);
+    {
+        auto* wriD = builder.CreateLoad(i64Ty, wriAddr, "fd.wri.final");
+        llvm::Value* v = llvm::Constant::getNullValue(retTy);
+        v = builder.CreateInsertValue(v, buf, {0});
+        v = builder.CreateInsertValue(v, wriD, {1});
+        v = builder.CreateInsertValue(v, cap, {2});
+        builder.CreateRet(v);
+    }
+    formatDynFn = fn;
+    return fn;
+}
+
+
 llvm::Function* CodegenContext::getUtf8ValidateFn() {
     if (utf8ValidateFn) return utf8ValidateFn;
     llvm::LLVMContext& c = *context;

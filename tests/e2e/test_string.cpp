@@ -426,3 +426,240 @@ TEST_F(StringE2E, AppendSelfAlias) {
         }
     )", "str24.c"), 0);
 }
+
+// ===== P1-09 (FMT-07/08/12): builtin format() 值断言 =====
+// 断言模式：format 结果经 `str v = s;` 投影后与字面量 == 比较，main 返回码即断言。
+
+TEST_F(StringE2E, FormatBasicExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = format("x={} y={}", 7, -3);
+            str v = s;
+            if (v == "x=7 y=-3") { return 0; }
+            return 1;
+        }
+    )", "fmt01.c"), 0);
+}
+
+TEST_F(StringE2E, FormatEmptyExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = format("");
+            if (s.len() != 0) { return 1; }
+            return 0;
+        }
+    )", "fmt02.c"), 0);
+}
+
+TEST_F(StringE2E, FormatSpecsExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = format("{:x} {:X} {:o} {:b}", 255, 255, 8, 5);
+            str v = s;
+            if (v == "ff FF 10 101") { return 0; }
+            return 1;
+        }
+    )", "fmt03.c"), 0);
+}
+
+TEST_F(StringE2E, FormatZeroPadExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = format("[{:02}:{:02}]", 5, 45);
+            str v = s;
+            if (v == "[05:45]") { return 0; }
+            return 1;
+        }
+    )", "fmt04.c"), 0);
+}
+
+TEST_F(StringE2E, FormatFloatPrecExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = format("{:.2f} {:e}", 3.14159, 31415.926);
+            str v = s;
+            if (v == "3.14 3.141593e+04") { return 0; }
+            return 1;
+        }
+    )", "fmt05.c"), 0);
+}
+
+TEST_F(StringE2E, FormatWidthAlignExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = format("{:>5}|{:<5}|", 42, 42);
+            str v = s;
+            if (v == "   42|42   |") { return 0; }
+            return 1;
+        }
+    )", "fmt06.c"), 0);
+}
+
+TEST_F(StringE2E, FormatCenteredExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = format("{:^5}|", 42);
+            str v = s;
+            if (v == " 42  |") { return 0; }
+            return 1;
+        }
+    )", "fmt07.c"), 0);
+}
+
+TEST_F(StringE2E, FormatCustomFillExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = format("{:*<5}", 42);
+            str v = s;
+            if (v == "42***") { return 0; }
+            return 1;
+        }
+    )", "fmt08.c"), 0);
+}
+
+TEST_F(StringE2E, FormatStrExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = format("s={} t={}", "ab", "cd");
+            str v = s;
+            if (v == "s=ab t=cd") { return 0; }
+            return 1;
+        }
+    )", "fmt09.c"), 0);
+}
+
+TEST_F(StringE2E, FormatStrNulPreserved) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string b = string.new("a");
+            b.push((char)0);
+            b.push('b');
+            string s = format("{}", b);
+            if (s.len() != 3) { return 1; }
+            if (s[0] != 'a') { return 2; }
+            if (s[2] != 'b') { return 3; }
+            return 0;
+        }
+    )", "fmt10.c"), 0);
+}
+
+TEST_F(StringE2E, FormatStringArgExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = format("{}", string.new("vv"));
+            str v = s;
+            if (v == "vv") { return 0; }
+            return 1;
+        }
+    )", "fmt11.c"), 0);
+}
+
+TEST_F(StringE2E, FormatToStringExec) {
+    EXPECT_EQ(runSource(R"(
+        class P { public: int32 x; public: char* to_string() { return "P!"; } };
+        int32 main() {
+            P p;
+            string s = format("{}", p);
+            str v = s;
+            if (v == "P!") { return 0; }
+            return 1;
+        }
+    )", "fmt12.c"), 0);
+}
+
+TEST_F(StringE2E, FormatEscapesExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = format("{{a}}");
+            str v = s;
+            if (v == "{a}") { return 0; }
+            return 1;
+        }
+    )", "fmt13.c"), 0);
+}
+
+TEST_F(StringE2E, FormatDynExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            str f = "{}-{}";
+            string s = format(f, 1, 2);
+            str v = s;
+            if (v == "1-2") { return 0; }
+            return 1;
+        }
+    )", "fmt14.c"), 0);
+}
+
+TEST_F(StringE2E, FormatDynEscapeExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            str f = "a{{b";
+            string s = format(f);
+            str v = s;
+            if (v == "a{b") { return 0; }
+            return 1;
+        }
+    )", "fmt15.c"), 0);
+}
+
+TEST_F(StringE2E, FormatDynExtraExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            str f = "{}";
+            string s = format(f, 1, 2);
+            str v = s;
+            if (v == "1") { return 0; }
+            return 1;
+        }
+    )", "fmt16.c"), 0);
+}
+
+// Review Focus 2: dynamic format strings ignore spec text — args render with
+// their default conversion (documented in stdlib.md).
+TEST_F(StringE2E, FormatDynSpecIgnored) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            str f = "{:x}";
+            string s = format(f, 10);
+            str v = s;
+            if (v == "10") { return 0; }
+            return 1;
+        }
+    )", "fmt17.c"), 0);
+}
+
+TEST_F(StringE2E, FormatDynShortExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            str f = "{} {}";
+            string s = format(f, 1);
+            str v = s;
+            if (v == "1 ") { return 0; }
+            return 1;
+        }
+    )", "fmt18.c"), 0);
+}
+
+TEST_F(StringE2E, FormatLargeExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = format("{} {} {} {} {} {} {} {} {} {}",
+                              1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+            str v = s;
+            if (v == "1 2 3 4 5 6 7 8 9 10") { return 0; }
+            return 1;
+        }
+    )", "fmt19.c"), 0);
+}
+
+// print/println 的渲染槽位（^ / 自定义 fill）冒烟：编译执行不崩即通过。
+TEST_F(StringE2E, PrintRenderSlotSmoke) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            println("{:^7}", "ab");
+            println("{:*<6}", 5);
+            println("{:b}", 5);
+            return 0;
+        }
+    )", "fmt20.c"), 0);
+}

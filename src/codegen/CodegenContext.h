@@ -92,6 +92,15 @@ public:
     llvm::Function* getUtf8CharLenAtFn();
     llvm::Function* getUtf8ValidateFn();
 
+    // P1-09 (FMT-07): dynamic format() runtime scan. Walks the format string,
+    // interleaving literal bytes with pre-rendered argument chunks
+    // ({ptr,len} arrays). Escapes {{ / }}; a '{' consumes the next chunk
+    // (spec text inside dynamic placeholders is ignored); an unterminated '{'
+    // stops the scan. Returns the string layout {ptr, len, cap} with a single
+    // malloc sized fmtLen + sum(chunkLens) + 1 (FMT-12: one buffer, no
+    // realloc).
+    llvm::Function* getFormatDynFn();
+
 private:
     std::unique_ptr<llvm::LLVMContext> context;
     llvm::IRBuilder<> builder;
@@ -115,4 +124,5 @@ private:
     llvm::Function* utf8CharLenAtFn{nullptr};
     llvm::Function* utf8CharCountFn{nullptr};
     llvm::Function* utf8ValidateFn{nullptr};
+    llvm::Function* formatDynFn{nullptr};
 };
