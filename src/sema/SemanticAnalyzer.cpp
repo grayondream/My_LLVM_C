@@ -1910,6 +1910,12 @@ bool SemanticAnalyzer::tryAnalyzeSplitCall(CallExprAST& node) {
             emitError("'split_destroy' requires a []str value", node);
             return true;
         }
+        // split produces []str only; []string has no legitimate producer and
+        // would let an array-decayed string[] reach free() (stack pointer).
+        if (elem->kind != TypeKind::Str) {
+            emitError("'split_destroy' requires a []str value", node);
+            return true;
+        }
         node.isSplitDestroy = true;
         node.type = typeCtx->getVoid();
         return true;

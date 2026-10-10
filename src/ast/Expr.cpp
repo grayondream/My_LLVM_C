@@ -195,10 +195,17 @@ static llvm::Value* emitPaddedValue(CodegenContext& ctx, const PrintSpec& spec,
             snprintfFn.getFunctionType(), snprintfFn.getCallee(),
             {buf1, llvm::ConstantInt::get(i64Ty, bufSize), fmt, promoted});
         len = builder.CreateZExt(ret, i64Ty, "pad.len");
-        // Clamp defensively: a negative snprintf return means encoding failure.
+        // Clamp defensively: a negative snprintf return means encoding failure,
+        // a would-be length beyond the buffer means truncation — the padded
+        // content never exceeds what snprintf actually wrote into buf1.
         len = builder.CreateSelect(
             builder.CreateICmpSLT(ret, llvm::ConstantInt::get(i32Ty, 0)),
-            llvm::ConstantInt::get(i64Ty, 0), len, "pad.len.clamp");
+            llvm::ConstantInt::get(i64Ty, 0),
+            builder.CreateSelect(
+                builder.CreateICmpUGT(
+                    len, llvm::ConstantInt::get(i64Ty, bufSize - 1)),
+                llvm::ConstantInt::get(i64Ty, bufSize - 1), len, "pad.len.hi"),
+            "pad.len.clamp");
         srcPtr = buf1;
     }
 
@@ -371,11 +378,15 @@ llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
         scBuilder.SetInsertPoint(rhsBB);
         llvm::Value* rhsV = evalTruthy(*right);
         if (!rhsV) return nullptr;
+        // The RHS may itself create blocks (nested &&/||, str ==/!= memcmp
+        // structure, ternary) — the PHI incoming block must be where its
+        // evaluation ENDED, not the block it started in.
+        llvm::BasicBlock* rhsEnd = scBuilder.GetInsertBlock();
         scBuilder.CreateBr(mergeBB);
         scBuilder.SetInsertPoint(mergeBB);
         auto* phi = scBuilder.CreatePHI(llvm::Type::getInt1Ty(c), 2, "log.val");
         phi->addIncoming(shortVal, shortBB);
-        phi->addIncoming(rhsV, rhsBB);
+        phi->addIncoming(rhsV, rhsEnd);
         return phi;
     }
 
@@ -810,13 +821,31 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
                                 const std::string& conv,
                                 int bufSize) -> std::pair<llvm::Value*, llvm::Value*> {
             llvm::Value* promoted = promotePrintArg(ctx, v, kind);
+            // NUL-terminated char* classes (bool/to_string/char*) chunk
+            // directly by strlen — no fixed-buffer truncation, no copy.
+            // (Only the plain "%s" conversion; width/alignment variants go
+            // through snprintf with the clamp below.)
+            if (conv == "%s" && promoted->getType()->isPointerTy()) {
+                auto strlenFn = ctx.getModule().getOrInsertFunction(
+                    "strlen", llvm::FunctionType::get(i64Ty, {ptrTy}, false));
+                llvm::Value* slen =
+                    builder.CreateCall(strlenFn, {promoted}, "fmt.slen");
+                return {promoted, slen};
+            }
             llvm::Value* buf = builder.CreateAlloca(
                 i8Ty, llvm::ConstantInt::get(i32Ty, bufSize), "fmt.buf");
             llvm::Value* cv = builder.CreateGlobalString(conv, ".fmt.cv");
             llvm::Value* ret = builder.CreateCall(
                 snprintfFn.getFunctionType(), snprintfFn.getCallee(),
                 {buf, llvm::ConstantInt::get(i64Ty, bufSize), cv, promoted});
-            return {buf, builder.CreateSExt(ret, i64Ty, "fmt.len")};
+            // Clamp: snprintf returns the WOULD-BE length on truncation; the
+            // chunk length must never exceed the buffer it read from.
+            llvm::Value* len = builder.CreateSExt(ret, i64Ty, "fmt.len");
+            len = builder.CreateSelect(
+                builder.CreateICmpSGT(
+                    len, llvm::ConstantInt::get(i64Ty, bufSize - 1)),
+                llvm::ConstantInt::get(i64Ty, bufSize - 1), len, "fmt.len.clamp");
+            return {buf, len};
         };
         auto defaultConvText = [](PrintArgKind kind) {
             switch (kind) {

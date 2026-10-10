@@ -2432,3 +2432,10 @@ TEST_F(SemanticAnalyzerTest, BuiltinSplitSema) {
         "str split(str s, str sep) { return s; }"
         "int32 main() { return 0; }"));
 }
+
+// I1: split_destroy 只接受 []str（split 从不产生 []string；放宽会配合数组
+// decay 对栈上 string 数组指针 free）。
+TEST_F(SemanticAnalyzerTest, SplitDestroyRejectsStringSlices) {
+    EXPECT_FALSE(analyzeFullyOk(
+        "int32 main() { string arr[2]; string[] a = arr; split_destroy(a); return 0; }"));
+}

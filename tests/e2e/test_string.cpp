@@ -794,3 +794,43 @@ TEST_F(StringE2E, LogicalOpsTruthinessAndShortCircuit) {
         }
     )", "logic1.c"), 0);
 }
+
+// ===== 终审修复回归 =====
+
+// C1: RHS 含控制流（str == 的 memcmp 块 / 嵌套 &&）时，PHI incoming 块
+// 必须取 RHS 求值结束的块——修复前硬编码 RHS 起始块，JIT 管线段错误。
+TEST_F(StringE2E, LogicalOpsBlockProducingRhs) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            int32 bad = 0;
+            int32 a = 8192;
+            str s = "x";
+            if (!(a && s == "x")) { bad = bad + 1; }
+            if (a && s != "x") { bad = bad + 2; }
+            int32 b = 1;
+            int32 c = 0;
+            if (!(a && (b || c))) { bad = bad + 4; }
+            if (c && (b || c)) { bad = bad + 8; }
+            if (!(a && s == "x" && b == 1)) { bad = bad + 16; }
+            return bad;
+        }
+    )", "logic2.c"), 0);
+}
+
+// C2: snprintf 截断时返回「本应写入」的长度——chunk 长度必须 clamp 到
+// 缓冲容量，否则越界读栈。钉长 to_string（>64 字节动态缓冲）与长浮点字面量。
+TEST_F(StringE2E, FormatClampsTruncatedChunks) {
+    EXPECT_EQ(runSource(R"(
+        class Big { public: int32 v; public: char* to_string() { return "0123456789012345678901234567890123456789012345678901234567890123456789"; } };
+        int32 main() {
+            Big big;
+            str f = "[{}]";
+            string s = format(f, big);
+            if (s.len() != 72) { return static_cast<int32>(s.len()); }
+            if (s[0] != '[') { return 2; }
+            if (s[71] != ']') { return 3; }
+            if (s[70] != '9') { return 4; }
+            return 0;
+        }
+    )", "clamp1.c"), 0);
+}
