@@ -634,3 +634,16 @@
 - **文档**：`docs/spec/stdlib.md` 新增 §9 std.string / §10 std.format；`docs/spec/abi.md` 补 str/string 布局行（终审 M5 清账）；TODO.md FMT-05~12/STD-09~11/P1-09 收口。
 - **验证**：全量 `ctest` 1180/1180 绿（含新增 PrintFormat 32 用例、format e2e 20 用例、split/split_destroy、StdStringLib 7 用例、&& 短路 e2e）；3 个已知 flaky 隔离重跑通过。
 - **留痕**：spec `docs/superpowers/specs/2026-10-09-p109-string-format-design.md`（853bc1e），plan `docs/superpowers/plans/2026-10-09-p109-string-format.md`（66ff5c5），执行 ledger `.superpowers/sdd/2026-10-09-p109-string-format/`。
+
+## 2026-10-10 20:13 — P1-09 终审（whole-branch review, 66ff5c5..efb2149）
+- 复审范围：diff 全文 + 实机验证（build/bin/my_llvm_c 逐例编译/运行）。
+- **Critical 2 项**（均实证）：
+  1. `src/ast/Expr.cpp:378` 短路 `&&`/`||` 的 PHI incoming 块硬编码 `rhsBB`——RHS 自身产生基本块（嵌套 `&&`/`||`、str `==`/`!=`、三元）时 PHI incoming 指向非前驱块，IR 非法，`-c`/JIT 段错误。复现：`a && s == "x"`、`a || s != "S"`、`a && (b || c)`。修法：RHS 求值后以 `GetInsertBlock()` 作 incoming 块。无测试覆盖（既有 e2e 仅调用型 RHS）。
+  2. `src/ast/Expr.cpp:819`（`renderScalar`，动态 format 路径）chunk 长度取 snprintf「本应长度」（SExt）而缓冲仅 64 字节——实参超长（如 to_string > 63 字节）时 memcpy 越界读栈 + 结果混入垃圾字节。复现：76 字符 to_string → len=76 仅 63 字节有效。同族：字面量路径 `:891`（bufSize=344+）、print 渲染槽 `:184`（bufSize=512+）。修法：长度 clamp 至 bufSize-1。
+- **Important 2 项**：
+  3. `src/sema/SemanticAnalyzer.cpp:1909` `split_destroy` 接受 `[]string`（split 永不产生）→ 栈数组 decay 后传入即 `free` 栈指针（复现 abort）。应只接受 `[]str`。
+  4. 基类截取修复（e878bdb）无任何回归测试钉死；且 `src/codegen/CodegenContext.cpp:399` 链上找不到目标时静默 fall-through 回通用 castValue（旧溢出路径）。实机验证单继承/三级链/含 string 基类均正确，多继承被 sema 拒绝——当前可达路径安全，但缺测试与防御性失败。
+- Minor：print 渲染槽 str 含内嵌 NUL 截断（format 路径字节保真，不一致）；"unterminated '{'"/"single '}'" 误归类 E2020；`{:#x}`/`{:F}` 等旧合法规格收窄未在计划文档化（`{:d}`/`{:g}` 已文档化）；`emitPaddedValue` 大 str 居中即全量栈 alloca；`renderScalar` 对 snprintf 负返回值未 clamp（与 pad 路径不一致）；`getSplitFn` 硬编码 16 字节 stride。
+- 核实为正确：coerceToBool（bool/int/float NaN 真值/指针）；castValue 同型赋值在走查前短路（string→string、无关 struct 不受影响）；memcpy 返回值不链式（三处合成 helper 均显式 GEP 偏移）；getStrFindFn/RFind 边界（空 needle 0/len、过界 -1）；getSplitFn 贪心非重叠计数与填充一致；getFormatDynFn 单 malloc 上界、块支配关系正确；print 旧行为回归（空 spec 表逐字一致、`%%`、`%.*s`、错误文案）。
+- Review Focus 1~5：1（%b 宿主可用、依赖已文档化）、2（FormatDynSpecIgnored 钉死）、3（FormatStrNulPreserved，print 渲染槽除外→Minor）、4（unit+e2e 全绿）、5（文档化不测试）——全部按计划处置。
+- 结论：**不通过（阻塞：Critical 1/2）**。修复面小（两处 codegen 数行 + sema 一处），建议修复后补 3 个 e2e（嵌套逻辑 RHS、长 to_string 动态 format、`B b = d;` 值赋值）再复验。
