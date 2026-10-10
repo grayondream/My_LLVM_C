@@ -1062,3 +1062,100 @@ llvm::Function* CodegenContext::getUtf8ValidateFn() {
     utf8ValidateFn = fn;
     return fn;
 }
+
+llvm::Function* CodegenContext::getStrFindFn(bool reverse) {
+    llvm::Function*& cache = reverse ? strRFindFn : strFindFn;
+    if (cache) return cache;
+    llvm::LLVMContext& c = *context;
+    auto* i8Ty = llvm::Type::getInt8Ty(c);
+    auto* i64Ty = llvm::Type::getInt64Ty(c);
+    auto* ptrTy = llvm::PointerType::get(c, 0);
+    auto* fnTy = llvm::FunctionType::get(
+        i64Ty, {ptrTy, i64Ty, ptrTy, i64Ty}, false);
+    auto* fn = llvm::Function::Create(
+        fnTy, llvm::Function::InternalLinkage,
+        reverse ? "smc.str.rfind" : "smc.str.find", module.get());
+    auto* hay = fn->getArg(0);
+    auto* hayLen = fn->getArg(1);
+    auto* needle = fn->getArg(2);
+    auto* needleLen = fn->getArg(3);
+
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(c, "entry", fn);
+    llvm::BasicBlock* sizeCheck = llvm::BasicBlock::Create(c, "size.check", fn);
+    llvm::BasicBlock* outerInit = llvm::BasicBlock::Create(c, "outer.init", fn);
+    llvm::BasicBlock* outer = llvm::BasicBlock::Create(c, "outer", fn);
+    llvm::BasicBlock* inner = llvm::BasicBlock::Create(c, "inner", fn);
+    llvm::BasicBlock* innerBody = llvm::BasicBlock::Create(c, "inner.body", fn);
+    llvm::BasicBlock* innerNext = llvm::BasicBlock::Create(c, "inner.next", fn);
+    llvm::BasicBlock* matched = llvm::BasicBlock::Create(c, "matched", fn);
+    llvm::BasicBlock* outerNext = llvm::BasicBlock::Create(c, "outer.next", fn);
+    llvm::BasicBlock* retEmpty = llvm::BasicBlock::Create(c, "ret.empty", fn);
+    llvm::BasicBlock* retMinus1 = llvm::BasicBlock::Create(c, "ret.m1", fn);
+    llvm::BasicBlock* retMatch = llvm::BasicBlock::Create(c, "ret.match", fn);
+
+    auto one = llvm::ConstantInt::get(i64Ty, 1);
+    auto zero = llvm::ConstantInt::get(i64Ty, 0);
+    auto minus1 = llvm::ConstantInt::get(i64Ty, static_cast<uint64_t>(-1));
+
+    builder.SetInsertPoint(entry);
+    auto* isEmpty = builder.CreateICmpEQ(needleLen, zero, "sf.empty");
+    builder.CreateCondBr(isEmpty, retEmpty, sizeCheck);
+    builder.SetInsertPoint(sizeCheck);
+    auto* tooBig = builder.CreateICmpUGT(needleLen, hayLen, "sf.toobig");
+    builder.CreateCondBr(tooBig, retMinus1, outerInit);
+
+    builder.SetInsertPoint(outerInit);
+    auto* limit = builder.CreateSub(hayLen, needleLen, "sf.limit");
+    llvm::Value* startIdx = reverse ? limit : zero;
+    builder.CreateBr(outer);
+    builder.SetInsertPoint(outer);
+    auto* iPhi = builder.CreatePHI(i64Ty, 2, "sf.i");
+    // Forward: scan i in [0, limit]; reverse: scan i in [limit, 0] descending.
+    if (reverse) {
+        auto* atFloor = builder.CreateICmpSLT(iPhi, zero, "sf.floor");
+        builder.CreateCondBr(atFloor, retMinus1, inner);
+    } else {
+        auto* pastEnd = builder.CreateICmpUGT(iPhi, limit, "sf.pastend");
+        builder.CreateCondBr(pastEnd, retMinus1, inner);
+    }
+    builder.SetInsertPoint(inner);
+    auto* jPhi = builder.CreatePHI(i64Ty, 2, "sf.j");
+    auto* jDone = builder.CreateICmpUGE(jPhi, needleLen, "sf.jdone");
+    builder.CreateCondBr(jDone, matched, innerBody);
+    builder.SetInsertPoint(innerBody);
+    auto* ij = builder.CreateAdd(iPhi, jPhi, "sf.ij");
+    auto* hByte = builder.CreateLoad(
+        i8Ty, builder.CreateGEP(i8Ty, hay, ij, "sf.hp"), "sf.hb");
+    auto* nByte = builder.CreateLoad(
+        i8Ty, builder.CreateGEP(i8Ty, needle, jPhi, "sf.np"), "sf.nb");
+    auto* eq = builder.CreateICmpEQ(hByte, nByte, "sf.eq");
+    builder.CreateCondBr(eq, innerNext, outerNext);
+    builder.SetInsertPoint(innerNext);
+    auto* jNext = builder.CreateAdd(jPhi, one, "sf.jnext");
+    jPhi->addIncoming(zero, outer);
+    jPhi->addIncoming(jNext, innerNext);
+    builder.CreateBr(inner);
+    builder.SetInsertPoint(matched);
+    builder.CreateBr(retMatch);
+    builder.SetInsertPoint(outerNext);
+    llvm::Value* iNext;
+    if (reverse) {
+        iNext = builder.CreateSub(iPhi, one, "sf.inext");
+    } else {
+        iNext = builder.CreateAdd(iPhi, one, "sf.inext");
+    }
+    iPhi->addIncoming(startIdx, outerInit);
+    iPhi->addIncoming(iNext, outerNext);
+    builder.CreateBr(outer);
+
+    builder.SetInsertPoint(retEmpty);
+    builder.CreateRet(reverse ? static_cast<llvm::Value*>(hayLen)
+                              : static_cast<llvm::Value*>(zero));
+    builder.SetInsertPoint(retMinus1);
+    builder.CreateRet(minus1);
+    builder.SetInsertPoint(retMatch);
+    builder.CreateRet(iPhi);
+
+    cache = fn;
+    return fn;
+}

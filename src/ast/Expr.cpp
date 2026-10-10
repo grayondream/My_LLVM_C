@@ -1625,6 +1625,87 @@ static llvm::Value* codegenBuiltinMethod(CodegenContext& ctx, MethodCallExprAST&
             idx = builder.CreateSExtOrTrunc(idx, i64Ty, "str.idx64");
             return builder.CreateCall(lenAtFn, {ptr, idx}, "str.width");
         }
+        case BuiltinMethod::StrFind:
+        case BuiltinMethod::StrRFind: {
+            // P1-09 (STD-10): needle scan over the byte view. The needle
+            // accepts str or string (both carry {ptr, len} prefix fields).
+            auto savedIP = builder.saveIP();
+            llvm::Function* findFn =
+                ctx.getStrFindFn(node.builtinMethod == BuiltinMethod::StrRFind);
+            builder.restoreIP(savedIP);
+            llvm::Value* obj = builtinObjectValue(ctx, node);
+            if (!obj) return nullptr;
+            llvm::Value* ptr = builder.CreateExtractValue(obj, 0, "str.ptr");
+            llvm::Value* len = builder.CreateExtractValue(obj, 1, "str.len");
+            llvm::Value* nv = node.args[0]->codegen(ctx);
+            if (!nv) return nullptr;
+            if (node.args[0]->isLValue)
+                nv = ctx.loadValue(nv, node.args[0]->type);
+            Type* nArg = node.args[0]->type;
+            while (nArg && nArg->kind == TypeKind::Typedef)
+                nArg = static_cast<TypedefType*>(nArg)->aliasedType;
+            if (nArg && nArg->kind == TypeKind::String) {
+                // Project {ptr, len, cap} to the str view.
+                llvm::Value* sv = llvm::Constant::getNullValue(
+                    ctx.getLLVMType(TypeContext::instance().getStrType()));
+                sv = builder.CreateInsertValue(
+                    sv, builder.CreateExtractValue(nv, 0, "n.ptr"), {0});
+                nv = builder.CreateInsertValue(
+                    sv, builder.CreateExtractValue(nv, 1, "n.len"), {1});
+            }
+            llvm::Value* nptr = builder.CreateExtractValue(nv, 0, "n.sptr");
+            llvm::Value* nlen = builder.CreateExtractValue(nv, 1, "n.slen");
+            return builder.CreateCall(findFn, {ptr, len, nptr, nlen},
+                                      node.builtinMethod == BuiltinMethod::StrFind
+                                          ? "str.find"
+                                          : "str.rfind");
+        }
+        case BuiltinMethod::StrSub: {
+            // P1-09 (STD-10): zero-copy byte-range view. begin < 0 ||
+            // end < begin || end > len aborts (str.sub: out of bounds).
+            llvm::Value* obj = builtinObjectValue(ctx, node);
+            if (!obj) return nullptr;
+            llvm::Value* ptr = builder.CreateExtractValue(obj, 0, "str.ptr");
+            llvm::Value* len = builder.CreateExtractValue(obj, 1, "str.len");
+            auto index64 = [&](ExprAST& arg) -> llvm::Value* {
+                llvm::Value* v = arg.codegen(ctx);
+                if (!v) return nullptr;
+                if (arg.isLValue) v = ctx.loadValue(v, arg.type);
+                return builder.CreateSExtOrTrunc(v, i64Ty, "sub.idx64");
+            };
+            llvm::Value* begin = index64(*node.args[0]);
+            if (!begin) return nullptr;
+            llvm::Value* end = index64(*node.args[1]);
+            if (!end) return nullptr;
+
+            llvm::Function* fn = builder.GetInsertBlock()->getParent();
+            llvm::BasicBlock* okBB = llvm::BasicBlock::Create(c, "sub.ok", fn);
+            llvm::BasicBlock* badBB = llvm::BasicBlock::Create(c, "sub.bad", fn);
+            auto* neg = builder.CreateICmpSLT(begin, llvm::ConstantInt::get(i64Ty, 0), "sub.neg");
+            auto* inverted = builder.CreateICmpSLT(end, begin, "sub.inv");
+            auto* over = builder.CreateICmpSGT(end, len, "sub.over");
+            auto* bad = builder.CreateOr(neg, builder.CreateOr(inverted, over), "sub.oob");
+            builder.CreateCondBr(bad, badBB, okBB);
+
+            builder.SetInsertPoint(badBB);
+            {
+                std::string prefix = nodeSourcePrefix(node);
+                std::string fmtStr = prefix.empty()
+                    ? "panic: str.sub: out of bounds\n"
+                    : prefix + ": panic: str.sub: out of bounds\n";
+                llvm::Value* fmt = builder.CreateGlobalString(fmtStr, ".subfmt");
+                emitDprintfAndAbort(ctx, fmt, {});
+                builder.CreateUnreachable();
+            }
+
+            builder.SetInsertPoint(okBB);
+            llvm::Value* subPtr = builder.CreateGEP(i8Ty, ptr, begin, "sub.ptr");
+            llvm::Value* subLen = builder.CreateSub(end, begin, "sub.len");
+            llvm::Value* v = llvm::Constant::getNullValue(
+                ctx.getLLVMType(TypeContext::instance().getStrType()));
+            v = builder.CreateInsertValue(v, subPtr, {0});
+            return builder.CreateInsertValue(v, subLen, {1});
+        }
         case BuiltinMethod::StringNew:
         case BuiltinMethod::StringDestroy:
         case BuiltinMethod::StringAppend:

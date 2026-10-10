@@ -2036,6 +2036,36 @@ void SemanticAnalyzer::analyzeStrMethod(MethodCallExprAST& node, Type* objType) 
         node.type = name == "char_at" ? typeCtx->getChar() : typeCtx->getUSize();
         return;
     }
+    // P1-09 (STD-10): find/rfind yield the byte index as isize (-1 when
+    // absent); sub yields a zero-copy byte-range view with a runtime bounds
+    // panic (str.sub: out of bounds).
+    if (name == "find" || name == "rfind") {
+        const auto isStrLike = [](Type* t) {
+            while (t && t->kind == TypeKind::Typedef)
+                t = static_cast<TypedefType*>(t)->aliasedType;
+            return t && (t->kind == TypeKind::Str || t->kind == TypeKind::String);
+        };
+        if (argTypes.size() != 1 || !isStrLike(argTypes[0])) {
+            emitError("'" + name + "()' requires exactly one str argument", node);
+            node.type = nullptr;
+            return;
+        }
+        node.builtinMethod =
+            name == "find" ? BuiltinMethod::StrFind : BuiltinMethod::StrRFind;
+        node.type = typeCtx->getISize();
+        return;
+    }
+    if (name == "sub") {
+        if (argTypes.size() != 2 || !isIntegerType(argTypes[0]) ||
+            !isIntegerType(argTypes[1])) {
+            emitError("'sub()' requires exactly two integer arguments", node);
+            node.type = nullptr;
+            return;
+        }
+        node.builtinMethod = BuiltinMethod::StrSub;
+        node.type = typeCtx->getStrType();
+        return;
+    }
     emitError("no member named '" + name + "' in str", node);
     node.type = nullptr;
 }

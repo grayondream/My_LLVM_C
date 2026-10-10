@@ -302,6 +302,10 @@ enum class BuiltinMethod {
     StrCharCount,
     StrCharAt,
     StrCharLenAt,
+    // P1-09 (STD-10): find/rfind/sub primitives
+    StrFind,
+    StrRFind,
+    StrSub,
     // string dynamic
     StringNew,
     StringDestroy,

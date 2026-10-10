@@ -2388,3 +2388,24 @@ TEST_F(SemanticAnalyzerTest, BuiltinFormatDiagnosticCodes) {
     EXPECT_EQ(formatDiagId(
         "int32 main() { string s = format(\"{:z}\", 1); return 0; }"), "E2022");
 }
+
+// P1-09 / STD-10: find/rfind/sub primitive type checks.
+TEST_F(SemanticAnalyzerTest, StrFindRFindSubSema) {
+    EXPECT_TRUE(analyzeFullyOk(
+        "int32 main() { str s = \"hello\"; isize i = s.find(\"ll\"); return 0; }"));
+    EXPECT_TRUE(analyzeFullyOk(
+        "int32 main() { str s = \"a/b/c\"; isize i = s.rfind(\"/\"); return 0; }"));
+    EXPECT_TRUE(analyzeFullyOk(
+        "int32 main() { str s = \"hello\"; str t = s.sub(1, 3); return 0; }"));
+    // Arity / type errors.
+    EXPECT_FALSE(analyzeFullyOk(
+        "int32 main() { str s = \"hello\"; s.find(); return 0; }"));
+    EXPECT_FALSE(analyzeFullyOk(
+        "int32 main() { str s = \"hello\"; s.find(1); return 0; }"));
+    EXPECT_FALSE(analyzeFullyOk(
+        "int32 main() { str s = \"hello\"; s.rfind(\"a\", 2); return 0; }"));
+    EXPECT_FALSE(analyzeFullyOk(
+        "int32 main() { str s = \"hello\"; s.sub(1.5, 2); return 0; }"));
+    EXPECT_FALSE(analyzeFullyOk(
+        "int32 main() { str s = \"hello\"; s.sub(1); return 0; }"));
+}

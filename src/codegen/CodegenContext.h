@@ -101,6 +101,11 @@ public:
     // realloc).
     llvm::Function* getFormatDynFn();
 
+    // P1-09 (STD-10): naive byte scan of needle in hay. Returns the match
+    // index as i64, -1 when absent. An empty needle yields 0 (forward) or
+    // hayLen (reverse).
+    llvm::Function* getStrFindFn(bool reverse);
+
 private:
     std::unique_ptr<llvm::LLVMContext> context;
     llvm::IRBuilder<> builder;
@@ -125,4 +130,6 @@ private:
     llvm::Function* utf8CharCountFn{nullptr};
     llvm::Function* utf8ValidateFn{nullptr};
     llvm::Function* formatDynFn{nullptr};
+    llvm::Function* strFindFn{nullptr};
+    llvm::Function* strRFindFn{nullptr};
 };

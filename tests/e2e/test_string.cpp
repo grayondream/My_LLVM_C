@@ -663,3 +663,59 @@ TEST_F(StringE2E, PrintRenderSlotSmoke) {
         }
     )", "fmt20.c"), 0);
 }
+
+// ===== P1-09 (STD-10): find/rfind/sub 内建原语 =====
+
+TEST_F(StringE2E, FindRFindExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            str s = "hello";
+            if (s.find("ll") != 2) { return 1; }
+            if (s.find("z") != -1) { return 2; }
+            if (s.find("") != 0) { return 3; }
+            str t = "a/b/c";
+            if (t.rfind("/") != 3) { return 4; }
+            if (t.rfind("z") != -1) { return 5; }
+            if (t.rfind("") != 5) { return 6; }
+            return 0;
+        }
+    )", "str19.c"), 0);
+}
+
+TEST_F(StringE2E, SubExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            str s = "hello";
+            str a = s.sub(1, 3);
+            if (a == "el") { return 0; }
+            str b = s.sub(0, 5);
+            if (b == "hello") { return 0; }
+            str c = s.sub(2, 2);
+            if (c.len() == 0) { return 0; }
+            return 9;
+        }
+    )", "str20.c"), 0);
+}
+
+TEST_F(StringE2E, FindOnStringView) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string src = string.new("xabx");
+            str v = src;
+            if (v.find("b") != 2) { return 1; }
+            return 0;
+        }
+    )", "str22.c"), 0);
+}
+
+TEST_F(StringE2E, SubBoundsPanicPath) {
+    // 越界 panic 不可执行（abort）；钉编译路径存在。
+    std::string ir = compileStringIR(R"(
+        int32 main() {
+            str s = "hello";
+            str a = s.sub(3, 2);
+            return 0;
+        }
+    )", "str21.c");
+    ASSERT_FALSE(ir.empty());
+}
