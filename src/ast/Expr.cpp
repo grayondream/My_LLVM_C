@@ -946,6 +946,75 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
             out, builder.CreateExtractValue(res, 2, "fmt.rcap"), {2});
     }
 
+    // P1-09 (STD-10): builtin `split(s, sep) -> []str` — malloc'd str-view
+    // array + {ptr, count} slice. A dynamic empty separator panics here (the
+    // literal case is rejected at sema).
+    if (isSplit || isSplitDestroy) {
+        llvm::LLVMContext& c = ctx.getContext();
+        auto& builder = ctx.getBuilder();
+        auto* i64Ty = llvm::Type::getInt64Ty(c);
+        auto* ptrTy = llvm::PointerType::get(c, 0);
+
+        if (isSplitDestroy) {
+            auto freeFn = ctx.getModule().getOrInsertFunction(
+                "free", llvm::FunctionType::get(llvm::Type::getVoidTy(c),
+                                                {ptrTy}, false));
+            llvm::Value* v = args[0]->codegen(ctx);
+            if (!v) return nullptr;
+            if (args[0]->isLValue) v = ctx.loadValue(v, args[0]->type);
+            llvm::Value* arr = builder.CreateExtractValue(v, 0, "split.arr");
+            return builder.CreateCall(freeFn, {arr});
+        }
+
+        auto freeFn = ctx.getModule().getOrInsertFunction(
+            "free", llvm::FunctionType::get(llvm::Type::getVoidTy(c),
+                                            {ptrTy}, false));
+        llvm::Value* vals[2];
+        for (int k = 0; k < 2; ++k) {
+            llvm::Value* v = args[k]->codegen(ctx);
+            if (!v) return nullptr;
+            if (args[k]->isLValue) v = ctx.loadValue(v, args[k]->type);
+            vals[k] = v;
+        }
+        // Both str and string carry {ptr, len} in fields 0/1.
+        llvm::Value* sPtr = builder.CreateExtractValue(vals[0], 0, "split.sptr");
+        llvm::Value* sLen = builder.CreateExtractValue(vals[0], 1, "split.slen");
+        llvm::Value* sepPtr = builder.CreateExtractValue(vals[1], 0, "split.seppt");
+        llvm::Value* sepLen = builder.CreateExtractValue(vals[1], 1, "split.sepln");
+
+        llvm::Function* fn = builder.GetInsertBlock()->getParent();
+        llvm::BasicBlock* okBB = llvm::BasicBlock::Create(c, "split.ok", fn);
+        llvm::BasicBlock* badBB = llvm::BasicBlock::Create(c, "split.bad", fn);
+        auto* empty = builder.CreateICmpEQ(
+            sepLen, llvm::ConstantInt::get(i64Ty, 0), "split.sep.empty");
+        builder.CreateCondBr(empty, badBB, okBB);
+        builder.SetInsertPoint(badBB);
+        {
+            std::string prefix = nodeSourcePrefix(*this);
+            std::string fmtStr = prefix.empty()
+                ? "panic: split: empty separator\n"
+                : prefix + ": panic: split: empty separator\n";
+            llvm::Value* fmt = builder.CreateGlobalString(fmtStr, ".splitfmt");
+            emitDprintfAndAbort(ctx, fmt, {});
+            builder.CreateUnreachable();
+        }
+
+        builder.SetInsertPoint(okBB);
+        auto savedIP = builder.saveIP();
+        llvm::Function* splitHelper = ctx.getSplitFn();
+        builder.restoreIP(savedIP);
+        auto* cntAddr = builder.CreateAlloca(i64Ty, nullptr, "split.cnt");
+        llvm::Value* arr =
+            builder.CreateCall(splitHelper, {sPtr, sLen, sepPtr, sepLen, cntAddr},
+                               "split.arr");
+        llvm::Value* cnt = builder.CreateLoad(i64Ty, cntAddr, "split.n");
+        llvm::Value* out = llvm::Constant::getNullValue(
+            ctx.getLLVMType(TypeContext::instance().getSliceType(
+                TypeContext::instance().getStrType())));
+        out = builder.CreateInsertValue(out, arr, {0});
+        return builder.CreateInsertValue(out, cnt, {1});
+    }
+
     // Indirect call through a function-pointer variable.
     if (isIndirect) {
         llvm::Value* fpAddr = ctx.lookupVariableAddr(callee);

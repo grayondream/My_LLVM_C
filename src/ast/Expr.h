@@ -199,6 +199,11 @@ public:
     // with the call site's file:line embedded at compile time.
     bool isAssert = false;
     bool isPanic = false;
+    // P1-09 (STD-10): builtin `split(s, sep) -> []str` (zero-copy views over
+    // malloc'd array; split_destroy frees it). Sema rejects a literal empty
+    // separator at compile time.
+    bool isSplit = false;
+    bool isSplitDestroy = false;
     // P1-06 (FMT-04): builtin `str_from_c(char*) -> str` (semantics: strlen
     // over the NUL-terminated buffer; UTF-8 validation at literal points).
     bool isStrFromC = false;

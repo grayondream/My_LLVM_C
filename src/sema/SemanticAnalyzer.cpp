@@ -1877,6 +1877,75 @@ bool SemanticAnalyzer::tryAnalyzeFormatCall(CallExprAST& node) {
     return true;
 }
 
+// P1-09 (STD-10): builtin `split(s, sep) -> []str` — zero-copy views over a
+// malloc'd str array (spec deviation 1: slice values are not constructible
+// from .smc, so split mirrors string.new/destroy as a codegen builtin). A
+// literal empty separator is rejected at compile time (spec deviation 2);
+// a dynamic one panics at runtime. split_destroy frees the array.
+bool SemanticAnalyzer::tryAnalyzeSplitCall(CallExprAST& node) {
+    node.type = nullptr;
+    node.isLValue = false;
+
+    if (node.callee == "split_destroy") {
+        if (node.args.size() != 1) {
+            emitError("'split_destroy' requires exactly one argument", node);
+            return true;
+        }
+        Type* argType = getExprType(*node.args[0]);
+        if (!argType) return true; // already reported
+        Type* stripped = argType;
+        while (stripped && stripped->kind == TypeKind::Typedef)
+            stripped = static_cast<TypedefType*>(stripped)->aliasedType;
+        auto* sliceTy = stripped && stripped->kind == TypeKind::Slice
+                            ? static_cast<SliceType*>(stripped)
+                            : nullptr;
+        if (!sliceTy || !sliceTy->elementType) {
+            emitError("'split_destroy' requires a []str value", node);
+            return true;
+        }
+        Type* elem = sliceTy->elementType;
+        while (elem && elem->kind == TypeKind::Typedef)
+            elem = static_cast<TypedefType*>(elem)->aliasedType;
+        if (!elem || (elem->kind != TypeKind::Str && elem->kind != TypeKind::String)) {
+            emitError("'split_destroy' requires a []str value", node);
+            return true;
+        }
+        node.isSplitDestroy = true;
+        node.type = typeCtx->getVoid();
+        return true;
+    }
+
+    if (node.args.size() != 2) {
+        emitError("'split' requires exactly two arguments (string, separator)", node);
+        return true;
+    }
+    const auto isStrLike = [](Type* t) {
+        while (t && t->kind == TypeKind::Typedef)
+            t = static_cast<TypedefType*>(t)->aliasedType;
+        return t && (t->kind == TypeKind::Str || t->kind == TypeKind::String);
+    };
+    for (size_t k = 0; k < 2; ++k) {
+        Type* argType = getExprType(*node.args[k]);
+        if (!argType) return true; // already reported
+        if (!isStrLike(argType)) {
+            emitError("'split' arguments must be str (got '" +
+                          typeToString(argType) + "')",
+                      node);
+            return true;
+        }
+    }
+    if (auto* lit = dynamic_cast<StringExprAST*>(node.args[1].get())) {
+        if (lit->value.empty()) {
+            emitError(DiagnosticCode::SemFormatSpecSyntax,
+                      "split: empty separator", node);
+            return true;
+        }
+    }
+    node.isSplit = true;
+    node.type = typeCtx->getSliceType(typeCtx->getStrType());
+    return true;
+}
+
 bool SemanticAnalyzer::tryAnalyzeAssertCall(CallExprAST& node) {    node.type = typeCtx->getVoid();
     node.isLValue = false;
     if (node.args.size() != 1) {
@@ -2195,6 +2264,15 @@ void SemanticAnalyzer::visit(CallExprAST& node) {
         OverloadSet* userDefined = currentScope->lookupOverload(node.callee);
         if (!userDefined || userDefined->empty()) {
             tryAnalyzeFormatCall(node);
+            return;
+        }
+    }
+
+    // P1-09 (STD-10): builtin `split` / `split_destroy` (user-defined first).
+    if (node.callee == "split" || node.callee == "split_destroy") {
+        OverloadSet* userDefined = currentScope->lookupOverload(node.callee);
+        if (!userDefined || userDefined->empty()) {
+            tryAnalyzeSplitCall(node);
             return;
         }
     }

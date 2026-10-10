@@ -1159,3 +1159,172 @@ llvm::Function* CodegenContext::getStrFindFn(bool reverse) {
     cache = fn;
     return fn;
 }
+
+llvm::Function* CodegenContext::getStrMatchAtFn() {
+    if (strMatchAtFn) return strMatchAtFn;
+    llvm::LLVMContext& c = *context;
+    auto* i8Ty = llvm::Type::getInt8Ty(c);
+    auto* i64Ty = llvm::Type::getInt64Ty(c);
+    auto* ptrTy = llvm::PointerType::get(c, 0);
+    auto* fnTy = llvm::FunctionType::get(
+        llvm::Type::getInt1Ty(c), {ptrTy, ptrTy, i64Ty, i64Ty}, false);
+    auto* fn = llvm::Function::Create(fnTy, llvm::Function::InternalLinkage,
+                                      "smc.str.matchat", module.get());
+    auto* hay = fn->getArg(0);
+    auto* needle = fn->getArg(1);
+    auto* nlen = fn->getArg(2);
+    auto* at = fn->getArg(3);
+
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(c, "entry", fn);
+    llvm::BasicBlock* loop = llvm::BasicBlock::Create(c, "loop", fn);
+    llvm::BasicBlock* body = llvm::BasicBlock::Create(c, "body", fn);
+    llvm::BasicBlock* yes = llvm::BasicBlock::Create(c, "yes", fn);
+    llvm::BasicBlock* no = llvm::BasicBlock::Create(c, "no", fn);
+
+    builder.SetInsertPoint(entry);
+    builder.CreateBr(loop);
+    builder.SetInsertPoint(loop);
+    auto* jPhi = builder.CreatePHI(i64Ty, 2, "ma.j");
+    auto* done = builder.CreateICmpUGE(jPhi, nlen, "ma.done");
+    builder.CreateCondBr(done, yes, body);
+    builder.SetInsertPoint(body);
+    auto* hb = builder.CreateLoad(i8Ty, builder.CreateGEP(
+        i8Ty, hay, builder.CreateAdd(at, jPhi, "ma.atj"), "ma.hp"), "ma.hb");
+    auto* nb = builder.CreateLoad(i8Ty, builder.CreateGEP(
+        i8Ty, needle, jPhi, "ma.np"), "ma.nb");
+    auto* eq = builder.CreateICmpEQ(hb, nb, "ma.eq");
+    auto* jNext = builder.CreateAdd(jPhi, llvm::ConstantInt::get(i64Ty, 1), "ma.jnext");
+    jPhi->addIncoming(llvm::ConstantInt::get(i64Ty, 0), entry);
+    jPhi->addIncoming(jNext, body);
+    builder.CreateCondBr(eq, loop, no);
+    builder.SetInsertPoint(yes);
+    builder.CreateRet(builder.getTrue());
+    builder.SetInsertPoint(no);
+    builder.CreateRet(builder.getFalse());
+
+    strMatchAtFn = fn;
+    return fn;
+}
+
+llvm::Function* CodegenContext::getSplitFn() {
+    if (splitFn) return splitFn;
+    llvm::LLVMContext& c = *context;
+    auto* i8Ty = llvm::Type::getInt8Ty(c);
+    auto* i64Ty = llvm::Type::getInt64Ty(c);
+    auto* ptrTy = llvm::PointerType::get(c, 0);
+    auto* fnTy = llvm::FunctionType::get(
+        ptrTy, {ptrTy, i64Ty, ptrTy, i64Ty, llvm::PointerType::get(i64Ty, 0)},
+        false);
+    auto* fn = llvm::Function::Create(fnTy, llvm::Function::InternalLinkage,
+                                      "smc.str.split", module.get());
+    auto mallocFn = module->getOrInsertFunction(
+        "malloc", llvm::FunctionType::get(ptrTy, {i64Ty}, false));
+    // Synthesize the callee FIRST (it re-points the shared builder).
+    llvm::Function* matchAt = getStrMatchAtFn();
+
+    auto* s = fn->getArg(0);
+    auto* slen = fn->getArg(1);
+    auto* sep = fn->getArg(2);
+    auto* seplen = fn->getArg(3);
+    auto* outCnt = fn->getArg(4);
+
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(c, "entry", fn);
+    llvm::BasicBlock* countLoop = llvm::BasicBlock::Create(c, "count.loop", fn);
+    llvm::BasicBlock* countBody = llvm::BasicBlock::Create(c, "count.body", fn);
+    llvm::BasicBlock* countSep = llvm::BasicBlock::Create(c, "count.sep", fn);
+    llvm::BasicBlock* countAdv = llvm::BasicBlock::Create(c, "count.adv", fn);
+    llvm::BasicBlock* allocBB = llvm::BasicBlock::Create(c, "alloc", fn);
+    llvm::BasicBlock* fillLoop = llvm::BasicBlock::Create(c, "fill.loop", fn);
+    llvm::BasicBlock* fillBody = llvm::BasicBlock::Create(c, "fill.body", fn);
+    llvm::BasicBlock* fillSep = llvm::BasicBlock::Create(c, "fill.sep", fn);
+    llvm::BasicBlock* fillAdv = llvm::BasicBlock::Create(c, "fill.adv", fn);
+    llvm::BasicBlock* fillTail = llvm::BasicBlock::Create(c, "fill.tail", fn);
+
+    builder.SetInsertPoint(entry);
+    auto* cntA = builder.CreateAlloca(i64Ty, nullptr, "sp.cnt");
+    auto* iA = builder.CreateAlloca(i64Ty, nullptr, "sp.i");
+    auto* psA = builder.CreateAlloca(i64Ty, nullptr, "sp.ps");
+    auto* idxA = builder.CreateAlloca(i64Ty, nullptr, "sp.idx");
+    auto* arrA = builder.CreateAlloca(ptrTy, nullptr, "sp.arr");
+    auto* one = llvm::ConstantInt::get(i64Ty, 1);
+    auto zero = llvm::ConstantInt::get(i64Ty, 0);
+    auto sixteen = llvm::ConstantInt::get(i64Ty, 16);
+
+    builder.CreateStore(one, cntA);
+    builder.CreateStore(zero, iA);
+    builder.CreateStore(zero, psA);
+    builder.CreateStore(zero, idxA);
+    builder.CreateBr(countLoop);
+
+    // Pass 1: greedy non-overlapping separator count; parts = count + 1.
+    builder.SetInsertPoint(countLoop);
+    auto* ci = builder.CreateLoad(i64Ty, iA, "sp.ci");
+    auto* ciNext = builder.CreateAdd(ci, seplen, "sp.cinext");
+    auto* cmore = builder.CreateICmpULE(ciNext, slen, "sp.cmore");
+    builder.CreateCondBr(cmore, countBody, allocBB);
+    builder.SetInsertPoint(countBody);
+    auto* chit = builder.CreateCall(matchAt, {s, sep, seplen, ci}, "sp.chit");
+    builder.CreateCondBr(chit, countSep, countAdv);
+    builder.SetInsertPoint(countSep);
+    builder.CreateStore(
+        builder.CreateAdd(builder.CreateLoad(i64Ty, cntA, "sp.ccnt"), one, "sp.cnt.next"),
+        cntA);
+    builder.CreateStore(ciNext, iA);
+    builder.CreateBr(countLoop);
+    builder.SetInsertPoint(countAdv);
+    builder.CreateStore(builder.CreateAdd(ci, one, "sp.ci.adv"), iA);
+    builder.CreateBr(countLoop);
+
+    builder.SetInsertPoint(allocBB);
+    auto* cnt = builder.CreateLoad(i64Ty, cntA, "sp.cnt.final");
+    auto* bytes = builder.CreateMul(cnt, sixteen, "sp.bytes");
+    auto* arr = builder.CreateCall(mallocFn, {bytes}, "sp.arr.v");
+    builder.CreateStore(arr, arrA);
+    builder.CreateStore(zero, iA);
+    builder.CreateBr(fillLoop);
+
+    // Pass 2: write each {ptr, len} view; parts span [partStart, sepStart).
+    builder.SetInsertPoint(fillLoop);
+    auto* fi = builder.CreateLoad(i64Ty, iA, "sp.fi");
+    auto* fiNext = builder.CreateAdd(fi, seplen, "sp.finext");
+    auto* fmore = builder.CreateICmpULE(fiNext, slen, "sp.fmore");
+    builder.CreateCondBr(fmore, fillBody, fillTail);
+    builder.SetInsertPoint(fillBody);
+    auto* fhit = builder.CreateCall(matchAt, {s, sep, seplen, fi}, "sp.fhit");
+    builder.CreateCondBr(fhit, fillSep, fillAdv);
+    builder.SetInsertPoint(fillSep);
+    {
+        auto* idx = builder.CreateLoad(i64Ty, idxA, "sp.fidx");
+        auto* ps = builder.CreateLoad(i64Ty, psA, "sp.fps");
+        auto* arrV = builder.CreateLoad(ptrTy, arrA, "sp.farr");
+        auto* slot = builder.CreateGEP(i8Ty, arrV,
+            builder.CreateMul(idx, sixteen, "sp.slot.off"), "sp.slot");
+        builder.CreateStore(builder.CreateGEP(i8Ty, s, ps, "sp.part.p"), slot);
+        builder.CreateStore(builder.CreateSub(fi, ps, "sp.part.l"),
+            builder.CreateGEP(i64Ty, slot, one, "sp.slot.l"));
+        builder.CreateStore(builder.CreateAdd(idx, one, "sp.idx.next"), idxA);
+        builder.CreateStore(fiNext, iA);
+        builder.CreateStore(fiNext, psA);
+        builder.CreateBr(fillLoop);
+    }
+    builder.SetInsertPoint(fillAdv);
+    builder.CreateStore(builder.CreateAdd(fi, one, "sp.fi.adv"), iA);
+    builder.CreateBr(fillLoop);
+
+    builder.SetInsertPoint(fillTail);
+    {
+        auto* idx = builder.CreateLoad(i64Ty, idxA, "sp.tidx");
+        auto* ps = builder.CreateLoad(i64Ty, psA, "sp.tps");
+        auto* arrV = builder.CreateLoad(ptrTy, arrA, "sp.tarr");
+        auto* slot = builder.CreateGEP(i8Ty, arrV,
+            builder.CreateMul(idx, sixteen, "sp.tslot.off"), "sp.tslot");
+        builder.CreateStore(builder.CreateGEP(i8Ty, s, ps, "sp.tpart.p"), slot);
+        builder.CreateStore(builder.CreateSub(slen, ps, "sp.tpart.l"),
+            builder.CreateGEP(i64Ty, slot, one, "sp.tslot.l"));
+        builder.CreateStore(cnt, outCnt);
+        builder.CreateRet(arrV);
+    }
+
+    splitFn = fn;
+    return fn;
+}

@@ -106,6 +106,14 @@ public:
     // hayLen (reverse).
     llvm::Function* getStrFindFn(bool reverse);
 
+    // P1-09 (STD-10): does sep match hay at byte offset `at`? (i1)
+    llvm::Function* getStrMatchAtFn();
+
+    // P1-09 (STD-10): greedy non-overlapping split. Returns a malloc'd array
+    // of str views ({i8*, i64} = 16 bytes each) and writes the part count to
+    // *outCnt. Assumes seplen > 0 (checked at the call site).
+    llvm::Function* getSplitFn();
+
 private:
     std::unique_ptr<llvm::LLVMContext> context;
     llvm::IRBuilder<> builder;
@@ -132,4 +140,6 @@ private:
     llvm::Function* formatDynFn{nullptr};
     llvm::Function* strFindFn{nullptr};
     llvm::Function* strRFindFn{nullptr};
+    llvm::Function* strMatchAtFn{nullptr};
+    llvm::Function* splitFn{nullptr};
 };

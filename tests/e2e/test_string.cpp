@@ -719,3 +719,52 @@ TEST_F(StringE2E, SubBoundsPanicPath) {
     )", "str21.c");
     ASSERT_FALSE(ir.empty());
 }
+
+// ===== P1-09: split/split_destroy 内建（零拷贝 []str 视图） =====
+
+TEST_F(StringE2E, SplitExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            str[] parts = split("a,b,c", ",");
+            if (parts.len != 3) { return 1; }
+            if (parts[1] == "b") { return 0; }
+            return 2;
+        }
+    )", "str23.c"), 0);
+}
+
+TEST_F(StringE2E, SplitNoSepExec) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            str[] parts = split("abc", ",");
+            if (parts.len != 1) { return 1; }
+            if (parts[0] == "abc") { return 0; }
+            return 2;
+        }
+    )", "str24.c"), 0);
+}
+
+TEST_F(StringE2E, SplitTailEmpty) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            str[] parts = split("a,", ",");
+            if (parts.len != 2) { return 1; }
+            if (parts[0] == "a") { return 0; }
+            if (parts[1].len() == 0) { return 0; }
+            return 2;
+        }
+    )", "str25.c"), 0);
+}
+
+TEST_F(StringE2E, SplitViewAndDestroy) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string src = string.new("x,y");
+            str[] parts = split(src, ",");
+            if (parts.len != 2) { return 1; }
+            if (parts[0] == "x") { return 0; }
+            split_destroy(parts);
+            return 0;
+        }
+    )", "str26.c"), 0);
+}

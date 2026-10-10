@@ -2409,3 +2409,26 @@ TEST_F(SemanticAnalyzerTest, StrFindRFindSubSema) {
     EXPECT_FALSE(analyzeFullyOk(
         "int32 main() { str s = \"hello\"; s.sub(1); return 0; }"));
 }
+
+// P1-09 / spec 偏差 1/2: builtin split/split_destroy.
+TEST_F(SemanticAnalyzerTest, BuiltinSplitSema) {
+    EXPECT_TRUE(analyzeFullyOk(
+        "int32 main() { str[] parts = split(\"a,b\", \",\"); return 0; }"));
+    EXPECT_TRUE(analyzeFullyOk(
+        "int32 main() { str[] parts = split(\"a,b\", \",\"); split_destroy(parts); return 0; }"));
+    // 非 str 实参
+    EXPECT_FALSE(analyzeFullyOk(
+        "int32 main() { str[] parts = split(1, \",\"); return 0; }"));
+    EXPECT_FALSE(analyzeFullyOk(
+        "int32 main() { str[] parts = split(\"a\", 2); return 0; }"));
+    // 字面空 sep → 编译期拒绝
+    EXPECT_FALSE(analyzeFullyOk(
+        "int32 main() { str[] parts = split(\"a\", \"\"); return 0; }"));
+    // 实参个数
+    EXPECT_FALSE(analyzeFullyOk(
+        "int32 main() { str[] parts = split(\"a\"); return 0; }"));
+    // user-defined 优先
+    EXPECT_TRUE(analyzeFullyOk(
+        "str split(str s, str sep) { return s; }"
+        "int32 main() { return 0; }"));
+}
