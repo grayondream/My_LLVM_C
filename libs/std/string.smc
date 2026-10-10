@@ -1,0 +1,103 @@
+// ===== std.string — 组合字符串操作库 (P1-09 / STD-10) =====
+// Import with `import std.string;` and use as `std::contains(...)` etc.
+// 原语 find/rfind/sub/split/split_destroy 是 codegen 内建（无需 import）；
+// 本库在其上组合出高层 API。libc 声明自包含（io.smc 先例），模块私有。
+// 所有权：join/concat/repeat 返回新 string（调用方 destroy）；trim*/utf8_sub
+// 返回源数据零拷贝视图。字符串构建：string 自身即 builder（append/push/len，
+// P1-06）；独立 StrBuilder 类因「class 无法跨模块导出（类型名在 parse 期
+// 注册，先于 import 处理）」而挂账，见 docs/spec/stdlib.md。
+module std.string;
+
+extern int32 isspace(int32 c);
+
+export namespace std {
+
+// ----- 谓词 -----
+
+bool contains(str s, str sub) {
+    return s.find(sub) >= 0;
+}
+
+bool starts_with(str s, str prefix) {
+    return s.find(prefix) == 0;
+}
+
+bool ends_with(str s, str suffix) {
+    if (suffix.len() > s.len()) { return false; }
+    str tail = s.sub(s.len() - suffix.len(), s.len());
+    return tail == suffix;
+}
+
+// ----- 裁剪（零拷贝视图） -----
+
+str trim_left(str s) {
+    usize i = 0;
+    while (i < s.len() && isspace(s.char_at(i))) {
+        i = i + 1;
+    }
+    return s.sub(i, s.len());
+}
+
+str trim_right(str s) {
+    usize n = s.len();
+    while (n > 0 && isspace(s.char_at(n - 1))) {
+        n = n - 1;
+    }
+    return s.sub(0, n);
+}
+
+str trim(str s) {
+    return trim_left(trim_right(s));
+}
+
+// ----- 拼接（新分配，调用方 destroy） -----
+
+string join(str[] parts, str sep) {
+    string out = string.new("");
+    usize n = parts.len;
+    usize i = 0;
+    while (i < n) {
+        if (i > 0) {
+            out.append(sep);
+        }
+        out.append(parts[i]);
+        i = i + 1;
+    }
+    return out;
+}
+
+string concat(str a, str b) {
+    string out = string.new(a);
+    out.append(b);
+    return out;
+}
+
+string repeat(str s, usize n) {
+    string out = string.new("");
+    usize i = 0;
+    while (i < n) {
+        out.append(s);
+        i = i + 1;
+    }
+    return out;
+}
+
+// ----- UTF-8 码点切片（零拷贝视图） -----
+
+str utf8_sub(str s, usize start_cp, usize len_cp) {
+    usize byteStart = 0;
+    usize i = 0;
+    while (i < start_cp && byteStart < s.len()) {
+        byteStart = byteStart + s.char_len_at(byteStart);
+        i = i + 1;
+    }
+    usize byteEnd = byteStart;
+    usize j = 0;
+    while (j < len_cp && byteEnd < s.len()) {
+        byteEnd = byteEnd + s.char_len_at(byteEnd);
+        j = j + 1;
+    }
+    return s.sub(byteStart, byteEnd);
+}
+
+} // namespace std
