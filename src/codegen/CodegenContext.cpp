@@ -383,6 +383,24 @@ llvm::Value* CodegenContext::castValue(llvm::Value* val, Type* fromAST, llvm::Ty
         return castValue(ptr, targetLLVMType);
     }
 
+    // P1-09 (INH slice fix): assigning a derived class VALUE to a base class
+    // keeps only the base sub-object (field 0 of the derived layout). The
+    // former whole-value store overflowed the destination by the derived tail
+    // — latent stack corruption that surfaced once short-circuit && changed
+    // the frame layout.
+    if (fromAST->kind == TypeKind::Class && srcType->isStructTy() &&
+        targetLLVMType->isStructTy()) {
+        llvm::Value* cur = val;
+        auto* srcStruct = llvm::cast<llvm::StructType>(srcType);
+        while (srcStruct->getNumContainedTypes() > 0) {
+            llvm::Type* first = srcStruct->getStructElementType(0);
+            if (!first->isStructTy()) break;
+            cur = builder.CreateExtractValue(cur, {0}, "base.slice");
+            if (first == targetLLVMType) return cur;
+            srcStruct = llvm::cast<llvm::StructType>(first);
+        }
+    }
+
     // Float -> int, float widening/narrowing and pointer conversions do not
     // depend on the source signedness; reuse the generic implementation.
     return castValue(val, targetLLVMType);

@@ -341,7 +341,44 @@ llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
         
         return ctx.getBuilder().CreateCall(calleeFn, {lhs, rhs}, "opcalltmp");
     }
-    
+
+    // P1-09: `&&`/`||` are short-circuit logical operators with C truthiness
+    // (value != 0 via coerceToBool) — not bitwise And/Or, which mis-evaluated
+    // high-bit truthy values and never skipped the RHS.
+    if (op == BinaryOp::And || op == BinaryOp::Or) {
+        auto& scBuilder = ctx.getBuilder();
+        llvm::LLVMContext& c = ctx.getContext();
+        auto evalTruthy = [&](ExprAST& e) -> llvm::Value* {
+            llvm::Value* v = e.codegen(ctx);
+            if (!v) return nullptr;
+            v = emitRValue(ctx, e, v);
+            return ctx.coerceToBool(v);
+        };
+        llvm::Value* lhsV = evalTruthy(*left);
+        if (!lhsV) return nullptr;
+        llvm::Function* fn = scBuilder.GetInsertBlock()->getParent();
+        llvm::BasicBlock* rhsBB = llvm::BasicBlock::Create(c, "log.rhs", fn);
+        llvm::BasicBlock* shortBB = llvm::BasicBlock::Create(c, "log.short", fn);
+        llvm::BasicBlock* mergeBB = llvm::BasicBlock::Create(c, "log.merge", fn);
+        // &&: false short-circuits to false; ||: true short-circuits to true.
+        scBuilder.CreateCondBr(lhsV,
+            op == BinaryOp::And ? rhsBB : shortBB,
+            op == BinaryOp::And ? shortBB : rhsBB);
+        scBuilder.SetInsertPoint(shortBB);
+        llvm::Value* shortVal = llvm::ConstantInt::get(
+            llvm::Type::getInt1Ty(c), op == BinaryOp::Or);
+        scBuilder.CreateBr(mergeBB);
+        scBuilder.SetInsertPoint(rhsBB);
+        llvm::Value* rhsV = evalTruthy(*right);
+        if (!rhsV) return nullptr;
+        scBuilder.CreateBr(mergeBB);
+        scBuilder.SetInsertPoint(mergeBB);
+        auto* phi = scBuilder.CreatePHI(llvm::Type::getInt1Ty(c), 2, "log.val");
+        phi->addIncoming(shortVal, shortBB);
+        phi->addIncoming(rhsV, rhsBB);
+        return phi;
+    }
+
     llvm::Value* lhs = left->codegen(ctx);
     llvm::Value* rhs = right->codegen(ctx);
     if (!lhs || !rhs) return nullptr;

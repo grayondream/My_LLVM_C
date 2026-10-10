@@ -768,3 +768,29 @@ TEST_F(StringE2E, SplitViewAndDestroy) {
         }
     )", "str26.c"), 0);
 }
+
+// P1-09: && / || 为 C 语义逻辑运算符——判零真值 + 短路求值。
+// （修复前：按位 And/Or，8192 之类高位真值被截断为假、RHS 永远求值。）
+TEST_F(StringE2E, LogicalOpsTruthinessAndShortCircuit) {
+    EXPECT_EQ(runSource(R"(
+        int32 calls = 0;
+        int32 side() { calls = calls + 1; return 1; }
+        int32 main() {
+            int32 bad = 0;
+            int32 a = 8192;
+            int32 b = 4;
+            if (!(a && b)) { bad = bad + 1; }
+            if (a && 0) { bad = bad + 2; }
+            int32 z = 0;
+            if (z && side()) { bad = bad + 4; }
+            if (calls != 0) { bad = bad + 8; }
+            if (!(a && side())) { bad = bad + 16; }
+            if (calls != 1) { bad = bad + 32; }
+            if (!(z || side())) { bad = bad + 64; }
+            if (calls != 2) { bad = bad + 128; }
+            if (a || side()) { }
+            if (calls != 2) { bad = bad + 256; }
+            return bad;
+        }
+    )", "logic1.c"), 0);
+}
