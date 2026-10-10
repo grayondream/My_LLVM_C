@@ -313,16 +313,16 @@
 - `[x]` **FMT-02** `String`：动态字符串、长度/容量、**C 语义内存管理（显式 `new/destroy`，无析构）**。完成（2026-10-08）：类型名钉死小写 `string`；`string.new(str)`/`destroy()`/`append(str)`/`push(char)`/`len()`/`capacity()`/`s[i]`；增长策略 `cap' = max(cap*2, need)`；`destroy` 清零三字段；无 SSO。
 - `[x]` **FMT-03** 字符串字面量类型与 `char*` 互操作。完成（2026-10-08）：字面量重定型为 `str`；`str → char*` 隐式（`typesCompatible`/`checkAssignmentTypes`/`conversionRank`/`castValue` 四点同步）；`char* → str` 仅经内建 `str_from_c`（char 数组实参衰减）；print/println 的 str 实参走 `%.*s`。
 - `[x]` **FMT-04** UTF-8 验证与遍历；`str`↔`String` 互转。完成（2026-10-08）：验证点 = 字面量与 `str_from_c` 字面量（sema 期，`support/Utf8`，E2015）+ 运行时缓冲（codegen 合成 IR `smc.utf8.validate`，失败 panic）；遍历 = `char_count`/`char_len_at` 步进 API（IR 辅助 `smc.utf8.*`），无 for-in 语法；`string → str` 隐式视图、`str → string` 显式 `string.new`。
-- `[~]` **FMT-05** 切片、连接、比较、查找、替换。部分（2026-10-08）：`==`/`!=` 完成；`str + str` 不提供（拼接 = `string.new(a).append(b)`，CT-06 字面量 `+` 一并移除）；查找/分割/替换挂 STD-10。
+- `[~]` **FMT-05** 切片、连接、比较、查找、替换。部分（2026-10-08）：`==`/`!=` 完成；`str + str` 不提供（拼接 = `string.new(a).append(b)`，CT-06 字面量 `+` 一并移除）。（2026-10-09）查找/分割完成：`find`/`rfind`/`sub`/`split` 内建（见 stdlib.md §9.1）；`replace` 未做。
 
 ### format
-- `[ ]` **FMT-06** `(已实现)` `print/println` 内建，`{}` 占位符；`(改)` 纳入 `import std.format` 体系。
-- `[ ]` **FMT-07** `format("name={} age={}", name, age)`。
-- `[ ]` **FMT-08** 格式说明：`{}`、`{:x}`、`{:f}`、`{:02}`、`{:.2f}`。
-- `[ ]` **FMT-09** 编译期格式字符串解析与类型检查（SEM-08）。
-- `[ ]` **FMT-10** 自定义类型格式化接口：`to_string`（已有类方法/自由函数两条路径）。
-- `[ ]` **FMT-11** 错误处理：参数不足、类型不匹配、格式非法。
-- `[ ]` **FMT-12** 性能：避免不必要分配。
+- `[x]` **FMT-06** `print/println` 内建，`{}` 占位符（2026-10-09：与 format 共享 PrintSpec 解析器，FMT-08 全规格自动生效；D4 裁决不引入 std.format import 形式，文档归 stdlib.md §10）。
+- `[x]` **FMT-07** `format(fmt, args...) -> string` 内建（2026-10-09；user-defined 同名优先；字面量/动态 fmt 双路径）。
+- `[x]` **FMT-08** 格式说明：`{}`、`{:x}/{:X}/{:o}/{:b}`、`{:f}/{:e}`、`{:02}`、`{:.2f}`、`{:<N}/{:>N}/{:^N}`、自定义 fill、sign（2026-10-09；`{:d}` 拒绝，十进制只用 `{}`；`{:b}` 依赖 glibc ≥ 2.35）。
+- `[x]` **FMT-09** 编译期格式字符串解析与类型检查（SEM-08）（2026-10-09；字面量 fmt 全检；动态 fmt 只查实参可格式化，运行时契约见 stdlib.md §10.4）。
+- `[x]` **FMT-10** 自定义类型格式化接口：`to_string`（类方法/自由函数两条路径，print/format 共享 lowerToString 管线）（2026-10-09）。
+- `[x]` **FMT-11** 错误处理：参数不足/过多（E2020）、类型不匹配（E2021）、格式非法（E2022）——print/format 共用稳定诊断码（2026-10-09）。
+- `[~]` **FMT-12** 性能：避免不必要分配。部分（2026-10-09）：format 全程单缓冲一次 malloc（长度可预知，无 realloc 路径）；str 实参零拷贝拼接。
 - `[ ]` **FMT-13** `(新)` `print/println` 与 `printf` 的关系与统一语义；数值宽度/精度/类型的精确格式化规则（细化 FMT-08/SEM-08）。
 - `[ ]` **FMT-14** `(新)` 自定义格式化 `to_string` 的签名与分派规则（细化 FMT-10/FUN-14）。
 
@@ -360,13 +360,13 @@
 - `[ ]` **STD-06** `Vec`/`ArrayList`（增长、容量、索引、迭代）。
 - `[ ]` **STD-07** `HashMap`/`HashSet`（依赖 `to_hash`/`equals`）。
 - `[ ]` **STD-08** `Deque`、`List`、`BTree`（可选）。
-- `[ ]` **STD-09** 扩展点约定文档：`to_string`/`to_hash`/`equals`。
+- `[~]` **STD-09** 扩展点约定文档：`to_string`/`to_hash`/`equals`。部分（2026-10-09）：`to_string` 已成 print/format 统一降级路径（FMT-10）；`to_hash`/`equals` 挂 STD-07。
 
 ### std.string
-- `[ ]` **STD-10** `str`、`String`、UTF-8 工具、字符串构建器、比较/查找/分割/拼接。
+- `[~]` **STD-10** `str`、`String`、UTF-8 工具、字符串构建器、比较/查找/分割/拼接。核心完成（2026-10-09）：内建原语 find/rfind/sub/split/split_destroy + `libs/std/string.smc`（contains/starts_with/ends_with/trim*/join/concat/repeat/utf8_sub），文档 stdlib.md §9。挂账：字典序 `<`/`>`、`to_lower`/`to_upper`、`replace` 不做（spec §8）；StrBuilder 类因「class 无法跨模块导出」挂账（string 自身即 builder）。
 
 ### std.format
-- `[ ]` **STD-11** `format`、`print`、格式说明解析、编译期检查接口、自定义格式化。
+- `[~]` **STD-11** `format`、`print`、格式说明解析、编译期检查接口、自定义格式化。核心完成（2026-10-09）：format 内建 + FMT-08 规格集 + E2020~22 + to_string 降级 + 动态格式串契约，文档 stdlib.md §10。挂账：`import std.format` 体系（D4 裁决暂不引入）、自定义格式化钩子（Weight 之外的扩展点）、`printf` 关系统一（FMT-13）。
 
 ### std.io
 - `[x]` **STD-12** `print`、`read`、stdout/stderr、文件读写、缓冲 I/O。`libs/std/io.smc` 已提供 `print_*`、`print_err_*`（stderr，经 `dprintf`）、`read_char/read_int/read_line`、`file_open/close/read/write`、`file_read_line/read_char/write_char/write_str`；基于 libc。
@@ -513,7 +513,7 @@
 - `[x]` **P1-06** str / String / format（FMT、STD-10/11）。核心纵向完成（2026-10-08）：FMT-01/02/03/04 + FMT-05 比较 + TYP-26/DEC-20 + 内建类型小写化（`optional`/`result`，DEC-18 先例）；E2015 新诊断；`grammar.ebnf` 同步。format（FMT-06~09）与 STD-10 高层操作另轮。spec `docs/superpowers/specs/2026-10-08-str-string-design.md`，plan `docs/superpowers/plans/2026-10-08-str-string.md`。挂账：`string` 不参与 constexpr；CT `+` 已移除；SSO 不做。
 - `[ ]` **P1-07** 位域、匿名类型、指定初始化器、lambda（AGG-03~06、PAR-10~13）。
 - `[~]` **P1-08** `static_cast` / 内联 `asm`（PAR-18、CG-10）。`static_cast`/`reinterpret_cast` 已完成（LEX-11/PAR-18）；内联 `asm`（CG-10/DEC-09）待定。
-- `[ ]` **P1-09** std.mem / std.string / std.format / std.math / **std.collections**（STD-05~14）。
+- `[~]` **P1-09** std.mem / std.string / std.format / std.math / **std.collections**（STD-05~14）。字符串库 + format 体系完成（2026-10-09）：FMT-06~11 全落地、FMT-12 单缓冲、STD-10 组合库、STD-11 核心；E2020~22 新诊断；顺带修复既有编译器 bug 两枚——`&&`/`||` 按位降级（真值截断 + 无短路）与派生→基类赋值整结构 store 溢出（潜在栈腐败）。spec `docs/superpowers/specs/2026-10-09-p109-string-format-design.md`，plan `docs/superpowers/plans/2026-10-09-p109-string-format.md`。挂账：StrBuilder 类导出缺口（语言层）、模块类导出（parse 期类型名注册）、`replace`/字典序/to_lower|upper 不做、std.mem/math/collections 另轮；终审 I4（string 值拷贝别名双 free）仍在账。
 
 ### P2：工程化与并发
 - `[ ]` **P2-01** atomic / thread_local / std.thread（CON、STD-24/25）。

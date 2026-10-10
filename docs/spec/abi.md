@@ -26,6 +26,8 @@
 | `T[]` (Slice) | `{ ptr, i64 }` | 16(64 位) | 8 | `[impl]` | **目标** `{ptr, usize}`，TYP-12 |
 | `T?` (optional) | `{ i1, T }` | — | — | `[impl]` | `{ bool valid; T value; }`（TYP-13，2026-10-06 落地：判别标志在前） |
 | `result<T,E>` | `{ i1, T, E }` | — | — | `[impl]` | `{ bool ok; T value; E error; }`（DEC-03 裁决，2026-10-06：加判别标志） |
+| `str` | `{ ptr, i64 }` | 16(64 位) | 8 | `[impl]` | 字节视图 `{ptr, len}`（P1-06）；零拷贝语义 |
+| `string` | `{ ptr, i64, i64 }` | 24(64 位) | 8 | `[impl]` | 动态字符串 `{ptr, len, cap}`（P1-06；P1-09 补记 ABI 行，终审 M5） |
 
 ## 2. 聚合布局
 

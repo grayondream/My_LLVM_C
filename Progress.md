@@ -621,3 +621,16 @@
   - I3（append 自别名）：已修（覆盖语言可表达的别名形态）。谓词 sptr∈[ptr,ptr+cap)（UGE/ULT GEP），自别名后重投影 ptr2 + memmove；非别名仍走 sptr。测试 AppendSelfAlias/AppendExec/AppendGrowthExec/AppendAcceptsString 4/4 绿。残余：若未来引入带偏移的 str 子视图（s[k..]），重投影会丢偏移——当前语言无此构造，不算缺陷。
 - 验证：目标 gtest 7/7 绿；全量 ctest -j4：1123/1125，2 个 ModuleVisibility 失败为并行 LLJIT 抖动（隔离重跑均过，与已知 flaky 同类）；ConstexprFunctionE2E 2 个为源码内 GTEST_SKIP（既有遗留）。
 - 结论：通过。新引入问题：无阻塞项；轻微不对称——三元分支 `cond ? str : char*` 现被拒（`? char* : str` 可过），系单向规则的连带效应，可接受。
+
+## 2026-10-10 P1-09 字符串库 + format 体系（本轮主体）
+
+- **完成**：FMT-06~11 全落地、FMT-12 单缓冲、STD-10 组合库、STD-11 核心。
+  - PrintSpec 解析器（`src/ast/PrintFormat.{h,cpp}`），print/println/format 三者共享；E2020~E2022 稳定诊断码。
+  - `format()` 内建：sema 全检（字面量）+ codegen 字面量直拼 / 动态 `smc.format.dyn` 扫描（单缓冲一次 malloc）。
+  - str 原语内建：`find`/`rfind`/`sub`/`split`/`split_destroy`（零拷贝视图 / malloc 段数组）。
+  - `libs/std/string.smc`：contains/starts_with/ends_with/trim*/join/concat/repeat/utf8_sub。
+- **顺带修复既有编译器 bug**（`e878bdb`）：`&&`/`||` 按位降级 → C 语义短路 + 判零真值；派生→基类赋值整结构 store 溢出 → castValue 沿继承链截取基子对象。
+- **挂账**：StrBuilder 类跨模块导出缺口（语言层，parse 期类型名注册先于 import）；`replace`/字典序/to_lower|upper 不做（spec §8）；std.mem/math/collections 另轮；终审 I4 仍在账。
+- **文档**：`docs/spec/stdlib.md` 新增 §9 std.string / §10 std.format；`docs/spec/abi.md` 补 str/string 布局行（终审 M5 清账）；TODO.md FMT-05~12/STD-09~11/P1-09 收口。
+- **验证**：全量 `ctest` 1180/1180 绿（含新增 PrintFormat 32 用例、format e2e 20 用例、split/split_destroy、StdStringLib 7 用例、&& 短路 e2e）；3 个已知 flaky 隔离重跑通过。
+- **留痕**：spec `docs/superpowers/specs/2026-10-09-p109-string-format-design.md`（853bc1e），plan `docs/superpowers/plans/2026-10-09-p109-string-format.md`（66ff5c5），执行 ledger `.superpowers/sdd/2026-10-09-p109-string-format/`。

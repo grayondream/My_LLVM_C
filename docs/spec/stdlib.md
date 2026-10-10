@@ -110,7 +110,81 @@ namespace 前缀，`namespace std { void abort() { abort(); } }` 会自递归，
 - 与 `[[nonnull]]` 等边界检查属性（MEM-*）的关系：二者都属"安全失败即终止"策略；
   `[[nonnull]]` 违规的默认处理将复用本节的内建终止路径（待实现）。
 
-## 9. 待办 `[plan]`
+## 9. `std.string`（P1-09 / STD-10）`[impl]`
+
+**分层**：原语（内建，无需 import）+ 组合（`libs/std/string.smc`，`import std.string;`）。
+原语之所以是内建：`.smc` 层无法触达 `str` 内部字段、也无法从 `ptr+len` 构造切片值。
+
+### 9.1 内建原语 `[impl]`
+| API | 语义 | 所有权 |
+|---|---|---|
+| `s.find(needle: str\|string) -> isize` | 首现字节下标；无 → `-1`；空 needle → `0` | 视图 |
+| `s.rfind(needle) -> isize` | 末现字节下标；无 → `-1`；空 needle → `len` | 视图 |
+| `s.sub(begin, end) -> str` | 字节区间零拷贝视图 `{ptr+begin, end-begin}` | 视图（见下） |
+| `split(s, sep) -> str[]` | 贪心非重叠分割；元素为源数据视图；无分隔符 → 全串 1 段 | 数组 malloc（见下） |
+| `split_destroy(parts)` | 释放 split 的段数组（不触碰元素） | — |
+
+- `sub` 越界（`begin < 0 || end < begin || end > len`）→ 运行时 panic `str.sub: out of bounds`。
+- `split` 空 sep：**字面量**在编译期拒绝（E2022 `split: empty separator`）；**动态**运行时 panic 同文案。
+- **视图生存期（用户责任）**：`sub`/`split` 的元素引用源数据字节；源 `string` 先 `destroy()` 则视图悬挂
+  （与 `str` = `string` 视图的所有权模型一致，挂账 I4 同族）。`split_destroy` 只释放段数组本身。
+
+### 9.2 组合库 `[impl]`（`import std.string;`）
+| API | 语义 | 所有权 |
+|---|---|---|
+| `std::contains(s, sub) -> bool` | `find >= 0` | — |
+| `std::starts_with(s, prefix) -> bool` | `find == 0` | — |
+| `std::ends_with(s, suffix) -> bool` | 尾对齐比较 | — |
+| `std::trim_left/right/trim(s) -> str` | `isspace` 扫描 + `sub` | 视图 |
+| `std::join(parts: str[], sep) -> string` | 空数组 → 空 string（cap≥1） | **新分配，调用方 destroy** |
+| `std::concat(a, b) -> string` | 新分配 | 同上 |
+| `std::repeat(s, n) -> string` | `n=0` → 空 string | 同上 |
+| `std::utf8_sub(s, start_cp, len_cp) -> str` | 码点步进（`char_len_at`）+ `sub` | 视图 |
+
+**字符串构建**：`string` 自身即 builder（`string.new("")` + `append`/`push`/`len`，P1-06）。
+独立 `StrBuilder` 类挂账：**class 无法跨模块导出**——类型名在 parse 期注册、先于 import
+处理（`std::StrBuilder` 与模块级 `export class` 均不可见）；语言侧修复后另行落地。
+不做（spec §8）：字典序 `<`/`>`、`to_lower`/`to_upper`、`replace`。
+
+## 10. `format` 与 FMT-08 规格集（P1-09 / STD-11）`[impl]`
+
+`format(fmt: str, args...) -> string` 为内建（user-defined 同名函数优先），
+与 `print`/`println` 共享同一规格解析器（`PrintSpec`，`src/ast/PrintFormat.cpp`）。
+`format` 返回**新分配 string**（单缓冲一次 `malloc`，无增长路径——长度可预知，
+FMT-12 以此满足），调用方 `destroy()`。
+
+### 10.1 规格文法（`{:...}`）`[impl]`
+```
+spec := [fill] align? sign? '0'? width? ('.' precision)? type?
+fill := 除 `{` `}` `:` 数字外的任意字符（仅当后随 align 时生效）
+align := '<' | '>' | '^'        sign := '+' | '-' | ' '
+width := 1..200                 precision := 0..200
+type  := 'x' | 'X' | 'o' | 'b' | 'f' | 'e' | 's'
+```
+- 语义：`'<'` 左对齐、`'>'` 右对齐、`'^'` 居中（或自定义 fill）走渲染路径；
+  `'0'` 补零（仅数值、仅右对齐）；`'+'`/`' '` 符号 flag；`{:.2}` 浮点无 type 推断为 `f`；
+  空 `{}` 保持旧行为（FMT-06）：整数 `%d`、浮点 `%g`、str `%.*s`、bool `true/false`。
+- 字符串带 width 时**默认左对齐**；数值默认右对齐。
+- `{:b}` 依赖 C23 `%b`（glibc ≥ 2.35 基线）。
+
+### 10.2 拒绝矩阵（编译期）`[impl]`
+| 诊断 | 条件 |
+|---|---|
+| E2020 参数计数不匹配 | 占位符数 ≠ 实参数 |
+| E2021 规格与实参不符 | `x/X/o/b` 用于非整数；`f/e` 用于非浮点；`s` 用于非字符串类；precision/`0` 用于不支持者；Char/`char*`/指针带任何规格 |
+| E2022 规格非法 | 未知 type、`{:d}`（十进制只用 `{}`）、`0` 与 `<`/`^` 冲突、`0` 无 width、align 无 width、width/precision > 200、文法错误 |
+
+### 10.3 实参降级（FMT-10）`[impl]`
+无内建转换的类型走 `to_string`（类方法/自由函数两条路径，P1-06 已有）；
+仍无可行转换 → 编译期错误 `cannot format value of type ...`。
+
+### 10.4 动态格式串契约（非字面量 fmt）`[impl]`
+编译期**只检查实参可格式化**，不解析规格。运行时（`smc.format.dyn`）：
+`{{`/`}}` 转义；`{...}` 消费下一实参并按其静态类型**默认转换**（规格文本被忽略）；
+占位符多于实参 → 多余忽略；少于 → 缺位读空串即停；未终止 `{` → 扫描即止。
+以上动态行为**不做检查不 panic**，格式串自担（stdlib 边界，spec §2.3.3）。
+
+## 11. 待办 `[plan]`
 
 - `std.mem`（STD-05）、`std.collections`（STD-06~08）、`std.string`（STD-10）、
   `std.format`（STD-11）、`std.math`/`std.bit`（STD-13/14）、`std.fs`（STD-19）等。
