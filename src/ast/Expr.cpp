@@ -1485,7 +1485,7 @@ llvm::Value* AsmExprAST::codegen(CodegenContext& ctx) {
         llvm::FunctionType::get(retTy, paramTys, /*isVarArg=*/false);
     llvm::InlineAsm* ia = llvm::InlineAsm::get(
         ft, tpl, constraintStr,
-        /*HasSideEffects=*/isVolatile,
+        /*HasSideEffects=*/isVolatile || nOut == 0,
         /*IsAlignStack=*/false,
         llvm::InlineAsm::AD_ATT);
 
@@ -1498,6 +1498,9 @@ llvm::Value* AsmExprAST::codegen(CodegenContext& ctx) {
     }
     std::vector<llvm::Value*> args;
     args.reserve(nIn + rwIndices.size());
+    // 输入一律传值。注意：LLVM 对 `m`（内存）输入会把该值 spill 到栈临时并传
+    // 其地址——只读模板语义与 GCC 一致，但模板若经 `m` 输入写内存，写的是副本
+    // 而非原变量（GCC 写原变量）。与 spec §5 记录一致；要写回须用 `=`/`+` 输出。
     for (unsigned i = 0; i < nIn; ++i) {
         llvm::Value* v = inputs[i].expr->codegen(ctx);
         if (!v) return nullptr;

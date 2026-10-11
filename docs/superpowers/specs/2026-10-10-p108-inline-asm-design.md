@@ -28,7 +28,7 @@
   constraint  := 字符串字面量
   ```
 - **模板串**：必须是字符串字面量（动态模板编译期拒绝，同 print 格式串先例）。模板语法为 GCC 方言：`%N` 引用第 N 个操作数、`%%` 转义为字面 `%`（格式校验在 sema，转义按 LLVM 约定原样透传——LLVM 模板直接收 `%N`，`%%` 由后端消化）。
-- **volatile**：`TOKEN_VOLATILE` 复用；语义 = LLVM `HasSideEffects`。无 volatile 时 LLVM 可假设无副作用（优化/消除）；有 volatile 时禁止消除与重排（GCC 一致）。
+- **volatile**：`TOKEN_VOLATILE` 复用；语义 = LLVM `HasSideEffects`。**无输出操作数的 asm 无论是否写 `volatile` 都视为 volatile**（GCC 语义，防优化期被 DCE）；有输出且未写 `volatile` 时 LLVM 可假设无副作用（优化/消除），有 `volatile` 时禁止消除与重排。
 
 ## §3 AST 节点与解析
 
@@ -60,13 +60,16 @@
 
 ## §5 Codegen：LLVM `InlineAsm` 映射
 
-- **签名**：`FunctionType::get(voidTy, operandTypes...)`，参数类型 = outputs（按序）+ inputs（按序）。LLVM 的 InlineAsm 参数列表即操作数列表；outputs 的 `=`/`+` 前缀写在约束串里。
-- **构造**：`llvm::InlineAsm::get(FT, constraintsJoined, asmTemplate, HasSideEffects = isVolatile, IsAlignStack = false, InlineAsm::AD_ATT)`。
-  - 约束串 = outputs 约束 + inputs 约束 + clobbers，`;` 为段分隔、`,` 为段内分隔，拼成 LLVM 约束格式（`"=r,r,~{memory}"`）。
-  - `AD_ATT`（AT&T 方言）为宿主 x86-64 默认。
-- **发射**：`CreateCall(InlineAsm, args)`；outputs 实参传**地址**（`Alloca` 或左值地址），调用后 `load` 回写 output 左值（GCC 语义）；inputs 传值。
-- **零操作数退化**：`asm("nop")` → 零参数 InlineAsm，正常。
-- **模板透传**：`asmTemplate` 原样传给 InlineAsm（`%%`/`%N` 由 LLVM 处理）。
+> **实现修正**（plan 原案「outputs 传左值地址 + 约束原样」被 LLVM 21 拒绝，实证见 ledger Task 4 Rulings；本节约定实现后的真实映射）。
+
+- **输出 → call 返回值**（LLVM 21 强制）：单输出返回类型即该标量；多输出返回 `{T0,T1,...}` StructType（按约束顺序），调用后 `ExtractValue` 逐位 `store` 回写左值；零输出返回 void。LLVM 对「`=r` 传左值地址」报 `number of input constraints does not match`，不可行。
+- **读-写输出（`+`）**：LLVM 21 无 `+` 前缀（`ConstraintPrefix` 只认 `~`/`=`/`!`）。翻译为 `=r`（输出）+ 追加在**全部普通输入之后**的 tied 数字约束（`"=r,r,0"`，参数顺序 = 普通输入值 + 读-写输出初值），使 GCC 模板编号（`%N`）与 LLVM `$N` 完全对齐（tied 槽不被模板引用）。
+- **模板翻译（GCC → LLVM 方言）**：LLVM 只认 `$N`（操作数引用）与 `$$`（字面 `$`），`%` 不处理。顺序：`$`→`$$`（先转义字面 `$`）→ `%%`→`%` → `%N`→`$N`。
+- **输出约束限定**：仅寄存器类输出（`r`/`q`/`Q`/具体寄存器等）。**内存类输出（`m`/`o`/`V`，含 `Um` 等多字母内存码）sema 拒绝（E2023）**——LLVM 21 对其返回-值模型走 `SelectionDAGBuilder` 崩溃路径（SEGV，实证 rc=139）。`p`/`g`/`X`/`v` 等由后端干净报错，不拒绝。
+- **输入**：一律传值。`m`（内存）输入由 LLVM spill 到栈临时并传其地址——**只读模板与 GCC 语义一致；模板若经 `m` 输入写内存，写的是副本而非原变量**（GCC 写原变量；写回须用 `=`/`+` 输出）。
+- **clobbers**：`~{name}` 追加在约束串末尾（逗号分隔）。
+- **构造**：`llvm::InlineAsm::get(FT, tpl, constraintStr, HasSideEffects = isVolatile || outputs.empty(), IsAlignStack = false, AD_ATT)`。
+- **发射**：`CreateCall(InlineAsm, args)`；output 左值地址求值一次（供 tied 输入与回写共用）。
 
 ## §6 测试
 

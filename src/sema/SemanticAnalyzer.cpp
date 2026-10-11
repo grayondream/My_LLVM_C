@@ -4391,6 +4391,19 @@ void SemanticAnalyzer::checkInstanceFieldComplete(StructDeclAST& node) {
     }
 }
 
+// 最终评审 C1：输出约束是否为内存类（m/o/V）。剥离 =/+（前缀）与 &（早破坏）
+// 后扫描约束码；命中 m/o/V 即内存类（GCC 内存约束，含 Um 等多字母内存码）。
+// `{寄存器}` 限定与 `|` 多选不展开——含内存字母即拒绝。寄存器类字母
+// （r/q/Q/R/S/T/A/a-d/f/x/y/k/j/e/v 等）不含这三个字母，不受影响。
+static bool hasMemoryClassOutputConstraint(const std::string& c) {
+    size_t i = 0;
+    while (i < c.size() && (c[i] == '=' || c[i] == '+' || c[i] == '&')) ++i;
+    for (; i < c.size() && c[i] != '{' && c[i] != '|'; ++i) {
+        if (c[i] == 'm' || c[i] == 'o' || c[i] == 'V') return true;
+    }
+    return false;
+}
+
 // P1-08 / DEC-09: inline asm —— 节点恒为 void 值（D3），outputs 必须是左值标量，
 // inputs 必须是标量，约束串非空；模板 `%` 后只能是 `%`（转义）或数字（操作数
 // 引用）。约束/模板的语义合法性交由 LLVM 后端（D2）。
@@ -4418,6 +4431,15 @@ void SemanticAnalyzer::visit(AsmExprAST& node) {
     node.outputTypes.clear();
     for (auto& op : node.outputs) {
         node.outputTypes.push_back(checkOperand(op, true, "output"));
+        // 最终评审 C1：本编译器的输出模型 = LLVM call 返回值，LLVM 21 对非间接
+        // 内存类输出约束（m/o/V）会走 SelectionDAGBuilder 崩溃路径（SEGV，实证
+        // rc=139）。sema 拒绝内存类输出，防 GCC 合法源码击穿编译器；寄存器输出
+        // （r/q/Q/...）与只读内存输入（m）不受影响。见 spec §5 注释。
+        if (hasMemoryClassOutputConstraint(op.constraint)) {
+            emitError(DiagnosticCode::SemAsmOperand,
+                      "asm memory-class output constraint is not supported "
+                      "(register-class outputs only)", node);
+        }
     }
     node.inputTypes.clear();
     for (auto& op : node.inputs) {

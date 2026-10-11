@@ -2515,3 +2515,28 @@ TEST_F(SemanticAnalyzerTest, InlineAsmNonLValueInputOk) {
     analyzer->analyze(*ast);
     EXPECT_TRUE(analyzer->getErrors().empty());
 }
+
+// 最终评审 C1：内存类输出约束（m/o/V）在 LLVM 21 的返回-值输出模型下会触发
+// SelectionDAGBuilder 崩溃（SEGV）——必须在 sema 拒绝，编译器不得因 GCC 合法
+// 源码崩溃。
+TEST_F(SemanticAnalyzerTest, InlineAsmMemoryOutputRejected) {
+    std::string source = "int32 f() { int32 x; asm(\"movl $42, %0\" : \"=m\"(x)); return 0; }";
+    Lexer lexer("t.c", source);
+    Parser parser(lexer.tokenize());
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    analyzer->analyze(*ast);
+    ASSERT_FALSE(analyzer->getErrors().empty());
+    EXPECT_EQ(analyzer->getErrors()[0].code, DiagnosticCode::SemAsmOperand);
+}
+
+TEST_F(SemanticAnalyzerTest, InlineAsmReadWriteMemoryOutputRejected) {
+    std::string source = "int32 f() { int32 x; asm(\"movl $42, %0\" : \"+m\"(x)); return 0; }";
+    Lexer lexer("t.c", source);
+    Parser parser(lexer.tokenize());
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    analyzer->analyze(*ast);
+    ASSERT_FALSE(analyzer->getErrors().empty());
+    EXPECT_EQ(analyzer->getErrors()[0].code, DiagnosticCode::SemAsmOperand);
+}
