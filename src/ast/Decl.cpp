@@ -130,7 +130,25 @@ static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
                 if (auto* nested = dynamic_cast<InitializerListExprAST*>(&item)) {
                     emitAggregateInitializer(ctx, fptr, ftype, nested);
                 } else {
-                    storeScalarInitializer(ctx, fptr, ctx.getLLVMType(ftype), item, ftype);
+                    // I4 (D7): brace-init string 字段活值深拷贝（新鲜值直接 store）。
+                    Type* fr = ftype;
+                    while (fr && fr->kind == TypeKind::Typedef)
+                        fr = static_cast<TypedefType*>(fr)->aliasedType;
+                    if (fr && fr->kind == TypeKind::String &&
+                        !ctx.isFreshStringValue(item)) {
+                        llvm::Value* v = item.codegen(ctx);
+                        if (v) {
+                            if (item.isLValue) v = ctx.loadValue(v, item.type);
+                            v = ctx.castValue(v, item.type, ctx.getLLVMType(ftype));
+                            auto savedIP = ctx.getBuilder().saveIP();
+                            llvm::Function* copyFn = ctx.getStringCopyFn();
+                            ctx.getBuilder().restoreIP(savedIP);
+                            ctx.getBuilder().CreateCall(copyFn, {fptr, v});
+                        }
+                    } else {
+                        storeScalarInitializer(ctx, fptr, ctx.getLLVMType(ftype),
+                                               item, ftype);
+                    }
                 }
             }
             break;
@@ -373,6 +391,14 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
                     llvm::Function* copyFn = ctx.getStringCopyFn();
                     ctx.getBuilder().restoreIP(savedIP);
                     ctx.getBuilder().CreateCall(copyFn, {alloca, initVal});
+                } else if (strType && !isConstexpr &&
+                           (strType->kind == TypeKind::Struct ||
+                            strType->kind == TypeKind::Class) &&
+                           ctx.aggregateHasStringField(strType)) {
+                    // I4 (D7): 聚合含 string 字段 → 字段感知深拷贝
+                    //（`struct S y = x;` 后 x/y 字段各自独立）。
+                    ctx.emitAggregateStringCopy(alloca, initVal, strType,
+                                                /*assign=*/false);
                 } else {
                     ctx.getBuilder().CreateStore(initVal, alloca);
                 }

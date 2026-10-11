@@ -1405,6 +1405,13 @@ llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
             }
             return result;
         }
+        // I4 (D7): 聚合含 string 字段 → 字段感知赋值（string 字段 free 旧 + 拷贝）。
+        if (lt && op == AssignOp::Assign &&
+            (lt->kind == TypeKind::Struct || lt->kind == TypeKind::Class) &&
+            ctx.aggregateHasStringField(lt)) {
+            ctx.emitAggregateStringCopy(lhsVal, result, lt, /*assign=*/true);
+            return result;
+        }
     }
 
     builder.CreateStore(result, lhsVal);

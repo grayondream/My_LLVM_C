@@ -136,6 +136,14 @@ public:
     // 不得 free 共享缓冲）；否则 dst.ptr != null 时 free 旧缓冲，再深拷贝。
     llvm::Function* getStringAssignFn();
 
+    // I4 (D7, spec §3.1/§5): 聚合字段感知拷贝。聚合（Struct/Class）含 string
+    // 字段时，整段拷贝会共享缓冲 → 双 free；须逐字段处理：string 字段深拷贝
+    // （assign=true → getStringAssignFn：自赋值守卫 + free 旧 + 拷贝；false →
+    // getStringCopyFn），其余字段原样 extract+store，嵌套聚合递归。
+    bool aggregateHasStringField(Type* t);
+    void emitAggregateStringCopy(llvm::Value* dst, llvm::Value* srcVal,
+                                 Type* aggType, bool assign);
+
 private:
     std::unique_ptr<llvm::LLVMContext> context;
     llvm::IRBuilder<> builder;

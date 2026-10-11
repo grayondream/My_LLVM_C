@@ -1450,3 +1450,87 @@ llvm::Function* CodegenContext::getStringAssignFn() {
     stringAssignFn = fn;
     return fn;
 }
+
+// I4 (D7): 递归检查聚合是否（直接或间接）含 string 字段。数组/optional/result
+// 等视为不敏感（整段原样拷贝，不深拷贝其中的 string——记录为已知限制）。
+bool CodegenContext::aggregateHasStringField(Type* t) {
+    while (t && t->kind == TypeKind::Typedef)
+        t = static_cast<TypedefType*>(t)->aliasedType;
+    if (!t) return false;
+    switch (t->kind) {
+        case TypeKind::String:
+            return true;
+        case TypeKind::Struct:
+            for (auto& f : static_cast<StructType*>(t)->fields)
+                if (aggregateHasStringField(f.type)) return true;
+            return false;
+        case TypeKind::Class: {
+            auto* ct = static_cast<ClassType*>(t);
+            for (auto& f : ct->fields)
+                if (aggregateHasStringField(f.type)) return true;
+            return ct->base ? aggregateHasStringField(ct->base) : false;
+        }
+        default:
+            return false;
+    }
+}
+
+// I4 (D7): 字段感知聚合拷贝。dst=目标聚合地址，srcVal=源聚合值，aggType=聚合
+// 类型。string 字段深拷贝（assign=true → 先 free 目标旧缓冲 + 拷贝）；其余
+// 字段 extract+store 原样写入；嵌套 Struct/Class 递归。helper 合成期间会劫持
+// 共享 builder——整体 save/restore。
+void CodegenContext::emitAggregateStringCopy(llvm::Value* dst, llvm::Value* srcVal,
+                                             Type* aggType, bool assign) {
+    auto savedIP = builder.saveIP();
+    while (aggType && aggType->kind == TypeKind::Typedef)
+        aggType = static_cast<TypedefType*>(aggType)->aliasedType;
+    if (!aggType || (aggType->kind != TypeKind::Struct &&
+                     aggType->kind != TypeKind::Class)) {
+        builder.restoreIP(savedIP);
+        return;
+    }
+    llvm::Type* llvmTy = getLLVMType(aggType);
+    std::vector<FieldInfo>* fields = nullptr;
+    Type* baseType = nullptr;
+    unsigned baseOffset = 0;
+    if (aggType->kind == TypeKind::Struct) {
+        fields = &static_cast<StructType*>(aggType)->fields;
+    } else {
+        auto* ct = static_cast<ClassType*>(aggType);
+        fields = &ct->fields;
+        baseType = ct->base;
+        if (!ct->baseClass.empty()) baseOffset = 1;
+    }
+    // 基类子对象占 slot 0（INH-01），递归。
+    if (baseType && aggregateHasStringField(baseType)) {
+        llvm::Value* baseAddr = builder.CreateStructGEP(llvmTy, dst, 0, "agg.basep");
+        llvm::Value* baseVal = builder.CreateExtractValue(srcVal, 0, "agg.base");
+        emitAggregateStringCopy(baseAddr, baseVal, baseType, assign);
+    }
+    // 预取 helper（合成期间劫持 builder，取完再 restore）。
+    llvm::Function* copyFn = nullptr;
+    llvm::Function* assignFn = nullptr;
+    if (aggregateHasStringField(aggType)) {
+        auto ip = builder.saveIP();
+        copyFn = getStringCopyFn();
+        if (assign) assignFn = getStringAssignFn();
+        builder.restoreIP(ip);
+    }
+    for (size_t i = 0; i < fields->size(); ++i) {
+        Type* raw = (*fields)[i].type;
+        while (raw && raw->kind == TypeKind::Typedef)
+            raw = static_cast<TypedefType*>(raw)->aliasedType;
+        unsigned idx = baseOffset + (unsigned)i;
+        llvm::Value* faddr = builder.CreateStructGEP(llvmTy, dst, idx, "agg.fp");
+        llvm::Value* fval = builder.CreateExtractValue(srcVal, idx, "agg.fv");
+        if (raw && raw->kind == TypeKind::String) {
+            builder.CreateCall(assign ? assignFn : copyFn, {faddr, fval});
+        } else if (raw && (raw->kind == TypeKind::Struct || raw->kind == TypeKind::Class) &&
+                   aggregateHasStringField(raw)) {
+            emitAggregateStringCopy(faddr, fval, raw, assign);
+        } else {
+            builder.CreateStore(fval, faddr);
+        }
+    }
+    builder.restoreIP(savedIP);
+}

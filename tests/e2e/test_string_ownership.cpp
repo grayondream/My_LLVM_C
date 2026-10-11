@@ -310,3 +310,54 @@ TEST_F(StringOwnershipE2E, TempArgMove) {
         }
     )", "own_temp_arg.c"), 0);
 }
+
+// I4 (D7, spec §3.1/§5): `struct S y = x;`（聚合初始化含 string 字段）必须
+// 字段感知深拷贝——x.s/y.s 各自独立缓冲，双双 destroy 不得双 free abort
+// （I4 路径 3；当前整段浅拷贝 → 字段共享缓冲 → 双 free）。
+TEST_F(StringOwnershipE2E, StructFieldCopyIndependent) {
+    EXPECT_EQ(runSource(R"(
+        struct S { string s; };
+        int32 main() {
+            struct S x = { string.new("x") };
+            struct S y = x;
+            x.s.destroy();
+            y.s.destroy();
+            return 0;
+        }
+    )", "own_struct_init.c"), 0);
+}
+
+// I4 (D7): 聚合赋值 `b = a;` 覆盖旧 string 字段——free 旧缓冲 + 深拷贝，
+// 值正确、无泄漏/双 free。
+TEST_F(StringOwnershipE2E, StructWithStringAssignFreesOld) {
+    EXPECT_EQ(runSource(R"(
+        struct S { string s; };
+        int32 main() {
+            struct S a = { string.new("aa") };
+            struct S b = { string.new("bb") };
+            b = a;
+            a.s.destroy();
+            string_view v = b.s;
+            if (v != "aa") { return 1; }
+            b.s.destroy();
+            return 0;
+        }
+    )", "own_struct_assign.c"), 0);
+}
+
+// I4 (D7): brace-init string 字段活值深拷贝——`struct S y = { src };` 后
+// y.s 独立于 src（src destroy 不影响 y.s）。
+TEST_F(StringOwnershipE2E, BraceInitStringFieldCopies) {
+    EXPECT_EQ(runSource(R"(
+        struct S { string s; };
+        int32 main() {
+            string src = string.new("data");
+            struct S y = { src };
+            src.destroy();
+            string_view v = y.s;
+            if (v != "data") { return 1; }
+            y.s.destroy();
+            return 0;
+        }
+    )", "own_struct_brace.c"), 0);
+}
