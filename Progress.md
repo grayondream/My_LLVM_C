@@ -673,3 +673,13 @@
 - **Task 5（文档收口）**：`keywords.md`（asm `[plan]`→`[impl]`）、`grammar.ebnf`（asm 产生式 `[impl]`）、`TODO.md`（LEX-12/PAR-16/CG-10/DEC-09 勾选、P1-08 `[x]`、进度快照）、`Progress.md`（本条）。
 - **验证**：每任务 TDD RED→GREEN；Task 4 全量 `ctest -j8` → **1203/1203 绿**（1197 + 新增 6；2 个既有 GTEST_SKIP 不变）。
 - **遗留**：顶层未知语句被静默吞掉（`asm volatile("nop");` 放函数体外的顶层语句不报错，既有缺陷，建议单独立项）；`%=`（GCC 唯一标签转义）未支持（sema E2024 拒绝）；根目录旧路径 `bin/`/`lib/`/`a.out` 待用户决定删除。
+
+## 2026-10-11（续）— P1-08 最终 whole-branch review 与修复轮
+
+- **评审**（fresh reviewer subagent，`971586f..386c860`）结论：核心实现与三处偏差映射（输出→返回值、`+r`→`=r`+tied、模板 GCC→LLVM 翻译）独立验证正确，UAF 修复精准；发现 **C1（Critical）+ I1/I2/I3（Important）+ M1-M4（Minor）**。
+- **C1（Critical，实证）**：内存类输出约束（`=m`/`+m`/`=o`/`=V`/`=Um`）SEGV 编译器（rc=139，`SelectionDAGBuilder::visitInlineAsm`）——LLVM 21 对返回-值输出模型的内存约束走崩溃路径。修复：sema 拒绝输出约束含内存类字母 `m`/`o`/`V`（E2023，`hasMemoryClassOutputConstraint`），CLI 实证 `=m` 输出干净报错不再 SEGV；`=p`/`=g`/`=X`/`=v` 由后端干净报错不拒绝。
+- **I1**：e2e 补 6 用例钉偏差路径（`=r`+`+r` 混用=40、多 `+r`=84、多输入=7、`&` 早破坏=5、`m` 输入=5、多位 `%N`=66）。
+- **I2**：`m` 输入由 LLVM spill 副本（写经 `m` 输入写到副本，非原变量）——spec §5 + codegen 注释记录。
+- **I3**：零输出 asm 隐式 volatile（GCC 语义，`HasSideEffects = isVolatile || outputs.empty()`），IR 层测试 `ZeroOutputAsmIsImplicitlyVolatile` 钉住，spec §2 同步。
+- **验证**：每项 RED→GREEN；修复后全量 `ctest -j8` → **1212/1212 绿**（1203 + 9）。
+- **遗留**：M1（sema 不查 `%N` 越界，D2 后端兜底）、M2（`%=` 拒绝未在 spec 注明）、M3（asm 前缀位置可解析、sema 以 void 拒绝）、M4（模板 `\0` 得内嵌 NUL）——deferred minors。
