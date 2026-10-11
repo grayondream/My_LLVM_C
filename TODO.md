@@ -13,6 +13,8 @@
 
 > **进度快照（2026-10-11）**：**P1-08 内联 `asm` 全链路完成**（LEX-12/PAR-16/CG-10/DEC-09 全部 `[x]`）。词法 `TOKEN_ASM`；解析 `AsmOperand`/`AsmExprAST` + `parseAsmExpr()`（至多三段操作数、模板/约束须字符串字面量）；sema 校验 outputs 左值标量/inputs 标量/约束非空（E2023）+ 模板 `%` 转义（E2024）+ 拒绝内存类输出（C1）；codegen 用 `llvm::InlineAsm`（AD_ATT）——实证 LLVM 21 与 GCC 三处差异并适配：输出映射 call 返回值（单值/struct 逐位回写）、`+r`→`=r`+尾部 tied 约束（编号对齐）、模板翻译 `$`→`$$`/`%%`→`%`/`%N`→`$N`；零输出 asm 隐式 volatile（GCC）。e2e 12 用例 LLJIT 执行通过。**顺带修复既有潜在 bug**：`CodegenContext::takeContext()` 把 context 移给 LLJIT（编译后销毁）后 IRBuilder 的 DebugLoc 悬垂 → 析构 `MetadataTracking::untrack` 间歇 UAF（gdb 关 ASLR 下 `InlineAsmE2E.ReadWriteOperand` 15/15 崩），修复为移出前清 DebugLoc，gdb 20/20 不崩；32 处测试 harness 共用该 API 一并受益。当前全量 **1212** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。
 
+> **进度快照（2026-10-11，I4 收口）**：**string 拥有型值语义 + `string_view` 硬改名完成**（终审 I4「string 值拷贝别名双 free」根治）。`str` → `string_view`（DEC-18 硬改名先例，TypeKind::Str 内部名不动）；`string` 升级 C++ `std::string` 式拥有型值——赋值/初始化/传参/返回深拷贝活值、移动新鲜值（`string.new`/返回 string 的调用 rvalue）、赋值自动释放旧缓冲、聚合（struct 含 string 字段）字段感知拷贝；惰性合成 `smc.string.copy`/`smc.string.assign` helper。spec `docs/superpowers/specs/2026-10-11-string-ownership-design.md`，plan `docs/superpowers/plans/2026-10-11-string-ownership.md`。当前全量 **1229** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。
+
 ---
 
 ## 0. 现状基线（已完成，勿重复实现）
@@ -367,7 +369,7 @@
 - `[~]` **STD-09** 扩展点约定文档：`to_string`/`to_hash`/`equals`。部分（2026-10-09）：`to_string` 已成 print/format 统一降级路径（FMT-10）；`to_hash`/`equals` 挂 STD-07。
 
 ### std.string
-- `[~]` **STD-10** `str`、`String`、UTF-8 工具、字符串构建器、比较/查找/分割/拼接。核心完成（2026-10-09）：内建原语 find/rfind/sub/split/split_destroy + `libs/std/string.smc`（contains/starts_with/ends_with/trim*/join/concat/repeat/utf8_sub），文档 stdlib.md §9。挂账：字典序 `<`/`>`、`to_lower`/`to_upper`、`replace` 不做（spec §8）；StrBuilder 类因「class 无法跨模块导出」挂账（string 自身即 builder）。
+- `[~]` **STD-10** `string_view`（原 `str`）、`String`、UTF-8 工具、字符串构建器、比较/查找/分割/拼接。核心完成（2026-10-09）：内建原语 find/rfind/sub/split/split_destroy + `libs/std/string.smc`（contains/starts_with/ends_with/trim*/join/concat/repeat/utf8_sub），文档 stdlib.md §9。I4 收口（2026-10-11）：`str` 硬改名 `string_view`、`string` 拥有型值语义（见 P1-09）。挂账：字典序 `<`/`>`、`to_lower`/`to_upper`、`replace` 不做（spec §8）；StrBuilder 类因「class 无法跨模块导出」挂账（string 自身即 builder）。
 
 ### std.format
 - `[~]` **STD-11** `format`、`print`、格式说明解析、编译期检查接口、自定义格式化。核心完成（2026-10-09）：format 内建 + FMT-08 规格集 + E2020~22 + to_string 降级 + 动态格式串契约，文档 stdlib.md §10。挂账：`import std.format` 体系（D4 裁决暂不引入）、自定义格式化钩子（Weight 之外的扩展点）、`printf` 关系统一（FMT-13）。
@@ -517,7 +519,7 @@
 - `[x]` **P1-06** str / String / format（FMT、STD-10/11）。核心纵向完成（2026-10-08）：FMT-01/02/03/04 + FMT-05 比较 + TYP-26/DEC-20 + 内建类型小写化（`optional`/`result`，DEC-18 先例）；E2015 新诊断；`grammar.ebnf` 同步。format（FMT-06~09）与 STD-10 高层操作另轮。spec `docs/superpowers/specs/2026-10-08-str-string-design.md`，plan `docs/superpowers/plans/2026-10-08-str-string.md`。挂账：`string` 不参与 constexpr；CT `+` 已移除；SSO 不做。
 - `[ ]` **P1-07** 位域、匿名类型、指定初始化器、lambda（AGG-03~06、PAR-10~13）。
 - `[x]` **P1-08** `static_cast` / 内联 `asm`（PAR-18、CG-10）。`static_cast`/`reinterpret_cast` 已完成（LEX-11/PAR-18）；内联 `asm` 全链路完成（2026-10-11）：LEX-12/PAR-16/CG-10/DEC-09，spec `docs/superpowers/specs/2026-10-10-p108-inline-asm-design.md`，plan `docs/superpowers/plans/2026-10-10-p108-inline-asm.md`，e2e 6 用例 LLJIT 执行通过（全量 1203 绿）。
-- `[~]` **P1-09** std.mem / std.string / std.format / std.math / **std.collections**（STD-05~14）。字符串库 + format 体系完成（2026-10-09）：FMT-06~11 全落地、FMT-12 单缓冲、STD-10 组合库、STD-11 核心；E2020~22 新诊断；顺带修复既有编译器 bug 两枚——`&&`/`||` 按位降级（真值截断 + 无短路）与派生→基类赋值整结构 store 溢出（潜在栈腐败）。spec `docs/superpowers/specs/2026-10-09-p109-string-format-design.md`，plan `docs/superpowers/plans/2026-10-09-p109-string-format.md`。挂账：StrBuilder 类导出缺口（语言层）、模块类导出（parse 期类型名注册）、`replace`/字典序/to_lower|upper 不做、std.mem/math/collections 另轮；终审 I4（string 值拷贝别名双 free）仍在账。
+- `[~]` **P1-09** std.mem / std.string / std.format / std.math / **std.collections**（STD-05~14）。字符串库 + format 体系完成（2026-10-09）：FMT-06~11 全落地、FMT-12 单缓冲、STD-10 组合库、STD-11 核心；E2020~22 新诊断；顺带修复既有编译器 bug 两枚——`&&`/`||` 按位降级（真值截断 + 无短路）与派生→基类赋值整结构 store 溢出（潜在栈腐败）。spec `docs/superpowers/specs/2026-10-09-p109-string-format-design.md`，plan `docs/superpowers/plans/2026-10-09-p109-string-format.md`。挂账：StrBuilder 类导出缺口（语言层）、模块类导出（parse 期类型名注册）、`replace`/字典序/to_lower|upper 不做、std.mem/math/collections 另轮。**终审 I4（string 值拷贝别名双 free）已收口**（2026-10-11）：string 拥有型值语义 + string_view 硬改名，spec `docs/superpowers/specs/2026-10-11-string-ownership-design.md`，plan `docs/superpowers/plans/2026-10-11-string-ownership.md`，e2e 16 用例（全量 1229 绿）。
 
 ### P2：工程化与并发
 - `[ ]` **P2-01** atomic / thread_local / std.thread（CON、STD-24/25）。

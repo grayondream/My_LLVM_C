@@ -113,21 +113,22 @@ namespace 前缀，`namespace std { void abort() { abort(); } }` 会自递归，
 ## 9. `std.string`（P1-09 / STD-10）`[impl]`
 
 **分层**：原语（内建，无需 import）+ 组合（`libs/std/string.smc`，`import std.string;`）。
-原语之所以是内建：`.smc` 层无法触达 `str` 内部字段、也无法从 `ptr+len` 构造切片值。
+原语之所以是内建：`.smc` 层无法触达 `string_view` 内部字段、也无法从 `ptr+len` 构造切片值。
 
 ### 9.1 内建原语 `[impl]`
 | API | 语义 | 所有权 |
 |---|---|---|
-| `s.find(needle: str\|string) -> isize` | 首现字节下标；无 → `-1`；空 needle → `0` | 视图 |
+| `s.find(needle: string_view\|string) -> isize` | 首现字节下标；无 → `-1`；空 needle → `0` | 视图 |
 | `s.rfind(needle) -> isize` | 末现字节下标；无 → `-1`；空 needle → `len` | 视图 |
-| `s.sub(begin, end) -> str` | 字节区间零拷贝视图 `{ptr+begin, end-begin}` | 视图（见下） |
-| `split(s, sep) -> str[]` | 贪心非重叠分割；元素为源数据视图；无分隔符 → 全串 1 段 | 数组 malloc（见下） |
+| `s.sub(begin, end) -> string_view` | 字节区间零拷贝视图 `{ptr+begin, end-begin}` | 视图（见下） |
+| `split(s, sep) -> string_view[]` | 贪心非重叠分割；元素为源数据视图；无分隔符 → 全串 1 段 | 数组 malloc（见下） |
 | `split_destroy(parts)` | 释放 split 的段数组（不触碰元素） | — |
 
-- `sub` 越界（`begin < 0 || end < begin || end > len`）→ 运行时 panic `str.sub: out of bounds`。
+- `sub` 越界（`begin < 0 || end < begin || end > len`）→ 运行时 panic `string_view.sub: out of bounds`。
 - `split` 空 sep：**字面量**在编译期拒绝（E2022 `split: empty separator`）；**动态**运行时 panic 同文案。
 - **视图生存期（用户责任）**：`sub`/`split` 的元素引用源数据字节；源 `string` 先 `destroy()` 则视图悬挂
-  （与 `str` = `string` 视图的所有权模型一致，挂账 I4 同族）。`split_destroy` 只释放段数组本身。
+  （与 `string_view` = `string` 视图的所有权模型一致；I4 已收口——`string` 为拥有型值，`string_view`
+  非拥有，悬垂仍是用户责任）。`split_destroy` 只释放段数组本身。
 
 ### 9.2 组合库 `[impl]`（`import std.string;`）
 | API | 语义 | 所有权 |
@@ -135,13 +136,16 @@ namespace 前缀，`namespace std { void abort() { abort(); } }` 会自递归，
 | `std::contains(s, sub) -> bool` | `find >= 0` | — |
 | `std::starts_with(s, prefix) -> bool` | `find == 0` | — |
 | `std::ends_with(s, suffix) -> bool` | 尾对齐比较 | — |
-| `std::trim_left/right/trim(s) -> str` | `isspace` 扫描 + `sub` | 视图 |
-| `std::join(parts: str[], sep) -> string` | 空数组 → 空 string（cap≥1） | **新分配，调用方 destroy** |
+| `std::trim_left/right/trim(s) -> string_view` | `isspace` 扫描 + `sub` | 视图 |
+| `std::join(parts: string_view[], sep) -> string` | 空数组 → 空 string（cap≥1） | **新分配，调用方 destroy** |
 | `std::concat(a, b) -> string` | 新分配 | 同上 |
 | `std::repeat(s, n) -> string` | `n=0` → 空 string | 同上 |
-| `std::utf8_sub(s, start_cp, len_cp) -> str` | 码点步进（`char_len_at`）+ `sub` | 视图 |
+| `std::utf8_sub(s, start_cp, len_cp) -> string_view` | 码点步进（`char_len_at`）+ `sub` | 视图 |
 
 **字符串构建**：`string` 自身即 builder（`string.new("")` + `append`/`push`/`len`，P1-06）。
+**string 拥有型值（I4 收口，2026-10-11）**：赋值/初始化/传参/返回深拷贝活值、移动新鲜值
+（`string.new`/函数调用 rvalue）、赋值自动释放旧缓冲——`string` 是 C++ `std::string` 式拥有值，
+`string_view`（原 `str`）是非拥有视图。见 `docs/superpowers/specs/2026-10-11-string-ownership-design.md`。
 独立 `StrBuilder` 类挂账：**class 无法跨模块导出**——类型名在 parse 期注册、先于 import
 处理（`std::StrBuilder` 与模块级 `export class` 均不可见）；语言侧修复后另行落地。
 不做（spec §8）：字典序 `<`/`>`、`to_lower`/`to_upper`、`replace`。

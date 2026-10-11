@@ -683,3 +683,15 @@
 - **I3**：零输出 asm 隐式 volatile（GCC 语义，`HasSideEffects = isVolatile || outputs.empty()`），IR 层测试 `ZeroOutputAsmIsImplicitlyVolatile` 钉住，spec §2 同步。
 - **验证**：每项 RED→GREEN；修复后全量 `ctest -j8` → **1212/1212 绿**（1203 + 9）。
 - **遗留**：M1（sema 不查 `%N` 越界，D2 后端兜底）、M2（`%=` 拒绝未在 spec 注明）、M3（asm 前缀位置可解析、sema 以 void 拒绝）、M4（模板 `\0` 得内嵌 NUL）——deferred minors。
+
+## 2026-10-11 — P1-09 终审 I4 收口：string 拥有型值语义 + string_view 硬改名
+
+- **流程**：brainstorming → spec（`docs/superpowers/specs/2026-10-11-string-ownership-design.md`，529ae6a）→ plan（`docs/superpowers/plans/2026-10-11-string-ownership.md`，a6a233b）→ executing-plans Native 内联 6 任务（master 直接工作，与 P1-06/P1-08/P1-09 同惯例）。
+- **Task 1（`str`→`string_view` 硬改名，D3）** `f081340`：Parser `isTypeStart`/`parseBaseType` 认 `string_view`（`str` 成未知标识符）；sema 显示名 + 全部用户文案（**实际 10 处**而非 pre-flight 估算 6 处——漏 4 处：`string.new takes exactly one str`/`requires a str`/`no member named ... in str`/`append() requires ... str`）→ `string_view`；libs/std/string.smc + 全库测试迁移。Rulings：①负向测试 `str v2;` 顶层被 P1-08 遗留「顶层未知语句静默吞」吞掉——改函数体内载体；②`cmake --build build` 默认只重链 `--target` 指定的目标，CLI 旧二进制曾误导排查。DEC-18 测试补 `int32 string_view = 1;` 覆盖。
+- **Task 2（赋值 D7）** `858ba34`：`getStringCopyFn`/`getStringAssignFn` 惰性合成（`smc.string.copy`/`smc.string.assign`）+ `isFreshStringValue`（rvalue 返回 string 的调用）。赋值挂接：string LHS → fresh 移动（free 旧+store）/ 活值 `getStringAssignFn`。Rulings：①自赋值守卫 `dst.ptr==src.ptr` 用「什么都不做」而非计划原文「仅拷贝跳过 free」（后者泄漏旧缓冲）；②helper 嵌套调用须 save/restore 共享 builder；③`CreateInsertValue` 的 Constant* 重载坑。e2e 4 测试。
+- **Task 3（初始化 D2）** `027e89f`：VarDecl 局部 string 初始化——活值 `getStringCopyFn` 深拷贝 / fresh 直接 store。e2e 4 测试（含三元初始化拷贝钉）。
+- **Task 4（传参/返回 D2/D6）** `c51551f`：三处实参组装 string 形参活值深拷贝（`emitStringArgCopy` 临时）；`string_view` 形参经 castValue 既有投影；返回——fresh 直接 ret / 局部标识符（AllocaInst）移动+源置零 / 字段/三元/全局拷贝。Rulings：①`true` 字面量→bool 形参重载解析失败是 pre-existing 缺陷（bool 变量可行、`true`→int32 可行），测试用 bool 变量规避、建议单独立项；②`-fsyntax-only` 只解析不跑 sema，误导排查。e2e 5 测试。
+- **Task 5（聚合 §3.1/§5）** `c5c9d50`：`aggregateHasStringField`/`emitAggregateStringCopy`（递归字段感知：string 字段深拷贝、其余原样、嵌套聚合递归、基类子对象 slot 0）；挂接聚合初始化/brace-init string 字段/聚合赋值。Rulings：未初始化局部不零初始化（仅 slice 特判）——fresh 赋值 free 守卫依赖 `oldPtr==null`，未初始化 struct 字段是垃圾可能 free(garbage)，建议后续扩展 slice 零初始化先例（本任务测试均用初始化值）；已知限制：数组/optional/result 内含 string 视为不敏感（整段浅拷贝）。e2e 3 测试。
+- **Task 6（文档收口）**：`2026-10-08-str-string-design.md` §1.2 标注 string 例外、`stdlib.md` §9 str→string_view + 所有权行、`semantics.md` NG-04 旁注、`TODO.md`（P1-09 I4 已收口 + 进度快照 1229）、`Progress.md`（本条）。
+- **验证**：每任务 TDD RED→GREEN（`free(): double free detected` abort → 全绿）；Task 6 全量 `ctest -j8` → **1229/1229 绿**（1212 + 17 新增：parser/sema 迁移期净 +1、ownership e2e 16；2 个既有 GTEST_SKIP 不变）。
+- **遗留/found issues**：①`true`/`false` 字面量 → bool 形参重载解析失败（pre-existing，建议单独立项）；②未初始化 string / 含 string 聚合局部不零初始化——fresh 赋值 free 守卫依赖 null（建议扩展 slice 零初始化先例）；③数组/optional/result 内含 string 的聚合拷贝不字段感知；④字符串字面量 → `string` 初始化仍须显式 `string.new`（既有）。

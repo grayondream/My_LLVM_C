@@ -16,7 +16,8 @@
 ### 1.2 `string`（动态，FMT-02）
 
 - 新 `TypeKind::String`，布局 `{ptr, len(字节), capacity}`（`size_of` = 24）。
-- `new` 时 malloc，`destroy()` 时 free；C 语义显式管理：无析构、无隐式堆分配、悬垂是用户责任。
+- `new` 时 malloc，`destroy()` 时 free；C 语义显式管理：无析构、悬垂是用户责任。
+- **I4 收口例外（2026-10-11）**：`string` 升级为拥有型值——赋值/初始化/传参/返回处深拷贝活值、移动新鲜值、赋值自动释放旧缓冲（spec `2026-10-11-string-ownership-design.md`，D2 拷贝模型 B / D7 赋值自动释放）；`str` 类型硬改名为 `string_view`（D3）。仍无析构、无隐式堆分配、无 use-after-move 诊断（NG-04，string 单类型特例）。
 - 与 `str` 的边界（DEC-20）：`string` 拥有其 `ptr` 指向的缓冲区；`str` 一律不拥有。字面量赋给 `string` 必须显式 `string.new`。
 
 ### 1.3 内建类型名小写化（硬改）

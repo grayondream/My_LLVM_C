@@ -3,6 +3,9 @@
 > 对应 TODO：**SEM-13 ~ SEM-18**、**FUN-07/10/13/14**、**GEN-06**
 > 状态：`[impl]` 以 `src/sema/SemanticAnalyzer.cpp`、`src/ast/Symbol.cpp`、`src/ast/*.cpp` 为准；`[plan]` 为目标。
 > 总原则：UB 清单对齐 C 标准（SEM-13）；**不引入**所有权/生命周期模型（NG-04）。
+> 旁注（I4 收口，2026-10-11）：`string` 拥有型值语义（深拷贝活值/移动新鲜值/赋值自动释放）
+> 是**单类型特例**，不构成一般所有权模型；`string_view`（原 `str`）悬垂仍是用户责任、无
+> use-after-move 诊断。详见 `docs/superpowers/specs/2026-10-11-string-ownership-design.md`。
 
 ## 1. 求值顺序与序列点（SEM-15）`[plan]`
 
