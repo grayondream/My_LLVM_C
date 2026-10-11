@@ -21,6 +21,26 @@ static Type* stripTypedefsT12(Type* t) {
     return t;
 }
 
+// I4 (D6): string 按值形参——活值实参深拷贝到临时后传值（形参独立缓冲，
+// callee destroy 不影响调用方）；新鲜实参（string.new / 返回 string 的调用）
+// 直接传（移动）。判定与拷贝 helper 供三处实参组装共用。
+static bool isStringType(Type* t) {
+    t = stripTypedefsT12(t);
+    return t && t->kind == TypeKind::String;
+}
+
+static llvm::Value* emitStringArgCopy(CodegenContext& ctx, llvm::Value* argVal,
+                                      Type* paramType) {
+    auto& builder = ctx.getBuilder();
+    llvm::Type* llvmTy = ctx.getLLVMType(paramType);
+    llvm::Value* tmp = builder.CreateAlloca(llvmTy, nullptr, "strarg");
+    auto savedIP = builder.saveIP();
+    llvm::Function* copyFn = ctx.getStringCopyFn();
+    builder.restoreIP(savedIP);
+    builder.CreateCall(copyFn, {tmp, argVal});
+    return builder.CreateLoad(llvmTy, tmp, "strarg.v");
+}
+
 // TYP-12: strip typedefs, then report whether the value is an array being
 // passed where a slice view is expected.
 static bool isArrayToSliceArg(Type* argType, Type* paramType) {
@@ -1102,6 +1122,12 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
                 argVal = ctx.castValue(argVal, args[i]->type,
                                        ctx.getLLVMType(resolvedParamTypes[i]));
             }
+            // I4 (D6): string 按值形参（间接调用路径）——活值实参深拷贝。
+            if (i < resolvedParamTypes.size() &&
+                isStringType(resolvedParamTypes[i]) &&
+                !ctx.isFreshStringValue(*args[i])) {
+                argVal = emitStringArgCopy(ctx, argVal, resolvedParamTypes[i]);
+            }
             argsV.push_back(argVal);
         }
 
@@ -1164,6 +1190,13 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
         } else if (calleeFn->isVarArg()) {
             // C default argument promotions for the variadic tail.
             argVal = promoteVarArg(ctx, argVal, args[i]->type);
+        }
+        // I4 (D6): string 按值形参——活值实参深拷贝（形参独立缓冲，callee
+        // destroy 不影响调用方）；新鲜实参直接传（移动）。
+        if (i < resolvedParamTypes.size() &&
+            isStringType(resolvedParamTypes[i]) &&
+            !ctx.isFreshStringValue(*args[i])) {
+            argVal = emitStringArgCopy(ctx, argVal, resolvedParamTypes[i]);
         }
         argsV.push_back(argVal);
     }
@@ -1277,6 +1310,12 @@ llvm::Value* MethodCallExprAST::codegen(CodegenContext& ctx) {
                 argVal = ctx.castValue(argVal, args[i]->type,
                                        ctx.getLLVMType(resolvedParamTypes[i + 1]));
             }
+        }
+        // I4 (D6): string 按值形参（方法调用路径）——活值实参深拷贝。
+        if (i + 1 < resolvedParamTypes.size() &&
+            isStringType(resolvedParamTypes[i + 1]) &&
+            !ctx.isFreshStringValue(*args[i])) {
+            argVal = emitStringArgCopy(ctx, argVal, resolvedParamTypes[i + 1]);
         }
         argsV.push_back(argVal);
     }

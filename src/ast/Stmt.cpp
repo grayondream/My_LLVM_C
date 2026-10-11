@@ -74,6 +74,34 @@ llvm::Value* ReturnStmtAST::codegen(CodegenContext& ctx) {
     llvm::Function* func = ctx.getBuilder().GetInsertBlock()->getParent();
     if (func) {
         v = ctx.castValue(v, valType, func->getReturnType());
+        // I4 (D6): string 返回值——新鲜调用直接返回（移动，零拷贝）；
+        // 局部/形参标识符 → 移动（置零源存储，返回值独占缓冲）；
+        // 其余（字段访问/三元/全局）→ stringCopy 到临时再返回（源仍拥有）。
+        Type* rt = valType;
+        while (rt && rt->kind == TypeKind::Typedef)
+            rt = static_cast<TypedefType*>(rt)->aliasedType;
+        if (rt && rt->kind == TypeKind::String &&
+            !ctx.isFreshStringValue(*value)) {
+            auto& builder = ctx.getBuilder();
+            llvm::Value* srcAddr = nullptr;
+            if (auto* varExpr = dynamic_cast<VariableExprAST*>(value.get())) {
+                srcAddr = ctx.lookupVariableAddr(varExpr->name);
+            }
+            if (srcAddr && llvm::isa<llvm::AllocaInst>(srcAddr)) {
+                // 移动局部/形参：源存储清零，返回值独占缓冲。
+                builder.CreateStore(
+                    llvm::Constant::getNullValue(func->getReturnType()), srcAddr);
+            } else {
+                // 拷贝到临时再返回。
+                llvm::Value* tmp = builder.CreateAlloca(
+                    func->getReturnType(), nullptr, "strret");
+                auto savedIP = builder.saveIP();
+                llvm::Function* copyFn = ctx.getStringCopyFn();
+                builder.restoreIP(savedIP);
+                builder.CreateCall(copyFn, {tmp, v});
+                v = builder.CreateLoad(func->getReturnType(), tmp, "strret.v");
+            }
+        }
     }
     // Run all deferred calls (innermost scope first) before leaving the function.
     ctx.emitAllDefers();

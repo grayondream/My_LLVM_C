@@ -219,3 +219,94 @@ TEST_F(StringOwnershipE2E, InitTernaryCopiesOperands) {
         }
     )", "own_init_ternary.c"), 0);
 }
+
+// I4 (D2/D6): `kill(a)`（string 按值传参）必须深拷贝——callee 内 destroy
+// 释放的是形参副本缓冲，调用方 a 仍有效可 destroy（I4 路径 2；当前浅拷贝
+// → callee destroy 释放共享缓冲 → 调用方 a 双 free abort）。
+TEST_F(StringOwnershipE2E, PassByValueIndependent) {
+    EXPECT_EQ(runSource(R"(
+        void kill(string s) { s.destroy(); }
+        int32 main() {
+            string a = string.new("data");
+            kill(a);
+            a.destroy();
+            return 0;
+        }
+    )", "own_pass.c"), 0);
+}
+
+// I4 (D6): `return s;`（局部 string）→ 移动——返回值独占缓冲、源存储置零，
+// 双 destroy 安全（moved-from s 的 free(null) 无害）。
+TEST_F(StringOwnershipE2E, ReturnMovesLocal) {
+    EXPECT_EQ(runSource(R"(
+        string f() {
+            string s = string.new("x");
+            return s;
+        }
+        int32 main() {
+            string r = f();
+            string_view v = r;
+            if (v != "x") { return 1; }
+            r.destroy();
+            return 0;
+        }
+    )", "own_ret_local.c"), 0);
+}
+
+// I4 (D6, review focus): `return g.s;`（struct 字段 string 返回）→ 拷贝，
+// 不得移动字段损坏 g——g.s 仍可 destroy，返回值独立。
+TEST_F(StringOwnershipE2E, ReturnFieldCopies) {
+    EXPECT_EQ(runSource(R"(
+        struct S { string s; };
+        struct S g;
+        string get() { return g.s; }
+        int32 main() {
+            g.s = string.new("data");
+            string r = get();
+            g.s.destroy();
+            string_view v = r;
+            if (v != "data") { return 1; }
+            r.destroy();
+            return 0;
+        }
+    )", "own_ret_field.c"), 0);
+}
+
+// I4 (D6, review focus): `return flag ? ga : gb;`（三元含活变量）→ 拷贝，
+// ga/gb 保持有效可 destroy（若移动则与返回值共享缓冲 → 双 free）。
+// （注：`true` 字面量 → bool 形参的重载解析有既有缺陷，用 bool 变量传参。）
+TEST_F(StringOwnershipE2E, ConditionalReturnCopiesOperands) {
+    EXPECT_EQ(runSource(R"(
+        string ga;
+        string gb;
+        string pick(bool flag) { return flag ? ga : gb; }
+        int32 main() {
+            ga = string.new("aa");
+            gb = string.new("bb");
+            bool t = true;
+            string r = pick(t);
+            ga.destroy();
+            gb.destroy();
+            string_view v = r;
+            if (v != "aa") { return 1; }
+            r.destroy();
+            return 0;
+        }
+    )", "own_ret_ternary.c"), 0);
+}
+
+// I4 (D6): `check(string.new("tmp"))`——新鲜实参 → 移动（零拷贝），
+// 形参独占缓冲，值正确、destroy 一次即安全。
+TEST_F(StringOwnershipE2E, TempArgMove) {
+    EXPECT_EQ(runSource(R"(
+        int32 check(string s) {
+            string_view v = s;
+            if (v != "tmp") { return 1; }
+            s.destroy();
+            return 0;
+        }
+        int32 main() {
+            return check(string.new("tmp"));
+        }
+    )", "own_temp_arg.c"), 0);
+}
