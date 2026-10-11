@@ -159,3 +159,63 @@ TEST_F(StringOwnershipE2E, AssignFreshValueFreesOld) {
         }
     )", "own_fresh.c"), 0);
 }
+
+// I4 (D2): `string t = s;`（初始化）必须深拷贝——`s`/`t` 各自独立缓冲，
+// 双双 destroy 不得双 free abort（I4 路径 1 的初始化形态；当前浅拷贝）。
+TEST_F(StringOwnershipE2E, InitCopyIndependent) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = string.new("x");
+            string t = s;
+            s.destroy();
+            t.destroy();
+            return 0;
+        }
+    )", "own_init.c"), 0);
+}
+
+// I4 (D2, fresh 初始化): `string s = string.new("x");` 直接 store（移动），
+// 行为不变且不崩。
+TEST_F(StringOwnershipE2E, InitMoveFromNew) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s = string.new("x");
+            s.destroy();
+            return 0;
+        }
+    )", "own_init_fresh.c"), 0);
+}
+
+// I4 (D2, fresh 初始化/函数调用): `string s = fresh();`——函数调用 rvalue
+// 返回 string → 移动（零拷贝），值正确。
+TEST_F(StringOwnershipE2E, InitFromCall) {
+    EXPECT_EQ(runSource(R"(
+        string fresh() { return string.new("abc"); }
+        int32 main() {
+            string s = fresh();
+            string_view v = s;
+            if (v != "abc") { return 1; }
+            s.destroy();
+            return 0;
+        }
+    )", "own_init_call.c"), 0);
+}
+
+// I4 (D2, 默认安全): `string s = flag ? a : b;`——三元非调用 → 深拷贝，
+// a/b 保持有效可 destroy（review focus: 三元含活变量 → 拷贝）。
+TEST_F(StringOwnershipE2E, InitTernaryCopiesOperands) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string a = string.new("aa");
+            string b = string.new("bb");
+            bool flag = true;
+            string s = flag ? a : b;
+            a.destroy();
+            b.destroy();
+            string_view v = s;
+            if (v != "aa") { return 1; }
+            s.destroy();
+            return 0;
+        }
+    )", "own_init_ternary.c"), 0);
+}

@@ -361,7 +361,21 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
                             static_cast<ArrayType*>(it), initVal);
                     }
                 }
-                ctx.getBuilder().CreateStore(initVal, alloca);
+                // I4 (D2): string 初始化——活值深拷贝 / 新鲜值移动。
+                // 类型为 string（剥 Typedef）且非 constexpr、非 initList 时：
+                //   fresh（string.new / 返回 string 的调用 rvalue）→ 直接 store（移动）；
+                //   其余（变量/字段/三元等活值）→ stringCopy 深拷贝到 alloca，
+                //   跳过裸 store（copy 已写三字段）——`string t = s;` 后 s/t 独立。
+                Type* strType = stripTypedefs(type);
+                if (strType && strType->kind == TypeKind::String && !isConstexpr &&
+                    !ctx.isFreshStringValue(*initExpr)) {
+                    auto savedIP = ctx.getBuilder().saveIP();
+                    llvm::Function* copyFn = ctx.getStringCopyFn();
+                    ctx.getBuilder().restoreIP(savedIP);
+                    ctx.getBuilder().CreateCall(copyFn, {alloca, initVal});
+                } else {
+                    ctx.getBuilder().CreateStore(initVal, alloca);
+                }
             }
         }
     }
