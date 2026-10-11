@@ -101,7 +101,7 @@ TEST_F(StringE2E, LiteralToCharPointer) {
     // FMT-03: str -> char* 隐式（字节视图，放弃 UTF-8 保证与长度）。
     EXPECT_EQ(runSource(R"(
         int32 main() {
-            str s = "hi";
+            string_view s = "hi";
             char* p = s;
             if (p[0] != 'h') { return 1; }
             if (p[1] != 'i') { return 2; }
@@ -125,16 +125,16 @@ TEST_F(StringE2E, StrCompareRuntime) {
     // == / != 走运行时 memcmp 路径（非常量、经函数返回的 str）。
     // 注意：bool 字面量直接作实参是既有解析局限（与 str 无关），经变量传递。
     EXPECT_EQ(runSource(R"(
-        str pick(bool which) {
+        string_view pick(bool which) {
             if (which) { return "abc"; }
             return "abd";
         }
         int32 main() {
             bool t = true;
             bool f = false;
-            str a = pick(t);
-            str b = pick(f);
-            str c = pick(t);
+            string_view a = pick(t);
+            string_view b = pick(f);
+            string_view c = pick(t);
             if (a == b) { return 1; }
             if (a != c) { return 2; }
             if (a == c) { return 0; }
@@ -148,7 +148,7 @@ TEST_F(StringE2E, StrCompareRuntime) {
 TEST_F(StringE2E, StrLen) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
-            str s = "hello";
+            string_view s = "hello";
             if (s.len() != 5) { return 1; }
             return 0;
         }
@@ -159,7 +159,7 @@ TEST_F(StringE2E, StrCharCount) {
     // "héllo" = 6 bytes / 5 code points (é is 2 bytes).
     EXPECT_EQ(runSource(R"(
         int32 main() {
-            str s = "h\xc3\xa9llo";
+            string_view s = "h\xc3\xa9llo";
             if (s.len() != 6) { return 1; }
             if (s.char_count() != 5) { return 2; }
             return 0;
@@ -171,7 +171,7 @@ TEST_F(StringE2E, StrCharAt) {
     // Byte indexing: byte 1 of "héllo" is the lead byte 0xC3.
     EXPECT_EQ(runSource(R"(
         int32 main() {
-            str s = "h\xc3\xa9llo";
+            string_view s = "h\xc3\xa9llo";
             if (s.char_at(1) != '\xC3') { return 1; }
             return 0;
         }
@@ -181,7 +181,7 @@ TEST_F(StringE2E, StrCharAt) {
 TEST_F(StringE2E, StrCharLenAt) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
-            str s = "h\xc3\xa9llo";
+            string_view s = "h\xc3\xa9llo";
             if (s.char_len_at(0) != 1) { return 1; }
             if (s.char_len_at(1) != 2) { return 2; }
             return 0;
@@ -193,7 +193,7 @@ TEST_F(StringE2E, StrFromCExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
             char* p = "abc";
-            str s = str_from_c(p);
+            string_view s = str_from_c(p);
             if (s.len() != 3) { return 1; }
             return 0;
         }
@@ -283,7 +283,7 @@ TEST_F(StringE2E, StringToStrView) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
             string s = string.new("ab");
-            str v = s;
+            string_view v = s;
             if (v.len() != 2) { return 1; }
             return 0;
         }
@@ -347,7 +347,7 @@ TEST_F(StringE2E, StrFromCRuntimeValidates) {
             char buf[4];
             buf[2] = 0;
             fill(buf);
-            str s = str_from_c(buf);
+            string_view s = str_from_c(buf);
             return 0;
         }
     )", "str18.c");
@@ -364,7 +364,7 @@ TEST_F(StringE2E, StrFromCRuntimeValidExec) {
             buf[1] = 'b';
             buf[2] = 'c';
             buf[3] = 0;
-            str s = str_from_c(buf);
+            string_view s = str_from_c(buf);
             if (s.len() != 3) { return 1; }
             return 0;
         }
@@ -434,7 +434,7 @@ TEST_F(StringE2E, FormatBasicExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
             string s = format("x={} y={}", 7, -3);
-            str v = s;
+            string_view v = s;
             if (v == "x=7 y=-3") { return 0; }
             return 1;
         }
@@ -455,7 +455,7 @@ TEST_F(StringE2E, FormatSpecsExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
             string s = format("{:x} {:X} {:o} {:b}", 255, 255, 8, 5);
-            str v = s;
+            string_view v = s;
             if (v == "ff FF 10 101") { return 0; }
             return 1;
         }
@@ -466,7 +466,7 @@ TEST_F(StringE2E, FormatZeroPadExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
             string s = format("[{:02}:{:02}]", 5, 45);
-            str v = s;
+            string_view v = s;
             if (v == "[05:45]") { return 0; }
             return 1;
         }
@@ -477,7 +477,7 @@ TEST_F(StringE2E, FormatFloatPrecExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
             string s = format("{:.2f} {:e}", 3.14159, 31415.926);
-            str v = s;
+            string_view v = s;
             if (v == "3.14 3.141593e+04") { return 0; }
             return 1;
         }
@@ -488,7 +488,7 @@ TEST_F(StringE2E, FormatWidthAlignExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
             string s = format("{:>5}|{:<5}|", 42, 42);
-            str v = s;
+            string_view v = s;
             if (v == "   42|42   |") { return 0; }
             return 1;
         }
@@ -499,7 +499,7 @@ TEST_F(StringE2E, FormatCenteredExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
             string s = format("{:^5}|", 42);
-            str v = s;
+            string_view v = s;
             if (v == " 42  |") { return 0; }
             return 1;
         }
@@ -510,7 +510,7 @@ TEST_F(StringE2E, FormatCustomFillExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
             string s = format("{:*<5}", 42);
-            str v = s;
+            string_view v = s;
             if (v == "42***") { return 0; }
             return 1;
         }
@@ -521,7 +521,7 @@ TEST_F(StringE2E, FormatStrExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
             string s = format("s={} t={}", "ab", "cd");
-            str v = s;
+            string_view v = s;
             if (v == "s=ab t=cd") { return 0; }
             return 1;
         }
@@ -547,7 +547,7 @@ TEST_F(StringE2E, FormatStringArgExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
             string s = format("{}", string.new("vv"));
-            str v = s;
+            string_view v = s;
             if (v == "vv") { return 0; }
             return 1;
         }
@@ -560,7 +560,7 @@ TEST_F(StringE2E, FormatToStringExec) {
         int32 main() {
             P p;
             string s = format("{}", p);
-            str v = s;
+            string_view v = s;
             if (v == "P!") { return 0; }
             return 1;
         }
@@ -571,7 +571,7 @@ TEST_F(StringE2E, FormatEscapesExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
             string s = format("{{a}}");
-            str v = s;
+            string_view v = s;
             if (v == "{a}") { return 0; }
             return 1;
         }
@@ -581,9 +581,9 @@ TEST_F(StringE2E, FormatEscapesExec) {
 TEST_F(StringE2E, FormatDynExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
-            str f = "{}-{}";
+            string_view f = "{}-{}";
             string s = format(f, 1, 2);
-            str v = s;
+            string_view v = s;
             if (v == "1-2") { return 0; }
             return 1;
         }
@@ -593,9 +593,9 @@ TEST_F(StringE2E, FormatDynExec) {
 TEST_F(StringE2E, FormatDynEscapeExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
-            str f = "a{{b";
+            string_view f = "a{{b";
             string s = format(f);
-            str v = s;
+            string_view v = s;
             if (v == "a{b") { return 0; }
             return 1;
         }
@@ -605,9 +605,9 @@ TEST_F(StringE2E, FormatDynEscapeExec) {
 TEST_F(StringE2E, FormatDynExtraExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
-            str f = "{}";
+            string_view f = "{}";
             string s = format(f, 1, 2);
-            str v = s;
+            string_view v = s;
             if (v == "1") { return 0; }
             return 1;
         }
@@ -619,9 +619,9 @@ TEST_F(StringE2E, FormatDynExtraExec) {
 TEST_F(StringE2E, FormatDynSpecIgnored) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
-            str f = "{:x}";
+            string_view f = "{:x}";
             string s = format(f, 10);
-            str v = s;
+            string_view v = s;
             if (v == "10") { return 0; }
             return 1;
         }
@@ -631,9 +631,9 @@ TEST_F(StringE2E, FormatDynSpecIgnored) {
 TEST_F(StringE2E, FormatDynShortExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
-            str f = "{} {}";
+            string_view f = "{} {}";
             string s = format(f, 1);
-            str v = s;
+            string_view v = s;
             if (v == "1 ") { return 0; }
             return 1;
         }
@@ -645,7 +645,7 @@ TEST_F(StringE2E, FormatLargeExec) {
         int32 main() {
             string s = format("{} {} {} {} {} {} {} {} {} {}",
                               1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
-            str v = s;
+            string_view v = s;
             if (v == "1 2 3 4 5 6 7 8 9 10") { return 0; }
             return 1;
         }
@@ -669,11 +669,11 @@ TEST_F(StringE2E, PrintRenderSlotSmoke) {
 TEST_F(StringE2E, FindRFindExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
-            str s = "hello";
+            string_view s = "hello";
             if (s.find("ll") != 2) { return 1; }
             if (s.find("z") != -1) { return 2; }
             if (s.find("") != 0) { return 3; }
-            str t = "a/b/c";
+            string_view t = "a/b/c";
             if (t.rfind("/") != 3) { return 4; }
             if (t.rfind("z") != -1) { return 5; }
             if (t.rfind("") != 5) { return 6; }
@@ -685,12 +685,12 @@ TEST_F(StringE2E, FindRFindExec) {
 TEST_F(StringE2E, SubExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
-            str s = "hello";
-            str a = s.sub(1, 3);
+            string_view s = "hello";
+            string_view a = s.sub(1, 3);
             if (a == "el") { return 0; }
-            str b = s.sub(0, 5);
+            string_view b = s.sub(0, 5);
             if (b == "hello") { return 0; }
-            str c = s.sub(2, 2);
+            string_view c = s.sub(2, 2);
             if (c.len() == 0) { return 0; }
             return 9;
         }
@@ -701,7 +701,7 @@ TEST_F(StringE2E, FindOnStringView) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
             string src = string.new("xabx");
-            str v = src;
+            string_view v = src;
             if (v.find("b") != 2) { return 1; }
             return 0;
         }
@@ -712,8 +712,8 @@ TEST_F(StringE2E, SubBoundsPanicPath) {
     // 越界 panic 不可执行（abort）；钉编译路径存在。
     std::string ir = compileStringIR(R"(
         int32 main() {
-            str s = "hello";
-            str a = s.sub(3, 2);
+            string_view s = "hello";
+            string_view a = s.sub(3, 2);
             return 0;
         }
     )", "str21.c");
@@ -725,7 +725,7 @@ TEST_F(StringE2E, SubBoundsPanicPath) {
 TEST_F(StringE2E, SplitExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
-            str[] parts = split("a,b,c", ",");
+            string_view[] parts = split("a,b,c", ",");
             if (parts.len != 3) { return 1; }
             if (parts[1] == "b") { return 0; }
             return 2;
@@ -736,7 +736,7 @@ TEST_F(StringE2E, SplitExec) {
 TEST_F(StringE2E, SplitNoSepExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
-            str[] parts = split("abc", ",");
+            string_view[] parts = split("abc", ",");
             if (parts.len != 1) { return 1; }
             if (parts[0] == "abc") { return 0; }
             return 2;
@@ -747,7 +747,7 @@ TEST_F(StringE2E, SplitNoSepExec) {
 TEST_F(StringE2E, SplitTailEmpty) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
-            str[] parts = split("a,", ",");
+            string_view[] parts = split("a,", ",");
             if (parts.len != 2) { return 1; }
             if (parts[0] == "a") { return 0; }
             if (parts[1].len() == 0) { return 0; }
@@ -760,7 +760,7 @@ TEST_F(StringE2E, SplitViewAndDestroy) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
             string src = string.new("x,y");
-            str[] parts = split(src, ",");
+            string_view[] parts = split(src, ",");
             if (parts.len != 2) { return 1; }
             if (parts[0] == "x") { return 0; }
             split_destroy(parts);
@@ -804,7 +804,7 @@ TEST_F(StringE2E, LogicalOpsBlockProducingRhs) {
         int32 main() {
             int32 bad = 0;
             int32 a = 8192;
-            str s = "x";
+            string_view s = "x";
             if (!(a && s == "x")) { bad = bad + 1; }
             if (a && s != "x") { bad = bad + 2; }
             int32 b = 1;
@@ -824,7 +824,7 @@ TEST_F(StringE2E, FormatClampsTruncatedChunks) {
         class Big { public: int32 v; public: char* to_string() { return "0123456789012345678901234567890123456789012345678901234567890123456789"; } };
         int32 main() {
             Big big;
-            str f = "[{}]";
+            string_view f = "[{}]";
             string s = format(f, big);
             if (s.len() != 72) { return static_cast<int32>(s.len()); }
             if (s[0] != '[') { return 2; }

@@ -2024,16 +2024,7 @@ TEST_F(ParserTest, ResultLowercaseParses) {
     EXPECT_EQ(var->type->kind, TypeKind::Result);
 }
 
-// P1-06 / T2: `str` (UTF-8 view) and `string` (dynamic) builtin types.
-TEST_F(ParserTest, StrTypeParses) {
-    auto tu = parse("str s;");
-    ASSERT_NE(tu, nullptr);
-    ASSERT_EQ(tu->declarations.size(), 1);
-    auto* var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
-    ASSERT_NE(var, nullptr);
-    EXPECT_EQ(var->type->kind, TypeKind::Str);
-}
-
+// P1-06 / T2: `string` (dynamic) builtin type.
 TEST_F(ParserTest, StringTypeParses) {
     auto tu = parse("string s;");
     ASSERT_NE(tu, nullptr);
@@ -2041,6 +2032,28 @@ TEST_F(ParserTest, StringTypeParses) {
     auto* var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
     ASSERT_NE(var, nullptr);
     EXPECT_EQ(var->type->kind, TypeKind::String);
+}
+
+// P1-06 / T2 (I4/D3): `str` 硬改名 `string_view`（DEC-18 先例）——
+// 新名解析为 string_view 类型（内部 TypeKind::Str，仅内部名不动）。
+TEST_F(ParserTest, StringViewTypeParses) {
+    auto tu = parse("string_view s;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1);
+    auto* var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->type->kind, TypeKind::Str);
+}
+
+// P1-06 / T2 (I4/D3): 旧名 `str` 不再是类型名——类型位置不再被识别。
+// （注意：顶层未知语句会被静默吞掉——P1-08 遗留；故用函数体内的
+// 局部声明作载体：str 若仍是类型则 `str v2;` 应解析为声明，改名后
+// 只能按表达式解析而报 `expected ';'`。）
+TEST_F(ParserTest, StrTypeNowUnknown) {
+    auto tokens = lex("int32 main() { str v2; return 0; }");
+    Parser parser(tokens);
+    auto tu = parser.parse();
+    EXPECT_FALSE(parser.getErrors().empty());
 }
 
 // ========== P1-08 / PAR-16: inline asm ==========

@@ -115,7 +115,7 @@ TEST_F(StdStringLibTest, ContainsStartsEndsExec) {
     EXPECT_EQ(runWithImports(R"(
         import std.string;
         int32 main() {
-            str s = "hello world";
+            string_view s = "hello world";
             if (!std::contains(s, "lo w")) { return 1; }
             if (std::contains(s, "xyz")) { return 2; }
             if (!std::starts_with(s, "hello")) { return 3; }
@@ -131,12 +131,12 @@ TEST_F(StdStringLibTest, TrimExec) {
     EXPECT_EQ(runWithImports(R"(
         import std.string;
         int32 main() {
-            str s = "  \t hi there \n ";
-            str l = std::trim_left(s);
+            string_view s = "  \t hi there \n ";
+            string_view l = std::trim_left(s);
             if (l == "hi there \n ") { return 0; }
-            str r = std::trim_right(s);
+            string_view r = std::trim_right(s);
             if (r == "  \t hi there") { return 0; }
-            str b = std::trim(s);
+            string_view b = std::trim(s);
             if (b == "hi there") { return 0; }
             return 9;
         }
@@ -147,12 +147,12 @@ TEST_F(StdStringLibTest, JoinExec) {
     EXPECT_EQ(runWithImports(R"(
         import std.string;
         int32 main() {
-            str[] parts = split("a,b,c", ",");
+            string_view[] parts = split("a,b,c", ",");
             string j = std::join(parts, "-");
-            str v = j;
+            string_view v = j;
             if (v == "a-b-c") { return 0; }
             j.destroy();
-            str[] empty;
+            string_view[] empty;
             string e = std::join(empty, "-");
             if (e.len() == 0) { return 0; }
             return 9;
@@ -165,11 +165,11 @@ TEST_F(StdStringLibTest, ConcatRepeatExec) {
         import std.string;
         int32 main() {
             string a = std::concat("ab", "cd");
-            str va = a;
+            string_view va = a;
             if (va == "abcd") { return 0; }
             a.destroy();
             string r = std::repeat("ab", 3);
-            str vr = r;
+            string_view vr = r;
             if (vr == "ababab") { return 0; }
             r.destroy();
             string z = std::repeat("ab", 0);
@@ -190,7 +190,7 @@ TEST_F(StdStringLibTest, BuilderIdiomExec) {
             b.append("x");
             b.push('y');
             if (b.len() != 2) { return 1; }
-            str v = b;
+            string_view v = b;
             if (v == "xy") { return 0; }
             b.destroy();
             return 9;
@@ -202,8 +202,8 @@ TEST_F(StdStringLibTest, Utf8SubExec) {
     EXPECT_EQ(runWithImports(R"(
         import std.string;
         int32 main() {
-            str s = "héllo";
-            str t = std::utf8_sub(s, 1, 2);
+            string_view s = "héllo";
+            string_view t = std::utf8_sub(s, 1, 2);
             if (t == "él") { return 0; }
             return 9;
         }
@@ -216,8 +216,8 @@ TEST_F(StdStringLibTest, SplitDynamicEmptySepPanicPath) {
         import std.string;
         int32 main() {
             string e = string.new("");
-            str sep = e;
-            str[] parts = split("a", sep);
+            string_view sep = e;
+            string_view[] parts = split("a", sep);
             return 0;
         }
     )", "sslib07.c");

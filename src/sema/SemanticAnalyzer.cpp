@@ -370,7 +370,7 @@ std::string SemanticAnalyzer::typeToString(Type* type) const {
         case TypeKind::Slice: return "slice";
         case TypeKind::Optional: return "optional";
         case TypeKind::Result: return "result";
-        case TypeKind::Str: return "str";
+        case TypeKind::Str: return "string_view";
         case TypeKind::String: return "string";
         case TypeKind::Pointer: {
             std::string baseStr = typeToString(type->base);
@@ -1824,7 +1824,7 @@ bool SemanticAnalyzer::tryAnalyzeFormatCall(CallExprAST& node) {
     }
     if (!stripped ||
         (stripped->kind != TypeKind::Str && stripped->kind != TypeKind::String)) {
-        emitError("the format argument to 'format' must be a str", node);
+        emitError("the format argument to 'format' must be a string_view", node);
         return true;
     }
 
@@ -1900,20 +1900,20 @@ bool SemanticAnalyzer::tryAnalyzeSplitCall(CallExprAST& node) {
                             ? static_cast<SliceType*>(stripped)
                             : nullptr;
         if (!sliceTy || !sliceTy->elementType) {
-            emitError("'split_destroy' requires a []str value", node);
+            emitError("'split_destroy' requires a []string_view value", node);
             return true;
         }
         Type* elem = sliceTy->elementType;
         while (elem && elem->kind == TypeKind::Typedef)
             elem = static_cast<TypedefType*>(elem)->aliasedType;
         if (!elem || (elem->kind != TypeKind::Str && elem->kind != TypeKind::String)) {
-            emitError("'split_destroy' requires a []str value", node);
+            emitError("'split_destroy' requires a []string_view value", node);
             return true;
         }
         // split produces []str only; []string has no legitimate producer and
         // would let an array-decayed string[] reach free() (stack pointer).
         if (elem->kind != TypeKind::Str) {
-            emitError("'split_destroy' requires a []str value", node);
+            emitError("'split_destroy' requires a []string_view value", node);
             return true;
         }
         node.isSplitDestroy = true;
@@ -1934,7 +1934,7 @@ bool SemanticAnalyzer::tryAnalyzeSplitCall(CallExprAST& node) {
         Type* argType = getExprType(*node.args[k]);
         if (!argType) return true; // already reported
         if (!isStrLike(argType)) {
-            emitError("'split' arguments must be str (got '" +
+            emitError("'split' arguments must be string_view (got '" +
                           typeToString(argType) + "')",
                       node);
             return true;
@@ -2014,7 +2014,7 @@ bool SemanticAnalyzer::tryAnalyzeStrFromCCall(CallExprAST& node) {
                              static_cast<ArrayType*>(t)->elementType &&
                              static_cast<ArrayType*>(t)->elementType->kind == TypeKind::Char;
     if (!isCharPointer && !isCharArray && (!t || t->kind != TypeKind::Str)) {
-        emitError("'str_from_c' requires a char* (or str) argument, got '" +
+        emitError("'str_from_c' requires a char* (or string_view) argument, got '" +
                       typeToString(argType) + "'",
                   node);
         return true;
@@ -2050,7 +2050,7 @@ bool SemanticAnalyzer::tryAnalyzeStringStaticCall(MethodCallExprAST& node) {
         return true;
     }
     if (node.args.size() != 1) {
-        emitError("'string.new' takes exactly one str argument", node);
+        emitError("'string.new' takes exactly one string_view argument", node);
         node.type = nullptr;
         return true;
     }
@@ -2061,7 +2061,7 @@ bool SemanticAnalyzer::tryAnalyzeStringStaticCall(MethodCallExprAST& node) {
         t = static_cast<TypedefType*>(t)->aliasedType;
     }
     if (!t || t->kind != TypeKind::Str) {
-        emitError("'string.new' requires a str argument; use str_from_c for char* buffers", node);
+        emitError("'string.new' requires a string_view argument; use str_from_c for char* buffers", node);
         node.type = nullptr;
         return true;
     }
@@ -2121,7 +2121,7 @@ void SemanticAnalyzer::analyzeStrMethod(MethodCallExprAST& node, Type* objType) 
             return t && (t->kind == TypeKind::Str || t->kind == TypeKind::String);
         };
         if (argTypes.size() != 1 || !isStrLike(argTypes[0])) {
-            emitError("'" + name + "()' requires exactly one str argument", node);
+            emitError("'" + name + "()' requires exactly one string_view argument", node);
             node.type = nullptr;
             return;
         }
@@ -2141,7 +2141,7 @@ void SemanticAnalyzer::analyzeStrMethod(MethodCallExprAST& node, Type* objType) 
         node.type = typeCtx->getStrType();
         return;
     }
-    emitError("no member named '" + name + "' in str", node);
+    emitError("no member named '" + name + "' in string_view", node);
     node.type = nullptr;
 }
 
@@ -2193,7 +2193,7 @@ void SemanticAnalyzer::analyzeStringMethod(MethodCallExprAST& node, Type* objTyp
     }
     if (name == "append") {
         if (argTypes.size() != 1 || !isStrLike(argTypes[0])) {
-            emitError("'append()' requires exactly one str argument; use str_from_c for char* buffers", node);
+            emitError("'append()' requires exactly one string_view argument; use str_from_c for char* buffers", node);
             node.type = nullptr;
             return;
         }

@@ -184,7 +184,7 @@ TEST_F(SemanticAnalyzerTest, BinaryOpErrorMessageIncludesTypes) {
     analyzer->analyze(tu);
     ASSERT_FALSE(analyzer->getErrors().empty());
     // P1-06 (FMT-03): string literals type as `str`.
-    EXPECT_NE(analyzer->getErrors()[0].message.find("str"), std::string::npos);
+    EXPECT_NE(analyzer->getErrors()[0].message.find("string_view"), std::string::npos);
 }
 
 TEST_F(SemanticAnalyzerTest, AssignmentTypeMismatchErrorMessageIncludesTypes) {
@@ -207,7 +207,7 @@ TEST_F(SemanticAnalyzerTest, AssignmentTypeMismatchErrorMessageIncludesTypes) {
     ASSERT_FALSE(analyzer->getErrors().empty());
     EXPECT_NE(analyzer->getErrors()[0].message.find("int"), std::string::npos);
     // P1-06 (FMT-03): string literals type as `str`.
-    EXPECT_NE(analyzer->getErrors()[0].message.find("str"), std::string::npos);
+    EXPECT_NE(analyzer->getErrors()[0].message.find("string_view"), std::string::npos);
 }
 
 TEST_F(SemanticAnalyzerTest, UndeclaredVariableErrorMessageIncludesName) {
@@ -241,7 +241,7 @@ TEST_F(SemanticAnalyzerTest, ReturnTypeErrorIncludesTypes) {
     ASSERT_FALSE(analyzer->getErrors().empty());
     EXPECT_NE(analyzer->getErrors()[0].message.find("float"), std::string::npos);
     // P1-06 (FMT-03): string literals type as `str`.
-    EXPECT_NE(analyzer->getErrors()[0].message.find("str"), std::string::npos);
+    EXPECT_NE(analyzer->getErrors()[0].message.find("string_view"), std::string::npos);
 }
 
 TEST_F(SemanticAnalyzerTest, DiagnosticHasSourceLocation) {
@@ -396,7 +396,7 @@ TEST_F(SemanticAnalyzerTest, AssignmentErrorMessageContainsBothTypes) {
     ASSERT_FALSE(analyzer->getErrors().empty());
     EXPECT_NE(analyzer->getErrors()[0].message.find("int"), std::string::npos);
     // P1-06 (FMT-03): string literals type as `str`.
-    EXPECT_NE(analyzer->getErrors()[0].message.find("str"), std::string::npos);
+    EXPECT_NE(analyzer->getErrors()[0].message.find("string_view"), std::string::npos);
 }
 
 TEST_F(SemanticAnalyzerTest, ReturnTypeErrorContainsFunctionName) {
@@ -2168,7 +2168,7 @@ TEST_F(SemanticAnalyzerTest, UppercaseBuiltinNoLongerAType) {
 
 // P1-06 / T2: a string literal's type is `str` (FMT-03 retype).
 TEST_F(SemanticAnalyzerTest, StringLiteralIsStr) {
-    Lexer lexer("t.c", "str s = \"hi\";");
+    Lexer lexer("t.c", "string_view s = \"hi\";");
     auto tokens = lexer.tokenize();
     Parser parser(tokens);
     auto ast = parser.parse();
@@ -2199,20 +2199,20 @@ TEST_F(SemanticAnalyzerTest, StrMethodDiagnostics) {
         }
         EXPECT_TRUE(found) << "missing '" << needle << "' for: " << src;
     };
-    check("int32 main() { str s = \"a\"; return s.bogus(); }",
-          "no member named 'bogus' in str");
-    check("int32 main() { str s = \"a\"; return s.len(1); }",
+    check("int32 main() { string_view s = \"a\"; return s.bogus(); }",
+          "no member named 'bogus' in string_view");
+    check("int32 main() { string_view s = \"a\"; return s.len(1); }",
           "takes no arguments");
-    check("int32 main() { str s = \"a\"; return str_from_c(42); }",
+    check("int32 main() { string_view s = \"a\"; return str_from_c(42); }",
           "str_from_c");
 }
 
 // P1-06 / T3: str_from_c accepts char* only (no implicit str -> str_from_c).
 TEST_F(SemanticAnalyzerTest, StrFromCAcceptsCharPointer) {
     EXPECT_TRUE(analyzeFullyOk(
-        "int32 main() { char* p = \"abc\"; str s = str_from_c(p); return 0; }"));
+        "int32 main() { char* p = \"abc\"; string_view s = str_from_c(p); return 0; }"));
     EXPECT_TRUE(analyzeFullyOk(
-        "int32 main() { str s = str_from_c(\"abc\"); return 0; }"));
+        "int32 main() { string_view s = str_from_c(\"abc\"); return 0; }"));
 }
 
 // P1-06 / T4: no implicit heap allocation into `string` (DEC-20).
@@ -2252,17 +2252,17 @@ TEST_F(SemanticAnalyzerTest, Utf8LiteralValidation) {
         return found;
     };
     // RFC 3629 subset: overlong, lone continuation, surrogate, out of range.
-    EXPECT_TRUE(e2015("str s = \"\xC0\x80\";"));       // overlong NUL (C0 80)
-    EXPECT_TRUE(e2015("str s = \"\x80\";"));           // lone continuation byte
-    EXPECT_TRUE(e2015("str s = \"\xED\xA0\x80\";"));   // U+D800 surrogate
-    EXPECT_TRUE(e2015("str s = \"\xF5\x80\x80\x80\";"));// > U+10FFFF
-    EXPECT_TRUE(e2015("str s = r\"(\xFF)\";"));        // raw string is checked too
-    EXPECT_FALSE(e2015("str s = \"\xE4\xB8\xAD\xF0\x9F\x8E\x89\";")); // 中🎉 valid
+    EXPECT_TRUE(e2015("string_view s = \"\xC0\x80\";"));       // overlong NUL (C0 80)
+    EXPECT_TRUE(e2015("string_view s = \"\x80\";"));           // lone continuation byte
+    EXPECT_TRUE(e2015("string_view s = \"\xED\xA0\x80\";"));   // U+D800 surrogate
+    EXPECT_TRUE(e2015("string_view s = \"\xF5\x80\x80\x80\";"));// > U+10FFFF
+    EXPECT_TRUE(e2015("string_view s = r\"(\xFF)\";"));        // raw string is checked too
+    EXPECT_FALSE(e2015("string_view s = \"\xE4\xB8\xAD\xF0\x9F\x8E\x89\";")); // 中🎉 valid
 }
 
 // P1-06 / T5: str_from_c validates a literal argument statically.
 TEST_F(SemanticAnalyzerTest, StrFromCLiteralValidation) {
-    Lexer lexer("t.c", "int32 main() { str s = str_from_c(\"\xFF\"); return 0; }");
+    Lexer lexer("t.c", "int32 main() { string_view s = str_from_c(\"\xFF\"); return 0; }");
     auto tokens = lexer.tokenize();
     Parser parser(tokens);
     auto ast = parser.parse();
@@ -2281,23 +2281,26 @@ TEST_F(SemanticAnalyzerTest, StrFromCLiteralValidation) {
 // precedent as LegacyKeywordNamesAreUsableAsIdentifiers), and the builtins
 // still recognize them in type positions.
 TEST_F(SemanticAnalyzerTest, TypeNamesRemainUsableAsIdentifiers) {
+    // DEC-18 hard rename precedent: the old `str` spelling is now an ordinary
+    // identifier; the new `string_view` name is also TYPE-POSITION-ONLY.
     EXPECT_TRUE(analyzeFullyOk("int32 main() { int32 str = 1; return str; }"));
+    EXPECT_TRUE(analyzeFullyOk("int32 main() { int32 string_view = 1; return string_view; }"));
     EXPECT_TRUE(analyzeFullyOk("int32 main() { int32 string = 1; return string; }"));
-    EXPECT_TRUE(analyzeFullyOk("str g = \"x\"; int32 main() { string l = string.new(\"y\"); return 0; }"));
+    EXPECT_TRUE(analyzeFullyOk("string_view g = \"x\"; int32 main() { string l = string.new(\"y\"); return 0; }"));
 }
 
 // P1-06 / T6: the empty literal is a valid (zero-length) str.
 TEST_F(SemanticAnalyzerTest, EmptyLiteralIsStr) {
-    EXPECT_TRUE(analyzeFullyOk("int32 main() { str s = \"\"; if (s.len() != 0) { return 1; } return 0; }"));
+    EXPECT_TRUE(analyzeFullyOk("int32 main() { string_view s = \"\"; if (s.len() != 0) { return 1; } return 0; }"));
 }
 
 // 终审 C1（修复轮）：char* -> str 不得经初始化/return 隐式转换（spec §1.4：
 // 仅经 str_from_c）。双向规则曾放行并产生垃圾 len。
 TEST_F(SemanticAnalyzerTest, CharPointerToStrStillExplicit) {
     EXPECT_FALSE(analyzeFullyOk(
-        "int32 main() { char* p = \"abc\"; str s = p; return 0; }"));
+        "int32 main() { char* p = \"abc\"; string_view s = p; return 0; }"));
     EXPECT_FALSE(analyzeFullyOk(
-        "str f(char* p) { return p; }\nint32 main() { return 0; }"));
+        "string_view f(char* p) { return p; }\nint32 main() { return 0; }"));
 }
 
 // P1-09 / FMT-11: print/format spec failures carry stable codes E2020-E2022.
@@ -2353,7 +2356,7 @@ TEST_F(SemanticAnalyzerTest, BuiltinFormatSema) {
         "int32 main() { string s = format(\"x={}\", 1); return 0; }"));
     // Dynamic format string: legal, no compile-time spec checks (FMT-09).
     EXPECT_TRUE(analyzeFullyOk(
-        "int32 main() { str f = \"{}\"; string s = format(f, 1); return 0; }"));
+        "int32 main() { string_view f = \"{}\"; string s = format(f, 1); return 0; }"));
     // Custom types lower through to_string (FMT-10).
     EXPECT_TRUE(analyzeFullyOk(
         "class C { public: char* to_string() { return \"C\"; } };"
@@ -2367,7 +2370,7 @@ TEST_F(SemanticAnalyzerTest, BuiltinFormatSema) {
         "int32 main() { string s = format(1, 2); return 0; }"));
     // User-defined format shadows the builtin.
     EXPECT_TRUE(analyzeFullyOk(
-        "string format(str f, int32 v) { return string.new(f); }"
+        "string format(string_view f, int32 v) { return string.new(f); }"
         "int32 main() { string s = format(\"{}\", 1); return 0; }"));
 }
 
@@ -2392,44 +2395,44 @@ TEST_F(SemanticAnalyzerTest, BuiltinFormatDiagnosticCodes) {
 // P1-09 / STD-10: find/rfind/sub primitive type checks.
 TEST_F(SemanticAnalyzerTest, StrFindRFindSubSema) {
     EXPECT_TRUE(analyzeFullyOk(
-        "int32 main() { str s = \"hello\"; isize i = s.find(\"ll\"); return 0; }"));
+        "int32 main() { string_view s = \"hello\"; isize i = s.find(\"ll\"); return 0; }"));
     EXPECT_TRUE(analyzeFullyOk(
-        "int32 main() { str s = \"a/b/c\"; isize i = s.rfind(\"/\"); return 0; }"));
+        "int32 main() { string_view s = \"a/b/c\"; isize i = s.rfind(\"/\"); return 0; }"));
     EXPECT_TRUE(analyzeFullyOk(
-        "int32 main() { str s = \"hello\"; str t = s.sub(1, 3); return 0; }"));
+        "int32 main() { string_view s = \"hello\"; string_view t = s.sub(1, 3); return 0; }"));
     // Arity / type errors.
     EXPECT_FALSE(analyzeFullyOk(
-        "int32 main() { str s = \"hello\"; s.find(); return 0; }"));
+        "int32 main() { string_view s = \"hello\"; s.find(); return 0; }"));
     EXPECT_FALSE(analyzeFullyOk(
-        "int32 main() { str s = \"hello\"; s.find(1); return 0; }"));
+        "int32 main() { string_view s = \"hello\"; s.find(1); return 0; }"));
     EXPECT_FALSE(analyzeFullyOk(
-        "int32 main() { str s = \"hello\"; s.rfind(\"a\", 2); return 0; }"));
+        "int32 main() { string_view s = \"hello\"; s.rfind(\"a\", 2); return 0; }"));
     EXPECT_FALSE(analyzeFullyOk(
-        "int32 main() { str s = \"hello\"; s.sub(1.5, 2); return 0; }"));
+        "int32 main() { string_view s = \"hello\"; s.sub(1.5, 2); return 0; }"));
     EXPECT_FALSE(analyzeFullyOk(
-        "int32 main() { str s = \"hello\"; s.sub(1); return 0; }"));
+        "int32 main() { string_view s = \"hello\"; s.sub(1); return 0; }"));
 }
 
 // P1-09 / spec 偏差 1/2: builtin split/split_destroy.
 TEST_F(SemanticAnalyzerTest, BuiltinSplitSema) {
     EXPECT_TRUE(analyzeFullyOk(
-        "int32 main() { str[] parts = split(\"a,b\", \",\"); return 0; }"));
+        "int32 main() { string_view[] parts = split(\"a,b\", \",\"); return 0; }"));
     EXPECT_TRUE(analyzeFullyOk(
-        "int32 main() { str[] parts = split(\"a,b\", \",\"); split_destroy(parts); return 0; }"));
+        "int32 main() { string_view[] parts = split(\"a,b\", \",\"); split_destroy(parts); return 0; }"));
     // 非 str 实参
     EXPECT_FALSE(analyzeFullyOk(
-        "int32 main() { str[] parts = split(1, \",\"); return 0; }"));
+        "int32 main() { string_view[] parts = split(1, \",\"); return 0; }"));
     EXPECT_FALSE(analyzeFullyOk(
-        "int32 main() { str[] parts = split(\"a\", 2); return 0; }"));
+        "int32 main() { string_view[] parts = split(\"a\", 2); return 0; }"));
     // 字面空 sep → 编译期拒绝
     EXPECT_FALSE(analyzeFullyOk(
-        "int32 main() { str[] parts = split(\"a\", \"\"); return 0; }"));
+        "int32 main() { string_view[] parts = split(\"a\", \"\"); return 0; }"));
     // 实参个数
     EXPECT_FALSE(analyzeFullyOk(
-        "int32 main() { str[] parts = split(\"a\"); return 0; }"));
+        "int32 main() { string_view[] parts = split(\"a\"); return 0; }"));
     // user-defined 优先
     EXPECT_TRUE(analyzeFullyOk(
-        "str split(str s, str sep) { return s; }"
+        "string_view split(string_view s, string_view sep) { return s; }"
         "int32 main() { return 0; }"));
 }
 

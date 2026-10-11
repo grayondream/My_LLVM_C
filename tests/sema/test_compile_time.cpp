@@ -408,7 +408,7 @@ TEST(CompileTimeStrOps, LiteralConcatRejected) {
     EXPECT_FALSE(analyzeOk(
         "int32 main() { compile_time.static_assert(\"a\" + \"b\" == \"ab\"); return 0; }"));
     EXPECT_FALSE(analyzeOk(
-        "int32 main() { str a = \"x\"; str b = a + \"y\"; return 0; }"));
+        "int32 main() { string_view a = \"x\"; string_view b = a + \"y\"; return 0; }"));
 }
 
 TEST(CompileTimeStrOps, LiteralEqStillCT) {

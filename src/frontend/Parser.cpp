@@ -1627,8 +1627,9 @@ bool Parser::isTypeStart() const {
                 m_tokens[i + 1].type == TokenType::TOKEN_LT) {
                 return true;
             }
-            // P1-06 (FMT-01/02): builtin monomorphic types `str` / `string`.
-            if (name == "str" || name == "string") {
+            // P1-06 (FMT-01/02) + I4/D3: builtin monomorphic types
+            // `string_view` (原 `str` 硬改名) / `string`.
+            if (name == "string" || name == "string_view") {
                 return true;
             }
             return lookupNamedType(name) != nullptr;
@@ -1908,10 +1909,10 @@ Type* Parser::parseBaseType() {
                 m_templateScopes.back().typeParams.count(name)) {
                 return TypeContext::instance().getTypeVar(name);
             }
-            // P1-06 (FMT-01/02): builtin monomorphic types `str` / `string` —
-            // identifier special-cases (same mechanism as optional/result),
-            // not keywords.
-            if (name == "str") {
+            // P1-06 (FMT-01/02) + I4/D3: builtin monomorphic types
+            // `string_view` (原 `str` 硬改名) / `string` — identifier
+            // special-cases (same mechanism as optional/result), not keywords.
+            if (name == "string_view") {
                 return TypeContext::instance().getStrType();
             }
             if (name == "string") {
