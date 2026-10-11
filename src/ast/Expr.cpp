@@ -1331,6 +1331,43 @@ llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
         }
     }
 
+    // I4 (D7): string 赋值——活值深拷贝 / 新鲜值移动，旧缓冲自动释放，
+    // 消除 I4「值拷贝别名双 free」。替代下方 :1334 的裸 store。
+    {
+        Type* lt = stripTypedefsT12(lhs->type);
+        if (lt && lt->kind == TypeKind::String && op == AssignOp::Assign) {
+            if (ctx.isFreshStringValue(*rhs)) {
+                // 新鲜值（string.new / 返回 string 的调用）→ 移动：free 旧缓冲
+                // （null 守卫，防御未初始化/零化局部）后裸 store。
+                llvm::Function* func = builder.GetInsertBlock()->getParent();
+                llvm::BasicBlock* freeBB = llvm::BasicBlock::Create(
+                    ctx.getContext(), "asn.free", func);
+                llvm::BasicBlock* storeBB = llvm::BasicBlock::Create(
+                    ctx.getContext(), "asn.store", func);
+                llvm::Value* dstVal = emitLoad(ctx, lhsVal, lhs->type);
+                llvm::Value* oldPtr = builder.CreateExtractValue(dstVal, 0, "asn.oldptr");
+                llvm::Value* nullPtr = llvm::Constant::getNullValue(oldPtr->getType());
+                builder.CreateCondBr(builder.CreateICmpNE(oldPtr, nullPtr, "asn.hasold?"),
+                                     freeBB, storeBB);
+                builder.SetInsertPoint(freeBB);
+                auto freeFn = ctx.getModule().getOrInsertFunction(
+                    "free", llvm::FunctionType::get(
+                        llvm::Type::getVoidTy(ctx.getContext()), {oldPtr->getType()}, false));
+                builder.CreateCall(freeFn, {oldPtr});
+                builder.CreateBr(storeBB);
+                builder.SetInsertPoint(storeBB);
+                builder.CreateStore(result, lhsVal);
+            } else {
+                // 活值 → 深拷贝赋值（自赋值守卫 + free 旧缓冲 + 拷贝）。
+                auto savedIP = builder.saveIP();
+                llvm::Function* assignFn = ctx.getStringAssignFn();
+                builder.restoreIP(savedIP);
+                builder.CreateCall(assignFn, {lhsVal, result});
+            }
+            return result;
+        }
+    }
+
     builder.CreateStore(result, lhsVal);
     return result;
 }

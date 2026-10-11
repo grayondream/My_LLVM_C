@@ -122,6 +122,20 @@ public:
     // *outCnt. Assumes seplen > 0 (checked at the call site).
     llvm::Function* getSplitFn();
 
+    // I4 (D2/D7): string 拥有型值语义 helper。string 是 {ptr, len, cap} 的
+    // 拥有型值——赋值/初始化/传参/返回处深拷贝活值、移动新鲜值，从根上消除
+    // I4「值拷贝别名双 free」。这些 helper 惰性合成（InternalLinkage），调用方
+    // 须在合成前 saveIP/restoreIP（与 getStrFindFn 等同一约定）。
+    //
+    // isFreshStringValue: rvalue 且为返回 string 的调用（string.new / 函数调用
+    // 等）→ 新鲜值，移动（零拷贝）而非深拷贝（spec D2 拷贝模型 B）。
+    bool isFreshStringValue(ExprAST& e);
+    // stringCopy: dst* ← 深拷贝 src（cap = max(len,1)，malloc+memcpy，写三字段）。
+    llvm::Function* getStringCopyFn();
+    // stringAssign: dst* ← src。自赋值守卫（dst.ptr == src.ptr 时什么都不做，
+    // 不得 free 共享缓冲）；否则 dst.ptr != null 时 free 旧缓冲，再深拷贝。
+    llvm::Function* getStringAssignFn();
+
 private:
     std::unique_ptr<llvm::LLVMContext> context;
     llvm::IRBuilder<> builder;
@@ -150,4 +164,7 @@ private:
     llvm::Function* strRFindFn{nullptr};
     llvm::Function* strMatchAtFn{nullptr};
     llvm::Function* splitFn{nullptr};
+    // I4 (D7): lazily synthesized string ownership helpers.
+    llvm::Function* stringCopyFn{nullptr};
+    llvm::Function* stringAssignFn{nullptr};
 };

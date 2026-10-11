@@ -1346,3 +1346,107 @@ llvm::Function* CodegenContext::getSplitFn() {
     splitFn = fn;
     return fn;
 }
+
+// I4 (D2): 新鲜 string 值——rvalue 且为返回 string 的调用（string.new / 函数
+// 调用 / 方法调用）→ 移动（零拷贝）而非深拷贝。spec D2 拷贝模型 B：活值深拷贝、
+// 新鲜值移动、return 特殊规则；无法判定 → 拷贝（默认安全）。
+bool CodegenContext::isFreshStringValue(ExprAST& e) {
+    if (e.isLValue) return false;
+    if (!dynamic_cast<CallExprAST*>(&e) &&
+        !dynamic_cast<MethodCallExprAST*>(&e))
+        return false;
+    Type* t = e.type;
+    while (t && t->kind == TypeKind::Typedef)
+        t = static_cast<TypedefType*>(t)->aliasedType;
+    return t && t->kind == TypeKind::String;
+}
+
+// I4 (D7): `void stringCopy({ptr,len,cap}* dst, {ptr,len,cap} src)` —
+// 深拷贝：cap = max(len,1)，malloc(cap)+memcpy，写 dst 三字段。调用方须
+// saveIP/restoreIP（惰性合成期间借用共享 builder）。
+llvm::Function* CodegenContext::getStringCopyFn() {
+    if (stringCopyFn) return stringCopyFn;
+    llvm::LLVMContext& c = *context;
+    auto* i64Ty = llvm::Type::getInt64Ty(c);
+    auto* ptrTy = llvm::PointerType::get(c, 0);
+    auto* strTy = getLLVMType(TypeContext::instance().getStringType());
+    auto* voidTy = llvm::Type::getVoidTy(c);
+    auto* fnTy = llvm::FunctionType::get(voidTy, {ptrTy, strTy}, false);
+    auto* fn = llvm::Function::Create(fnTy, llvm::Function::InternalLinkage,
+                                      "smc.string.copy", module.get());
+    auto* dst = fn->getArg(0);
+    auto* src = fn->getArg(1);
+
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(c, "copy.entry", fn);
+    builder.SetInsertPoint(entry);
+    auto* sptr = builder.CreateExtractValue(src, 0, "copy.sptr");
+    auto* slen = builder.CreateExtractValue(src, 1, "copy.slen");
+    auto* one = llvm::ConstantInt::get(i64Ty, 1);
+    auto* cap = builder.CreateSelect(
+        builder.CreateICmpUGT(slen, one, "copy.gt1"), slen, one, "copy.cap");
+    auto mallocFn = module->getOrInsertFunction(
+        "malloc", llvm::FunctionType::get(ptrTy, {i64Ty}, false));
+    auto memcpyFn = module->getOrInsertFunction(
+        "memcpy", llvm::FunctionType::get(ptrTy, {ptrTy, ptrTy, i64Ty}, false));
+    auto* nptr = builder.CreateCall(mallocFn, {cap}, "copy.nptr");
+    builder.CreateCall(memcpyFn, {nptr, sptr, slen});
+    llvm::Value* v = llvm::Constant::getNullValue(strTy);
+    v = builder.CreateInsertValue(v, nptr, {0});
+    v = builder.CreateInsertValue(v, slen, {1});
+    v = builder.CreateInsertValue(v, cap, {2});
+    builder.CreateStore(v, dst);
+    builder.CreateRetVoid();
+
+    stringCopyFn = fn;
+    return fn;
+}
+
+// I4 (D7): `void stringAssign({ptr,len,cap}* dst, {ptr,len,cap} src)` —
+// 赋值语义：自赋值守卫（dst.ptr == src.ptr 时什么都不做——free 会双 free、
+// copy 会泄漏旧缓冲，值本就相同）；否则 dst.ptr != null 时 free 旧缓冲；
+// 再深拷贝。让 `b = a` 后 a/b 各自独立、旧缓冲自动释放。
+llvm::Function* CodegenContext::getStringAssignFn() {
+    if (stringAssignFn) return stringAssignFn;
+    llvm::LLVMContext& c = *context;
+    auto* ptrTy = llvm::PointerType::get(c, 0);
+    auto* strTy = getLLVMType(TypeContext::instance().getStringType());
+    auto* voidTy = llvm::Type::getVoidTy(c);
+    auto* fnTy = llvm::FunctionType::get(voidTy, {ptrTy, strTy}, false);
+    auto* fn = llvm::Function::Create(fnTy, llvm::Function::InternalLinkage,
+                                      "smc.string.assign", module.get());
+    auto* dst = fn->getArg(0);
+    auto* src = fn->getArg(1);
+
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(c, "asn.entry", fn);
+    llvm::BasicBlock* selfBB = llvm::BasicBlock::Create(c, "asn.self", fn);
+    llvm::BasicBlock* freeBB = llvm::BasicBlock::Create(c, "asn.free", fn);
+    llvm::BasicBlock* doFreeBB = llvm::BasicBlock::Create(c, "asn.dofree", fn);
+    llvm::BasicBlock* copyBB = llvm::BasicBlock::Create(c, "asn.copy", fn);
+    builder.SetInsertPoint(entry);
+    auto* dv = builder.CreateLoad(strTy, dst, "asn.dv");
+    auto* dptr = builder.CreateExtractValue(dv, 0, "asn.dptr");
+    auto* sptr = builder.CreateExtractValue(src, 0, "asn.sptr");
+    builder.CreateCondBr(builder.CreateICmpEQ(dptr, sptr, "asn.self?"),
+                         selfBB, freeBB);
+    builder.SetInsertPoint(selfBB);
+    builder.CreateRetVoid();
+    builder.SetInsertPoint(freeBB);
+    auto* nullPtr = llvm::Constant::getNullValue(ptrTy);
+    builder.CreateCondBr(builder.CreateICmpNE(dptr, nullPtr, "asn.hasold?"),
+                         doFreeBB, copyBB);
+    builder.SetInsertPoint(doFreeBB);
+    auto freeFn = module->getOrInsertFunction(
+        "free", llvm::FunctionType::get(voidTy, {ptrTy}, false));
+    builder.CreateCall(freeFn, {dptr});
+    builder.CreateBr(copyBB);
+    builder.SetInsertPoint(copyBB);
+    // getStringCopyFn() 惰性合成期间会劫持共享 builder 的插入点——save/restore。
+    auto savedIP = builder.saveIP();
+    llvm::Function* copyFn = getStringCopyFn();
+    builder.restoreIP(savedIP);
+    builder.CreateCall(copyFn, {dst, src});
+    builder.CreateRetVoid();
+
+    stringAssignFn = fn;
+    return fn;
+}
