@@ -4391,6 +4391,58 @@ void SemanticAnalyzer::checkInstanceFieldComplete(StructDeclAST& node) {
     }
 }
 
+// P1-08 / DEC-09: inline asm —— 节点恒为 void 值（D3），outputs 必须是左值标量，
+// inputs 必须是标量，约束串非空；模板 `%` 后只能是 `%`（转义）或数字（操作数
+// 引用）。约束/模板的语义合法性交由 LLVM 后端（D2）。
+void SemanticAnalyzer::visit(AsmExprAST& node) {
+    node.type = typeCtx->getVoid();
+    node.isLValue = false;
+
+    auto checkOperand = [&](AsmOperand& op, bool mustBeLValue, const char* what) -> Type* {
+        if (op.constraint.empty()) {
+            emitError(DiagnosticCode::SemAsmOperand,
+                      std::string("empty asm ") + what + " constraint", node);
+        }
+        Type* t = getExprType(*op.expr);
+        if (mustBeLValue && !op.expr->isLValue) {
+            emitError(DiagnosticCode::SemAsmOperand,
+                      "asm output operand must be an lvalue", node);
+        }
+        if (t && !isScalarType(t)) {
+            emitError(DiagnosticCode::SemAsmOperand,
+                      std::string("asm ") + what + " operand must be a scalar type", node);
+        }
+        return t;
+    };
+
+    node.outputTypes.clear();
+    for (auto& op : node.outputs) {
+        node.outputTypes.push_back(checkOperand(op, true, "output"));
+    }
+    node.inputTypes.clear();
+    for (auto& op : node.inputs) {
+        node.inputTypes.push_back(checkOperand(op, false, "input"));
+    }
+
+    const std::string& tpl = node.asmTemplate;
+    for (size_t i = 0; i < tpl.size(); ++i) {
+        if (tpl[i] != '%') continue;
+        if (i + 1 >= tpl.size()) {
+            emitError(DiagnosticCode::SemAsmTemplate,
+                      "invalid asm template: trailing '%' must be '%%' or a digit reference", node);
+            break;
+        }
+        const char next = tpl[i + 1];
+        if (next == '%' || (next >= '0' && next <= '9')) {
+            ++i; // 已确认的一对（转义或操作数引用）整体跳过
+            continue;
+        }
+        emitError(DiagnosticCode::SemAsmTemplate,
+                  "invalid asm template: '%' must be followed by '%' or a digit", node);
+        break;
+    }
+}
+
 void SemanticAnalyzer::visit(ExprAST& expr) {
     if (auto* e = dynamic_cast<NumberExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<FloatExprAST*>(&expr)) { visit(*e); return; }
@@ -4403,6 +4455,7 @@ void SemanticAnalyzer::visit(ExprAST& expr) {
     if (auto* e = dynamic_cast<AssignmentExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<TernaryExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<CastExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<AsmExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<CommaExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<PostfixIncDecExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<ArrayAccessExprAST*>(&expr)) { visit(*e); return; }

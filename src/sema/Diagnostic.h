@@ -37,6 +37,9 @@ enum class DiagnosticCode {
     SemFormatArgCount,
     SemFormatSpecType,
     SemFormatSpecSyntax,
+    // P1-08 / DEC-09
+    SemAsmOperand,
+    SemAsmTemplate,
 
     WarnUninitializedVariable,
     WarnUnusedVariable,

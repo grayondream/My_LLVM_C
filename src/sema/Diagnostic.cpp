@@ -31,6 +31,8 @@ const DiagnosticInfo kRegistry[] = {
     {DiagnosticCode::SemFormatArgCount,           "E2020", "format argument count mismatch"},
     {DiagnosticCode::SemFormatSpecType,           "E2021", "format spec does not match argument type"},
     {DiagnosticCode::SemFormatSpecSyntax,         "E2022", "invalid format spec"},
+    {DiagnosticCode::SemAsmOperand,               "E2023", "invalid asm operand or constraint"},
+    {DiagnosticCode::SemAsmTemplate,              "E2024", "invalid asm template"},
 
     {DiagnosticCode::WarnUninitializedVariable,  "W3001", "variable may be uninitialized"},
     {DiagnosticCode::WarnUnusedVariable,         "W3002", "unused variable"},

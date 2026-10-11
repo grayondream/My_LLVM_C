@@ -236,6 +236,7 @@ private:
     void visit(AssignmentExprAST& node);
     void visit(TernaryExprAST& node);
     void visit(CastExprAST& node);
+    void visit(AsmExprAST& node);
     void visit(CommaExprAST& node);
     void visit(PostfixIncDecExprAST& node);
     void visit(ArrayAccessExprAST& node);

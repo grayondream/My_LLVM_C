@@ -2439,3 +2439,79 @@ TEST_F(SemanticAnalyzerTest, SplitDestroyRejectsStringSlices) {
     EXPECT_FALSE(analyzeFullyOk(
         "int32 main() { string arr[2]; string[] a = arr; split_destroy(a); return 0; }"));
 }
+
+// ========== P1-08 / DEC-09: inline asm 语义 ==========
+
+TEST_F(SemanticAnalyzerTest, InlineAsmValid) {
+    std::string source = "int32 f() { int32 x; asm(\"mov $7, %0\" : \"=r\"(x)); return x; }";
+    Lexer lexer("t.c", source);
+    Parser parser(lexer.tokenize());
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    analyzer->analyze(*ast);
+    EXPECT_TRUE(analyzer->getErrors().empty());
+}
+
+TEST_F(SemanticAnalyzerTest, InlineAsmOutputMustBeLValue) {
+    std::string source = "int32 f() { asm(\"\" : \"=r\"(1 + 2)); return 0; }";
+    Lexer lexer("t.c", source);
+    Parser parser(lexer.tokenize());
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    analyzer->analyze(*ast);
+    ASSERT_FALSE(analyzer->getErrors().empty());
+    EXPECT_EQ(analyzer->getErrors()[0].code, DiagnosticCode::SemAsmOperand);
+}
+
+TEST_F(SemanticAnalyzerTest, InlineAsmOperandMustBeScalar) {
+    std::string source = "struct P { int32 x; }; int32 f() { struct P p; asm(\"\" : \"=r\"(p)); return 0; }";
+    Lexer lexer("t.c", source);
+    Parser parser(lexer.tokenize());
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    analyzer->analyze(*ast);
+    ASSERT_FALSE(analyzer->getErrors().empty());
+    EXPECT_EQ(analyzer->getErrors()[0].code, DiagnosticCode::SemAsmOperand);
+}
+
+TEST_F(SemanticAnalyzerTest, InlineAsmEmptyConstraintRejected) {
+    std::string source = "int32 f() { int32 x; asm(\"\" : \"\"(x)); return 0; }";
+    Lexer lexer("t.c", source);
+    Parser parser(lexer.tokenize());
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    analyzer->analyze(*ast);
+    ASSERT_FALSE(analyzer->getErrors().empty());
+    EXPECT_EQ(analyzer->getErrors()[0].code, DiagnosticCode::SemAsmOperand);
+}
+
+TEST_F(SemanticAnalyzerTest, InlineAsmTemplateBadEscape) {
+    std::string source = "int32 f() { asm(\"mov %z, %0\"); return 0; }";
+    Lexer lexer("t.c", source);
+    Parser parser(lexer.tokenize());
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    analyzer->analyze(*ast);
+    ASSERT_FALSE(analyzer->getErrors().empty());
+    EXPECT_EQ(analyzer->getErrors()[0].code, DiagnosticCode::SemAsmTemplate);
+}
+
+TEST_F(SemanticAnalyzerTest, InlineAsmPercentEscapeOk) {
+    std::string source = "int32 f() { int32 x; asm(\"mov %%eax, %0\" : \"=r\"(x)); return x; }";
+    Lexer lexer("t.c", source);
+    Parser parser(lexer.tokenize());
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    analyzer->analyze(*ast);
+    EXPECT_TRUE(analyzer->getErrors().empty());
+}
+
+TEST_F(SemanticAnalyzerTest, InlineAsmNonLValueInputOk) {
+    std::string source = "int32 f(int32 x) { int32 y; asm(\"mov %1, %0\" : \"=r\"(y) : \"r\"(x + 1)); return y; }";
+    Lexer lexer("t.c", source);
+    Parser parser(lexer.tokenize());
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    analyzer->analyze(*ast);
+    EXPECT_TRUE(analyzer->getErrors().empty());
+}
