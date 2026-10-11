@@ -448,3 +448,23 @@ TEST(LexerValueWidthTest, LargeIntegerIsNotTruncated) {
     // 0xFFFFFFFFFFFFFFFF is the two's-complement bit pattern for -1 in int64.
     EXPECT_EQ(std::get<long long>(tokens[1].value), -1LL);
 }
+
+// LEX-12: `asm` is a keyword token; `volatile` stays a keyword beside it.
+TEST(AsmKeyword, LexesAsmVolatileTemplate) {
+    spdlog::set_level(spdlog::level::off);
+    Lexer lexer("asm.c", "asm volatile(\"nop\");");
+    auto tokens = lexer.tokenize();
+    // 完整 token 流：asm volatile ( "nop" ) ;
+    ASSERT_EQ(tokens.size(), 6u);
+    EXPECT_EQ(tokens[0].type, TokenType::TOKEN_ASM);
+    EXPECT_EQ(tokens[0].lexeme, "asm");
+    EXPECT_EQ(tokens[1].type, TokenType::TOKEN_VOLATILE);
+    EXPECT_EQ(tokens[1].lexeme, "volatile");
+    EXPECT_EQ(tokens[2].type, TokenType::TOKEN_LPAREN);
+    // 字符串 token 的 lexeme 保留两端引号，由 Parser 剥除后解码。
+    EXPECT_EQ(tokens[3].type, TokenType::TOKEN_STRING);
+    EXPECT_EQ(tokens[3].lexeme, "\"nop\"");
+    EXPECT_EQ(tokens[4].type, TokenType::TOKEN_RPAREN);
+    EXPECT_EQ(tokens[5].type, TokenType::TOKEN_SEMICOLON);
+    EXPECT_TRUE(lexer.getDiagnostics().empty());
+}

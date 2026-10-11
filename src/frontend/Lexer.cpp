@@ -92,6 +92,7 @@ static const std::unordered_map<std::string, TokenType> keywordMap = {
     {"defer", TokenType::TOKEN_DEFER},
     {"alignof", TokenType::TOKEN_ALIGNOF},
     {"offsetof", TokenType::TOKEN_OFFSETOF},
+    {"asm", TokenType::TOKEN_ASM},
 
     // ===== 新增整数类型 =====
     {"int8", TokenType::TOKEN_INT8},

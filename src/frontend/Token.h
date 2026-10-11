@@ -35,6 +35,7 @@ enum class TokenType : int32_t {
     TOKEN_STATIC,
     TOKEN_EXTERN,
     TOKEN_VOLATILE,
+    TOKEN_ASM,
     TOKEN_SIZEOF,
     TOKEN_TYPEDEF,
     TOKEN_INLINE,
