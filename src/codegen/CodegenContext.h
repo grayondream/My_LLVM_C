@@ -22,7 +22,15 @@ public:
     llvm::DIFile* getDIFile() { return diFile; }
 
     std::unique_ptr<llvm::Module> takeModule() { return std::move(module); }
-    std::unique_ptr<llvm::LLVMContext> takeContext() { return std::move(context); }
+
+    // Releasing the context (e.g. into LLJIT, which destroys it after compiling
+    // the module) would leave the IRBuilder's current DebugLoc pointing at
+    // freed debug metadata — ~IRBuilder then use-after-frees in
+    // MetadataTracking::untrack. Detach the debug location first.
+    std::unique_ptr<llvm::LLVMContext> takeContext() {
+        builder.SetCurrentDebugLocation(llvm::DebugLoc());
+        return std::move(context);
+    }
 
     void pushScope();
     void popScope();

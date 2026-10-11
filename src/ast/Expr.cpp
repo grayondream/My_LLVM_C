@@ -5,6 +5,8 @@
 #include "support/Log.h"
 #include "Mangle.h"
 
+#include "llvm/IR/InlineAsm.h"
+
 // P1-06: builtin str/string lowering (defined at file bottom).
 static llvm::Value* codegenBuiltinMethod(CodegenContext& ctx, MethodCallExprAST& node);
 static llvm::Value* codegenStringMethod(CodegenContext& ctx, MethodCallExprAST& node);
@@ -1393,12 +1395,129 @@ llvm::Value* TernaryExprAST::codegen(CodegenContext& ctx) {
     return phi;
 }
 
-// P1-08 / PAR-16 + CG-10: 最小定义。AsmExprAST 的 vtable/typeinfo 需要首个非纯
-// 虚函数（codegen）有定义才能链接——plan 的 Task 2 预期即可跑绿，故先给占位体，
-// Task 4 用真正的 llvm::InlineAsm 发射替换它（届时 e2e 提供 RED）。
+// P1-08 / CG-10: inline asm → llvm::InlineAsm。
+//
+// LLVM 21 的 inline asm 约束语义与 GCC 有三处关键差异（实证于 llc + LLVM 源码
+// InlineAsm.cpp Parse/verify、InlineAsm.h ConstraintPrefix）：
+//   1. 输出必须映射到 call 返回值：单输出 → 返回类型即该标量；多输出 →
+//      StructType（按约束顺序）；无输出 → void。plan 原案的「给 `=r` 传左值
+//      地址」被 LLVM 拒绝（"number of input constraints does not match"）。
+//   2. 约束前缀只认 `~`/`=`/`!`，无 GCC 的 `+`：`+r` 会被当纯输入（且多出
+//      无意义的 `+` code）。读-写操作数翻译为 `=r`（输出）＋ 追加在全部普通
+//      输入之后的 tied 输入（数字约束 = 该输出在 outputs 中的下标），使 GCC
+//      模板编号（%N）与 LLVM `$N` 完全一致（tied 槽不被 GCC 模板引用）。
+//   3. 模板转义不同：LLVM 只认 `$N`（操作数引用）与 `$$`（字面 `$`），`%`
+//      不做任何处理。GCC 模板翻译：`$`→`$$`、`%%`→`%`、`%N`→`$N`（顺序为
+//      先转义字面 `$`，再 `%%`，最后 `%N`，避免把新引入的 `$N` 再次转义）。
 llvm::Value* AsmExprAST::codegen(CodegenContext& ctx) {
-    (void)ctx;
-    return nullptr;
+    llvm::LLVMContext& context = ctx.getContext();
+    llvm::IRBuilder<>& builder = ctx.getBuilder();
+
+    const unsigned nOut = static_cast<unsigned>(outputs.size());
+    const unsigned nIn = static_cast<unsigned>(inputs.size());
+
+    // 1. 返回类型：0 → void；1 → 该标量；≥2 → StructType。
+    std::vector<llvm::Type*> retTys;
+    retTys.reserve(nOut);
+    for (Type* t : outputTypes) retTys.push_back(ctx.getLLVMType(t));
+    llvm::Type* retTy = llvm::Type::getVoidTy(context);
+    if (retTys.size() == 1) {
+        retTy = retTys[0];
+    } else if (retTys.size() > 1) {
+        retTy = llvm::StructType::get(context, retTys);
+    }
+
+    // 2. 约束串（LLVM 方言）：outputs（`+`→`=`）＋ inputs ＋ 追加的 tied 输入
+    //    ＋ clobbers（`~{name}`）。tied 输入排在所有普通输入之后。
+    std::vector<int> rwIndices;  // 读-写输出在 outputs 中的下标（升序）
+    std::vector<std::string> cons;
+    cons.reserve(nOut + nIn + nOut);
+    for (unsigned i = 0; i < nOut; ++i) {
+        std::string c = outputs[i].constraint;
+        if (!c.empty() && c[0] == '+') {
+            c[0] = '=';  // '+r' → '=r'
+            rwIndices.push_back(static_cast<int>(i));
+        }
+        cons.push_back(std::move(c));
+    }
+    for (unsigned i = 0; i < nIn; ++i) cons.push_back(inputs[i].constraint);
+    for (int idx : rwIndices) cons.push_back(std::to_string(idx));
+    for (const std::string& cl : clobbers) cons.push_back("~{" + cl + "}");
+    std::string constraintStr;
+    for (size_t i = 0; i < cons.size(); ++i) {
+        if (i) constraintStr += ',';
+        constraintStr += cons[i];
+    }
+
+    // 3. 模板 GCC → LLVM 翻译。
+    std::string tpl;
+    tpl.reserve(asmTemplate.size());
+    for (size_t i = 0; i < asmTemplate.size(); ++i) {
+        const char ch = asmTemplate[i];
+        if (ch == '$') {
+            tpl += "$$";
+        } else if (ch == '%') {
+            const char nx = (i + 1 < asmTemplate.size()) ? asmTemplate[i + 1] : '\0';
+            if (nx == '%') {
+                tpl += '%';
+                ++i;
+            } else if (nx >= '0' && nx <= '9') {
+                size_t j = i + 1;
+                while (j < asmTemplate.size() && asmTemplate[j] >= '0' && asmTemplate[j] <= '9')
+                    ++j;
+                tpl += '$';
+                tpl.append(asmTemplate, i + 1, j - i - 1);
+                i = j - 1;
+            } else {
+                tpl += ch;  // sema E2024 已拒绝；防御性直通
+            }
+        } else {
+            tpl += ch;
+        }
+    }
+
+    // 4. 签名：参数 = 普通 inputs（值）＋ 读-写 outputs 初值（值）。
+    std::vector<llvm::Type*> paramTys;
+    paramTys.reserve(nIn + rwIndices.size());
+    for (unsigned i = 0; i < nIn; ++i) paramTys.push_back(ctx.getLLVMType(inputTypes[i]));
+    for (int idx : rwIndices) paramTys.push_back(ctx.getLLVMType(outputTypes[idx]));
+    llvm::FunctionType* ft =
+        llvm::FunctionType::get(retTy, paramTys, /*isVarArg=*/false);
+    llvm::InlineAsm* ia = llvm::InlineAsm::get(
+        ft, tpl, constraintStr,
+        /*HasSideEffects=*/isVolatile,
+        /*IsAlignStack=*/false,
+        llvm::InlineAsm::AD_ATT);
+
+    // 5. 实参：先求所有 output 左值地址（求值一次，供 tied 输入与回写共用），
+    //    再 inputs 值 ＋ 读-写输出初值。
+    std::vector<llvm::Value*> outAddr(nOut);
+    for (unsigned i = 0; i < nOut; ++i) {
+        outAddr[i] = outputs[i].expr->codegen(ctx);
+        if (!outAddr[i]) return nullptr;
+    }
+    std::vector<llvm::Value*> args;
+    args.reserve(nIn + rwIndices.size());
+    for (unsigned i = 0; i < nIn; ++i) {
+        llvm::Value* v = inputs[i].expr->codegen(ctx);
+        if (!v) return nullptr;
+        args.push_back(emitRValue(ctx, *inputs[i].expr, v));
+    }
+    for (int idx : rwIndices) {
+        llvm::Value* v = emitRValue(ctx, *outputs[idx].expr, outAddr[idx]);
+        if (!v) return nullptr;
+        args.push_back(v);
+    }
+
+    // 6. 调用 + 逐输出回写（结果丢弃，void 语义，D3）。
+    llvm::Value* result = builder.CreateCall(ia, args);
+    for (unsigned i = 0; i < nOut; ++i) {
+        llvm::Value* outVal =
+            (retTys.size() == 1) ? result : builder.CreateExtractValue(result, i, "asm.out");
+        builder.CreateStore(outVal, outAddr[i]);
+    }
+
+    return nullptr;  // void 表达式
 }
 
 llvm::Value* CastExprAST::codegen(CodegenContext& ctx) {
