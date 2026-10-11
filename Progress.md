@@ -647,3 +647,29 @@
 - 核实为正确：coerceToBool（bool/int/float NaN 真值/指针）；castValue 同型赋值在走查前短路（string→string、无关 struct 不受影响）；memcpy 返回值不链式（三处合成 helper 均显式 GEP 偏移）；getStrFindFn/RFind 边界（空 needle 0/len、过界 -1）；getSplitFn 贪心非重叠计数与填充一致；getFormatDynFn 单 malloc 上界、块支配关系正确；print 旧行为回归（空 spec 表逐字一致、`%%`、`%.*s`、错误文案）。
 - Review Focus 1~5：1（%b 宿主可用、依赖已文档化）、2（FormatDynSpecIgnored 钉死）、3（FormatStrNulPreserved，print 渲染槽除外→Minor）、4（unit+e2e 全绿）、5（文档化不测试）——全部按计划处置。
 - 结论：**不通过（阻塞：Critical 1/2）**。修复面小（两处 codegen 数行 + sema 一处），建议修复后补 3 个 e2e（嵌套逻辑 RHS、长 to_string 动态 format、`B b = d;` 值赋值）再复验。
+
+## 2026-10-11 11:00 — 环境恢复 + 全量构建验证 + LEX-12 测试期望修正
+
+- **背景**：工程从 `/media/nvme0n1/...` 迁到 `/media/nvm1/workspace/My_LLVM_C`，旧磁盘已不存在。in-source 残留（根目录 `CMakeCache.txt`/`CMakeFiles`/`Makefile`/`cmake_install.cmake`/`CTestTestfile.cmake`/`Testing`/`src|tests/Makefile`，以及 `src/CMakeFiles`、`tests/CMakeFiles`）与 `build/` 缓存全部指向失效路径，`scripts/build.sh` 直接报 "CMakeCache.txt directory ... is different"；同时 LLVM 21 开发包缺失。
+- **环境（用户安装）**：`llvm-dev`（→ `llvm-21-dev` 21.1.8 + 无版本 `llvm-config`）、`libcxxopts-dev 3.3.1`、`libgtest-dev 1.17`；`libspdlog-dev 1.15`、gcc 15.2、cmake 4.2.3、`ld`/`ld.lld` 原已具备。实测 `find_package(LLVM/GTest/spdlog/cxxopts)` 四项全部命中系统包，构建不再走 FetchContent 联网下载。
+- **清理与重建**：删除全部失效 in-source 残留与 `build/`，`bash scripts/build.sh` 全量重建 → **BUILD_EXIT=0**（`build/bin/my_llvm_c`、`build/bin/compiler_tests`）。
+- **唯一失败项定位**：`tests/frontend/test_lexer.cpp::AsmKeyword.LexesAsmVolatileTemplate`（未提交 WIP，对应 **LEX-12**）。gtest 打印 `<69-00 00-00>` 是**十六进制** = 0x69 = 105 = `TOKEN_LPAREN`，易误读成十进制 69（`TOKEN_PERCENT`）。独立复现（直接编译 `Lexer.cpp`+`Diagnostic.cpp` 打印 token 流）证实 lexer 正确：`asm volatile ( "nop" ) ;` → `[0]ASM [1]VOLATILE [2]LPAREN [3]STRING [4]RPAREN [5]SEMICOLON`，`diagnostics=0`。
+- **根因**：测试期望写错两处 ——（1）漏算 `(` ，字符串实际在 `tokens[3]` 而非 `tokens[2]`；（2）假设字符串 lexeme 不含引号，实际**含两端引号**（既有约定，`src/frontend/Parser.cpp:575` 用 `lex.front()=='"' && lex.back()=='"'` 剥除后 `decodeEscapes`）。
+- **修复**：仅修正测试期望（`ASSERT_EQ(size,6)` + 补 `LPAREN/RPAREN/SEMICOLON` + lexeme `\"nop\"`），**未改 lexer/Token.h**；同时清掉 `src/CMakeFiles`、`tests/CMakeFiles` 两处 451M 的 in-source 旧对象目录。
+- **验证**：`ctest -j8` → **100% tests passed, 0 tests failed out of 1184**（CTEST_EXIT=0）；2 个未运行项为既有 `GTEST_SKIP`（`ConstexprFunctionE2E.ConstexprForLoop/NestedCall`，源码注明 constexpr for/嵌套调用会挂起）。期间 `ModuleVisibilityTest.NonExportedFunctionIsHidden` 曾在 `-j12` 下失败一次，为**已知并行 LLJIT flaky**（同 2026-10-09 条目记录），隔离重跑通过。
+- **遗留**：根目录 `bin/`（137M）、`lib/`（85M）、`a.out` 仍为旧路径构建产物，未删除（非 git 跟踪，见 `.gitignore`）；**LEX-12** 在 `TODO.md` 仍为 `[ ]`，本轮只覆盖词法 token 层，parser/codegen 的 `asm` 尚未实现。
+
+## 2026-10-11 — P1-08 内联 asm 全链路完成（LEX-12/PAR-16/CG-10/DEC-09）
+
+- **流程**：brainstorming → spec（`docs/superpowers/specs/2026-10-10-p108-inline-asm-design.md`，70382f4）→ plan（`docs/superpowers/plans/2026-10-10-p108-inline-asm.md`，971586f）→ executing-plans Native 内联 5 任务（master 直接工作，与 P1-06/P1-09 同惯例）。
+- **Task 1（词法）**：`TOKEN_ASM` + keywordMap `{"asm", ...}`；提交 `9fe660e`。Ruling：plan 自带测试片段与实际 token 流不符（`asm volatile ( "nop" ) ;` 共 6 个，字符串在 `tokens[3]` 且 lexeme 含引号），已同步修正 plan 与 brief。
+- **Task 2（AST+解析）**：`AsmOperand`/`AsmExprAST` + `parseAsmExpr()`（至多三段操作数、模板/约束须字符串字面量、`decodeEscapes` 去引号）；提交 `943527f`。Rulings：纯虚 codegen 需占位定义才能链接（Task 4 替换）；`AsmTemplateMustBeLiteral` 改断言 `getErrors()` 非空（`Parser::parse()` 永不返回 nullptr）。
+- **Task 3（sema）**：E2023（操作数/约束）/E2024（模板转义）+ `visit(AsmExprAST&)`；提交 `582e21c`；变异验证 4 负向用例恰好转红。Ruling：`TEST` → `TEST_F`（gtest 禁同 suite 混用）。
+- **Task 4（codegen+e2e）**：提交 `9d55994`；e2e 6 用例 LLJIT 执行通过。**实证 LLVM 21 与 GCC 三处关键差异并适配**（llc 21.1.8 + LLVM 源码验证）：
+  1. 输出必须映射 call 返回值（单值/`{T,T}` struct 逐位回写）——plan 原案「`=r` 传左值地址」被 LLVM 拒绝（"number of input constraints does not match"）。
+  2. LLVM 21 无 `+` 前缀（`Parse` 只认 `~`/`=`/`!`）——`+r` 翻译为 `=r` + 追加在全部普通输入之后的 tied 数字约束（`"=r,r,0"`），实证 GCC `%N` 编号与 LLVM `$N` 完全对齐（ReadWriteOperand `add %1,%0` → 5+3=8）。
+  3. 模板转义方言不同（LLVM 只认 `$N`/`$$`）——GCC 模板翻译 `$`→`$$`、`%%`→`%`、`%N`→`$N`。
+- **顺带修复既有潜在 UAF**：`CodegenContext::takeContext()` 把 context 移给 LLJIT（编译后经 `ThreadSafeContext::State` 销毁）后，IRBuilder 的 `CurDebugLocation`（TrackingMDRef）仍引用其中 DILocation → 析构 `MetadataTracking::untrack` 读已释放内存，间歇 SIGSEGV。证据：gdb（关 ASLR）下 `InlineAsmE2E.ReadWriteOperand` 15/15 崩、其余 asm 用例 0/15；4 用例 DebugLoc MD 内存全是释放块填充；`LLVMContext` 析构经 `ThreadSafeContext` 触发；占位 codegen 时该用例也崩（非本次引入）。修复：`takeContext()` 移出前 `builder.SetCurrentDebugLocation(llvm::DebugLoc())`，修复后 gdb 20/20 不崩；32 处测试 harness 共用该 API 一并受益。
+- **Task 5（文档收口）**：`keywords.md`（asm `[plan]`→`[impl]`）、`grammar.ebnf`（asm 产生式 `[impl]`）、`TODO.md`（LEX-12/PAR-16/CG-10/DEC-09 勾选、P1-08 `[x]`、进度快照）、`Progress.md`（本条）。
+- **验证**：每任务 TDD RED→GREEN；Task 4 全量 `ctest -j8` → **1203/1203 绿**（1197 + 新增 6；2 个既有 GTEST_SKIP 不变）。
+- **遗留**：顶层未知语句被静默吞掉（`asm volatile("nop");` 放函数体外的顶层语句不报错，既有缺陷，建议单独立项）；`%=`（GCC 唯一标签转义）未支持（sema E2024 拒绝）；根目录旧路径 `bin/`/`lib/`/`a.out` 待用户决定删除。

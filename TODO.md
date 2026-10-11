@@ -9,6 +9,10 @@
 
 > **进度快照（2026-09-28）**：P0-01 ~ P0-08 全部完成；转换系统 **TYP-09/20/22/25、AGG-14/15** 完成（enum 显式底层类型、enum 强类型、整数提升 + 常规算术转换）；**LEX-13/17** 词法诊断（E0001 非法字符、E0002 未闭合字面量、E0003 整型溢出、E0004 分隔符位置）与错误恢复完成，**LEX-15** 字面量后缀与默认/基础类型映射在词法层完成，**LEX-05** 浮点指数完成；**P1-08** 部分（`static_cast`/`reinterpret_cast` 已完成，内联 `asm` 待定）。数值类型已统一为定宽集合：删除 `int`/`float`/`double` 关键字与 `TypeKind::Int/Float/Double`，新增 `float16`/`float128`，规范见 `docs/spec/fixed-width-types.md`。**TYP-04** 部分完成：f16/f128 在 x86-64 上全语义可用，print 全格式接入，varargs 提升对齐 C23。**AGG-17/AGG-03** union 补齐：匿名成员提升、typedef 聚合成员访问修复、行为基线固化。**PAR-04/SEM-04/DEC-01** class 访问段落地：默认 private/public 冻结、E2009 访问诊断、既有测试迁移。当前全量 **751** 测试通过，工作区干净。
 
+> **进度快照（2026-10-11）**：环境恢复 + 全量构建验证轮。工程迁到 `/media/nvm1/workspace/My_LLVM_C` 后清理了全部指向已失效 `/media/nvme0n1` 的 in-source CMake 残留与 `build/` 缓存，按 `vcpkg.json` 装齐依赖（`llvm-dev`=21.1.8、`libcxxopts-dev`、`libgtest-dev`，`libspdlog-dev` 原已具备），`scripts/build.sh` 全量重建成功。修正 `tests/frontend/test_lexer.cpp::AsmKeyword.LexesAsmVolatileTemplate`（**LEX-12** 未提交 WIP）的错误期望：token 流实为 `asm volatile ( "nop" ) ;`，字符串在 `tokens[3]`（`tokens[2]` 是 `(`），且字符串 token 的 lexeme 含两端引号（由 `Parser` 剥除）——仅改测试，未动 lexer。当前全量 **1184** 测试 0 失败（2 个为既有 `GTEST_SKIP`；`ModuleVisibilityTest.NonExportedFunctionIsHidden` 为已知并行 LLJIT flaky，隔离重跑通过）。**LEX-12 仍为 `[ ]`**：本轮只到词法 token 层，parser/codegen 的 `asm` 未实现；根目录 `bin/`、`lib/`、`a.out` 为旧路径产物，待清理。
+
+> **进度快照（2026-10-11）**：**P1-08 内联 `asm` 全链路完成**（LEX-12/PAR-16/CG-10/DEC-09 全部 `[x]`）。词法 `TOKEN_ASM`；解析 `AsmOperand`/`AsmExprAST` + `parseAsmExpr()`（至多三段操作数、模板/约束须字符串字面量）；sema 校验 outputs 左值标量/inputs 标量/约束非空（E2023）+ 模板 `%` 转义（E2024）；codegen 用 `llvm::InlineAsm`（AD_ATT）——实证 LLVM 21 与 GCC 三处差异并适配：输出映射 call 返回值（单值/struct 逐位回写）、`+r`→`=r`+尾部 tied 约束（编号对齐）、模板翻译 `$`→`$$`/`%%`→`%`/`%N`→`$N`。e2e 6 用例 LLJIT 执行通过。**顺带修复既有潜在 bug**：`CodegenContext::takeContext()` 把 context 移给 LLJIT（编译后销毁）后 IRBuilder 的 DebugLoc 悬垂 → 析构 `MetadataTracking::untrack` 间歇 UAF（gdb 关 ASLR 下 `InlineAsmE2E.ReadWriteOperand` 15/15 崩），修复为移出前清 DebugLoc，gdb 20/20 不崩；32 处测试 harness 共用该 API 一并受益。当前全量 **1203** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。
+
 ---
 
 ## 0. 现状基线（已完成，勿重复实现）
@@ -57,7 +61,7 @@
 - `[ ]` **LEX-09** Slice 语法 `T[]` 的 token 与解析支持（当前已有 `SliceType`，核对）。
 - `[x]` **LEX-10** 注解 token——不新增 token；`[[` = 两个 TOKEN_LBRACKET，parser 声明位置前瞻特判（2026-10-07）。
 - `[x]` **LEX-11** `static_cast<T>(x)` / `reinterpret_cast<T>(x)` 等转换关键字（为 INH/CRTP 铺路）。已实现为**上下文关键字**（紧跟 `<类型>` 时解析），见 PAR-18。
-- `[ ]` **LEX-12** 内联汇编 `asm` token。
+- `[x]` **LEX-12** 内联汇编 `asm` token。**完成**（2026-10-11，P1-08）：keywordMap 注册 `{"asm", TOKEN_ASM}`（Task 1）；parser/sema/codegen 全链路见 PAR-16/CG-10/DEC-09。
 - `[x]` **LEX-13** 错误恢复与词法诊断（非法字符、未闭合字面量、整型溢出）。已实现：`Lexer::getDiagnostics()` 产出 E0001（非法字符，跳过并继续）、E0002（未闭合字符串/字符/块注释，含原始字符串）、E0003（整型字面量超过 64 位）；`skipTrivia` 统一跳过空白与注释（修复行注释后空行被误判）；诊断在 `CompilerDriver`/`ModuleLoader`/`StdPrelude` 中上报并使编译失败（`tests/frontend/test_lexer.cpp`、`tests/driver/test_compiler_driver.cpp`、`tests/diagnostics/snapshots/lexical_invalid_character.txt`）。
 - `[~]` **LEX-14** `(新)` **关键字/保留字总表落地**（配合 INF-11）：`register`/`cast`/`typeof` 已按 DEC-18 移除 token；`namespace` 关键字与 `::` token 已新增；`template`/`typename`/`this` 待补。
 - `[~]` **LEX-15** `(新)` **字面量默认类型与后缀映射**：无后缀整型/浮点的默认类型，`u`/`l`/`f16`…后缀 → 底层类型表。**词法层已完成**：`Token::literalKind`（`Int/UInt/Long/ULong/Float16/Float32/Float64/Float128`）+ `literalKindName` 映射表；识别 `u`/`l`/`ul`/`lu`（各进制通用）与 `f`/`f16`/`f32`/`f64`/`f128`（兼容 `l`/`L`）；无后缀默认 `int32`/`float64`；规范见 `docs/spec/grammar.ebnf`、`conversions.md §7`（`tests/frontend/test_lexer.cpp`）。**已完成**：LEX-15 消费端——AST 节点携带 `literalKind`，sema 按 kind 赋定宽类型（无后缀默认 `int32`/`float64`），codegen 按宽度/符号（含无符号）与 APFloat 语义（half/single/double/quad）生成常量，大整数不再截断。
@@ -84,7 +88,7 @@
 - `[ ]` **PAR-13** `(新)` 指定初始化器 `{.field = v}`、柔性数组 `T a[]`。
 - `[ ]` **PAR-14** `(已实现)` `sizeof`；`(新)` `alignof`、`offsetof`。
 - `[x]` **PAR-15** `(新)` `compile_time` 表达式：`static_assert`、`if`、目标/构建查询完成（2026-10-06）；反射部分未含（另轮）。
-- `[ ]` **PAR-16** `(新)` 内联汇编 `asm` 语句/表达式。
+- `[x]` **PAR-16** `(新)` 内联汇编 `asm` 语句/表达式。**完成**（2026-10-11，P1-08）：`AsmOperand`/`AsmExprAST` 节点 + `parseAsmExpr()`（至多三段操作数、模板/约束须字符串字面量、`decodeEscapes` 去引号），见 plan `2026-10-10-p108-inline-asm`。
 - `[x]` **PAR-17** `(新)` `this` 表达式（2026-10-06）。方法体内 `this` 走隐式 this 参数按普通变量解析；`this.field` 点号对指针自动解引用；static 方法内 this 钉死诊断。
 - `[x]` **PAR-18** `(新)` `static_cast<T>(x)` / C 风格强转；向下转换（CRTP 必需）。C 风格 `(T)x` 已泛化到完整类型（P0-02）；`static_cast`/`reinterpret_cast` 已实现（LEX-11/DEC-18）：static 限算术↔算术、指针↔指针；reinterpret 为标量位重解释（同宽 `bitcast`）。
 - `[ ]` **PAR-19** AST 节点带源码位置/属性/注释/文档；AST 序列化（增量编译缓存）。
@@ -405,7 +409,7 @@
 - `[x]` **CG-07** **模板单态化代码生成**（GEN-05）、实例去重缓存。已实现（2026-10-06）：实例即普通声明走既有 codegen；TU 预扫（实例布局先行 + 函数签名）+ 调用点按需前向声明。
 - `[ ]` **CG-08** **继承布局与 `this`/`static_cast` codegen**（INH）。
 - `[ ]` **CG-09** **位域 codegen**：`iN` 与读-改-写位操作。
-- `[ ]` **CG-10** **内联 `asm`** → LLVM `InlineAsm`（操作数约束/clobber/volatile/目标限定）。
+- `[x]` **CG-10** **内联 `asm`** → LLVM `InlineAsm`（操作数约束/clobber/volatile/目标限定）。**完成**（2026-10-11，P1-08）：`AsmExprAST::codegen` 用 `llvm::InlineAsm`（AD_ATT）；输出映射 call 返回值（单值/struct）、`+r`→`=r`+尾部 tied 约束、GCC 模板翻译 `$`→`$$`/`%%`→`%`/`%N`→`$N`；e2e 6 用例 LLJIT 执行通过。
 - `[ ]` **CG-11** **lambda codegen**：无捕获→函数指针；有捕获→匿名 struct + 函数。
 - `[ ]` **CG-12** `compile_time` 常量折叠后 codegen；与 LLVM 常量集成。
 - `[ ]` **CG-13** 原子操作与 `thread_local`。
@@ -458,7 +462,7 @@
 - `[ ]` **DEC-06** Slice/数组边界检查默认策略：静态可证 or 运行时检查，Debug/Release 差异。
 - `[ ]` **DEC-07** 整数溢出默认行为：Debug 检查 / Release 回绕。
 - `[ ]` **DEC-08** 位域布局对齐哪个 C ABI（System V / MSVC）；与 `[[packed]]`/`[[align]]` 交互。
-- `[ ]` **DEC-09** 内联 `asm` 的语法与约束模型；是否仅限特定目标。
+- `[x]` **DEC-09** 内联 `asm` 的语法与约束模型；是否仅限特定目标。**完成**（2026-10-11，P1-08）：sema 校验 outputs 左值标量/inputs 标量/约束非空（E2023）+ 模板 `%` 转义（E2024）；方言固定 AD_ATT、约束语义透传 LLVM（D2）；目标限定 x86-64 宿主基线。
 - `[ ]` **DEC-10** lambda 精确语法与捕获模型（默认按值/按引用？）。
 - `[ ]` **DEC-11** `atomic` 是类型限定符还是类型构造器。
 - `[ ]` **DEC-12** `thread_local` 存储类语法细节。
@@ -512,7 +516,7 @@
 - `[x]` **P1-05** 注解系统（ANN）——核心纵向完成（2026-10-07）：ANN-01~06/09/10 + LEX-10/PAR-07 + W3004/W3005；ANN-07/08 挂账。
 - `[x]` **P1-06** str / String / format（FMT、STD-10/11）。核心纵向完成（2026-10-08）：FMT-01/02/03/04 + FMT-05 比较 + TYP-26/DEC-20 + 内建类型小写化（`optional`/`result`，DEC-18 先例）；E2015 新诊断；`grammar.ebnf` 同步。format（FMT-06~09）与 STD-10 高层操作另轮。spec `docs/superpowers/specs/2026-10-08-str-string-design.md`，plan `docs/superpowers/plans/2026-10-08-str-string.md`。挂账：`string` 不参与 constexpr；CT `+` 已移除；SSO 不做。
 - `[ ]` **P1-07** 位域、匿名类型、指定初始化器、lambda（AGG-03~06、PAR-10~13）。
-- `[~]` **P1-08** `static_cast` / 内联 `asm`（PAR-18、CG-10）。`static_cast`/`reinterpret_cast` 已完成（LEX-11/PAR-18）；内联 `asm`（CG-10/DEC-09）待定。
+- `[x]` **P1-08** `static_cast` / 内联 `asm`（PAR-18、CG-10）。`static_cast`/`reinterpret_cast` 已完成（LEX-11/PAR-18）；内联 `asm` 全链路完成（2026-10-11）：LEX-12/PAR-16/CG-10/DEC-09，spec `docs/superpowers/specs/2026-10-10-p108-inline-asm-design.md`，plan `docs/superpowers/plans/2026-10-10-p108-inline-asm.md`，e2e 6 用例 LLJIT 执行通过（全量 1203 绿）。
 - `[~]` **P1-09** std.mem / std.string / std.format / std.math / **std.collections**（STD-05~14）。字符串库 + format 体系完成（2026-10-09）：FMT-06~11 全落地、FMT-12 单缓冲、STD-10 组合库、STD-11 核心；E2020~22 新诊断；顺带修复既有编译器 bug 两枚——`&&`/`||` 按位降级（真值截断 + 无短路）与派生→基类赋值整结构 store 溢出（潜在栈腐败）。spec `docs/superpowers/specs/2026-10-09-p109-string-format-design.md`，plan `docs/superpowers/plans/2026-10-09-p109-string-format.md`。挂账：StrBuilder 类导出缺口（语言层）、模块类导出（parse 期类型名注册）、`replace`/字典序/to_lower|upper 不做、std.mem/math/collections 另轮；终审 I4（string 值拷贝别名双 free）仍在账。
 
 ### P2：工程化与并发

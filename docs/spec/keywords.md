@@ -8,7 +8,7 @@
 
 - 关键字目前通过 `src/frontend/Lexer.cpp` 中的静态 map 识别；`src/frontend/Token.h` 定义 token 枚举。
 - `using`、`type`、`protected` 当前**不是**关键字，而是把标识符文本当作上下文关键字处理（见 `Parser::parseDeclaration`）——本表统一登记为“上下文关键字”。
-- `namespace`、`template`、`typename`、`this`、`asm`、`thread_local`、`static_cast`、`reinterpret_cast` **尚无**对应 token，属规划项。
+- `namespace`、`template`、`typename`、`this`、`thread_local`、`static_cast`、`reinterpret_cast` **尚无**对应 token，属规划项。
 
 ## 1. 数据类型关键字
 
@@ -100,7 +100,7 @@
 |---|---|---|
 | `static_cast` | `[plan]` | LEX-11 / PAR-18 |
 | `reinterpret_cast` | `[plan]` | LEX-11 / PAR-18 |
-| `asm` | `[plan]` | PAR-16 / CG-10 / DEC-09 |
+| `asm` | `[impl]` | P1-08（PAR-16 / CG-10 / DEC-09）；模板/约束透传 LLVM，方言 AD_ATT |
 
 ## 8. 运算符与标点（token）
 

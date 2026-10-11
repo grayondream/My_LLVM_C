@@ -215,7 +215,7 @@ statement           = declaration-statement
                     | return-statement
                     | defer-statement
                     | compile-time-if
-                    | asm-statement ;                               (* [plan] asm PAR-16/CG-10 *)
+                    | asm-statement ;                               (* [impl] asm PAR-16/CG-10 P1-08 *)
 
 declaration-statement = declaration ;
 expression-statement  = expr , ';' ;
@@ -241,7 +241,7 @@ compile-time-if     = 'compile_time' , '.' , 'if' , '(' , const-expr , ')' , blo
 
 asm-statement       = 'asm' , [ 'volatile' ] , '(' , string-literal
                       , [ ':' , asm-operands ] , ')' , ';' ;
-(* [plan] asm 约束模型见 DEC-09 *)
+(* [impl] asm 约束模型见 DEC-09：模板/约束透传 LLVM，方言 AD_ATT，outputs 左值回写 *)
 
 
 (* =========================================================================
