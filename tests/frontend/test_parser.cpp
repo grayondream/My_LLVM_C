@@ -2042,3 +2042,71 @@ TEST_F(ParserTest, StringTypeParses) {
     ASSERT_NE(var, nullptr);
     EXPECT_EQ(var->type->kind, TypeKind::String);
 }
+
+// ========== P1-08 / PAR-16: inline asm ==========
+
+// 取函数体第一条语句的表达式（asm 经 ExprStmtAST 作为语句出现）。
+static ExprAST* parseStmtExpr(const std::string& body) {
+    std::string src = "int32 f() { " + body + " return 0; }";
+    s_lastTU = parse(src);
+    if (!s_lastTU || s_lastTU->declarations.empty()) return nullptr;
+    auto func = dynamic_cast<FunctionDeclAST*>(s_lastTU->declarations[0].get());
+    if (!func || !func->body || func->body->stmts.empty()) return nullptr;
+    auto est = dynamic_cast<ExprStmtAST*>(func->body->stmts[0].get());
+    return est ? est->expr.get() : nullptr;
+}
+
+TEST_F(ParserTest, AsmNoOperands) {
+    auto a = dynamic_cast<AsmExprAST*>(parseStmtExpr("asm(\"nop\");"));
+    ASSERT_NE(a, nullptr);
+    EXPECT_EQ(a->asmTemplate, "nop");
+    EXPECT_FALSE(a->isVolatile);
+    EXPECT_TRUE(a->outputs.empty() && a->inputs.empty() && a->clobbers.empty());
+}
+
+TEST_F(ParserTest, AsmVolatileWithOutput) {
+    auto a = dynamic_cast<AsmExprAST*>(
+        parseStmtExpr("asm volatile(\"mov $7, %0\" : \"=r\"(out));"));
+    ASSERT_NE(a, nullptr);
+    EXPECT_TRUE(a->isVolatile);
+    ASSERT_EQ(a->outputs.size(), 1u);
+    EXPECT_EQ(a->outputs[0].constraint, "=r");
+}
+
+TEST_F(ParserTest, AsmReadWriteAndInput) {
+    auto a = dynamic_cast<AsmExprAST*>(
+        parseStmtExpr("asm(\"add %1, %0\" : \"+r\"(x) : \"r\"(y));"));
+    ASSERT_NE(a, nullptr);
+    ASSERT_EQ(a->outputs.size(), 1u);
+    ASSERT_EQ(a->inputs.size(), 1u);
+    EXPECT_EQ(a->outputs[0].constraint, "+r");
+    EXPECT_EQ(a->inputs[0].constraint, "r");
+}
+
+TEST_F(ParserTest, AsmMultipleOutputsAndClobbers) {
+    auto a = dynamic_cast<AsmExprAST*>(
+        parseStmtExpr("asm(\"\" : \"=r\"(a), \"=r\"(b) : : \"memory\", \"cc\");"));
+    ASSERT_NE(a, nullptr);
+    ASSERT_EQ(a->outputs.size(), 2u);
+    ASSERT_EQ(a->clobbers.size(), 2u);
+    EXPECT_EQ(a->clobbers[0], "memory");
+    EXPECT_EQ(a->clobbers[1], "cc");
+}
+
+TEST_F(ParserTest, AsmEmptyOutputSection) {
+    auto a = dynamic_cast<AsmExprAST*>(
+        parseStmtExpr("asm(\"\" : : \"r\"(x) : \"memory\");"));
+    ASSERT_NE(a, nullptr);
+    EXPECT_TRUE(a->outputs.empty());
+    ASSERT_EQ(a->inputs.size(), 1u);
+}
+
+TEST_F(ParserTest, AsmTemplateMustBeLiteral) {
+    // 非字面量模板：GCC 要求字符串字面量，解析层报错。
+    // 注：Parser::parse() 只有一个 return（始终返回非空 TU），故不断言 nullptr，只断言有诊断。
+    auto tokens = lex("int32 f() { asm(nop); return 0; }");
+    Parser parser(tokens);
+    auto tu = parser.parse();
+    EXPECT_NE(tu, nullptr);
+    EXPECT_FALSE(parser.getErrors().empty());
+}

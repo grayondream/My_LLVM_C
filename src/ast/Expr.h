@@ -257,6 +257,32 @@ public:
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
+// P1-08 / PAR-16: 内联汇编操作数 —— 约束串 + 表达式（GCC extended asm 形态）。
+struct AsmOperand {
+    std::string constraint;
+    std::unique_ptr<ExprAST> expr;
+};
+
+// `asm [volatile] ("tpl" : outputs : inputs : clobbers)` —— 表达式节点，经
+// ExprStmtAST 作语句出现；sema 置 type=void、isLValue=false（D3）。
+class AsmExprAST : public ExprAST {
+public:
+    std::string asmTemplate;
+    bool isVolatile;
+    std::vector<AsmOperand> outputs;
+    std::vector<AsmOperand> inputs;
+    std::vector<std::string> clobbers;
+    // sema 按序填充，codegen 用其构造 InlineAsm 签名。
+    std::vector<Type*> outputTypes;
+    std::vector<Type*> inputTypes;
+
+    AsmExprAST(std::string tpl, bool vol, std::vector<AsmOperand> outs,
+               std::vector<AsmOperand> ins, std::vector<std::string> clobs)
+        : asmTemplate(std::move(tpl)), isVolatile(vol), outputs(std::move(outs)),
+          inputs(std::move(ins)), clobbers(std::move(clobs)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
 class CommaExprAST : public ExprAST {
 public:
     std::unique_ptr<ExprAST> left;

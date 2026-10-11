@@ -437,6 +437,13 @@ std::unique_ptr<ExprAST> Parser::parseUnaryImpl() {
             isReinterpret ? CastKind::Reinterpret : CastKind::Static);
     }
 
+    // Inline asm (P1-08 / PAR-16): `asm [volatile] ("tpl" : outs : ins : clobbers)`.
+    // Consumes `asm`; parseAsmExpr handles the rest.
+    if (token->type == TokenType::TOKEN_ASM) {
+        advance();
+        return parseAsmExpr();
+    }
+
     // Handle parenthesized expressions and cast expressions
     if (token->type == TokenType::TOKEN_LPAREN) {
         advance(); // consume '('
@@ -521,6 +528,89 @@ std::unique_ptr<ExprAST> Parser::parseUnaryImpl() {
     }
 
     return parsePrimary();
+}
+
+// P1-08 / PAR-16: `asm [volatile] ("tpl" [: outputs [: inputs [: clobbers]]])`.
+// `asm` 已由 parseUnaryImpl 消费。至多三段操作数，段可为空；模板必须是字符串
+// 字面量（GCC 同样要求），取其去引号并解码后的文本。
+std::unique_ptr<ExprAST> Parser::parseAsmExpr() {
+    const bool isVolatile = match(TokenType::TOKEN_VOLATILE).has_value();
+    if (!expect(TokenType::TOKEN_LPAREN, "expected '(' after asm")) return nullptr;
+
+    if (!check(TokenType::TOKEN_STRING)) {
+        errorUnexpected("string literal asm template");
+        return nullptr;
+    }
+    auto tplTok = advance();
+    const std::string lex = tplTok ? tplTok->lexeme : std::string();
+    // 字符串 token 的 lexeme 含两端引号；模板/约束/clobber 都取其值文本
+    // （GCC 语义：`"=r"` 的值是 `=r`，`"memory"` 的值是 `memory`）。
+    auto strValue = [](const std::string& s) {
+        return s.size() >= 2 && s.front() == '"' && s.back() == '"'
+                   ? decodeEscapes(s.substr(1, s.size() - 2))
+                   : s;
+    };
+    std::string asmTemplate = strValue(lex);
+
+    std::vector<AsmOperand> outputs;
+    std::vector<AsmOperand> inputs;
+    std::vector<std::string> clobbers;
+    int section = 0; // 0=template, 1=outputs, 2=inputs, 3=clobbers
+
+    while (true) {
+        if (check(TokenType::TOKEN_RPAREN)) break;
+        if (check(TokenType::TOKEN_COLON)) {
+            advance();
+            ++section;
+            if (section > 3) {
+                errorUnexpected("at most three asm operand sections");
+                return nullptr;
+            }
+            continue;
+        }
+        if (section == 0) {
+            errorUnexpected("':' or ')' after asm template");
+            return nullptr;
+        }
+
+        if (section == 3) {
+            // clobbers: 逗号分隔的字符串列表。
+            do {
+                if (!check(TokenType::TOKEN_STRING)) {
+                    errorUnexpected("string literal asm clobber");
+                    return nullptr;
+                }
+                auto tok = advance();
+                clobbers.push_back(strValue(tok ? tok->lexeme : std::string()));
+            } while (match(TokenType::TOKEN_COMMA));
+            continue;
+        }
+
+        // outputs / inputs: `"constraint"(expr)` 逗号分隔列表。
+        do {
+            if (!check(TokenType::TOKEN_STRING)) {
+                errorUnexpected("string literal asm constraint");
+                return nullptr;
+            }
+            auto tok = advance();
+            AsmOperand op;
+            op.constraint = strValue(tok ? tok->lexeme : std::string());
+            if (!expect(TokenType::TOKEN_LPAREN, "expected '(' after asm constraint")) return nullptr;
+            op.expr = parseExpr();
+            if (!op.expr) {
+                errorUnexpected("expression in asm operand");
+                return nullptr;
+            }
+            if (!expect(TokenType::TOKEN_RPAREN, "expected ')' after asm operand")) return nullptr;
+            if (section == 1) outputs.push_back(std::move(op));
+            else inputs.push_back(std::move(op));
+        } while (match(TokenType::TOKEN_COMMA));
+    }
+
+    if (!expect(TokenType::TOKEN_RPAREN, "expected ')' to close asm")) return nullptr;
+    return std::make_unique<AsmExprAST>(std::move(asmTemplate), isVolatile,
+                                        std::move(outputs), std::move(inputs),
+                                        std::move(clobbers));
 }
 
 std::unique_ptr<ExprAST> Parser::parsePrimary() {

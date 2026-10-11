@@ -1393,6 +1393,14 @@ llvm::Value* TernaryExprAST::codegen(CodegenContext& ctx) {
     return phi;
 }
 
+// P1-08 / PAR-16 + CG-10: 最小定义。AsmExprAST 的 vtable/typeinfo 需要首个非纯
+// 虚函数（codegen）有定义才能链接——plan 的 Task 2 预期即可跑绿，故先给占位体，
+// Task 4 用真正的 llvm::InlineAsm 发射替换它（届时 e2e 提供 RED）。
+llvm::Value* AsmExprAST::codegen(CodegenContext& ctx) {
+    (void)ctx;
+    return nullptr;
+}
+
 llvm::Value* CastExprAST::codegen(CodegenContext& ctx) {
     llvm::Value* val = expr->codegen(ctx);
     if (!val) return nullptr;

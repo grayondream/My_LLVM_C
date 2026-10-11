@@ -160,6 +160,9 @@ private:
     std::unique_ptr<ExprAST> parsePrimaryImpl();
     std::unique_ptr<ExprAST> parseUnaryImpl();
 
+    // P1-08 / PAR-16: inline asm —— `asm` 已被 parseUnaryImpl 消费后调用。
+    std::unique_ptr<ExprAST> parseAsmExpr();
+
     std::unique_ptr<ExprAST> parseUnary();
 
     std::unique_ptr<ExprAST> parsePostfix(std::unique_ptr<ExprAST> lhs);
