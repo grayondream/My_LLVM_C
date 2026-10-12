@@ -19,6 +19,8 @@
 
 > **进度快照（2026-10-12，新遗留项处理）**：**optional/result 嵌套 brace-init codegen 缺陷修复**（`a0b1887`）——根因 `visit(InitializerListExprAST)` 只 sema 首元素，嵌套列表（struct 字段 optional/result 的 `{ { true, string.new("data") } }`）里 `string.new` 的 MethodCallExprAST 未解析 → codegen `unknown variable: string`；修复为递归所有元素。2 个新 e2e（optional/result 嵌套 brace-init）RED→GREEN。当前全量 **1238** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。剩余遗留：仅 optional/result valid→invalid 聚合赋值旧缓冲泄漏（边缘，未处理）。
 
+> **进度快照（2026-10-12，新遗留项收尾）**：**optional/result valid→invalid 聚合赋值旧缓冲泄漏修复**（`42da409`）——根因 `emitAggregateStringCopy` 只按**源**有效位分支，目标中"变为失效"的槽位从不释放：optional valid→invalid、result ok→err / err→ok 时旧 string 缓冲泄漏且槽位残留旧内容（破坏"valid⟹value 含缓冲"不变量）。修复：读旧 valid/ok 位，槽位失效时 `emitStringValueRelease`/`emitAggregateStringRelease`（镜像拷贝递归，Struct/Class/Array/Optional/Result 全支持）free+置零，再转换时 assign helper 见 null 不双 free。6 个新 e2e（valid→invalid 释放 ×4、err→ok、再转换安全）RED→GREEN。当前全量 **1244** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。**新遗留清单已清空**。
+
 ---
 
 ## 0. 现状基线（已完成，勿重复实现）

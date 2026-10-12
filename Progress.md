@@ -713,3 +713,12 @@
 - **范围确认**：仅此一处。VarDecl/ArrayDecl/UnionDecl 外层列表已逐元素；嵌套列表唯一入口即此 visit。非 string 表达式（如嵌套 struct `{ {1,2} }`）元素[1] 虽未 sema 也碰巧 codegen 正常（NumberExprAST type=null 默认 int32）——非有效 RED，未加测试。
 - **验证**：2 新 e2e（`NestedBraceInitOptionalStringField`/`NestedBraceInitResultStringField`）RED→GREEN；CLI bug.c 干净编译运行；全量 ctest → **1238/1238 绿**。
 - **剩余遗留**：仅 ②optional/result valid→invalid 聚合赋值旧缓冲泄漏（边缘，未处理）。
+
+## 2026-10-12（续）— 新遗留项收尾：optional/result valid→invalid 赋值旧缓冲泄漏修复
+
+- **背景**：嵌套 brace-init 缺陷修复后，剩余遗留仅 ②optional/result valid→invalid 聚合赋值旧缓冲泄漏（边缘，未处理）。
+- **根因（systematic-debugging）**：`emitAggregateStringCopy`（CodegenContext.cpp）的 Optional/Result 分支只按**源**有效位分支——`br srcValid ? body : done`（srcOk ? ok : err）。string 字段的 assign helper 只释放它**写入**的槽（新活跃字段）；目标中"变为失效"的槽位从不触碰：optional valid→invalid（body 跳过，dstVSlot 保留旧缓冲）、result ok→err（okBB 跳过，旧 value 缓冲残留）、err→ok（errBB 跳过，旧 error 缓冲残留）。可观测点：失效后读伪字段 `.value`/`.error`（TYP-13/14 自由读写）→ 残留旧内容（len>0）；且违反"valid⟹value 含缓冲"不变量。非崩溃泄漏，故此前无测试。
+- **RED 有效性（TDD）**：CLI 实证六文件全部 exit=2（读失效槽 len!=0），runSource 返回 2 精确命中根因。5 项 e2e（OptionalAssignValidToInvalidReleasesOld / ReleasesStructField / ReleasesArrayField、ResultAssignOkToErrReleasesOldValue / ErrToOkReleasesOldError）+ 1 项再转换安全（OptionalInvalidateThenRevalidateSafe）。⚠ 约束实证：赋值 RHS 不能是 brace-init 列表（`o = {...}` 报 E2003，列表类型按首元素 bool）→ 走 `x = y` 变量赋值；`optional<string[2]>` 非法（模板实参不能数组类型）→ 数组 case 经 `optional<struct S{string arr[2]}>` 间接到达。
+- **修复** `42da409`：①Optional 分支读旧 valid 位 → `br srcValid ? body : staleBB`，staleBB 按 oldValid 决定是否 `freeBB`；②Result 分支读旧 ok 位 → okBB 尾 `br oldOk ? done : freeErrBB`、errBB 尾 `br oldOk ? freeValBB : done`；③新增 `emitStringValueRelease`/`emitAggregateStringRelease`（镜像拷贝递归，Struct/Class/Array/Optional/Result 全支持）：释放槽位内全部 string 缓冲（free null 守卫）+ 置零，维持"失效⟹槽位零化"不变量——否则再转换时 assign helper 对悬垂指针二次 free。非 string 承载 → 无操作。
+- **验证**：6 新 e2e RED（exit=2）→ GREEN；CLI 六实证 exit=0 + r7 再转换 exit=0；全量 `ctest -j8` → **1244/1244 绿**（1238 + 6；2 个既有 GTEST_SKIP 不变）。
+- **新遗留**：**已清空**。相关已知限制（不在本轮范围）：失效侧 RHS 临时值被丢弃（如 `{false, string.new("world")}` 的 "world" 缓冲）——语言无 RAII，未消费的 rvalue 临时一律丢弃（pre-existing）；可选后续：Issue-3 的 optional/result 测试仍用字段赋值构造（当初为规避本 bug），现可换自然嵌套 brace-init 语法。
