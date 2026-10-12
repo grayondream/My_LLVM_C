@@ -460,3 +460,37 @@ TEST_F(StringOwnershipE2E, AggregateOptionalAssignFreesOld) {
         }
     )", "own_agg_opt_assign.c"), 0);
 }
+
+// Found issue（I4 review 顺带发现）: struct 字段 optional<string> 的嵌套
+// brace-init `{ { true, string.new("data") } }`——sema 的
+// InitializerListExprAST 访问此前只处理首元素，`string.new` 静态调用未被
+// 解析 → codegen 报 `unknown variable: string`。修复后应直接可用。
+TEST_F(StringOwnershipE2E, NestedBraceInitOptionalStringField) {
+    EXPECT_EQ(runSource(R"(
+        struct T { optional<string> o; };
+        int32 main() {
+            struct T x = { { true, string.new("data") } };
+            if (!x.o.valid) { return 1; }
+            string_view v = x.o.value;
+            if (v != "data") { return 2; }
+            x.o.value.destroy();
+            return 0;
+        }
+    )", "own_brinit_opt.c"), 0);
+}
+
+// Found issue（I4 review 顺带发现）: struct 字段 result<string, int32> 的嵌套
+// brace-init `{ { true, string.new("ok"), 0 } }`——同上，修复后应直接可用。
+TEST_F(StringOwnershipE2E, NestedBraceInitResultStringField) {
+    EXPECT_EQ(runSource(R"(
+        struct U { result<string, int32> r; };
+        int32 main() {
+            struct U x = { { true, string.new("ok"), 0 } };
+            if (!x.r.ok) { return 1; }
+            string_view v = x.r.value;
+            if (v != "ok") { return 2; }
+            x.r.value.destroy();
+            return 0;
+        }
+    )", "own_brinit_res.c"), 0);
+}

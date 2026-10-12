@@ -3013,8 +3013,16 @@ void SemanticAnalyzer::visit(SizeofExprAST& node) {
 }
 
 void SemanticAnalyzer::visit(InitializerListExprAST& node) {
+    // Found issue: 此前只 sema 首元素——嵌套 brace-init（如 struct 字段
+    // optional/result 的 `{ { true, string.new("data") } }`）其余元素
+    // （`string.new` 静态调用）未解析 → codegen 时 builtinMethod 空 → 回退
+    // codegen object → `unknown variable: string`。与其它表达式 visit 一致，
+    // 递归所有元素；node.type 仍取首元素类型（既有启发）。
     if (!node.initializers.empty()) {
         node.type = getExprType(*node.initializers[0]);
+        for (size_t i = 1; i < node.initializers.size(); ++i) {
+            getExprType(*node.initializers[i]);
+        }
     } else {
         node.type = typeCtx->getInt32();
     }
