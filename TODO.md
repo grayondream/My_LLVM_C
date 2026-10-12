@@ -15,6 +15,8 @@
 
 > **进度快照（2026-10-11，I4 收口）**：**string 拥有型值语义 + `string_view` 硬改名完成**（终审 I4「string 值拷贝别名双 free」根治）。`str` → `string_view`（DEC-18 硬改名先例，TypeKind::Str 内部名不动）；`string` 升级 C++ `std::string` 式拥有型值——赋值/初始化/传参/返回深拷贝活值、移动新鲜值（`string.new`/返回 string 的调用 rvalue）、赋值自动释放旧缓冲、聚合（struct 含 string 字段）字段感知拷贝；惰性合成 `smc.string.copy`/`smc.string.assign` helper。spec `docs/superpowers/specs/2026-10-11-string-ownership-design.md`，plan `docs/superpowers/plans/2026-10-11-string-ownership.md`。当前全量 **1229** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。
 
+> **进度快照（2026-10-12，I4 收口轮 found issues）**：3 项遗留缺陷全部修复——①`true`/`false` 改为 bool 字面量（`BoolLiteralExprAST`，spec keywords.md「布尔字面量」，重载解析可匹配 bool 形参；`isIntegerType` 含 Bool 故算术/赋值零 ripple）；②未初始化 string/含 string 聚合局部零初始化（扩展 TYP-12 D3 slice 先例，D7 fresh 赋值 free 守卫不再见野指针）；③聚合内数组/optional/result 含 string 的字段感知拷贝（`aggregateHasStringField`/`emitAggregateStringCopy` 扩展 Array/Optional/Result）。当前全量 **1236** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。新遗留：optional/result 嵌套 brace-init codegen 缺陷、optional/result valid→invalid 赋值旧缓冲泄漏（边缘）。
+
 ---
 
 ## 0. 现状基线（已完成，勿重复实现）
