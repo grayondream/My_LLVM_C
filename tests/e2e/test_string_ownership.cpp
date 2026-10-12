@@ -494,3 +494,109 @@ TEST_F(StringOwnershipE2E, NestedBraceInitResultStringField) {
         }
     )", "own_brinit_res.c"), 0);
 }
+
+// 遗留缺陷（新遗留项）: optional/result 聚合赋值 valid→invalid（ok→err、
+// err→ok）时，目标中"变为失效"的字段槽从不释放——旧 string 缓冲泄漏，且槽
+// 位残留旧缓冲（破坏"valid⟹value 含缓冲"不变量）。可观测点：失效后读伪字段
+// 槽位，泄漏代码残留旧内容（len>0），修复后应已 free+置零（len==0）。
+TEST_F(StringOwnershipE2E, OptionalAssignValidToInvalidReleasesOld) {
+    EXPECT_EQ(runSource(R"(
+        struct T { optional<string> o; };
+        int32 main() {
+            struct T x = { { true, string.new("hello") } };
+            struct T y = { { false, string.new("w") } };
+            x = y;
+            if (x.o.valid) { return 1; }
+            string_view v = x.o.value;
+            if (v.len() != 0) { return 2; }
+            return 0;
+        }
+    )", "own_opt_v2i.c"), 0);
+}
+
+// 同上——optional 元素为含 string 字段的 struct：递归释放失效槽内聚合的缓冲。
+TEST_F(StringOwnershipE2E, OptionalAssignValidToInvalidReleasesStructField) {
+    EXPECT_EQ(runSource(R"(
+        struct S { string s; };
+        struct T { optional<struct S> o; };
+        int32 main() {
+            struct T x = { { true, { string.new("hello") } } };
+            struct T y = { { false, { string.new("w") } } };
+            x = y;
+            if (x.o.valid) { return 1; }
+            string_view v = x.o.value.s;
+            if (v.len() != 0) { return 2; }
+            return 0;
+        }
+    )", "own_opt_v2i_struct.c"), 0);
+}
+
+// 同上——optional 元素为含 string 数组字段的 struct：递归逐元素释放。
+TEST_F(StringOwnershipE2E, OptionalAssignValidToInvalidReleasesArrayField) {
+    EXPECT_EQ(runSource(R"(
+        struct S { string arr[2]; };
+        struct T { optional<struct S> o; };
+        int32 main() {
+            struct T x = { { true, { { string.new("a"), string.new("b") } } } };
+            struct T y = { { false, { { string.new("c"), string.new("d") } } } };
+            x = y;
+            if (x.o.valid) { return 1; }
+            string_view v0 = x.o.value.arr[0];
+            string_view v1 = x.o.value.arr[1];
+            if (v0.len() != 0 || v1.len() != 0) { return 2; }
+            return 0;
+        }
+    )", "own_opt_v2i_arr.c"), 0);
+}
+
+// 同上——result ok→err：失效的 value 槽释放。
+TEST_F(StringOwnershipE2E, ResultAssignOkToErrReleasesOldValue) {
+    EXPECT_EQ(runSource(R"(
+        struct U { result<string, int32> r; };
+        int32 main() {
+            struct U x = { { true, string.new("ok"), 0 } };
+            struct U y = { { false, string.new("x"), 7 } };
+            x = y;
+            if (x.r.ok) { return 1; }
+            string_view v = x.r.value;
+            if (v.len() != 0) { return 2; }
+            return 0;
+        }
+    )", "own_res_o2e.c"), 0);
+}
+
+// 同上——result err→ok：失效的 error 槽释放（error 为 string）。
+TEST_F(StringOwnershipE2E, ResultAssignErrToOkReleasesOldError) {
+    EXPECT_EQ(runSource(R"(
+        struct U { result<string, string> r; };
+        int32 main() {
+            struct U x = { { false, string.new("v"), string.new("err") } };
+            struct U y = { { true, string.new("ok"), string.new("e") } };
+            x = y;
+            if (!x.r.ok) { return 1; }
+            string_view e = x.r.error;
+            if (e.len() != 0) { return 2; }
+            return 0;
+        }
+    )", "own_res_e2o.c"), 0);
+}
+
+// 同上——valid→invalid 释放并置零后，再 invalid→valid 不得双 free（value 槽
+// 已零化，assign helper 的 free(null) 无害），值正确。
+TEST_F(StringOwnershipE2E, OptionalInvalidateThenRevalidateSafe) {
+    EXPECT_EQ(runSource(R"(
+        struct T { optional<string> o; };
+        int32 main() {
+            struct T x = { { true, string.new("hello") } };
+            struct T y = { { false, string.new("w") } };
+            x = y;
+            struct T z = { { true, string.new("back") } };
+            x = z;
+            if (!x.o.valid) { return 1; }
+            string_view v = x.o.value;
+            if (v != "back") { return 2; }
+            x.o.value.destroy();
+            return 0;
+        }
+    )", "own_opt_retrans.c"), 0);
+}

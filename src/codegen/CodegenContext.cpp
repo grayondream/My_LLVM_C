@@ -1583,12 +1583,24 @@ void CodegenContext::emitAggregateStringCopy(llvm::Value* dst, llvm::Value* srcV
             llvm::Value* srcV = builder.CreateExtractValue(srcVal, 1, "agg.opt.v");
             llvm::Value* dstValidSlot = builder.CreateStructGEP(optLLVM, dst, 0, "agg.opt.vp");
             llvm::Value* dstVSlot = builder.CreateStructGEP(optLLVM, dst, 1, "agg.opt.vp.v");
+            // 遗留缺陷修复：目标"变为失效"（srcValid=false）时 value 槽必须释放
+            // 旧缓冲——先读旧 valid 位，旧有效则 free+置零槽位；否则旧缓冲泄漏
+            // 且槽位残留（破坏"valid⟹value 含缓冲"不变量）。
+            llvm::Value* oldValid = builder.CreateLoad(
+                optLLVM->getStructElementType(0), dstValidSlot, "agg.opt.oldvalid");
             llvm::Function* curFn = builder.GetInsertBlock()->getParent();
             llvm::BasicBlock* bodyBB = llvm::BasicBlock::Create(c, "agg.opt.body", curFn);
+            llvm::BasicBlock* staleBB = llvm::BasicBlock::Create(c, "agg.opt.stale", curFn);
+            llvm::BasicBlock* freeBB = llvm::BasicBlock::Create(c, "agg.opt.free", curFn);
             llvm::BasicBlock* doneBB = llvm::BasicBlock::Create(c, "agg.opt.done", curFn);
-            builder.CreateCondBr(srcValid, bodyBB, doneBB);
+            builder.CreateCondBr(srcValid, bodyBB, staleBB);
             builder.SetInsertPoint(bodyBB);
             emitStringValueCopy(dstVSlot, srcV, optTy->elementType, assign);
+            builder.CreateBr(doneBB);
+            builder.SetInsertPoint(staleBB);
+            builder.CreateCondBr(oldValid, freeBB, doneBB);
+            builder.SetInsertPoint(freeBB);
+            emitStringValueRelease(dstVSlot, optTy->elementType);
             builder.CreateBr(doneBB);
             builder.SetInsertPoint(doneBB);
             builder.CreateStore(srcValid, dstValidSlot);
@@ -1604,9 +1616,15 @@ void CodegenContext::emitAggregateStringCopy(llvm::Value* dst, llvm::Value* srcV
             llvm::Value* dstOkSlot = builder.CreateStructGEP(resLLVM, dst, 0, "agg.res.okp");
             llvm::Value* dstVSlot = builder.CreateStructGEP(resLLVM, dst, 1, "agg.res.vp");
             llvm::Value* dstESlot = builder.CreateStructGEP(resLLVM, dst, 2, "agg.res.ep");
+            // 遗留缺陷修复：变为失效的槽位须释放旧缓冲——ok→err 时旧 value 缓冲
+            // （oldOk 为真）、err→ok 时旧 error 缓冲（oldOk 为假）free+置零。
+            llvm::Value* oldOk = builder.CreateLoad(
+                resLLVM->getStructElementType(0), dstOkSlot, "agg.res.oldok");
             llvm::Function* curFn = builder.GetInsertBlock()->getParent();
             llvm::BasicBlock* okBB = llvm::BasicBlock::Create(c, "agg.res.ok", curFn);
             llvm::BasicBlock* errBB = llvm::BasicBlock::Create(c, "agg.res.err", curFn);
+            llvm::BasicBlock* freeErrBB = llvm::BasicBlock::Create(c, "agg.res.freeerr", curFn);
+            llvm::BasicBlock* freeValBB = llvm::BasicBlock::Create(c, "agg.res.freeval", curFn);
             llvm::BasicBlock* doneBB = llvm::BasicBlock::Create(c, "agg.res.done", curFn);
             builder.CreateCondBr(srcOk, okBB, errBB);
             builder.SetInsertPoint(okBB);
@@ -1614,15 +1632,158 @@ void CodegenContext::emitAggregateStringCopy(llvm::Value* dst, llvm::Value* srcV
                 emitStringValueCopy(dstVSlot, srcV, rt->successType, assign);
             else
                 builder.CreateStore(srcV, dstVSlot);
+            builder.CreateCondBr(oldOk, doneBB, freeErrBB);
+            builder.SetInsertPoint(freeErrBB);
+            emitStringValueRelease(dstESlot, rt->errorType);
             builder.CreateBr(doneBB);
             builder.SetInsertPoint(errBB);
             if (aggregateHasStringField(rt->errorType))
                 emitStringValueCopy(dstESlot, srcE, rt->errorType, assign);
             else
                 builder.CreateStore(srcE, dstESlot);
+            builder.CreateCondBr(oldOk, freeValBB, doneBB);
+            builder.SetInsertPoint(freeValBB);
+            emitStringValueRelease(dstVSlot, rt->successType);
             builder.CreateBr(doneBB);
             builder.SetInsertPoint(doneBB);
             builder.CreateStore(srcOk, dstOkSlot);
+            break;
+        }
+        default:
+            return;
+    }
+}
+
+// 遗留缺陷修复（新遗留项）：单值槽位释放——string → free(null 守卫)+置零；
+// 含 string 聚合 → 递归（emitAggregateStringRelease）；其余（无拥有资源）→
+// 无操作。用于 optional/result 赋值时"变为失效"的字段槽：释放旧缓冲并置零，
+// 维持"失效 ⟹ 槽位零化"不变量（否则后续赋值 helper 会对悬垂指针二次 free）。
+void CodegenContext::emitStringValueRelease(llvm::Value* dstPtr, Type* t) {
+    while (t && t->kind == TypeKind::Typedef)
+        t = static_cast<TypedefType*>(t)->aliasedType;
+    if (!t) return;
+    switch (t->kind) {
+        case TypeKind::String: {
+            llvm::LLVMContext& c = *context;
+            auto* ptrTy = llvm::PointerType::get(c, 0);
+            auto* voidTy = llvm::Type::getVoidTy(c);
+            llvm::Type* strTy = getLLVMType(t);
+            llvm::Value* cur = builder.CreateLoad(strTy, dstPtr, "rel.dv");
+            llvm::Value* dptr = builder.CreateExtractValue(cur, 0, "rel.dptr");
+            llvm::Function* curFn = builder.GetInsertBlock()->getParent();
+            llvm::BasicBlock* doFreeBB = llvm::BasicBlock::Create(c, "rel.free", curFn);
+            llvm::BasicBlock* zeroBB = llvm::BasicBlock::Create(c, "rel.zero", curFn);
+            llvm::Value* nullPtr = llvm::Constant::getNullValue(ptrTy);
+            builder.CreateCondBr(builder.CreateICmpNE(dptr, nullPtr, "rel.hasold?"),
+                                 doFreeBB, zeroBB);
+            builder.SetInsertPoint(doFreeBB);
+            auto freeFn = module->getOrInsertFunction(
+                "free", llvm::FunctionType::get(voidTy, {ptrTy}, false));
+            builder.CreateCall(freeFn, {dptr});
+            builder.CreateBr(zeroBB);
+            builder.SetInsertPoint(zeroBB);
+            builder.CreateStore(llvm::Constant::getNullValue(strTy), dstPtr);
+            return;
+        }
+        case TypeKind::Struct:
+        case TypeKind::Class:
+        case TypeKind::Array:
+        case TypeKind::Optional:
+        case TypeKind::Result:
+            if (aggregateHasStringField(t))
+                emitAggregateStringRelease(dstPtr, t);
+            return;
+        default:
+            return;
+    }
+}
+
+// 遗留缺陷修复（新遗留项）：聚合槽位释放——镜像 emitAggregateStringCopy 的
+// 递归结构，只做"释放拥有缓冲 + 置零"，不做拷贝。Struct/Class/Array/
+// Optional/Result 全支持（失效槽可能承载嵌套聚合）。
+void CodegenContext::emitAggregateStringRelease(llvm::Value* dst, Type* aggType) {
+    while (aggType && aggType->kind == TypeKind::Typedef)
+        aggType = static_cast<TypedefType*>(aggType)->aliasedType;
+    if (!aggType) return;
+    llvm::LLVMContext& c = *context;
+    switch (aggType->kind) {
+        case TypeKind::Struct:
+        case TypeKind::Class: {
+            llvm::Type* llvmTy = getLLVMType(aggType);
+            std::vector<FieldInfo>* fields = nullptr;
+            Type* baseType = nullptr;
+            unsigned baseOffset = 0;
+            if (aggType->kind == TypeKind::Struct) {
+                fields = &static_cast<StructType*>(aggType)->fields;
+            } else {
+                auto* ct = static_cast<ClassType*>(aggType);
+                fields = &ct->fields;
+                baseType = ct->base;
+                if (!ct->baseClass.empty()) baseOffset = 1;
+            }
+            if (baseType && aggregateHasStringField(baseType)) {
+                llvm::Value* baseAddr = builder.CreateStructGEP(llvmTy, dst, 0, "rel.basep");
+                emitAggregateStringRelease(baseAddr, baseType);
+            }
+            for (size_t i = 0; i < fields->size(); ++i) {
+                unsigned idx = baseOffset + (unsigned)i;
+                llvm::Value* faddr = builder.CreateStructGEP(llvmTy, dst, idx, "rel.fp");
+                emitStringValueRelease(faddr, (*fields)[i].type);
+            }
+            break;
+        }
+        case TypeKind::Array: {
+            auto* arrTy = static_cast<ArrayType*>(aggType);
+            llvm::Type* arrLLVM = getLLVMType(arrTy);
+            auto* i32 = llvm::Type::getInt32Ty(c);
+            for (int i = 0; i < arrTy->size; ++i) {
+                llvm::Value* elemPtr = builder.CreateInBoundsGEP(
+                    arrLLVM, dst,
+                    {llvm::ConstantInt::get(i32, 0), llvm::ConstantInt::get(i32, i)},
+                    "rel.arrp");
+                emitStringValueRelease(elemPtr, arrTy->elementType);
+            }
+            break;
+        }
+        case TypeKind::Optional: {
+            auto* optTy = static_cast<OptionalType*>(aggType);
+            llvm::Type* optLLVM = getLLVMType(optTy);
+            llvm::Value* validSlot = builder.CreateStructGEP(optLLVM, dst, 0, "rel.opt.vp");
+            llvm::Value* valSlot = builder.CreateStructGEP(optLLVM, dst, 1, "rel.opt.valp");
+            llvm::Value* valid = builder.CreateLoad(
+                optLLVM->getStructElementType(0), validSlot, "rel.opt.valid");
+            llvm::Function* curFn = builder.GetInsertBlock()->getParent();
+            llvm::BasicBlock* bodyBB = llvm::BasicBlock::Create(c, "rel.opt.body", curFn);
+            llvm::BasicBlock* doneBB = llvm::BasicBlock::Create(c, "rel.opt.done", curFn);
+            builder.CreateCondBr(valid, bodyBB, doneBB);
+            builder.SetInsertPoint(bodyBB);
+            emitStringValueRelease(valSlot, optTy->elementType);
+            builder.CreateBr(doneBB);
+            builder.SetInsertPoint(doneBB);
+            builder.CreateStore(llvm::ConstantInt::getFalse(c), validSlot);
+            break;
+        }
+        case TypeKind::Result: {
+            auto* rt = static_cast<ResultType*>(aggType);
+            llvm::Type* resLLVM = getLLVMType(rt);
+            llvm::Value* okSlot = builder.CreateStructGEP(resLLVM, dst, 0, "rel.res.okp");
+            llvm::Value* valSlot = builder.CreateStructGEP(resLLVM, dst, 1, "rel.res.valp");
+            llvm::Value* errSlot = builder.CreateStructGEP(resLLVM, dst, 2, "rel.res.errp");
+            llvm::Value* ok = builder.CreateLoad(
+                resLLVM->getStructElementType(0), okSlot, "rel.res.ok");
+            llvm::Function* curFn = builder.GetInsertBlock()->getParent();
+            llvm::BasicBlock* okBB = llvm::BasicBlock::Create(c, "rel.res.ok", curFn);
+            llvm::BasicBlock* errBB = llvm::BasicBlock::Create(c, "rel.res.err", curFn);
+            llvm::BasicBlock* doneBB = llvm::BasicBlock::Create(c, "rel.res.done", curFn);
+            builder.CreateCondBr(ok, okBB, errBB);
+            builder.SetInsertPoint(okBB);
+            emitStringValueRelease(valSlot, rt->successType);
+            builder.CreateBr(doneBB);
+            builder.SetInsertPoint(errBB);
+            emitStringValueRelease(errSlot, rt->errorType);
+            builder.CreateBr(doneBB);
+            builder.SetInsertPoint(doneBB);
+            builder.CreateStore(llvm::ConstantInt::getFalse(c), okSlot);
             break;
         }
         default:

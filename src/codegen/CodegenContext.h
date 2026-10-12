@@ -147,6 +147,11 @@ public:
     // string → copy/assign helper；含 string 聚合 → 递归；其余 → 裸 store。
     void emitStringValueCopy(llvm::Value* dstPtr, llvm::Value* srcVal,
                              Type* t, bool assign);
+    // 聚合槽位释放（optional/result 赋值使某字段"变为失效"时用）：
+    // 释放槽位内全部 string 缓冲并置零，维持"失效 ⟹ 槽位零化"不变量。
+    // 镜像 emitAggregateStringCopy 的递归结构；非 string 承载 → 无操作。
+    void emitStringValueRelease(llvm::Value* dstPtr, Type* t);
+    void emitAggregateStringRelease(llvm::Value* dst, Type* aggType);
 
 private:
     std::unique_ptr<llvm::LLVMContext> context;
