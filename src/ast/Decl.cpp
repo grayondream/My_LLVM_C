@@ -335,11 +335,20 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
         alloca->setAlignment(llvm::Align(declAlign));
     }
 
-    // TYP-12 D3: uninitialized slices are the empty slice {null, 0}.
+    // TYP-12 D3 + I4 found issue: 未初始化聚合零初始化——
+    //   * slice → 空 slice {null, 0}（TYP-12 D3）；
+    //   * string / 含 string 聚合 → {null,0,0}：D7 赋值 helper 的 free 守卫
+    //     （oldPtr != null）绝不能看到野指针，否则 free(garbage) 崩溃。
     {
         Type* st = stripTypedefs(type);
-        if (st && st->kind == TypeKind::Slice && !initExpr && !isConstexpr) {
-            ctx.getBuilder().CreateStore(llvm::Constant::getNullValue(llvmType), alloca);
+        if (st && !initExpr && !isConstexpr) {
+            bool needZero = st->kind == TypeKind::Slice ||
+                            st->kind == TypeKind::String ||
+                            ((st->kind == TypeKind::Struct || st->kind == TypeKind::Class) &&
+                             ctx.aggregateHasStringField(st));
+            if (needZero) {
+                ctx.getBuilder().CreateStore(llvm::Constant::getNullValue(llvmType), alloca);
+            }
         }
     }
     

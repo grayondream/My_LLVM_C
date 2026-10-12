@@ -359,3 +359,18 @@ TEST_F(StringOwnershipE2E, BraceInitStringFieldCopies) {
         }
     )", "own_struct_brace.c"), 0);
 }
+
+// Found issue（I4 review）: 未初始化 `string s;` 零初始化 {null,0,0}——
+// fresh 赋值 free 守卫安全（不 free 野指针）、值正确、destroy 一次即安全。
+TEST_F(StringOwnershipE2E, UninitializedStringLocalAssignSafe) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string s;
+            s = string.new("x");
+            string_view v = s;
+            if (v != "x") { return 1; }
+            s.destroy();
+            return 0;
+        }
+    )", "own_uninit_safe.c"), 0);
+}

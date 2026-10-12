@@ -647,12 +647,38 @@ TEST_F(CodegenContextTest, ConstexprLocalVariable) {
         }
     }
     ASSERT_NE(storeInst, nullptr);
-    
+
     // Verify the stored value is constant 42
     auto* constVal = llvm::dyn_cast<llvm::ConstantInt>(storeInst->getValueOperand());
     ASSERT_NE(constVal, nullptr);
     EXPECT_EQ(constVal->getSExtValue(), 42);
     intType->isConst = false;
+    ctx->popScope();
+}
+
+// Found issue（I4 review）: 未初始化 `string` 局部必须零初始化 {null,0,0}——
+// D7 赋值 helper 的 free 守卫（oldPtr != null）绝不能看到野指针。扩展
+// TYP-12 D3 的 slice 零初始化先例到 string / 含 string 聚合。
+TEST_F(CodegenContextTest, UninitializedStringLocalIsZeroed) {
+    ctx->pushScope(); // Simulate being inside a function
+    auto varDecl = std::make_unique<VarDeclAST>("s", typeCtx->getStringType());
+
+    llvm::Value* val = varDecl->codegen(*ctx);
+    ASSERT_NE(val, nullptr);
+    auto* alloca = llvm::dyn_cast<llvm::AllocaInst>(val);
+    ASSERT_NE(alloca, nullptr);
+
+    llvm::StoreInst* zeroStore = nullptr;
+    for (auto& I : *entryBB) {
+        if (auto* si = llvm::dyn_cast<llvm::StoreInst>(&I)) {
+            if (si->getPointerOperand() == alloca) {
+                zeroStore = si;
+                break;
+            }
+        }
+    }
+    ASSERT_NE(zeroStore, nullptr) << "uninitialized string alloca must be zero-initialized";
+    EXPECT_TRUE(zeroStore->getValueOperand()->getType()->isStructTy());
     ctx->popScope();
 }
 
