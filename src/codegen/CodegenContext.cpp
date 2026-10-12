@@ -1470,67 +1470,162 @@ bool CodegenContext::aggregateHasStringField(Type* t) {
                 if (aggregateHasStringField(f.type)) return true;
             return ct->base ? aggregateHasStringField(ct->base) : false;
         }
+        // Found issue: 数组/optional/result 内含 string 也要字段感知
+        //（否则整段浅拷贝 → 元素共享缓冲 → 双 free）。
+        case TypeKind::Array:
+            return aggregateHasStringField(static_cast<ArrayType*>(t)->elementType);
+        case TypeKind::Optional:
+            return aggregateHasStringField(static_cast<OptionalType*>(t)->elementType);
+        case TypeKind::Result: {
+            auto* rt = static_cast<ResultType*>(t);
+            return aggregateHasStringField(rt->successType) ||
+                   aggregateHasStringField(rt->errorType);
+        }
         default:
             return false;
     }
 }
 
+// I4 (D7): 单值字段感知拷贝——string → copy/assign helper（fetch 时 save/restore
+// 共享 builder）；含 string 聚合 → 递归；其余 → 裸 store。
+void CodegenContext::emitStringValueCopy(llvm::Value* dstPtr, llvm::Value* srcVal,
+                                         Type* t, bool assign) {
+    while (t && t->kind == TypeKind::Typedef)
+        t = static_cast<TypedefType*>(t)->aliasedType;
+    if (!t) return;
+    switch (t->kind) {
+        case TypeKind::String: {
+            auto ip = builder.saveIP();
+            llvm::Function* fn = assign ? getStringAssignFn() : getStringCopyFn();
+            builder.restoreIP(ip);
+            builder.CreateCall(fn, {dstPtr, srcVal});
+            return;
+        }
+        case TypeKind::Struct:
+        case TypeKind::Class:
+        case TypeKind::Array:
+        case TypeKind::Optional:
+        case TypeKind::Result:
+            if (aggregateHasStringField(t)) {
+                emitAggregateStringCopy(dstPtr, srcVal, t, assign);
+            } else {
+                builder.CreateStore(srcVal, dstPtr);
+            }
+            return;
+        default:
+            builder.CreateStore(srcVal, dstPtr);
+            return;
+    }
+}
+
 // I4 (D7): 字段感知聚合拷贝。dst=目标聚合地址，srcVal=源聚合值，aggType=聚合
 // 类型。string 字段深拷贝（assign=true → 先 free 目标旧缓冲 + 拷贝）；其余
-// 字段 extract+store 原样写入；嵌套 Struct/Class 递归。helper 合成期间会劫持
-// 共享 builder——整体 save/restore。
+// 字段原样；嵌套聚合递归。helper 合成期间会劫持共享 builder——整体 save/restore。
+// 支持 Struct/Class/Array/Optional/Result（found issue 扩展）。
 void CodegenContext::emitAggregateStringCopy(llvm::Value* dst, llvm::Value* srcVal,
                                              Type* aggType, bool assign) {
-    auto savedIP = builder.saveIP();
     while (aggType && aggType->kind == TypeKind::Typedef)
         aggType = static_cast<TypedefType*>(aggType)->aliasedType;
-    if (!aggType || (aggType->kind != TypeKind::Struct &&
-                     aggType->kind != TypeKind::Class)) {
-        builder.restoreIP(savedIP);
+    if (!aggType) {
         return;
     }
-    llvm::Type* llvmTy = getLLVMType(aggType);
-    std::vector<FieldInfo>* fields = nullptr;
-    Type* baseType = nullptr;
-    unsigned baseOffset = 0;
-    if (aggType->kind == TypeKind::Struct) {
-        fields = &static_cast<StructType*>(aggType)->fields;
-    } else {
-        auto* ct = static_cast<ClassType*>(aggType);
-        fields = &ct->fields;
-        baseType = ct->base;
-        if (!ct->baseClass.empty()) baseOffset = 1;
-    }
-    // 基类子对象占 slot 0（INH-01），递归。
-    if (baseType && aggregateHasStringField(baseType)) {
-        llvm::Value* baseAddr = builder.CreateStructGEP(llvmTy, dst, 0, "agg.basep");
-        llvm::Value* baseVal = builder.CreateExtractValue(srcVal, 0, "agg.base");
-        emitAggregateStringCopy(baseAddr, baseVal, baseType, assign);
-    }
-    // 预取 helper（合成期间劫持 builder，取完再 restore）。
-    llvm::Function* copyFn = nullptr;
-    llvm::Function* assignFn = nullptr;
-    if (aggregateHasStringField(aggType)) {
-        auto ip = builder.saveIP();
-        copyFn = getStringCopyFn();
-        if (assign) assignFn = getStringAssignFn();
-        builder.restoreIP(ip);
-    }
-    for (size_t i = 0; i < fields->size(); ++i) {
-        Type* raw = (*fields)[i].type;
-        while (raw && raw->kind == TypeKind::Typedef)
-            raw = static_cast<TypedefType*>(raw)->aliasedType;
-        unsigned idx = baseOffset + (unsigned)i;
-        llvm::Value* faddr = builder.CreateStructGEP(llvmTy, dst, idx, "agg.fp");
-        llvm::Value* fval = builder.CreateExtractValue(srcVal, idx, "agg.fv");
-        if (raw && raw->kind == TypeKind::String) {
-            builder.CreateCall(assign ? assignFn : copyFn, {faddr, fval});
-        } else if (raw && (raw->kind == TypeKind::Struct || raw->kind == TypeKind::Class) &&
-                   aggregateHasStringField(raw)) {
-            emitAggregateStringCopy(faddr, fval, raw, assign);
-        } else {
-            builder.CreateStore(fval, faddr);
+    llvm::LLVMContext& c = *context;
+    // 注意：不 save/restore 外层插入点——Struct/Class/Array 不改变插入块；
+    // Optional/Result 的收尾块（doneBB）是控制流汇合点，调用方必须从其继续。
+    switch (aggType->kind) {
+        case TypeKind::Struct:
+        case TypeKind::Class: {
+            llvm::Type* llvmTy = getLLVMType(aggType);
+            std::vector<FieldInfo>* fields = nullptr;
+            Type* baseType = nullptr;
+            unsigned baseOffset = 0;
+            if (aggType->kind == TypeKind::Struct) {
+                fields = &static_cast<StructType*>(aggType)->fields;
+            } else {
+                auto* ct = static_cast<ClassType*>(aggType);
+                fields = &ct->fields;
+                baseType = ct->base;
+                if (!ct->baseClass.empty()) baseOffset = 1;
+            }
+            // 基类子对象占 slot 0（INH-01），递归。
+            if (baseType && aggregateHasStringField(baseType)) {
+                llvm::Value* baseAddr = builder.CreateStructGEP(llvmTy, dst, 0, "agg.basep");
+                llvm::Value* baseVal = builder.CreateExtractValue(srcVal, 0, "agg.base");
+                emitAggregateStringCopy(baseAddr, baseVal, baseType, assign);
+            }
+            for (size_t i = 0; i < fields->size(); ++i) {
+                unsigned idx = baseOffset + (unsigned)i;
+                llvm::Value* faddr = builder.CreateStructGEP(llvmTy, dst, idx, "agg.fp");
+                llvm::Value* fval = builder.CreateExtractValue(srcVal, idx, "agg.fv");
+                emitStringValueCopy(faddr, fval, (*fields)[i].type, assign);
+            }
+            break;
         }
+        case TypeKind::Array: {
+            auto* arrTy = static_cast<ArrayType*>(aggType);
+            llvm::Type* arrLLVM = getLLVMType(arrTy);
+            auto* i32 = llvm::Type::getInt32Ty(c);
+            for (int i = 0; i < arrTy->size; ++i) {
+                llvm::Value* elemPtr = builder.CreateInBoundsGEP(
+                    arrLLVM, dst,
+                    {llvm::ConstantInt::get(i32, 0), llvm::ConstantInt::get(i32, i)},
+                    "agg.arrp");
+                llvm::Value* elemVal = builder.CreateExtractValue(srcVal, i, "agg.arrv");
+                emitStringValueCopy(elemPtr, elemVal, arrTy->elementType, assign);
+            }
+            break;
+        }
+        case TypeKind::Optional: {
+            // {i1 valid, T value} — valid 时深拷贝 value。
+            auto* optTy = static_cast<OptionalType*>(aggType);
+            llvm::Type* optLLVM = getLLVMType(optTy);
+            llvm::Value* srcValid = builder.CreateExtractValue(srcVal, 0, "agg.opt.valid");
+            llvm::Value* srcV = builder.CreateExtractValue(srcVal, 1, "agg.opt.v");
+            llvm::Value* dstValidSlot = builder.CreateStructGEP(optLLVM, dst, 0, "agg.opt.vp");
+            llvm::Value* dstVSlot = builder.CreateStructGEP(optLLVM, dst, 1, "agg.opt.vp.v");
+            llvm::Function* curFn = builder.GetInsertBlock()->getParent();
+            llvm::BasicBlock* bodyBB = llvm::BasicBlock::Create(c, "agg.opt.body", curFn);
+            llvm::BasicBlock* doneBB = llvm::BasicBlock::Create(c, "agg.opt.done", curFn);
+            builder.CreateCondBr(srcValid, bodyBB, doneBB);
+            builder.SetInsertPoint(bodyBB);
+            emitStringValueCopy(dstVSlot, srcV, optTy->elementType, assign);
+            builder.CreateBr(doneBB);
+            builder.SetInsertPoint(doneBB);
+            builder.CreateStore(srcValid, dstValidSlot);
+            break;
+        }
+        case TypeKind::Result: {
+            // {i1 ok, T value, E error} — ok 时拷贝 value、!ok 时拷贝 error。
+            auto* rt = static_cast<ResultType*>(aggType);
+            llvm::Type* resLLVM = getLLVMType(rt);
+            llvm::Value* srcOk = builder.CreateExtractValue(srcVal, 0, "agg.res.ok");
+            llvm::Value* srcV = builder.CreateExtractValue(srcVal, 1, "agg.res.v");
+            llvm::Value* srcE = builder.CreateExtractValue(srcVal, 2, "agg.res.e");
+            llvm::Value* dstOkSlot = builder.CreateStructGEP(resLLVM, dst, 0, "agg.res.okp");
+            llvm::Value* dstVSlot = builder.CreateStructGEP(resLLVM, dst, 1, "agg.res.vp");
+            llvm::Value* dstESlot = builder.CreateStructGEP(resLLVM, dst, 2, "agg.res.ep");
+            llvm::Function* curFn = builder.GetInsertBlock()->getParent();
+            llvm::BasicBlock* okBB = llvm::BasicBlock::Create(c, "agg.res.ok", curFn);
+            llvm::BasicBlock* errBB = llvm::BasicBlock::Create(c, "agg.res.err", curFn);
+            llvm::BasicBlock* doneBB = llvm::BasicBlock::Create(c, "agg.res.done", curFn);
+            builder.CreateCondBr(srcOk, okBB, errBB);
+            builder.SetInsertPoint(okBB);
+            if (aggregateHasStringField(rt->successType))
+                emitStringValueCopy(dstVSlot, srcV, rt->successType, assign);
+            else
+                builder.CreateStore(srcV, dstVSlot);
+            builder.CreateBr(doneBB);
+            builder.SetInsertPoint(errBB);
+            if (aggregateHasStringField(rt->errorType))
+                emitStringValueCopy(dstESlot, srcE, rt->errorType, assign);
+            else
+                builder.CreateStore(srcE, dstESlot);
+            builder.CreateBr(doneBB);
+            builder.SetInsertPoint(doneBB);
+            builder.CreateStore(srcOk, dstOkSlot);
+            break;
+        }
+        default:
+            return;
     }
-    builder.restoreIP(savedIP);
 }

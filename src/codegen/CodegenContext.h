@@ -143,6 +143,10 @@ public:
     bool aggregateHasStringField(Type* t);
     void emitAggregateStringCopy(llvm::Value* dst, llvm::Value* srcVal,
                                  Type* aggType, bool assign);
+    // 单值字段感知拷贝（供 emitAggregateStringCopy 递归复用）：
+    // string → copy/assign helper；含 string 聚合 → 递归；其余 → 裸 store。
+    void emitStringValueCopy(llvm::Value* dstPtr, llvm::Value* srcVal,
+                             Type* t, bool assign);
 
 private:
     std::unique_ptr<llvm::LLVMContext> context;

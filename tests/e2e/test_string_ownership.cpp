@@ -374,3 +374,89 @@ TEST_F(StringOwnershipE2E, UninitializedStringLocalAssignSafe) {
         }
     )", "own_uninit_safe.c"), 0);
 }
+
+// Found issue（I4 review）: 聚合内 string 数组字段——字段感知逐元素拷贝。
+// `struct S y = x;` 后 y.arr[i] 独立于 x.arr[i]，双双 destroy 不得双 free。
+TEST_F(StringOwnershipE2E, AggregateArrayOfStringsCopyIndependent) {
+    EXPECT_EQ(runSource(R"(
+        struct S { string arr[2]; };
+        int32 main() {
+            struct S x;
+            x.arr[0] = string.new("a");
+            x.arr[1] = string.new("b");
+            struct S y = x;
+            x.arr[0].destroy();
+            x.arr[1].destroy();
+            string_view v0 = y.arr[0];
+            string_view v1 = y.arr[1];
+            if (v0 != "a" || v1 != "b") { return 1; }
+            y.arr[0].destroy();
+            y.arr[1].destroy();
+            return 0;
+        }
+    )", "own_agg_array.c"), 0);
+}
+
+// Found issue（I4 review）: 聚合内 optional<string> 字段——valid 时字段感知
+// 深拷贝。`struct T y = x;` 后 x.o.value/y.o.value 独立缓冲。
+TEST_F(StringOwnershipE2E, AggregateOptionalStringCopyIndependent) {
+    EXPECT_EQ(runSource(R"(
+        struct T { optional<string> o; };
+        int32 main() {
+            struct T x;
+            x.o.valid = true;
+            x.o.value = string.new("data");
+            struct T y = x;
+            x.o.value.destroy();
+            string_view v = y.o.value;
+            if (!y.o.valid) { return 1; }
+            if (v != "data") { return 2; }
+            y.o.value.destroy();
+            return 0;
+        }
+    )", "own_agg_opt.c"), 0);
+}
+
+// Found issue（I4 review）: 聚合内 result<string, int32> 字段——ok 时字段
+// 感知深拷贝。`struct U y = x;` 后 x.r.value/y.r.value 独立缓冲。
+TEST_F(StringOwnershipE2E, AggregateResultStringCopyIndependent) {
+    EXPECT_EQ(runSource(R"(
+        struct U { result<string, int32> r; };
+        int32 main() {
+            struct U x;
+            x.r.ok = true;
+            x.r.value = string.new("ok");
+            x.r.error = 0;
+            struct U y = x;
+            x.r.value.destroy();
+            string_view v = y.r.value;
+            if (!y.r.ok) { return 1; }
+            if (v != "ok") { return 2; }
+            y.r.value.destroy();
+            return 0;
+        }
+    )", "own_agg_res.c"), 0);
+}
+
+// Found issue（I4 review）: 聚合赋值 `y = x;`（optional<string> 字段，
+// assign=true 路径）——free y 旧缓冲 + 深拷贝，值正确、无泄漏/双 free。
+TEST_F(StringOwnershipE2E, AggregateOptionalAssignFreesOld) {
+    EXPECT_EQ(runSource(R"(
+        struct T { optional<string> o; };
+        int32 main() {
+            struct T x;
+            x.o.valid = true;
+            x.o.value = string.new("data");
+            struct T y;
+            y.o.valid = true;
+            y.o.value = string.new("old");
+            y = x;
+            x.o.value.destroy();
+            string_view v = y.o.value;
+            if (!y.o.valid) { return 1; }
+            if (v != "data") { return 2; }
+            y.o.value.destroy();
+            return 0;
+        }
+    )", "own_agg_opt_assign.c"), 0);
+}
