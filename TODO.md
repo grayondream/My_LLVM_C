@@ -17,6 +17,8 @@
 
 > **进度快照（2026-10-12，I4 收口轮 found issues）**：3 项遗留缺陷全部修复——①`true`/`false` 改为 bool 字面量（`BoolLiteralExprAST`，spec keywords.md「布尔字面量」，重载解析可匹配 bool 形参；`isIntegerType` 含 Bool 故算术/赋值零 ripple）；②未初始化 string/含 string 聚合局部零初始化（扩展 TYP-12 D3 slice 先例，D7 fresh 赋值 free 守卫不再见野指针）；③聚合内数组/optional/result 含 string 的字段感知拷贝（`aggregateHasStringField`/`emitAggregateStringCopy` 扩展 Array/Optional/Result）。当前全量 **1236** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。新遗留：optional/result 嵌套 brace-init codegen 缺陷、optional/result valid→invalid 赋值旧缓冲泄漏（边缘）。
 
+> **进度快照（2026-10-12，新遗留项处理）**：**optional/result 嵌套 brace-init codegen 缺陷修复**（`a0b1887`）——根因 `visit(InitializerListExprAST)` 只 sema 首元素，嵌套列表（struct 字段 optional/result 的 `{ { true, string.new("data") } }`）里 `string.new` 的 MethodCallExprAST 未解析 → codegen `unknown variable: string`；修复为递归所有元素。2 个新 e2e（optional/result 嵌套 brace-init）RED→GREEN。当前全量 **1238** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。剩余遗留：仅 optional/result valid→invalid 聚合赋值旧缓冲泄漏（边缘，未处理）。
+
 ---
 
 ## 0. 现状基线（已完成，勿重复实现）

@@ -704,3 +704,12 @@
 - **Issue 3（数组/optional/result 内含 string 的聚合拷贝不字段感知）** `835ca66`：根因——`aggregateHasStringField` 对 Array/Optional/Result 返回 false → 整段浅拷贝 → 元素共享缓冲双 free（数组实测 double free、optional/result 悬垂读段错误）。修复——`aggregateHasStringField` 递归 Array elementType / Optional elementType / Result success+error；`emitAggregateStringCopy` 重构为 switch 分发 + 新 `emitStringValueCopy` helper（string→helper、聚合→递归、其余→store）；Array 逐元素、Optional valid 守卫拷贝 value、Result ok 守卫拷贝 value/error。**Ruling（builder 插入点）**：Optional/Result 分支创建基本块后不能外层 `restoreIP`（会退回旧块致 doneBB 缺 terminator）——改为「builder 停在收尾块，调用方从其继续」（嵌套递归也正确）。已知限制：optional/result valid→invalid 赋值时旧缓冲不 free（泄漏非崩溃，未处理）。
 - **验证**：每项 RED→GREEN（数组 double free / optional·result 段错误 → 全绿）；全量 `ctest -j8` → **1236/1236 绿**（2 个既有 GTEST_SKIP 不变）。基线 1229 → 1236（净 +7：sema bool 测试 +1、codegen 零初始化 IR 测试 +1、e2e +5）。
 - **新遗留/found**：①optional/result 嵌套 brace-init 的 codegen 缺陷（`unknown variable: string`）；②optional/result valid→invalid 聚合赋值旧缓冲泄漏（边缘，未处理）。
+
+## 2026-10-12（续）— 新遗留项处理：嵌套 brace-init 缺陷修复
+
+- **背景**：found-issues 轮遗留 ①optional/result 嵌套 brace-init codegen 缺陷、②valid→invalid 赋值旧缓冲泄漏（边缘）。用户选定先修 ①。
+- **根因（systematic-debugging）**：`visit(InitializerListExprAST)`（SemanticAnalyzer.cpp:3015）只 sema 元素[0]，不递归其余元素。`struct T x = { { true, string.new("data") } };` 的外层 VarDecl sema 对嵌套列表调 getExprType → 只访问 `true`；`string.new("data")` 的 MethodCallExprAST 从未触发 `tryAnalyzeStringStaticCall` → `builtinMethod` 未设 → codegen（Expr.cpp:1229）回退 `object->codegen`（VariableExprAST("string")）→ `unknown variable: string`。对照：变量级 `optional<string> o = {true, string.new("data")};` 正常（VarDecl 对每个元素 getExprType，:3215）。
+- **修复** `a0b1887`：`visit(InitializerListExprAST)` 递归所有元素（node.type 保留首元素启发）。sema 通过但 codegen 失败时验证链：runSource 无 ADD_FAILURE、程序返回 2（`true` 正常存储、`string.new` 失败留零值 → `v!="data"`）——RED 精确命中根因。
+- **范围确认**：仅此一处。VarDecl/ArrayDecl/UnionDecl 外层列表已逐元素；嵌套列表唯一入口即此 visit。非 string 表达式（如嵌套 struct `{ {1,2} }`）元素[1] 虽未 sema 也碰巧 codegen 正常（NumberExprAST type=null 默认 int32）——非有效 RED，未加测试。
+- **验证**：2 新 e2e（`NestedBraceInitOptionalStringField`/`NestedBraceInitResultStringField`）RED→GREEN；CLI bug.c 干净编译运行；全量 ctest → **1238/1238 绿**。
+- **剩余遗留**：仅 ②optional/result valid→invalid 聚合赋值旧缓冲泄漏（边缘，未处理）。
