@@ -283,6 +283,12 @@ llvm::Value* NumberExprAST::codegen(CodegenContext& ctx) {
         ctx.getContext(), llvm::APInt(bits, static_cast<uint64_t>(value), isSigned));
 }
 
+// Found issue: `true`/`false` 是 bool 字面量——发射 i1 常量；整数上下文
+// （int32 x = true 等）经 castValue 的 ZExt 提升路径。
+llvm::Value* BoolLiteralExprAST::codegen(CodegenContext& ctx) {
+    return llvm::ConstantInt::get(ctx.getContext(), llvm::APInt(1, value ? 1 : 0));
+}
+
 llvm::Value* FloatExprAST::codegen(CodegenContext& ctx) {
     // LEX-15: pick the APFloat semantics from the literal's fixed-width type.
     // Build at double precision, then convert to the target semantics.

@@ -274,7 +274,6 @@ TEST_F(StringOwnershipE2E, ReturnFieldCopies) {
 
 // I4 (D6, review focus): `return flag ? ga : gb;`（三元含活变量）→ 拷贝，
 // ga/gb 保持有效可 destroy（若移动则与返回值共享缓冲 → 双 free）。
-// （注：`true` 字面量 → bool 形参的重载解析有既有缺陷，用 bool 变量传参。）
 TEST_F(StringOwnershipE2E, ConditionalReturnCopiesOperands) {
     EXPECT_EQ(runSource(R"(
         string ga;
@@ -283,8 +282,7 @@ TEST_F(StringOwnershipE2E, ConditionalReturnCopiesOperands) {
         int32 main() {
             ga = string.new("aa");
             gb = string.new("bb");
-            bool t = true;
-            string r = pick(t);
+            string r = pick(true);
             ga.destroy();
             gb.destroy();
             string_view v = r;

@@ -105,6 +105,16 @@ public:
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
+// Found issue（I4 review）: `true`/`false` 是布尔字面量（spec keywords.md），
+// 此前被解析成 NumberExprAST(1)/(0)（int32）→ 重载解析匹配不上 bool 形参。
+// 独立节点携带 bool 类型（i1），算术/赋值仍按整数族参与（bool 是 1 位整数）。
+class BoolLiteralExprAST : public ExprAST {
+public:
+    bool value;
+    explicit BoolLiteralExprAST(bool val) : value(val) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
 class FloatExprAST : public ExprAST {
 public:
     double value;

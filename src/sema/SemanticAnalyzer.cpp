@@ -1116,6 +1116,14 @@ std::optional<SemanticAnalyzer::ConstValue> SemanticAnalyzer::evaluateConstexpr(
         return cv;
     }
 
+    // Found issue: bool 字面量按整数（0/1）参与 constexpr 折叠。
+    if (auto* bl = dynamic_cast<BoolLiteralExprAST*>(expr)) {
+        ConstValue cv;
+        cv.type = ConstValue::INT;
+        cv.intVal = bl->value ? 1 : 0;
+        return cv;
+    }
+
     if (auto* chr = dynamic_cast<CharExprAST*>(expr)) {
         ConstValue cv;
         cv.type = ConstValue::CHAR;
@@ -1391,6 +1399,12 @@ void SemanticAnalyzer::visit(NumberExprAST& node) {
     // LEX-15: the literal kind chooses the fixed-width type; fall back to int32.
     node.type = typeForLiteralKind(node.literalKind);
     if (!node.type) node.type = typeCtx->getInt32();
+    node.isLValue = false;
+}
+
+// Found issue: `true`/`false` 是布尔字面量（spec keywords.md）——bool 类型。
+void SemanticAnalyzer::visit(BoolLiteralExprAST& node) {
+    node.type = typeCtx->getBool();
     node.isLValue = false;
 }
 
@@ -4467,6 +4481,7 @@ void SemanticAnalyzer::visit(AsmExprAST& node) {
 
 void SemanticAnalyzer::visit(ExprAST& expr) {
     if (auto* e = dynamic_cast<NumberExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<BoolLiteralExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<FloatExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<CharExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<StringExprAST*>(&expr)) { visit(*e); return; }

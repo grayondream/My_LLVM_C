@@ -2543,3 +2543,17 @@ TEST_F(SemanticAnalyzerTest, InlineAsmReadWriteMemoryOutputRejected) {
     ASSERT_FALSE(analyzer->getErrors().empty());
     EXPECT_EQ(analyzer->getErrors()[0].code, DiagnosticCode::SemAsmOperand);
 }
+
+// Found issue（I4 review）: `true`/`false` 是布尔字面量（spec keywords.md），
+// 必须能解析到 bool 形参（当前被解析成 int 字面量 → 重载解析不匹配 bool）。
+TEST_F(SemanticAnalyzerTest, BoolLiteralMatchesBoolParam) {
+    EXPECT_TRUE(analyzeOk(
+        "bool f(bool flag) { return flag; }\n"
+        "int32 main() { return f(true) ? 0 : 1; }"));
+    // bool 字面量在整数上下文仍可用（整数族加宽，行为不变）。
+    EXPECT_TRUE(analyzeOk(
+        "int32 g(int32 x) { return x; }\n"
+        "int32 main() { return g(true); }"));
+    EXPECT_TRUE(analyzeOk(
+        "int32 main() { bool b = true; int32 x = false; return (int32)b + x; }"));
+}

@@ -72,6 +72,14 @@ std::optional<ConstValue> CompileTimeEvaluator::eval(ExprAST* expr, ASTNode& at)
         return cv;
     }
 
+    // Found issue: bool 字面量按整数（0/1）参与编译期求值。
+    if (auto* bl = dynamic_cast<BoolLiteralExprAST*>(expr)) {
+        ConstValue cv;
+        cv.type = ConstValue::INT;
+        cv.intVal = bl->value ? 1 : 0;
+        return cv;
+    }
+
     if (auto* flt = dynamic_cast<FloatExprAST*>(expr)) {
         ConstValue cv;
         cv.type = ConstValue::DOUBLE;

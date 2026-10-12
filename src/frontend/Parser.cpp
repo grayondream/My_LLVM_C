@@ -669,14 +669,14 @@ std::unique_ptr<ExprAST> Parser::parsePrimaryImpl() {
         return std::make_unique<StringExprAST>(val);
     }
 
-    // Boolean literals
+    // Boolean literals (found issue: 布尔字面量，非 int 字面量——bool 类型)。
     if (token->type == TokenType::TOKEN_TRUE) {
         advance();
-        return std::make_unique<NumberExprAST>(1);
+        return std::make_unique<BoolLiteralExprAST>(true);
     }
     if (token->type == TokenType::TOKEN_FALSE) {
         advance();
-        return std::make_unique<NumberExprAST>(0);
+        return std::make_unique<BoolLiteralExprAST>(false);
     }
     // null literal
     if (token->type == TokenType::TOKEN_NULL) {
