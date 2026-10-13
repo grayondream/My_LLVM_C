@@ -38,4 +38,7 @@ struct FieldInfo {
     std::string name;
     Type* type{};
     std::vector<Annotation> annotations;
+    // P1-07 / PAR-10: 位域宽度。0 = 普通字段；>0 = 位域（命名/无名位域以
+    // name 区分）；无名零宽位域 = bitWidth 0 且 name == ""。
+    int bitWidth{0};
 };

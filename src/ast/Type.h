@@ -122,8 +122,8 @@ public:
         return nullptr;
     }
 
-    void addField(const std::string& fieldName, Type* fieldType) {
-        fields.push_back(FieldInfo{fieldName, fieldType, {}});
+    void addField(const std::string& fieldName, Type* fieldType, int bitWidth = 0) {
+        fields.push_back(FieldInfo{fieldName, fieldType, {}, bitWidth});
     }
 };
 
@@ -142,8 +142,8 @@ public:
     UnionType(const std::string& n)
         : Type(TypeKind::Union), name(n) {}
 
-    void addMember(const std::string& memberName, Type* memberType) {
-        members.push_back(FieldInfo{memberName, memberType, {}});
+    void addMember(const std::string& memberName, Type* memberType, int bitWidth = 0) {
+        members.push_back(FieldInfo{memberName, memberType, {}, bitWidth});
     }
 };
 
@@ -281,8 +281,8 @@ public:
         return it == memberAccess.end() ? AccessLevel::Public : it->second;
     }
 
-    void addField(const std::string& fieldName, Type* fieldType) {
-        fields.push_back(FieldInfo{fieldName, fieldType, {}});
+    void addField(const std::string& fieldName, Type* fieldType, int bitWidth = 0) {
+        fields.push_back(FieldInfo{fieldName, fieldType, {}, bitWidth});
     }
 
     void addMethod(const std::string& methodName, FunctionType* methodType) {

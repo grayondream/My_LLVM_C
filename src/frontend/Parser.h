@@ -81,6 +81,12 @@ private:
     // declarator (used for struct/class/union members).
     Type* parseMemberArraySuffix(Type* base);
 
+    // P1-07 / PAR-10: parse a bit-field width after the caller consumed ':':
+    //   width = parseExpr(2); evalIntConstExpr must succeed (constant expr).
+    // Returns false (with a diagnostic) when the width is not a constant
+    // expression; on success `width` holds the evaluated value.
+    bool parseBitFieldWidth(int& width);
+
     std::unique_ptr<DeclAST> parseDeclaration();
 
     // The raw declaration parser; `parseDeclaration` wraps it to stamp source

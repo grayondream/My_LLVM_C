@@ -1782,8 +1782,30 @@ Type* Parser::parseBaseType() {
                 while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
                     Type* fieldType = parseType();
                     if (!fieldType) break;
+                    // P1-07 / PAR-10: unnamed bit-field `T : N;`.
+                    if (check(TokenType::TOKEN_COLON)) {
+                        advance();
+                        int bw = 0;
+                        if (!parseBitFieldWidth(bw)) break;
+                        structType->addField("", fieldType, bw);
+                        match(TokenType::TOKEN_SEMICOLON);
+                        continue;
+                    }
                     if (!check(TokenType::TOKEN_IDENTIFIER)) break;
                     std::string fieldName = advance()->lexeme;
+                    // P1-07 / PAR-10: named bit-field `T name : N;`.
+                    if (check(TokenType::TOKEN_COLON)) {
+                        advance();
+                        int bw = 0;
+                        if (!parseBitFieldWidth(bw)) break;
+                        if (check(TokenType::TOKEN_LBRACKET)) {
+                            error("bit-field cannot have array suffix", *peek());
+                            break;
+                        }
+                        structType->addField(fieldName, fieldType, bw);
+                        match(TokenType::TOKEN_SEMICOLON);
+                        continue;
+                    }
                     fieldType = parseMemberArraySuffix(fieldType);
                     structType->addField(fieldName, fieldType);
                     match(TokenType::TOKEN_SEMICOLON);
@@ -1819,8 +1841,30 @@ Type* Parser::parseBaseType() {
                 while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
                     Type* memberType = parseType();
                     if (!memberType) break;
+                    // P1-07 / PAR-10: unnamed bit-field `T : N;`.
+                    if (check(TokenType::TOKEN_COLON)) {
+                        advance();
+                        int bw = 0;
+                        if (!parseBitFieldWidth(bw)) break;
+                        unionType->addMember("", memberType, bw);
+                        match(TokenType::TOKEN_SEMICOLON);
+                        continue;
+                    }
                     if (!check(TokenType::TOKEN_IDENTIFIER)) break;
                     std::string memberName = advance()->lexeme;
+                    // P1-07 / PAR-10: named bit-field `T name : N;`.
+                    if (check(TokenType::TOKEN_COLON)) {
+                        advance();
+                        int bw = 0;
+                        if (!parseBitFieldWidth(bw)) break;
+                        if (check(TokenType::TOKEN_LBRACKET)) {
+                            error("bit-field cannot have array suffix", *peek());
+                            break;
+                        }
+                        unionType->addMember(memberName, memberType, bw);
+                        match(TokenType::TOKEN_SEMICOLON);
+                        continue;
+                    }
                     memberType = parseMemberArraySuffix(memberType);
                     unionType->addMember(memberName, memberType);
                     match(TokenType::TOKEN_SEMICOLON);
@@ -2261,7 +2305,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
         if (!structDecl->fields.empty() || !structDecl->nestedTypes.empty()) {
             auto structType = new StructType(structDecl->name);
             for (auto& field : structDecl->fields) {
-                structType->addField(field.name, field.type);
+                structType->addField(field.name, field.type, field.bitWidth);
             }
             TypeContext::instance().addStruct(structDecl->name, structType);
         }
@@ -3170,6 +3214,19 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
         Type* fieldType = parseType();
         if (!fieldType) break;
 
+        // P1-07 / PAR-10: unnamed bit-field `T : N;` (incl. zero-width `T : 0;`).
+        if (check(TokenType::TOKEN_COLON)) {
+            advance();
+            int bw = 0;
+            if (!parseBitFieldWidth(bw)) {
+                m_typeNamespacePrefix = savedPrefix;
+                return nullptr;
+            }
+            fields.push_back(FieldInfo{"", fieldType, std::move(memberAnns), bw});
+            match(TokenType::TOKEN_SEMICOLON);
+            continue;
+        }
+
         if (!check(TokenType::TOKEN_IDENTIFIER)) {
             // AGG-03: an anonymous struct/union member promotes its
             // fields/members into the enclosing struct. The trailing ';' was
@@ -3204,6 +3261,23 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
             staticMembers.push_back(std::move(staticVar));
             continue;
         }
+        // P1-07 / PAR-10: named bit-field `T name : N;`.
+        if (check(TokenType::TOKEN_COLON)) {
+            advance();
+            int bw = 0;
+            if (!parseBitFieldWidth(bw)) {
+                m_typeNamespacePrefix = savedPrefix;
+                return nullptr;
+            }
+            if (check(TokenType::TOKEN_LBRACKET)) {
+                error("bit-field cannot have array suffix", *peek());
+                m_typeNamespacePrefix = savedPrefix;
+                return nullptr;
+            }
+            fields.push_back(FieldInfo{fieldName, fieldType, std::move(memberAnns), bw});
+            match(TokenType::TOKEN_SEMICOLON);
+            continue;
+        }
         fieldType = parseMemberArraySuffix(fieldType);
 
         fields.push_back(FieldInfo{fieldName, fieldType, std::move(memberAnns)});
@@ -3233,12 +3307,12 @@ void Parser::registerNestedDeclType(DeclAST* decl) {
         if (sd->isClassDecl) {
             if (!tc.getClass(sd->name)) {
                 auto* classType = new ClassType(sd->name);
-                for (auto& f : sd->fields) classType->addField(f.name, f.type);
+                for (auto& f : sd->fields) classType->addField(f.name, f.type, f.bitWidth);
                 tc.addClass(sd->name, classType);
             }
         } else if (!tc.getStruct(sd->name)) {
             auto* structType = new StructType(sd->name);
-            for (auto& f : sd->fields) structType->addField(f.name, f.type);
+            for (auto& f : sd->fields) structType->addField(f.name, f.type, f.bitWidth);
             tc.addStruct(sd->name, structType);
         }
         return;
@@ -3255,7 +3329,7 @@ void Parser::registerNestedDeclType(DeclAST* decl) {
     if (auto* ud = dynamic_cast<UnionDeclAST*>(decl)) {
         if (!tc.getUnion(ud->name)) {
             auto* unionType = new UnionType(ud->name);
-            for (auto& m : ud->members) unionType->addMember(m.name, m.type);
+            for (auto& m : ud->members) unionType->addMember(m.name, m.type, m.bitWidth);
             tc.addUnion(ud->name, unionType);
         }
         return;
@@ -3498,6 +3572,19 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
             Type* declType = parseType();
             if (!declType) break;
 
+            // P1-07 / PAR-10: unnamed bit-field `T : N;` (incl. zero-width).
+            if (check(TokenType::TOKEN_COLON)) {
+                advance();
+                int bw = 0;
+                if (!parseBitFieldWidth(bw)) {
+                    m_typeNamespacePrefix = savedPrefix;
+                    return nullptr;
+                }
+                fields.push_back(FieldInfo{"", declType, std::move(memberAnns), bw});
+                match(TokenType::TOKEN_SEMICOLON);
+                continue;
+            }
+
             if (check(TokenType::TOKEN_IDENTIFIER)) {
                 std::string memberName = advance()->lexeme;
 
@@ -3538,6 +3625,24 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                     memberAccess["static:" + memberName] = currentAccess;
                 } else {
                     // Field declaration
+                    // P1-07 / PAR-10: named bit-field `T name : N;`.
+                    if (check(TokenType::TOKEN_COLON)) {
+                        advance();
+                        int bw = 0;
+                        if (!parseBitFieldWidth(bw)) {
+                            m_typeNamespacePrefix = savedPrefix;
+                            return nullptr;
+                        }
+                        if (check(TokenType::TOKEN_LBRACKET)) {
+                            error("bit-field cannot have array suffix", *peek());
+                            m_typeNamespacePrefix = savedPrefix;
+                            return nullptr;
+                        }
+                        fields.push_back(FieldInfo{memberName, declType, std::move(memberAnns), bw});
+                        memberAccess[memberName] = currentAccess;
+                        match(TokenType::TOKEN_SEMICOLON);
+                        continue;
+                    }
                     declType = parseMemberArraySuffix(declType);
                     fields.push_back(FieldInfo{memberName, declType, std::move(memberAnns)});
                     memberAccess[memberName] = currentAccess;
@@ -3634,6 +3739,21 @@ Type* Parser::parseMemberArraySuffix(Type* base) {
         if (!dimParams[i].empty()) static_cast<ArrayType*>(result)->sizeParam = dimParams[i];
     }
     return result;
+}
+
+// P1-07 / PAR-10: parse + constant-evaluate a bit-field width. The caller has
+// already consumed the ':'. The width must be a compile-time integer constant
+// (evalIntConstExpr), matching how enum values are folded in parseEnumDecl.
+bool Parser::parseBitFieldWidth(int& width) {
+    auto e = parseExpr(2);
+    if (!e) return false;
+    long long w = 0;
+    if (!evalIntConstExpr(e.get(), w)) {
+        error("bit-field width must be a constant expression", *peek());
+        return false;
+    }
+    width = static_cast<int>(w);
+    return true;
 }
 
 std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
@@ -3735,6 +3855,19 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
         Type* memberType = parseType();
         if (!memberType) break;
 
+        // P1-07 / PAR-10: unnamed bit-field `T : N;` (incl. zero-width).
+        if (check(TokenType::TOKEN_COLON)) {
+            advance();
+            int bw = 0;
+            if (!parseBitFieldWidth(bw)) {
+                m_typeNamespacePrefix = savedPrefix;
+                return nullptr;
+            }
+            members.push_back(FieldInfo{"", memberType, std::move(memberAnns), bw});
+            match(TokenType::TOKEN_SEMICOLON);
+            continue;
+        }
+
         if (!check(TokenType::TOKEN_IDENTIFIER)) {
             // AGG-03: an anonymous struct/union inside a union body promotes
             // its members; parseType already consumed the trailing ';'.
@@ -3749,6 +3882,23 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
             break;
         }
         std::string memberName = advance()->lexeme;
+        // P1-07 / PAR-10: named bit-field `T name : N;`.
+        if (check(TokenType::TOKEN_COLON)) {
+            advance();
+            int bw = 0;
+            if (!parseBitFieldWidth(bw)) {
+                m_typeNamespacePrefix = savedPrefix;
+                return nullptr;
+            }
+            if (check(TokenType::TOKEN_LBRACKET)) {
+                error("bit-field cannot have array suffix", *peek());
+                m_typeNamespacePrefix = savedPrefix;
+                return nullptr;
+            }
+            members.push_back(FieldInfo{memberName, memberType, std::move(memberAnns), bw});
+            match(TokenType::TOKEN_SEMICOLON);
+            continue;
+        }
         memberType = parseMemberArraySuffix(memberType);
 
         members.push_back(FieldInfo{memberName, memberType, std::move(memberAnns)});
