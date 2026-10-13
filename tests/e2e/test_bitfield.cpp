@@ -126,3 +126,60 @@ TEST_F(BitFieldE2E, ParseNonConstWidthRejected) {
     ASSERT_NE(ast, nullptr);
     EXPECT_FALSE(parser.getErrors().empty());
 }
+
+// ---- Task 2: 位域语义校验（sema）----
+
+// 负例辅助：显式管线取 sema 诊断（runSource 对任何错误 ADD_FAILURE，仅正向可用）。
+static std::vector<Diagnostic> semaErrorsOf(const std::string& source, const std::string& filename) {
+    Lexer lexer(filename, source);
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    if (!ast) return {};
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    return analyzer.getErrors();
+}
+
+TEST_F(BitFieldE2E, FloatBaseRejected) {
+    // 浮点基础类型 → E2025。
+    auto errs = semaErrorsOf(
+        "struct S { float64 a : 3; }; int32 main(){return 0;}", "bf_f.c");
+    ASSERT_FALSE(errs.empty());
+    EXPECT_EQ(errs.front().code, DiagnosticCode::SemBitFieldInvalidType);
+}
+
+TEST_F(BitFieldE2E, EnumBaseRejected) {
+    // 枚举基础类型 → E2025。
+    auto errs = semaErrorsOf(
+        "enum E : uint8 { A }; struct S { enum E e : 2; }; int32 main(){return 0;}", "bf_e.c");
+    ASSERT_FALSE(errs.empty());
+    EXPECT_EQ(errs.front().code, DiagnosticCode::SemBitFieldInvalidType);
+}
+
+TEST_F(BitFieldE2E, WidthTooWideRejected) {
+    // 宽度超类型位宽 → E2026。
+    auto errs = semaErrorsOf(
+        "struct S { int32 a : 40; }; int32 main(){return 0;}", "bf_w.c");
+    ASSERT_FALSE(errs.empty());
+    EXPECT_EQ(errs.front().code, DiagnosticCode::SemBitFieldWidthOutOfRange);
+}
+
+TEST_F(BitFieldE2E, NamedZeroWidthRejected) {
+    // 命名零宽位域 → parse 期拒绝（FieldInfo 编码不可表示该状态，Ruling 记录）。
+    Lexer lexer("bf_z.c",
+        "struct S { int32 a : 0; }; int32 main(){return 0;}");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    EXPECT_FALSE(parser.getErrors().empty());
+}
+
+TEST_F(BitFieldE2E, AddrOfRejected) {
+    // 对位域取址 → E2027。
+    auto errs = semaErrorsOf(
+        "struct S { int32 a : 3; }; int32 main(){ struct S s; int32* p = &s.a; return 0; }", "bf_addr.c");
+    ASSERT_FALSE(errs.empty());
+    EXPECT_EQ(errs.front().code, DiagnosticCode::SemBitFieldNotAddressable);
+}

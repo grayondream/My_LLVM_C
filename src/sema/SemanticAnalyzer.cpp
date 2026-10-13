@@ -18,6 +18,41 @@ static Type* stripTypedef(Type* type) {
     return type;
 }
 
+// P1-07 / SEM-12: bit-field base types — bool + the fixed-width integer
+// family (int8..int128 / uint8..uint128 / isize / usize). char and enum are
+// NOT allowed (spec §4.3).
+static bool isBitFieldBaseType(Type* t) {
+    t = stripTypedef(t);
+    if (!t) return false;
+    switch (t->kind) {
+        case TypeKind::Bool:
+        case TypeKind::Int8: case TypeKind::Int16: case TypeKind::Int32:
+        case TypeKind::Int64: case TypeKind::Int128:
+        case TypeKind::UInt8: case TypeKind::UInt16: case TypeKind::UInt32:
+        case TypeKind::UInt64: case TypeKind::UInt128:
+        case TypeKind::ISize: case TypeKind::USize:
+            return true;
+        default: return false;
+    }
+}
+
+// P1-07 / SEM-12: storage width of a bit-field base type in bits
+// (Bool→1, isize/usize→64, otherwise the fixed width).
+static int bitFieldTypeBits(Type* t) {
+    t = stripTypedef(t);
+    if (!t) return 0;
+    switch (t->kind) {
+        case TypeKind::Bool: return 1;
+        case TypeKind::Int8: case TypeKind::UInt8: return 8;
+        case TypeKind::Int16: case TypeKind::UInt16: return 16;
+        case TypeKind::Int32: case TypeKind::UInt32: return 32;
+        case TypeKind::Int64: case TypeKind::UInt64:
+        case TypeKind::ISize: case TypeKind::USize: return 64;
+        case TypeKind::Int128: case TypeKind::UInt128: return 128;
+        default: return 0;
+    }
+}
+
 // SEM-11: true when `stmt` unconditionally transfers control (return/break/
 // continue). Used for the unreachable-code warning (W3003). Trailing `defer`
 // statements do not clear termination — they still run on scope exit.
@@ -1673,6 +1708,15 @@ void SemanticAnalyzer::visit(UnaryExprAST& node) {
             }
             break;
         case UnaryOp::AddressOf:
+            // P1-07 / SEM-12: a bit-field has no address (C constraint).
+            if (auto* ma = dynamic_cast<MemberAccessExprAST*>(node.operand.get())) {
+                if (ma->isBitField) {
+                    emitError(DiagnosticCode::SemBitFieldNotAddressable,
+                              "cannot take the address of a bit-field", node);
+                    node.type = nullptr;
+                    break;
+                }
+            }
             if (node.operand->isLValue) {
                 node.type = new Type(TypeKind::Pointer, operandType);
             } else {
@@ -2828,6 +2872,11 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
                 if (field.name == node.memberName) {
                     node.type = field.type;
                     node.isLValue = true;
+                    // P1-07 / SEM-12: bit-field access marker (isLValue stays
+                    // true — the sema assignment gate depends on it; codegen
+                    // returns the storage-unit address).
+                    node.isBitField = field.bitWidth > 0;
+                    node.bitWidth = static_cast<uint32_t>(field.bitWidth > 0 ? field.bitWidth : 0);
                     definingStruct = cur;
                     break;
                 }
@@ -2854,6 +2903,9 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
                 if (field.name == node.memberName) {
                     node.type = field.type;
                     node.isLValue = true;
+                    // P1-07 / SEM-12: bit-field access marker (see struct path).
+                    node.isBitField = field.bitWidth > 0;
+                    node.bitWidth = static_cast<uint32_t>(field.bitWidth > 0 ? field.bitWidth : 0);
                     definingClass = classType;
                     break;
                 }
@@ -2887,6 +2939,9 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
             if (member.name == node.memberName) {
                 node.type = member.type;
                 node.isLValue = true;
+                // P1-07 / SEM-12: bit-field access marker (see struct path).
+                node.isBitField = member.bitWidth > 0;
+                node.bitWidth = static_cast<uint32_t>(member.bitWidth > 0 ? member.bitWidth : 0);
                 return;
             }
         }
@@ -3454,6 +3509,28 @@ void SemanticAnalyzer::visit(StructDeclAST& node) {
     m_definingStack.pop_back();
 }
 
+// P1-07 / SEM-12: validate a bit-field field. A field is a bit-field when
+// `bitWidth != 0` (any sign) or it is unnamed (`name == ""`, incl. the
+// zero-width align marker). Named zero-width is rejected at parse time (the
+// FieldInfo encoding cannot represent it), so a named field reaching here
+// always has bitWidth != 0.
+void SemanticAnalyzer::checkBitFieldField(FieldInfo& f, ASTNode& node) {
+    if (f.bitWidth == 0 && !f.name.empty()) return;  // 普通字段
+    if (!isBitFieldBaseType(f.type)) {
+        emitError(DiagnosticCode::SemBitFieldInvalidType,
+                  "invalid bit-field base type (expected bool or a fixed-width integer type)",
+                  node);
+        return;
+    }
+    int bits = bitFieldTypeBits(f.type);
+    // 无名位域允许 0..bits（0 = 零宽对齐）；命名位域要求 1..bits。
+    int min = f.name.empty() ? 0 : 1;
+    if (f.bitWidth < min || f.bitWidth > bits) {
+        emitError(DiagnosticCode::SemBitFieldWidthOutOfRange,
+                  "bit-field width out of range", node);
+    }
+}
+
 void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
     // P1-03 / GEN-03: 实例字段/方法签名中的实例占位先解析。
     for (auto& f : node.fields) {
@@ -3463,6 +3540,8 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
         checkDeprecatedTypeUse(f.type, node);
         // P1-04 评审 I3: 字段类型不得来自 compile_time.if 死分支。
         checkCtDeadBranchUse(f.type, node);
+        // P1-07 / SEM-12: 位域基础类型与宽度范围校验。
+        checkBitFieldField(f, node);
     }
     for (auto& m : node.methods) {
         m->returnType = resolveTypeInstance(m->returnType, node);
@@ -3541,7 +3620,7 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
         // Add fields if not already added
         for (auto& field : node.fields) {
             if (!classType->getFieldType(field.name)) {
-                classType->addField(field.name, field.type);
+                classType->addField(field.name, field.type, field.bitWidth);
             }
         }
 
@@ -3719,7 +3798,7 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
         }
         for (auto& field : node.fields) {
             if (!structType->getFieldType(field.name)) {
-                structType->addField(field.name, field.type);
+                structType->addField(field.name, field.type, field.bitWidth);
             }
         }
         // INH-01: single public inheritance — wire the base before layout
@@ -3772,6 +3851,8 @@ void SemanticAnalyzer::visit(UnionDeclAST& node) {
     validateAnnotations(node.annotations, node, "union");
     for (auto& member : node.members) {
         validateAnnotations(member.annotations, node, "field");
+        // P1-07 / SEM-12: 位域基础类型与宽度范围校验。
+        checkBitFieldField(member, node);
     }
     // P1-05 / ANN-02/03: union 仅 align 有效（packed 无填充语义，spec §4）。
     {
@@ -3798,7 +3879,7 @@ void SemanticAnalyzer::visit(UnionDeclAST& node) {
         typeCtx->addUnion(node.name, unionType);
     }
     for (auto& member : node.members) {
-        unionType->addMember(member.name, member.type);
+        unionType->addMember(member.name, member.type, member.bitWidth);
     }
     // Redef 轮: duplicate definition of the same name (any kind) is E2004.
     if (!node.isForwardDecl && !node.name.empty()) {

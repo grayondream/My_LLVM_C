@@ -328,6 +328,11 @@ public:
     MemberAccessKind accessKind;
     std::unique_ptr<ExprAST> object;
     std::string memberName;
+    // P1-07 / SEM-12: bit-field access metadata — sema sets isBitField/bitWidth
+    // when the resolved field is a bit-field (isLValue stays true; codegen
+    // returns the storage-unit address). codegen fills bitOffset (Task 4).
+    bool isBitField = false;
+    uint32_t bitWidth = 0;
 
 
     MemberAccessExprAST(MemberAccessKind kind, std::unique_ptr<ExprAST> obj, const std::string& member)

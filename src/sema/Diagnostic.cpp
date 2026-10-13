@@ -33,6 +33,10 @@ const DiagnosticInfo kRegistry[] = {
     {DiagnosticCode::SemFormatSpecSyntax,         "E2022", "invalid format spec"},
     {DiagnosticCode::SemAsmOperand,               "E2023", "invalid asm operand or constraint"},
     {DiagnosticCode::SemAsmTemplate,              "E2024", "invalid asm template"},
+    // P1-07 / SEM-12
+    {DiagnosticCode::SemBitFieldInvalidType,      "E2025", "invalid bit-field base type"},
+    {DiagnosticCode::SemBitFieldWidthOutOfRange,  "E2026", "bit-field width out of range"},
+    {DiagnosticCode::SemBitFieldNotAddressable,   "E2027", "bit-field is not addressable"},
 
     {DiagnosticCode::WarnUninitializedVariable,  "W3001", "variable may be uninitialized"},
     {DiagnosticCode::WarnUnusedVariable,         "W3002", "unused variable"},

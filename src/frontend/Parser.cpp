@@ -1798,6 +1798,11 @@ Type* Parser::parseBaseType() {
                         advance();
                         int bw = 0;
                         if (!parseBitFieldWidth(bw)) break;
+                        // 命名零宽位域 parse 期拒绝（FieldInfo 编码不可表示）。
+                        if (bw == 0) {
+                            error("bit-field width must be non-zero for a named bit-field", *peek());
+                            break;
+                        }
                         if (check(TokenType::TOKEN_LBRACKET)) {
                             error("bit-field cannot have array suffix", *peek());
                             break;
@@ -1857,6 +1862,11 @@ Type* Parser::parseBaseType() {
                         advance();
                         int bw = 0;
                         if (!parseBitFieldWidth(bw)) break;
+                        // 命名零宽位域 parse 期拒绝（FieldInfo 编码不可表示）。
+                        if (bw == 0) {
+                            error("bit-field width must be non-zero for a named bit-field", *peek());
+                            break;
+                        }
                         if (check(TokenType::TOKEN_LBRACKET)) {
                             error("bit-field cannot have array suffix", *peek());
                             break;
@@ -3269,6 +3279,13 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
                 m_typeNamespacePrefix = savedPrefix;
                 return nullptr;
             }
+            // 命名零宽位域无法在 FieldInfo 编码中表示（bitWidth 0 = 普通字段），
+            // 亦属 C 约束违反——parse 期拒绝（信息只在此处存在）。
+            if (bw == 0) {
+                error("bit-field width must be non-zero for a named bit-field", *peek());
+                m_typeNamespacePrefix = savedPrefix;
+                return nullptr;
+            }
             if (check(TokenType::TOKEN_LBRACKET)) {
                 error("bit-field cannot have array suffix", *peek());
                 m_typeNamespacePrefix = savedPrefix;
@@ -3633,6 +3650,12 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                             m_typeNamespacePrefix = savedPrefix;
                             return nullptr;
                         }
+                        // 命名零宽位域 parse 期拒绝（FieldInfo 编码不可表示）。
+                        if (bw == 0) {
+                            error("bit-field width must be non-zero for a named bit-field", *peek());
+                            m_typeNamespacePrefix = savedPrefix;
+                            return nullptr;
+                        }
                         if (check(TokenType::TOKEN_LBRACKET)) {
                             error("bit-field cannot have array suffix", *peek());
                             m_typeNamespacePrefix = savedPrefix;
@@ -3887,6 +3910,12 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
             advance();
             int bw = 0;
             if (!parseBitFieldWidth(bw)) {
+                m_typeNamespacePrefix = savedPrefix;
+                return nullptr;
+            }
+            // 命名零宽位域 parse 期拒绝（FieldInfo 编码不可表示）。
+            if (bw == 0) {
+                error("bit-field width must be non-zero for a named bit-field", *peek());
                 m_typeNamespacePrefix = savedPrefix;
                 return nullptr;
             }

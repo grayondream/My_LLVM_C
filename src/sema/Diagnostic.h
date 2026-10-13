@@ -40,6 +40,10 @@ enum class DiagnosticCode {
     // P1-08 / DEC-09
     SemAsmOperand,
     SemAsmTemplate,
+    // P1-07 / SEM-12
+    SemBitFieldInvalidType,
+    SemBitFieldWidthOutOfRange,
+    SemBitFieldNotAddressable,
 
     WarnUninitializedVariable,
     WarnUnusedVariable,

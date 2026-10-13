@@ -73,6 +73,9 @@ public:
                              const std::string& target, Type* paramType = nullptr);
     // P1-05 / ANN-05: 弃用类型使用检查（Type::deprecated 折叠，包装层穿透）。
     void checkDeprecatedTypeUse(Type* t, ASTNode& at);
+    // P1-07 / SEM-12: 位域字段校验——基础类型（E2025）与宽度范围（E2026）。
+    // 位域判定：bitWidth != 0（含负宽）或无名（name == ""，含零宽对齐）。
+    void checkBitFieldField(FieldInfo& f, ASTNode& node);
     // 弃用函数/变量记录（键 = 声明名；msg 供 W3004 文本）。
     std::unordered_set<std::string> m_deprecatedFuncs;
     std::unordered_set<std::string> m_deprecatedVars;
