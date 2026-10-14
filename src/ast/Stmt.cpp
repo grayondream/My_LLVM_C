@@ -5,13 +5,26 @@
 
 namespace {
 
+// P1-07 / CG-09: unified lvalue read (mirror of Expr.cpp's readLValue) —
+// bit-field lvalues are read via loadBitFieldValue, everything else via
+// loadValue. Non-lvalues pass through unchanged.
+llvm::Value* readLValue(CodegenContext& ctx, ExprAST& e, llvm::Value* v) {
+    if (!v) return nullptr;
+    if (!e.isLValue) return v;
+    if (e.isBitFieldAccess()) {
+        auto& ma = static_cast<MemberAccessExprAST&>(e);
+        return ctx.loadBitFieldValue(v, ma.bitOffset, ma.bitWidth, e.type);
+    }
+    return ctx.loadValue(v, e.type);
+}
+
 // Evaluate a controlling expression. Variable references codegen to their
 // address, so load lvalues before turning the value into an i1 condition.
 llvm::Value* evalCondition(CodegenContext& ctx, ExprAST& expr) {
     llvm::Value* v = expr.codegen(ctx);
     if (!v) return nullptr;
     if (expr.isLValue && expr.type && expr.type->kind != TypeKind::Array) {
-        v = ctx.loadValue(v, expr.type);
+        v = readLValue(ctx, expr, v);
     }
     return ctx.coerceToBool(v);
 }
@@ -68,7 +81,7 @@ llvm::Value* ReturnStmtAST::codegen(CodegenContext& ctx) {
             }
         }
         if (valType) {
-            v = ctx.loadValue(v, valType);
+            v = readLValue(ctx, *value, v);
         }
     }
     llvm::Function* func = ctx.getBuilder().GetInsertBlock()->getParent();
@@ -240,7 +253,7 @@ llvm::Value* SwitchStmtAST::codegen(CodegenContext& ctx) {
     llvm::Value* condVal = cond->codegen(ctx);
     if (!condVal) return nullptr;
     if (cond->isLValue) {
-        condVal = ctx.loadValue(condVal, cond->type);
+        condVal = readLValue(ctx, *cond, condVal);
     }
 
     auto& builder = ctx.getBuilder();

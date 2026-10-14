@@ -256,3 +256,137 @@ TEST_F(BitFieldE2E, OffsetOfBitFieldRejected) {
     ASSERT_FALSE(errs.empty());
 }
 
+// ---- Task 4: codegen 位域读写（read-modify-write）----
+
+TEST_F(BitFieldE2E, ReadWriteBasic) {
+    EXPECT_EQ(runSource(R"(
+        struct S { int32 a : 3; };
+        int32 main() {
+            struct S s = { 3 };
+            if (s.a != 3) { return 1; }
+            s.a = 2;
+            if (s.a != 2) { return 2; }
+            return 0;
+        }
+    )", "bf_rw.c"), 0);
+}
+
+TEST_F(BitFieldE2E, SignedExtendNegative) {
+    // int32 a:3 存负值读回负值（sext），可参与负数比较。
+    EXPECT_EQ(runSource(R"(
+        struct S { int32 a : 3; };
+        int32 main() {
+            struct S s = { -3 };
+            if (s.a != -3) { return 1; }
+            if (!(s.a < 0)) { return 2; }
+            return 0;
+        }
+    )", "bf_sgn.c"), 0);
+}
+
+TEST_F(BitFieldE2E, UnsignedTruncate) {
+    // uint32 a:3 存 9（1001）→ 截断回 1。
+    EXPECT_EQ(runSource(R"(
+        struct S { uint32 a : 3; };
+        int32 main() {
+            struct S s = { 9 };
+            if (s.a != 1) { return 1; }
+            return 0;
+        }
+    )", "bf_uns.c"), 0);
+}
+
+TEST_F(BitFieldE2E, CompoundAssign) {
+    // 复合赋值回绕：7 += 2 → 9 → 1。
+    EXPECT_EQ(runSource(R"(
+        struct S { uint32 a : 3; };
+        int32 main() {
+            struct S s = { 7 };
+            s.a += 2;
+            if (s.a != 1) { return 1; }
+            return 0;
+        }
+    )", "bf_cmp.c"), 0);
+}
+
+TEST_F(BitFieldE2E, IncDec) {
+    // ++/-- 前缀后缀，宽度边界回绕。
+    EXPECT_EQ(runSource(R"(
+        struct S { uint32 a : 3; };
+        int32 main() {
+            struct S s = { 7 };
+            s.a++;
+            if (s.a != 0) { return 1; }
+            ++s.a;
+            if (s.a != 1) { return 2; }
+            s.a--;
+            if (s.a != 0) { return 3; }
+            return 0;
+        }
+    )", "bf_inc.c"), 0);
+}
+
+TEST_F(BitFieldE2E, BoolBitField) {
+    // bool b:1 位域读写（i1 语义值）。
+    EXPECT_EQ(runSource(R"(
+        struct S { bool b : 1; };
+        int32 main() {
+            struct S s = { 1 };
+            if (!s.b) { return 1; }
+            s.b = 0;
+            if (s.b) { return 2; }
+            return 0;
+        }
+    )", "bf_bool.c"), 0);
+}
+
+TEST_F(BitFieldE2E, NestedChain) {
+    // 链式位域访问 arr[1].i.bf / o.i.bf——unit GEP 在最内层做。
+    // 注意：int32 bf:3 有符号，值须在 [-4, 3]（写 5 会读回 -3，符合 C 语义）。
+    EXPECT_EQ(runSource(R"(
+        struct I { int32 bf : 3; };
+        struct O { struct I i; };
+        int32 main() {
+            struct O o = { { 1 } };
+            struct O arr[2];
+            arr[1].i.bf = 3;
+            o.i.bf = 2;
+            if (o.i.bf != 2) { return 1; }
+            if (arr[1].i.bf != 3) { return 2; }
+            return 0;
+        }
+    )", "bf_chain.c"), 0);
+}
+
+TEST_F(BitFieldE2E, AsArgAndReturn) {
+    // 位域值传参（按基础类型值）；经指针位域读作返回值。
+    // （struct 整体作函数返回是 MEM-14 既有限制，Ruling 记录。）
+    EXPECT_EQ(runSource(R"(
+        struct S { int32 a : 3; };
+        int32 take(int32 v) { return v; }
+        int32 readA(struct S* p) { return p->a; }
+        int32 main() {
+            struct S s = { 1 };
+            if (take(s.a) != 1) { return 1; }
+            struct S t = { -2 };
+            if (readA(&t) != -2) { return 2; }
+            return 0;
+        }
+    )", "bf_arg.c"), 0);
+}
+
+TEST_F(BitFieldE2E, StructCopy) {
+    // 含位域 struct 整体拷贝（存储单元 = 整数，字节拷贝等价位拷贝）。
+    EXPECT_EQ(runSource(R"(
+        struct S { int32 a : 3; uint32 b : 5; };
+        int32 main() {
+            struct S x = { -3, 7 };
+            struct S y;
+            y = x;
+            if (y.a != -3 || y.b != 7) { return 1; }
+            return 0;
+        }
+    )", "bf_copy.c"), 0);
+}
+
+

@@ -74,12 +74,26 @@ static llvm::Value* ctConstantOrNull(CodegenContext& ctx, ExprAST& node) {
     return nullptr;
 }
 
+// P1-07 / CG-09: unified read point — dereference an lvalue to its value.
+// Bit-field lvalues return the storage-unit address from codegen, so they are
+// read via loadBitFieldValue (RMW-aware) instead of loading the whole unit.
+// Non-lvalues are returned unchanged.
+static llvm::Value* readLValue(CodegenContext& ctx, ExprAST& e, llvm::Value* v) {
+    if (!v) return nullptr;
+    if (!e.isLValue) return v;
+    if (e.isBitFieldAccess()) {
+        auto& ma = static_cast<MemberAccessExprAST&>(e);
+        return ctx.loadBitFieldValue(v, ma.bitOffset, ma.bitWidth, e.type);
+    }
+    return ctx.loadValue(v, e.type);
+}
+
 // Evaluate an expression node as a value: lvalues are dereferenced, rvalues are
 // used as-is. A pointer-typed rvalue (string literal, call result, function
 // designator) is already a value and must not be loaded from.
 static llvm::Value* emitRValue(CodegenContext& ctx, ExprAST& expr, llvm::Value* v) {
     if (!v) return nullptr;
-    return expr.isLValue ? emitLoad(ctx, v, expr.type) : v;
+    return readLValue(ctx, expr, v);
 }
 
 // C default argument promotions for variadic calls: float -> double and integer
@@ -643,6 +657,18 @@ llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
         }
         case UnaryOp::PreInc:
         case UnaryOp::PreDec: {
+            // P1-07 / CG-09: bit-field operand — RMW: read → ±1 → write back.
+            if (operand->isBitFieldAccess()) {
+                auto* ma = static_cast<MemberAccessExprAST*>(operand.get());
+                Type* ft = stripTypedefsT12(operand->type);
+                llvm::Value* oldVal = ctx.loadBitFieldValue(v, ma->bitOffset, ma->bitWidth, ft);
+                llvm::Value* one = llvm::ConstantInt::get(oldVal->getType(), 1);
+                llvm::Value* newVal = (op == UnaryOp::PreInc)
+                    ? builder.CreateAdd(oldVal, one, "preinc")
+                    : builder.CreateSub(oldVal, one, "predec");
+                ctx.storeBitFieldValue(v, ma->bitOffset, ma->bitWidth, ft, newVal);
+                return newVal;
+            }
             // The operand is an lvalue; update it in place and yield the new
             // value.
             llvm::Type* loadType = operand->type
@@ -719,7 +745,7 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
         auto& builder = ctx.getBuilder();
         llvm::Value* cond = args[0]->codegen(ctx);
         if (!cond) return nullptr;
-        if (args[0]->isLValue) cond = ctx.loadValue(cond, args[0]->type);
+        if (args[0]->isLValue) cond = readLValue(ctx, *args[0], cond);
         cond = ctx.coerceToBool(cond);
         if (!cond) return nullptr;
 
@@ -749,7 +775,7 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
         auto& builder = ctx.getBuilder();
         llvm::Value* userMsg = args[0]->codegen(ctx);
         if (!userMsg) return nullptr;
-        if (args[0]->isLValue) userMsg = ctx.loadValue(userMsg, args[0]->type);
+        if (args[0]->isLValue) userMsg = readLValue(ctx, *args[0], userMsg);
         if (!userMsg) return nullptr;
         // P1-06 (FMT-03): a str message is viewed as its char* bytes.
         if (args[0]->type && args[0]->type->kind == TypeKind::Str) {
@@ -787,7 +813,7 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
         for (size_t k = 1; k < args.size(); ++k) {
             llvm::Value* v = args[k]->codegen(ctx);
             if (!v) return nullptr;
-            if (args[k]->isLValue) v = ctx.loadValue(v, args[k]->type);
+            if (args[k]->isLValue) v = readLValue(ctx, *args[k], v);
             if (k - 1 < printArgKinds.size()) {
                 // P1-09 (FMT-08): specs printf cannot express (centering or a
                 // custom fill) pre-render the value into a padded buffer.
@@ -918,7 +944,7 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
                     if (argK >= args.size() || slotIdx >= printArgKinds.size()) break;
                     llvm::Value* v = args[argK]->codegen(ctx);
                     if (!v) return nullptr;
-                    if (args[argK]->isLValue) v = ctx.loadValue(v, args[argK]->type);
+                    if (args[argK]->isLValue) v = readLValue(ctx, *args[argK], v);
                     const PrintArgKind kind = printArgKinds[slotIdx];
                     const PrintSpec& spec = slotIdx < formatSpecs.size()
                                                 ? formatSpecs[slotIdx]
@@ -994,7 +1020,7 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
         // conversion, then let smc.format.dyn interleave (FMT-09 contract).
         llvm::Value* fmtV = args[0]->codegen(ctx);
         if (!fmtV) return nullptr;
-        if (args[0]->isLValue) fmtV = ctx.loadValue(fmtV, args[0]->type);
+        if (args[0]->isLValue) fmtV = readLValue(ctx, *args[0], fmtV);
         llvm::Value* fptr = builder.CreateExtractValue(fmtV, 0, "fmt.fptr");
         llvm::Value* flen = builder.CreateExtractValue(fmtV, 1, "fmt.flen");
 
@@ -1008,7 +1034,7 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
                                           : PrintArgKind::Int32;
             llvm::Value* v = args[k]->codegen(ctx);
             if (!v) return nullptr;
-            if (args[k]->isLValue) v = ctx.loadValue(v, args[k]->type);
+            if (args[k]->isLValue) v = readLValue(ctx, *args[k], v);
             llvm::Value* cptr;
             llvm::Value* clen;
             if (kind == PrintArgKind::Str) {
@@ -1055,7 +1081,7 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
                                                 {ptrTy}, false));
             llvm::Value* v = args[0]->codegen(ctx);
             if (!v) return nullptr;
-            if (args[0]->isLValue) v = ctx.loadValue(v, args[0]->type);
+            if (args[0]->isLValue) v = readLValue(ctx, *args[0], v);
             llvm::Value* arr = builder.CreateExtractValue(v, 0, "split.arr");
             return builder.CreateCall(freeFn, {arr});
         }
@@ -1067,7 +1093,7 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
         for (int k = 0; k < 2; ++k) {
             llvm::Value* v = args[k]->codegen(ctx);
             if (!v) return nullptr;
-            if (args[k]->isLValue) v = ctx.loadValue(v, args[k]->type);
+            if (args[k]->isLValue) v = readLValue(ctx, *args[k], v);
             vals[k] = v;
         }
         // Both str and string carry {ptr, len} in fields 0/1.
@@ -1123,7 +1149,7 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
         for (size_t i = 0; i < args.size(); ++i) {
             llvm::Value* argVal = args[i]->codegen(ctx);
             if (!argVal) return nullptr;
-            if (args[i]->isLValue) argVal = ctx.loadValue(argVal, args[i]->type);
+            if (args[i]->isLValue) argVal = readLValue(ctx, *args[i], argVal);
             if (i < resolvedParamTypes.size()) {
                 argVal = ctx.castValue(argVal, args[i]->type,
                                        ctx.getLLVMType(resolvedParamTypes[i]));
@@ -1181,7 +1207,7 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
         llvm::Value* argVal = args[i]->codegen(ctx);
         if (!argVal) return nullptr;
         if (args[i]->isLValue) {
-            argVal = emitLoad(ctx, argVal, args[i]->type);
+            argVal = readLValue(ctx, *args[i], argVal);
         }
         if (i < resolvedParamTypes.size()) {
             if (isArrayToSliceArg(args[i]->type, resolvedParamTypes[i])) {
@@ -1303,7 +1329,7 @@ llvm::Value* MethodCallExprAST::codegen(CodegenContext& ctx) {
         llvm::Value* argVal = args[i]->codegen(ctx);
         if (!argVal) return nullptr;
         if (args[i]->isLValue) {
-            argVal = emitLoad(ctx, argVal, args[i]->type);
+            argVal = readLValue(ctx, *args[i], argVal);
         }
         // resolvedParamTypes[0] is this — explicit argument i maps to [i+1].
         if (i + 1 < resolvedParamTypes.size()) {
@@ -1338,6 +1364,40 @@ llvm::Value* MethodCallExprAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
+    // P1-07 / CG-09: bit-field LHS — codegen returns the storage-unit address
+    // (and records bitOffset); read-modify-write the field, not the unit.
+    if (lhs->isBitFieldAccess()) {
+        auto* lma = static_cast<MemberAccessExprAST*>(lhs.get());
+        llvm::Value* unitAddr = lhs->codegen(ctx);
+        llvm::Value* rhsVal = rhs->codegen(ctx);
+        if (!unitAddr || !rhsVal) return nullptr;
+        auto& builder = ctx.getBuilder();
+        llvm::Value* result = readLValue(ctx, *rhs, rhsVal);
+        Type* ft = stripTypedefsT12(lhs->type);
+        if (llvm::Type* dest = ctx.getLLVMType(ft)) {
+            result = ctx.castValue(result, rhs->type, dest);
+        }
+        if (op != AssignOp::Assign) {
+            // 复合赋值：先读当前位域值（基础类型宽度），运算后 RMW 写回。
+            llvm::Value* cur = ctx.loadBitFieldValue(unitAddr, lma->bitOffset, lma->bitWidth, ft);
+            switch (op) {
+                case AssignOp::AddAssign:   result = builder.CreateAdd(cur, result, "addassign"); break;
+                case AssignOp::SubAssign:   result = builder.CreateSub(cur, result, "subassign"); break;
+                case AssignOp::MulAssign:   result = builder.CreateMul(cur, result, "mulassign"); break;
+                case AssignOp::DivAssign:   result = builder.CreateSDiv(cur, result, "divassign"); break;
+                case AssignOp::ModAssign:   result = builder.CreateSRem(cur, result, "modassign"); break;
+                case AssignOp::BitAndAssign: result = builder.CreateAnd(cur, result, "bandassign"); break;
+                case AssignOp::BitOrAssign:  result = builder.CreateOr(cur, result, "borassign"); break;
+                case AssignOp::BitXorAssign: result = builder.CreateXor(cur, result, "bxorassign"); break;
+                case AssignOp::LShiftAssign: result = builder.CreateShl(cur, result, "lshiftassign"); break;
+                case AssignOp::RShiftAssign: result = builder.CreateAShr(cur, result, "rshiftassign"); break;
+                default: break;
+            }
+        }
+        ctx.storeBitFieldValue(unitAddr, lma->bitOffset, lma->bitWidth, ft, result);
+        return result;
+    }
+
     llvm::Value* lhsVal = lhs->codegen(ctx);
     llvm::Value* rhsVal = rhs->codegen(ctx);
     if (!lhsVal || !rhsVal) return nullptr;
@@ -1345,7 +1405,7 @@ llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
     auto& builder = ctx.getBuilder();
     // Only load the RHS when it denotes a location; values such as function
     // designators or '&x' are already the stored value.
-    llvm::Value* result = rhs->isLValue ? emitLoad(ctx, rhsVal, rhs->type) : rhsVal;
+    llvm::Value* result = readLValue(ctx, *rhs, rhsVal);
 
     // TYP-12: array RHS decays to a slice view when assigned to a slice LHS.
     {
@@ -1360,7 +1420,9 @@ llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
     }
 
     if (op != AssignOp::Assign) {
-        llvm::Value* loadedLhs = emitLoad(ctx, lhsVal, lhs->type);
+        // 复合赋值 lhs 必为可写左值（位域 lhs 已在函数顶部早退）；无条件取值
+        // 保持既有行为（测试手工构造 AST 时 isLValue 可能未置位）。
+        llvm::Value* loadedLhs = ctx.loadValue(lhsVal, lhs->type);
         switch (op) {
             case AssignOp::AddAssign:   result = builder.CreateAdd(loadedLhs, result, "addassign"); break;
             case AssignOp::SubAssign:   result = builder.CreateSub(loadedLhs, result, "subassign"); break;
@@ -1389,7 +1451,7 @@ llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
                     ctx.getContext(), "asn.free", func);
                 llvm::BasicBlock* storeBB = llvm::BasicBlock::Create(
                     ctx.getContext(), "asn.store", func);
-                llvm::Value* dstVal = emitLoad(ctx, lhsVal, lhs->type);
+                llvm::Value* dstVal = ctx.loadValue(lhsVal, lhs->type);
                 llvm::Value* oldPtr = builder.CreateExtractValue(dstVal, 0, "asn.oldptr");
                 llvm::Value* nullPtr = llvm::Constant::getNullValue(oldPtr->getType());
                 builder.CreateCondBr(builder.CreateICmpNE(oldPtr, nullPtr, "asn.hasold?"),
@@ -1429,7 +1491,7 @@ llvm::Value* TernaryExprAST::codegen(CodegenContext& ctx) {
     llvm::Value* condVal = cond->codegen(ctx);
     if (!condVal) return nullptr;
     if (cond->isLValue && cond->type && cond->type->kind != TypeKind::Array) {
-        condVal = ctx.loadValue(condVal, cond->type);
+        condVal = readLValue(ctx, *cond, condVal);
     }
     condVal = ctx.coerceToBool(condVal);
 
@@ -1450,7 +1512,7 @@ llvm::Value* TernaryExprAST::codegen(CodegenContext& ctx) {
     llvm::Type* commonLLVM = common ? ctx.getLLVMType(common) : nullptr;
     auto finishBranch = [&ctx, commonLLVM](ExprAST& branch, llvm::Value* val) -> llvm::Value* {
         if (branch.isLValue && branch.type && branch.type->kind != TypeKind::Array) {
-            val = ctx.loadValue(val, branch.type);
+            val = readLValue(ctx, branch, val);
         }
         if (val && branch.type) {
             if (llvm::Type* dest = commonLLVM) {
@@ -1620,7 +1682,7 @@ llvm::Value* CastExprAST::codegen(CodegenContext& ctx) {
     if (!targetLLVMType) return nullptr;
 
     if (expr->isLValue) {
-        val = emitLoad(ctx, val, expr->type);
+        val = readLValue(ctx, *expr, val);
     }
 
     // `reinterpret_cast` reinterprets the bit pattern of same-width scalars
@@ -1654,6 +1716,17 @@ llvm::Value* PostfixIncDecExprAST::codegen(CodegenContext& ctx) {
     if (!addr) return nullptr;
 
     auto& builder = ctx.getBuilder();
+    // P1-07 / CG-09: bit-field operand — RMW, return the OLD value.
+    if (operand->isBitFieldAccess()) {
+        auto* ma = static_cast<MemberAccessExprAST*>(operand.get());
+        Type* ft = stripTypedefsT12(operand->type);
+        llvm::Value* oldVal = ctx.loadBitFieldValue(addr, ma->bitOffset, ma->bitWidth, ft);
+        llvm::Value* one = llvm::ConstantInt::get(oldVal->getType(), 1);
+        llvm::Value* newVal = isIncrement ? builder.CreateAdd(oldVal, one, "postinc")
+                                          : builder.CreateSub(oldVal, one, "postdec");
+        ctx.storeBitFieldValue(addr, ma->bitOffset, ma->bitWidth, ft, newVal);
+        return oldVal;
+    }
     llvm::Type* loadType = operand->type ? ctx.getLLVMType(operand->type) : llvm::Type::getInt32Ty(ctx.getContext());
     llvm::Value* oldVal = builder.CreateLoad(loadType, addr, "postold");
     llvm::Value* one = llvm::ConstantInt::get(loadType->isIntegerTy() ? loadType : llvm::Type::getInt32Ty(ctx.getContext()), 1);
@@ -1668,7 +1741,7 @@ llvm::Value* ArrayAccessExprAST::codegen(CodegenContext& ctx) {
     if (!arrVal || !idxVal) return nullptr;
 
     if (index->isLValue) {
-        idxVal = emitLoad(ctx, idxVal, index->type);
+        idxVal = readLValue(ctx, *index, idxVal);
     }
 
     // Determine the element type and, for a pointer operand, load the pointer
@@ -1759,6 +1832,55 @@ static llvm::Value* emitClassFieldGEP(CodegenContext& ctx, Type* aggType,
     return nullptr;
 }
 
+// P1-07 / CG-09: bit-field member GEP — walk the inheritance chain to the
+// defining aggregate and GEP to the storage unit. `unitIndex` is the absolute
+// LLVM field index recorded at materialization (base sub-object occupies slot
+// 0, so no +1 adjustment is needed here). Records bitOffset on the node for
+// the RMW read/write helpers.
+static llvm::Value* emitBitFieldGEP(CodegenContext& ctx, Type* aggType,
+                                    llvm::Value* objPtr, MemberAccessExprAST& node) {
+    auto& builder = ctx.getBuilder();
+    Type* cur = aggType;
+    llvm::Value* curPtr = objPtr;
+    int walkDepth = 0;
+    while (cur) {
+        std::unordered_map<std::string, BitFieldLayout>* bf = nullptr;
+        std::string baseClassName;
+        Type* baseType = nullptr;
+        if (cur->kind == TypeKind::Class) {
+            auto* ct = static_cast<ClassType*>(cur);
+            bf = &ct->bitFields;
+            baseClassName = ct->baseClass;
+            baseType = ct->base;
+        } else if (cur->kind == TypeKind::Struct) {
+            auto* st = static_cast<StructType*>(cur);
+            bf = &st->bitFields;
+            baseClassName = st->baseClass;
+            baseType = st->base;
+        } else {
+            break;
+        }
+        auto it = bf->find(node.memberName);
+        if (it != bf->end()) {
+            node.bitOffset = it->second.bitOffset;
+            llvm::Type* curLLVM = ctx.getLLVMType(cur);
+            if (!curLLVM) return nullptr;
+            return builder.CreateStructGEP(curLLVM, curPtr, it->second.unitIndex, "bfunit");
+        }
+        if (baseClassName.empty()) break;
+        if (!baseType || (baseType->kind != TypeKind::Class &&
+                          baseType->kind != TypeKind::Struct)) {
+            break;
+        }
+        llvm::Type* curLLVM = ctx.getLLVMType(cur);
+        if (!curLLVM) break;
+        curPtr = builder.CreateStructGEP(curLLVM, curPtr, 0, "base");
+        cur = baseType;
+        if (++walkDepth > 64) break;
+    }
+    return nullptr;
+}
+
 llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
     if (auto* ct = ctConstantOrNull(ctx, *this)) return ct;
     // TYP-12: slice `.len` extracts the length field of the {ptr, len} view.
@@ -1827,6 +1949,13 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
     if (valType && valType->kind == TypeKind::Union) {
         llvm::Type* unionLLVM = ctx.getLLVMType(valType);
         if (!unionLLVM) return nullptr;
+        // P1-07: union 位域——单元即字段 0；记录 bitOffset（恒 0）供 RMW。
+        if (isBitField) {
+            auto it = static_cast<UnionType*>(valType)->bitFields.find(memberName);
+            if (it != static_cast<UnionType*>(valType)->bitFields.end()) {
+                bitOffset = it->second.bitOffset;
+            }
+        }
         return builder.CreateStructGEP(unionLLVM, objVal, 0, "unionmember");
     }
     if (valType && valType->kind == TypeKind::Pointer &&
@@ -1836,11 +1965,25 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
         }
         llvm::Type* unionLLVM = ctx.getLLVMType(valBase);
         if (!unionLLVM) return nullptr;
+        // P1-07: union 位域——记录 bitOffset 供 RMW。
+        if (isBitField) {
+            auto it = static_cast<UnionType*>(valBase)->bitFields.find(memberName);
+            if (it != static_cast<UnionType*>(valBase)->bitFields.end()) {
+                bitOffset = it->second.bitOffset;
+            }
+        }
         return builder.CreateStructGEP(unionLLVM, objVal, 0, "unionmember");
     }
 
     if (valType && valType->kind == TypeKind::Struct) {
         auto* structType = static_cast<StructType*>(valType);
+        // P1-07: 位域成员 → 存储单元 GEP（先于名字扫描——物化后 fields
+        // 无位域名，普通扫描会误 GEP 到字段 0）。
+        if (isBitField) {
+            if (auto* gep = emitBitFieldGEP(ctx, valType, objVal, *this)) {
+                return gep;
+            }
+        }
         // INH-01: chain-aware GEP first (inherited fields live in the base
         // sub-object); falls back to the local scan below.
         if (auto* gep = emitClassFieldGEP(ctx, valType, objVal, memberName)) {
@@ -1855,6 +1998,12 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
         objType = ctx.getLLVMType(valType);
     } else if (valType && valType->kind == TypeKind::Class) {
         auto* classType = static_cast<ClassType*>(valType);
+        // P1-07: 位域成员 → 存储单元 GEP（链式：定义类型可能为基类）。
+        if (isBitField) {
+            if (auto* gep = emitBitFieldGEP(ctx, classType, objVal, *this)) {
+                return gep;
+            }
+        }
         if (auto* gep = emitClassFieldGEP(ctx, classType, objVal, memberName)) {
             return gep;
         }
@@ -1869,6 +2018,12 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
         // of a variable that stores the pointer (MEM-10).
         if (object->isLValue) {
             objVal = builder.CreateLoad(llvm::PointerType::get(ctx.getContext(), 0), objVal, "deref");
+        }
+        // P1-07: 位域成员 → 存储单元 GEP。
+        if (isBitField) {
+            if (auto* gep = emitBitFieldGEP(ctx, valBase, objVal, *this)) {
+                return gep;
+            }
         }
         if (auto* gep = emitClassFieldGEP(ctx, valBase, objVal, memberName)) {
             return gep;
@@ -1886,6 +2041,12 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
         // Load the pointer unless the object already produced a pointer value.
         if (object->isLValue) {
             objVal = builder.CreateLoad(llvm::PointerType::get(ctx.getContext(), 0), objVal, "deref");
+        }
+        // P1-07: 位域成员 → 存储单元 GEP。
+        if (isBitField) {
+            if (auto* gep = emitBitFieldGEP(ctx, classType, objVal, *this)) {
+                return gep;
+            }
         }
         if (auto* gep = emitClassFieldGEP(ctx, classType, objVal, memberName)) {
             return gep;
@@ -1925,7 +2086,7 @@ llvm::Value* InitializerListExprAST::codegen(CodegenContext& ctx) {
 static llvm::Value* builtinObjectValue(CodegenContext& ctx, MethodCallExprAST& node) {
     llvm::Value* objVal = node.object->codegen(ctx);
     if (!objVal) return nullptr;
-    if (node.object->isLValue) objVal = ctx.loadValue(objVal, node.object->type);
+    if (node.object->isLValue) objVal = readLValue(ctx, *node.object, objVal);
     return objVal;
 }
 
@@ -1959,7 +2120,7 @@ static llvm::Value* codegenBuiltinMethod(CodegenContext& ctx, MethodCallExprAST&
             llvm::Value* ptr = builder.CreateExtractValue(obj, 0, "str.ptr");
             llvm::Value* idx = node.args[0]->codegen(ctx);
             if (!idx) return nullptr;
-            if (node.args[0]->isLValue) idx = ctx.loadValue(idx, node.args[0]->type);
+            if (node.args[0]->isLValue) idx = readLValue(ctx, *node.args[0], idx);
             idx = builder.CreateSExtOrTrunc(idx, i64Ty, "str.idx64");
             llvm::Value* bytePtr =
                 builder.CreateGEP(i8Ty, ptr, idx, "str.bytep");
@@ -1975,7 +2136,7 @@ static llvm::Value* codegenBuiltinMethod(CodegenContext& ctx, MethodCallExprAST&
             llvm::Value* ptr = builder.CreateExtractValue(obj, 0, "str.ptr");
             llvm::Value* idx = node.args[0]->codegen(ctx);
             if (!idx) return nullptr;
-            if (node.args[0]->isLValue) idx = ctx.loadValue(idx, node.args[0]->type);
+            if (node.args[0]->isLValue) idx = readLValue(ctx, *node.args[0], idx);
             idx = builder.CreateSExtOrTrunc(idx, i64Ty, "str.idx64");
             return builder.CreateCall(lenAtFn, {ptr, idx}, "str.width");
         }
@@ -1994,7 +2155,7 @@ static llvm::Value* codegenBuiltinMethod(CodegenContext& ctx, MethodCallExprAST&
             llvm::Value* nv = node.args[0]->codegen(ctx);
             if (!nv) return nullptr;
             if (node.args[0]->isLValue)
-                nv = ctx.loadValue(nv, node.args[0]->type);
+                nv = readLValue(ctx, *node.args[0], nv);
             Type* nArg = node.args[0]->type;
             while (nArg && nArg->kind == TypeKind::Typedef)
                 nArg = static_cast<TypedefType*>(nArg)->aliasedType;
@@ -2024,7 +2185,7 @@ static llvm::Value* codegenBuiltinMethod(CodegenContext& ctx, MethodCallExprAST&
             auto index64 = [&](ExprAST& arg) -> llvm::Value* {
                 llvm::Value* v = arg.codegen(ctx);
                 if (!v) return nullptr;
-                if (arg.isLValue) v = ctx.loadValue(v, arg.type);
+                if (arg.isLValue) v = readLValue(ctx, arg, v);
                 return builder.CreateSExtOrTrunc(v, i64Ty, "sub.idx64");
             };
             llvm::Value* begin = index64(*node.args[0]);
@@ -2095,7 +2256,7 @@ static llvm::Value* builtinStrArg(CodegenContext& ctx, ExprAST* arg) {
     auto& builder = ctx.getBuilder();
     llvm::Value* v = arg->codegen(ctx);
     if (!v) return nullptr;
-    if (arg->isLValue) v = ctx.loadValue(v, arg->type);
+    if (arg->isLValue) v = readLValue(ctx, *arg, v);
     Type* t = arg->type;
     while (t && t->kind == TypeKind::Typedef)
         t = static_cast<TypedefType*>(t)->aliasedType;
@@ -2238,7 +2399,7 @@ static llvm::Value* codegenStringMethod(CodegenContext& ctx, MethodCallExprAST& 
             if (!addr) return nullptr;
             llvm::Value* ch = node.args[0]->codegen(ctx);
             if (!ch) return nullptr;
-            if (node.args[0]->isLValue) ch = ctx.loadValue(ch, node.args[0]->type);
+            if (node.args[0]->isLValue) ch = readLValue(ctx, *node.args[0], ch);
             ch = builder.CreateSExtOrTrunc(ch, i8Ty, "push.c8");
 
             llvm::Value* v = builder.CreateLoad(strLLVM, addr, "push.v");
@@ -2292,7 +2453,7 @@ static llvm::Value* codegenStrFromC(CodegenContext& ctx, CallExprAST& node) {
 
     llvm::Value* arg = node.args[0]->codegen(ctx);
     if (!arg) return nullptr;
-    if (node.args[0]->isLValue) arg = ctx.loadValue(arg, node.args[0]->type);
+    if (node.args[0]->isLValue) arg = readLValue(ctx, *node.args[0], arg);
 
     Type* argTy = node.args[0]->type;
     while (argTy && argTy->kind == TypeKind::Typedef) {

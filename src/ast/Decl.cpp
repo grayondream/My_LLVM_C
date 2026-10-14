@@ -9,6 +9,19 @@
 #include <functional>
 #include <unordered_set>
 
+// P1-07 / CG-09: unified lvalue read (mirror of Expr.cpp's readLValue) —
+// bit-field lvalues are read via loadBitFieldValue, everything else via
+// loadValue. Non-lvalues pass through unchanged.
+static llvm::Value* readLValue(CodegenContext& ctx, ExprAST& e, llvm::Value* v) {
+    if (!v) return nullptr;
+    if (!e.isLValue) return v;
+    if (e.isBitFieldAccess()) {
+        auto& ma = static_cast<MemberAccessExprAST&>(e);
+        return ctx.loadBitFieldValue(v, ma.bitOffset, ma.bitWidth, e.type);
+    }
+    return ctx.loadValue(v, e.type);
+}
+
 static llvm::Constant* foldToConstant(CodegenContext& ctx, const FoldedValue& fv) {
     switch (fv.type) {
         case FoldedValue::INT:
@@ -36,7 +49,7 @@ static void storeScalarInitializer(CodegenContext& ctx, llvm::Value* dest,
                                    Type* targetType) {
     llvm::Value* v = expr.codegen(ctx);
     if (!v) return;
-    if (expr.isLValue) v = ctx.loadValue(v, expr.type);
+    if (expr.isLValue) v = readLValue(ctx, expr, v);
     if (targetType) v = ctx.castValue(v, expr.type, ctx.getLLVMType(targetType));
     if (destLLVM) v = ctx.castValue(v, destLLVM);
     ctx.getBuilder().CreateStore(v, dest);
@@ -78,6 +91,22 @@ static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
             llvm::Value* memberPtr = builder.CreateStructGEP(destLLVM, dest, 0, "unioninit");
             Type* mtype = ut->members[0].type;
             auto& item = *init->initializers[0];
+            // P1-07 / AGG-06: 位域成员 → 初始值 RMW 进存储单元。
+            if (ut->members[0].bitWidth != 0 || ut->members[0].name.empty()) {
+                auto it = ut->bitFields.find(ut->members[0].name);
+                if (it != ut->bitFields.end()) {
+                    llvm::Value* v = item.codegen(ctx);
+                    if (v) {
+                        v = readLValue(ctx, item, v);
+                        if (llvm::Type* dt = ctx.getLLVMType(mtype)) {
+                            v = ctx.castValue(v, item.type, dt);
+                        }
+                        ctx.storeBitFieldValue(memberPtr, it->second.bitOffset,
+                                               it->second.bitWidth, mtype, v);
+                    }
+                }
+                break;
+            }
             if (auto* nested = dynamic_cast<InitializerListExprAST*>(&item)) {
                 emitAggregateInitializer(ctx, memberPtr, mtype, nested);
             } else {
@@ -115,41 +144,87 @@ static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
         case TypeKind::Class: {
             std::vector<FieldInfo>* fields = nullptr;
             unsigned baseOffset = 0;
+            std::vector<FieldInfo>* semFields = nullptr;
+            std::unordered_map<std::string, BitFieldLayout>* bfMap = nullptr;
             if (type->kind == TypeKind::Struct) {
-                fields = &static_cast<StructType*>(type)->fields;
+                auto* st = static_cast<StructType*>(type);
+                fields = &st->fields;
+                if (!st->semanticFields.empty()) {
+                    semFields = &st->semanticFields;
+                    bfMap = &st->bitFields;
+                }
             } else {
                 auto* ct = static_cast<ClassType*>(type);
                 fields = &ct->fields;
                 if (!ct->baseClass.empty()) baseOffset = 1;
+                if (!ct->semanticFields.empty()) {
+                    semFields = &ct->semanticFields;
+                    bfMap = &ct->bitFields;
+                }
+            }
+            // P1-07 / AGG-06: 单个初始值项写入一个字段（嵌套/string 深拷贝/标量）。
+            auto emitFieldItem = [&](ExprAST& item, Type* ftype, llvm::Value* fptr) {
+                if (auto* nested = dynamic_cast<InitializerListExprAST*>(&item)) {
+                    emitAggregateInitializer(ctx, fptr, ftype, nested);
+                    return;
+                }
+                Type* fr = ftype;
+                while (fr && fr->kind == TypeKind::Typedef)
+                    fr = static_cast<TypedefType*>(fr)->aliasedType;
+                // I4 (D7): brace-init string 字段活值深拷贝（新鲜值直接 store）。
+                if (fr && fr->kind == TypeKind::String &&
+                    !ctx.isFreshStringValue(item)) {
+                    llvm::Value* v = item.codegen(ctx);
+                    if (v) {
+                        v = readLValue(ctx, item, v);
+                        v = ctx.castValue(v, item.type, ctx.getLLVMType(ftype));
+                        auto savedIP = ctx.getBuilder().saveIP();
+                        llvm::Function* copyFn = ctx.getStringCopyFn();
+                        ctx.getBuilder().restoreIP(savedIP);
+                        ctx.getBuilder().CreateCall(copyFn, {fptr, v});
+                    }
+                } else {
+                    storeScalarInitializer(ctx, fptr, ctx.getLLVMType(ftype), item, ftype);
+                }
+            };
+            if (semFields) {
+                // P1-07 / AGG-06: 位域感知初始化——按语义字段序消费初始值；
+                // 位域值 RMW 进存储单元，普通字段按物化索引 GEP。
+                std::unordered_map<std::string, unsigned> nameIdx;
+                for (unsigned k = 0; k < fields->size(); ++k) {
+                    if (!(*fields)[k].name.empty()) nameIdx[(*fields)[k].name] = k;
+                }
+                for (size_t i = 0; i < semFields->size() && i < init->initializers.size(); ++i) {
+                    auto& sf = (*semFields)[i];
+                    auto& item = *init->initializers[i];
+                    if (sf.bitWidth != 0 || sf.name.empty()) {
+                        auto it = bfMap->find(sf.name);
+                        if (it == bfMap->end()) continue;
+                        llvm::Value* fptr = builder.CreateStructGEP(
+                            destLLVM, dest, baseOffset + it->second.unitIndex, "bfinit");
+                        llvm::Value* v = item.codegen(ctx);
+                        if (!v) continue;
+                        v = readLValue(ctx, item, v);
+                        if (llvm::Type* dt = ctx.getLLVMType(sf.type)) {
+                            v = ctx.castValue(v, item.type, dt);
+                        }
+                        ctx.storeBitFieldValue(fptr, it->second.bitOffset,
+                                               it->second.bitWidth, sf.type, v);
+                    } else {
+                        auto nit = nameIdx.find(sf.name);
+                        if (nit == nameIdx.end()) continue;
+                        emitFieldItem(item, sf.type, builder.CreateStructGEP(
+                            destLLVM, dest, baseOffset + nit->second, "fieldinit"));
+                    }
+                }
+                break;
             }
             for (size_t i = 0; i < fields->size() && i < init->initializers.size(); ++i) {
                 auto& item = *init->initializers[i];
                 Type* ftype = (*fields)[i].type;
                 llvm::Value* fptr = builder.CreateStructGEP(
                     destLLVM, dest, baseOffset + (unsigned)i, "fieldinit");
-                if (auto* nested = dynamic_cast<InitializerListExprAST*>(&item)) {
-                    emitAggregateInitializer(ctx, fptr, ftype, nested);
-                } else {
-                    // I4 (D7): brace-init string 字段活值深拷贝（新鲜值直接 store）。
-                    Type* fr = ftype;
-                    while (fr && fr->kind == TypeKind::Typedef)
-                        fr = static_cast<TypedefType*>(fr)->aliasedType;
-                    if (fr && fr->kind == TypeKind::String &&
-                        !ctx.isFreshStringValue(item)) {
-                        llvm::Value* v = item.codegen(ctx);
-                        if (v) {
-                            if (item.isLValue) v = ctx.loadValue(v, item.type);
-                            v = ctx.castValue(v, item.type, ctx.getLLVMType(ftype));
-                            auto savedIP = ctx.getBuilder().saveIP();
-                            llvm::Function* copyFn = ctx.getStringCopyFn();
-                            ctx.getBuilder().restoreIP(savedIP);
-                            ctx.getBuilder().CreateCall(copyFn, {fptr, v});
-                        }
-                    } else {
-                        storeScalarInitializer(ctx, fptr, ctx.getLLVMType(ftype),
-                                               item, ftype);
-                    }
-                }
+                emitFieldItem(item, ftype, fptr);
             }
             break;
         }
@@ -375,7 +450,7 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
                 // An lvalue initializer denotes a location; load its value
                 // (arrays decay to a pointer) before storing it.
                 if (initExpr->isLValue) {
-                    initVal = ctx.loadValue(initVal, initExpr->type);
+                    initVal = readLValue(ctx, *initExpr, initVal);
                 }
                 initVal = ctx.castValue(initVal, initExpr->type, llvmType);
                 // TYP-12: array initializer decays to a slice view.
@@ -625,7 +700,7 @@ llvm::Value* ArrayDeclAST::codegen(CodegenContext& ctx) {
     } else if (initExpr) {
         llvm::Value* initVal = initExpr->codegen(ctx);
         if (initVal) {
-            if (initExpr->isLValue) initVal = ctx.loadValue(initVal, initExpr->type);
+            if (initExpr->isLValue) initVal = readLValue(ctx, *initExpr, initVal);
             ctx.getBuilder().CreateStore(initVal, alloca);
         }
     }

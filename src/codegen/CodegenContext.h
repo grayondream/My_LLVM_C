@@ -45,6 +45,17 @@ public:
     // their first element instead of being loaded by value.
     llvm::Value* loadValue(llvm::Value* ptr, Type* type);
 
+    // P1-07 / CG-09: bit-field storage-unit read/write (read-modify-write).
+    // unitAddr points at the integer storage unit (materialized LLVM field);
+    // the field spans [bitOffset, bitOffset+bitWidth) of that unit, counted
+    // from the LSB. loadBitFieldValue returns the field as a base-type value
+    // (bool → i1; signed → sext; unsigned → zext). storeBitFieldValue clears
+    // the field bits, truncates+shifts the value in, and stores (no atomicity).
+    llvm::Value* loadBitFieldValue(llvm::Value* unitAddr, uint64_t bitOffset,
+                                   uint32_t bitWidth, Type* fieldType);
+    void storeBitFieldValue(llvm::Value* unitAddr, uint64_t bitOffset,
+                            uint32_t bitWidth, Type* fieldType, llvm::Value* val);
+
     llvm::Type* getLLVMType(Type* type);
 
     void setSourceFile(const std::string& file);

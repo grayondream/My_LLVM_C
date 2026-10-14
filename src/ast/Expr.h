@@ -92,6 +92,9 @@ public:
     std::optional<double> ctFloat;
 
     virtual llvm::Value* codegen(CodegenContext& ctx) = 0;
+    // P1-07 / CG-09: bit-field member access predicate (only MemberAccessExprAST
+    // overrides). codegen uses it to route reads through readLValue.
+    virtual bool isBitFieldAccess() const { return false; }
 };
 
 class NumberExprAST : public ExprAST {
@@ -330,9 +333,12 @@ public:
     std::string memberName;
     // P1-07 / SEM-12: bit-field access metadata — sema sets isBitField/bitWidth
     // when the resolved field is a bit-field (isLValue stays true; codegen
-    // returns the storage-unit address). codegen fills bitOffset (Task 4).
+    // returns the storage-unit address). codegen fills bitOffset from the
+    // defining type's bitFields map.
     bool isBitField = false;
     uint32_t bitWidth = 0;
+    uint64_t bitOffset = 0;
+    bool isBitFieldAccess() const override { return isBitField; }
 
 
     MemberAccessExprAST(MemberAccessKind kind, std::unique_ptr<ExprAST> obj, const std::string& member)
