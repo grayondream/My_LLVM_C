@@ -516,6 +516,19 @@ CompileTimeEvaluator::evalLayoutQuery(MethodCallExprAST& node, ASTNode& at) {
             m_module->getDataLayout(),
             [this](Type* tt) { return toLLVMType(tt); },
             [this](const std::string& n) -> Type* { return m_sema.resolveTypeByName(n); });
+        // P1-07 / SEM-12: offset_of 对位域成员报错（C 语义；LayoutBuilder 已
+        // 在物化时填充 bitFields 表）。
+        bool isBitFieldField = false;
+        if (queriedType->kind == TypeKind::Struct)
+            isBitFieldField = static_cast<StructType*>(queriedType)->bitFields.count(field->value) > 0;
+        else if (queriedType->kind == TypeKind::Class)
+            isBitFieldField = static_cast<ClassType*>(queriedType)->bitFields.count(field->value) > 0;
+        else if (queriedType->kind == TypeKind::Union)
+            isBitFieldField = static_cast<UnionType*>(queriedType)->bitFields.count(field->value) > 0;
+        if (isBitFieldField) {
+            m_sema.emitError("cannot take offset of a bit-field", at);
+            return std::nullopt;
+        }
         auto offIt = LR.fieldOffsets.find(field->value);
         if (offIt == LR.fieldOffsets.end()) {
             m_sema.emitError("unknown field '" + field->value

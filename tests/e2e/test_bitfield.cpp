@@ -183,3 +183,76 @@ TEST_F(BitFieldE2E, AddrOfRejected) {
     ASSERT_FALSE(errs.empty());
     EXPECT_EQ(errs.front().code, DiagnosticCode::SemBitFieldNotAddressable);
 }
+
+// ---- Task 3: 布局物化（System V 存储单元分配）----
+
+// 布局 pin：compile_time.size_of/align_of 与 IR 布局同源（LayoutBuilder 单源）。
+TEST_F(BitFieldE2E, LayoutPack29) {
+    // a(3)+b(29) 共单元0，c(3) 放不下 → 单元1（offset 4），size 8。
+    EXPECT_EQ(runSource(R"(
+        struct S { int32 a : 3; int32 b : 29; int32 c : 3; };
+        int32 main() {
+            return (compile_time.size_of(struct S) == 8 &&
+                    compile_time.align_of(struct S) == 4) ? 0 : 1;
+        }
+    )", "bf_l1.c"), 0);
+}
+
+TEST_F(BitFieldE2E, LayoutSplit28) {
+    // a 单元0，b 放不下 → 单元1（offset 4），size 8。
+    EXPECT_EQ(runSource(R"(
+        struct S { int32 a : 28; int32 b : 28; };
+        int32 main() { return (compile_time.size_of(struct S) == 8) ? 0 : 1; }
+    )", "bf_l2.c"), 0);
+}
+
+TEST_F(BitFieldE2E, LayoutUint8Share) {
+    // uint8 a:3 + uint8 b:3 共享 1 字节单元。
+    EXPECT_EQ(runSource(R"(
+        struct S { uint8 a : 3; uint8 b : 3; };
+        int32 main() { return (compile_time.size_of(struct S) == 1) ? 0 : 1; }
+    )", "bf_l3.c"), 0);
+}
+
+TEST_F(BitFieldE2E, LayoutZeroWidthAlign) {
+    // 零宽对齐：a 单元0，b 单元1（offset 4），size 8。
+    EXPECT_EQ(runSource(R"(
+        struct S { int32 a : 3; int32 : 0; int32 b : 3; };
+        int32 main() { return (compile_time.size_of(struct S) == 8) ? 0 : 1; }
+    )", "bf_l4.c"), 0);
+}
+
+TEST_F(BitFieldE2E, LayoutUnnamedPad) {
+    // 无名填充：a + 填充 + b 共 1 单元，size 4。
+    EXPECT_EQ(runSource(R"(
+        struct S { int32 a : 3; int32 : 5; int32 b : 3; };
+        int32 main() { return (compile_time.size_of(struct S) == 4) ? 0 : 1; }
+    )", "bf_l5.c"), 0);
+}
+
+TEST_F(BitFieldE2E, LayoutBoolUnit) {
+    // bool 位域 → 1 字节存储单元。
+    EXPECT_EQ(runSource(R"(
+        struct S { bool b : 1; };
+        int32 main() { return (compile_time.size_of(struct S) == 1) ? 0 : 1; }
+    )", "bf_l6.c"), 0);
+}
+
+TEST_F(BitFieldE2E, LayoutPackedTight) {
+    // [[packed]]：单元对齐 1 无填充。int32 a:24 + int32 b:8 → 一个 4B 单元，size 4。
+    EXPECT_EQ(runSource(R"(
+        [[packed]] struct S { int32 a : 24; int32 b : 8; };
+        int32 main() { return (compile_time.size_of(struct S) == 4) ? 0 : 1; }
+    )", "bf_l7.c"), 0);
+}
+
+TEST_F(BitFieldE2E, OffsetOfBitFieldRejected) {
+    // offset_of 对位域报错（C 语义）。runSource 对任何 sema 错误 ADD_FAILURE
+    //（正向专用），负例走显式 sema 管线。
+    auto errs = semaErrorsOf(R"(
+        struct S { int32 a : 3; };
+        int32 main() { return (compile_time.offset_of(struct S, "a") == 0) ? 0 : 1; }
+    )", "bf_off.c");
+    ASSERT_FALSE(errs.empty());
+}
+

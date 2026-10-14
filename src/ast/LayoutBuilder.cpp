@@ -15,6 +15,22 @@ static uint64_t alignUp(uint64_t v, uint64_t a) {
     return a == 0 ? v : (v + a - 1) / a * a;
 }
 
+// P1-07 / AGG-06: 位域存储单元类型——Bool → i8（1 字节单元），其余基础类型原样
+// （spec §4.4：bool 单元须 1 字节；intN 单元即 iN 自然对象）。
+static Type* bitFieldStorageType(Type* base) {
+    return (base && base->kind == TypeKind::Bool)
+               ? TypeContext::instance().getInt8()
+               : base;
+}
+
+// P1-07 / AGG-06: 字段序列是否含位域（bitWidth != 0 含负宽/超宽，或无名含零宽）。
+static bool hasBitFields(const std::vector<FieldInfo>& flds) {
+    for (auto& f : flds) {
+        if (f.bitWidth != 0 || f.name.empty()) return true;
+    }
+    return false;
+}
+
 LayoutResult LayoutBuilder::buildAggregate(Type* agg, llvm::LLVMContext& ctx,
                                            const llvm::DataLayout& dl,
                                            const TypeConverter& conv,
@@ -46,6 +62,12 @@ LayoutResult LayoutBuilder::buildAggregate(Type* agg, llvm::LLVMContext& ctx,
     }
 
     bool annotated = lr.isPacked || forcedAlign || (fieldAligns && !fieldAligns->empty());
+    // P1-07 / AGG-06: 含位域的聚合强制物化——存储单元以整数 LLVM 伪字段落盘。
+    // 物化前的原始字段序快照进 semanticFields，位域布局表持久化到 Type 对象。
+    const bool hasBF = flds ? hasBitFields(*flds) : false;
+    auto* bitFields = agg->kind == TypeKind::Struct
+                          ? &static_cast<StructType*>(agg)->bitFields
+                          : &static_cast<ClassType*>(agg)->bitFields;
 
     // 基类只解析/转换一次（评审 C1：物化与 fieldTypes 两个阶段共享）。
     llvm::Type* baseLLVM = nullptr;
@@ -61,8 +83,8 @@ LayoutResult LayoutBuilder::buildAggregate(Type* agg, llvm::LLVMContext& ctx,
     // 评审 C1：物化后 fieldTypes 只走 padded 列表，基类不再二次推入）。
     std::vector<uint64_t> targetOffsets; // 命名字段的目标偏移（不含基类）
     uint64_t structAlign = 1;
-    const bool usePaddedList = materialized && annotated;
-    if (!materialized && annotated) {
+    const bool usePaddedList = materialized && (annotated || hasBF);
+    if (!materialized && (annotated || hasBF)) {
         std::vector<FieldInfo> padded;
         uint64_t cursor = 0;
         if (hasBase) {
@@ -73,30 +95,92 @@ LayoutResult LayoutBuilder::buildAggregate(Type* agg, llvm::LLVMContext& ctx,
                     structAlign, dl.getABITypeAlign(baseLLVM).value());
             }
         }
+        // P1-07 / AGG-06: 位域存储单元状态。当前单元 = padded 中最后压入的
+        // 整数伪字段；其字节已计入 cursor。System V / GCC 分配规则见下。
+        int curUnitBytes = 0;   // 当前单元字节大小（0 = 无当前单元）
+        int curUnitBits = 0;    // 当前单元位容量
+        int curBitUsed = 0;     // 当前单元已用位数
+        uint32_t curUnitIndex = 0;
+        // 快照物化前原始字段序（含位域；常量构造按语义字段消费初始值）。
+        if (agg->kind == TypeKind::Struct)
+            static_cast<StructType*>(agg)->semanticFields = *flds;
+        else
+            static_cast<ClassType*>(agg)->semanticFields = *flds;
+        auto flushUnit = [&]() {
+            curUnitBytes = 0; curUnitBits = 0; curBitUsed = 0;
+        };
         for (auto& f : *flds) {
-            llvm::Type* ft = conv(f.type);
-            if (!ft) continue;
-            uint64_t sz = dl.getTypeAllocSize(ft);
-            uint64_t nat = dl.getABITypeAlign(ft).value();
-            uint64_t ta = nat;
-            if (lr.isPacked) ta = 1;
-            auto it = fieldAligns->find(f.name);
-            const bool explicitAlign = it != fieldAligns->end();
-            if (explicitAlign) ta = std::max(ta, it->second);
-            // packed 语义（GNU）：自然对齐不抬整体对齐；显式字段对齐仍抬。
-            if (!lr.isPacked || explicitAlign) {
-                structAlign = std::max(structAlign, ta);
+            if (f.bitWidth != 0 || f.name.empty()) {
+                // ---- 位域（命名 / 无名填充 / 零宽对齐）----
+                Type* storageTy = bitFieldStorageType(f.type);
+                llvm::Type* ft = conv(storageTy);
+                if (!ft) continue;
+                int uBytes = static_cast<int>(dl.getTypeAllocSize(ft));
+                int uAlign = lr.isPacked
+                                 ? 1
+                                 : static_cast<int>(dl.getABITypeAlign(ft).value());
+                int uBits = uBytes * 8;
+                if (f.bitWidth == 0 && f.name.empty()) {
+                    // 零宽无名位域：结束当前单元（下一位域强制新单元）。
+                    flushUnit();
+                    continue;
+                }
+                // System V：新单元当且仅当 无当前单元 / 存储单元尺寸不同
+                // （基础类型不同，GCC 行为）/ 放不下（不跨单元拆分）。
+                bool needNew = curUnitBytes == 0 || curUnitBytes != uBytes ||
+                               curBitUsed + f.bitWidth > uBits;
+                if (needNew) {
+                    uint64_t off = alignUp(cursor, uAlign);
+                    if (off > cursor) {
+                        padded.push_back(FieldInfo{
+                            "", new ArrayType(TypeContext::instance().getInt8(),
+                                              static_cast<int>(off - cursor)),
+                            {}});
+                    }
+                    padded.push_back(FieldInfo{"", storageTy, {}, 0});
+                    curUnitIndex = static_cast<uint32_t>(padded.size()) - 1;
+                    cursor = off + uBytes;
+                    curUnitBytes = uBytes;
+                    curUnitBits = uBits;
+                    curBitUsed = 0;
+                    // packed 语义（GNU）：自然对齐不抬整体对齐。
+                    if (!lr.isPacked) {
+                        structAlign = std::max<uint64_t>(structAlign, uAlign);
+                    }
+                }
+                if (!f.name.empty()) {
+                    (*bitFields)[f.name] = {curUnitIndex,
+                                            static_cast<uint32_t>(curBitUsed),
+                                            static_cast<uint32_t>(f.bitWidth)};
+                }
+                curBitUsed += f.bitWidth;
+            } else {
+                // ---- 普通字段 ----
+                flushUnit();
+                llvm::Type* ft = conv(f.type);
+                if (!ft) continue;
+                uint64_t sz = dl.getTypeAllocSize(ft);
+                uint64_t nat = dl.getABITypeAlign(ft).value();
+                uint64_t ta = nat;
+                if (lr.isPacked) ta = 1;
+                auto it = fieldAligns->find(f.name);
+                const bool explicitAlign = it != fieldAligns->end();
+                if (explicitAlign) ta = std::max(ta, it->second);
+                // packed 语义（GNU）：自然对齐不抬整体对齐；显式字段对齐仍抬。
+                if (!lr.isPacked || explicitAlign) {
+                    structAlign = std::max(structAlign, ta);
+                }
+                uint64_t off = alignUp(cursor, ta);
+                if (off > cursor) {
+                    padded.push_back(FieldInfo{
+                        "", new ArrayType(TypeContext::instance().getInt8(),
+                                          static_cast<int>(off - cursor)),
+                        {}});
+                }
+                padded.push_back(f);
+                targetOffsets.push_back(off);
+                cursor = off + sz;
             }
-            uint64_t off = alignUp(cursor, ta);
-            if (off > cursor) {
-                padded.push_back(FieldInfo{
-                    "", new ArrayType(TypeContext::instance().getInt8(),
-                                      static_cast<int>(off - cursor)),
-                    {}});
-            }
-            padded.push_back(f);
-            targetOffsets.push_back(off);
-            cursor = off + sz;
         }
         if (forcedAlign) {
             structAlign = std::max(structAlign, forcedAlign);
@@ -119,7 +203,7 @@ LayoutResult LayoutBuilder::buildAggregate(Type* agg, llvm::LLVMContext& ctx,
     // fieldTypes：物化/注解路径下 flds 已含基类伪字段（1:1）；默认路径
     // 显式基类推入（评审 C1：二选一，杜绝双基类）。
     std::vector<llvm::Type*> fieldTypes;
-    if (usePaddedList || (!materialized && annotated)) {
+    if (usePaddedList || (!materialized && (annotated || hasBF))) {
         for (auto& f : *flds) {
             if (llvm::Type* ft = conv(f.type)) {
                 fieldTypes.push_back(ft);
@@ -158,9 +242,10 @@ LayoutResult LayoutBuilder::buildAggregate(Type* agg, llvm::LLVMContext& ctx,
         }
     }
 
-    // fieldOffsets：命名字段 → 偏移。注解路径 flds 与 LR.fields 1:1
-    // （基类/填充伪字段 name=""）；默认路径 LR.fields 前有基类槽。
-    if (annotated) {
+    // fieldOffsets：命名字段 → 偏移。物化/注解路径 flds 与 LR.fields 1:1
+    // （基类/填充/存储单元伪字段 name=""，位域自然无偏移）；默认路径
+    // LR.fields 前有基类槽。
+    if (annotated || hasBF) {
         for (size_t i = 0; i < flds->size() && i < lr.fields.size(); ++i) {
             if (!(*flds)[i].name.empty()) {
                 lr.fieldOffsets[(*flds)[i].name] = lr.fields[i].offset;
@@ -205,7 +290,13 @@ LayoutResult LayoutBuilder::buildUnion(UnionType* ut, llvm::LLVMContext& ctx,
     const uint64_t forcedAlign = ut->forcedAlign;
     llvm::Type* alignType = nullptr;
     for (auto& m : ut->members) {
-        llvm::Type* mt = conv(m.type);
+        // P1-07 / AGG-06: 位域成员以存储单元块（bitFieldStorageType）参与
+        // max size/align；布局表单元索引恒 0（union 单块、成员共享偏移 0），
+        // 位偏移 0（C 语义：各按自己的块解释，重叠于 union 基址）。
+        Type* mTy = (m.bitWidth != 0 || m.name.empty())
+                        ? bitFieldStorageType(m.type)
+                        : m.type;
+        llvm::Type* mt = conv(mTy);
         if (!mt) continue;
         uint64_t sz = dl.getTypeAllocSize(mt);
         uint64_t al = dl.getABITypeAlign(mt).value();
@@ -213,6 +304,9 @@ LayoutResult LayoutBuilder::buildUnion(UnionType* ut, llvm::LLVMContext& ctx,
         if (al > maxAlign) {
             maxAlign = al;
             alignType = mt;
+        }
+        if ((m.bitWidth != 0 || m.name.empty()) && !m.name.empty()) {
+            ut->bitFields[m.name] = {0, 0, static_cast<uint32_t>(m.bitWidth)};
         }
     }
     if (maxSize == 0) maxSize = 1;

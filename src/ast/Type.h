@@ -89,6 +89,14 @@ public:
         : Type(TypeKind::Array), elementType(elem), size(sz) {}
 };
 
+// P1-07 / AGG-06: 位域布局元组——(存储单元 LLVM 字段索引, 单元内位偏移, 位宽)。
+// LayoutBuilder 物化时填充进 StructType/ClassType/UnionType::bitFields。
+struct BitFieldLayout {
+    uint32_t unitIndex;
+    uint32_t bitOffset;
+    uint32_t bitWidth;
+};
+
 class StructType : public Type {
 public:
     std::string name;
@@ -111,6 +119,11 @@ public:
     // LayoutBuilder 首次构造时插入的 padding 伪字段（name=""）已落盘。
     bool layoutMaterialized = false;
     std::vector<FieldInfo> fields;
+    // P1-07 / PAR-10: 物化前原始字段序快照（LayoutBuilder 首次物化时填充；
+    // 常量构造/位域查表按语义字段消费，物化伪字段不占语义位）。
+    std::vector<FieldInfo> semanticFields;
+    // P1-07 / AGG-06: 位域布局表（LayoutBuilder 物化时填充）——字段名 → 布局。
+    std::unordered_map<std::string, BitFieldLayout> bitFields;
 
     StructType(const std::string& n)
         : Type(TypeKind::Struct), name(n) {}
@@ -135,6 +148,8 @@ public:
     bool reprC = false;
     uint64_t forcedAlign = 0;
     std::vector<FieldInfo> members;
+    // P1-07 / AGG-06: 位域布局表（union 成员共享偏移 0，unitIndex 恒 0）。
+    std::unordered_map<std::string, BitFieldLayout> bitFields;
     // Redef 轮: completion tracking (mirrors ClassType::isComplete) — a
     // forward declaration leaves the placeholder incomplete.
     bool isComplete{};
@@ -268,6 +283,10 @@ public:
     std::unordered_map<std::string, bool> fieldDeprecated;
     std::unordered_map<std::string, std::string> fieldDeprecatedMsg;
     bool layoutMaterialized = false;
+    // P1-07 / PAR-10: 物化前原始字段序快照（镜像 StructType）。
+    std::vector<FieldInfo> semanticFields;
+    // P1-07 / AGG-06: 位域布局表（镜像 StructType）。
+    std::unordered_map<std::string, BitFieldLayout> bitFields;
 
     ClassType(const std::string& n)
         : Type(TypeKind::Class), name(n) {}
