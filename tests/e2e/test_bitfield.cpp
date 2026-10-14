@@ -389,4 +389,32 @@ TEST_F(BitFieldE2E, StructCopy) {
     )", "bf_copy.c"), 0);
 }
 
+// ---- Task 5: 全局/static 位域初始化（常量构造位域感知）----
+
+TEST_F(BitFieldE2E, GlobalInitSharedUnit) {
+    // a 与 b 共享 4B 单元——全局常量须把两值 OR 进同一单元。
+    // （uint32 避免有符号 3 位域装不下 5 的 sext 语义。）
+    EXPECT_EQ(runSource(R"(
+        struct S { uint32 a : 3; uint32 b : 5; };
+        struct S g = { 5, 7 };
+        int32 main() {
+            if (g.a != 5 || g.b != 7) { return 1; }
+            return 0;
+        }
+    )", "bf_ginit.c"), 0);
+}
+
+TEST_F(BitFieldE2E, StaticLocalInit) {
+    // static 局部位域初始化：9 截断回 1。
+    EXPECT_EQ(runSource(R"(
+        struct S { uint32 a : 3; };
+        int32 main() {
+            static struct S s = { 9 };
+            if (s.a != 1) { return 1; }
+            return 0;
+        }
+    )", "bf_sinit.c"), 0);
+}
+
+
 

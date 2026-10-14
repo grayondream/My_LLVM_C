@@ -318,12 +318,81 @@ static llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
                 fields = &ct->fields;
                 hasBase = !ct->baseClass.empty();
             }
+            // P1-07 / AGG-06: getLLVMType 先触发 LayoutBuilder 物化
+            // （填充 semanticFields/bitFields），再读语义字段序。
             auto* stTy = llvm::dyn_cast<llvm::StructType>(ctx.getLLVMType(type));
             if (!stTy) return nullptr;
+            std::vector<FieldInfo>* semFields = nullptr;
+            std::unordered_map<std::string, BitFieldLayout>* bfMap = nullptr;
+            if (type->kind == TypeKind::Struct) {
+                auto* st = static_cast<StructType*>(type);
+                if (!st->semanticFields.empty()) {
+                    semFields = &st->semanticFields;
+                    bfMap = &st->bitFields;
+                }
+            } else {
+                auto* ct = static_cast<ClassType*>(type);
+                if (!ct->semanticFields.empty()) {
+                    semFields = &ct->semanticFields;
+                    bfMap = &ct->bitFields;
+                }
+            }
             std::vector<llvm::Constant*> elems;
+            for (unsigned e = 0; e < stTy->getNumElements(); ++e) {
+                elems.push_back(llvm::Constant::getNullValue(stTy->getElementType(e)));
+            }
+            if (semFields) {
+                // P1-07 / AGG-06: 位域感知——按语义字段序消费初始值；位域值
+                // 截断+移位 OR 进所属存储单元常量，普通字段写物化索引。
+                std::unordered_map<std::string, unsigned> nameIdx;
+                for (unsigned k = 0; k < fields->size(); ++k) {
+                    if (!(*fields)[k].name.empty()) nameIdx[(*fields)[k].name] = k;
+                }
+                std::unordered_map<unsigned, llvm::APInt> bfAcc;
+                for (size_t i = 0; i < semFields->size() && i < init->initializers.size(); ++i) {
+                    auto& sf = (*semFields)[i];
+                    auto& item = *init->initializers[i];
+                    if (sf.bitWidth != 0 || sf.name.empty()) {
+                        auto it = bfMap->find(sf.name);
+                        if (it == bfMap->end()) continue;
+                        llvm::Constant* c = constFor(item, sf.type);
+                        auto* ci = llvm::dyn_cast_or_null<llvm::ConstantInt>(c);
+                        if (!ci) return nullptr;  // 非常量 → 放弃（回退零初始化）
+                        unsigned unitIdx = it->second.unitIndex;
+                        unsigned unitBits = stTy->getElementType(unitIdx)->getIntegerBitWidth();
+                        // APInt 默认构造不初始化位宽——用 emplace 显式建零值。
+                        if (bfAcc.find(unitIdx) == bfAcc.end()) {
+                            bfAcc.emplace(unitIdx, llvm::APInt::getZero(unitBits));
+                        }
+                        llvm::APInt& acc = bfAcc[unitIdx];
+                        llvm::APInt wMask =
+                            llvm::APInt::getLowBitsSet(unitBits, it->second.bitWidth);
+                        acc |= (ci->getValue().zext(unitBits) & wMask)
+                                   .shl(it->second.bitOffset);
+                    } else {
+                        auto nit = nameIdx.find(sf.name);
+                        if (nit == nameIdx.end()) continue;
+                        llvm::Constant* c = nullptr;
+                        if (auto* nested = dynamic_cast<InitializerListExprAST*>(&item)) {
+                            c = buildAggregateConstant(ctx, sf.type, nested);
+                        } else {
+                            c = constFor(item, sf.type);
+                        }
+                        if (!c) c = llvm::Constant::getNullValue(stTy->getElementType(nit->second));
+                        elems[nit->second] = c;
+                    }
+                }
+                for (auto& kv : bfAcc) {
+                    elems[kv.first] =
+                        llvm::ConstantInt::get(stTy->getElementType(kv.first), kv.second);
+                }
+                return llvm::ConstantStruct::get(stTy, elems);
+            }
+            // 既有路径（无位域）：字段 1:1。
             size_t elemIdx = 0;
             if (hasBase) {
-                elems.push_back(llvm::Constant::getNullValue(stTy->getElementType(elemIdx++)));
+                elems[elemIdx] = llvm::Constant::getNullValue(stTy->getElementType(elemIdx));
+                ++elemIdx;
             }
             for (size_t i = 0; i < fields->size(); ++i) {
                 llvm::Constant* c = nullptr;
@@ -335,7 +404,7 @@ static llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
                     }
                 }
                 if (!c) c = llvm::Constant::getNullValue(stTy->getElementType(elemIdx));
-                elems.push_back(c);
+                elems[elemIdx] = c;
                 ++elemIdx;
             }
             return llvm::ConstantStruct::get(stTy, elems);
