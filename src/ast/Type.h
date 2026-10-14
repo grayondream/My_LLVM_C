@@ -89,12 +89,17 @@ public:
         : Type(TypeKind::Array), elementType(elem), size(sz) {}
 };
 
-// P1-07 / AGG-06: 位域布局元组——(存储单元 LLVM 字段索引, 单元内位偏移, 位宽)。
+// P1-07 / AGG-06: 位域布局元组——(存储单元 LLVM 字段索引, 单元内位偏移, 位宽,
+// 存储单元总位宽)。unitBits 供 RMW 助手构造加载/掩码类型：
+//   - 非 packed：基类型位宽（int32→32，bool→8，经 bitFieldStorageType）；
+//   - packed：所在位流区域字段（[N x i8]）总位宽 N*8（如 a:3;:0;b:3 → 40）；
+//   - union：对齐字段（alignType）位宽，全体位域成员统一。
 // LayoutBuilder 物化时填充进 StructType/ClassType/UnionType::bitFields。
 struct BitFieldLayout {
     uint32_t unitIndex;
     uint32_t bitOffset;
     uint32_t bitWidth;
+    uint32_t unitBits;
 };
 
 class StructType : public Type {

@@ -8,15 +8,6 @@
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Metadata.h"
 
-// P1-07 / CG-09: 位域存储单元类型——Bool → i8（1 字节单元），其余基础类型
-// 原样。与 LayoutBuilder.cpp 的 bitFieldStorageType 各一份 static（避免
-// 头文件依赖），语义必须一致。
-static Type* bitFieldStorageType(Type* base) {
-    return (base && base->kind == TypeKind::Bool)
-               ? TypeContext::instance().getInt8()
-               : base;
-}
-
 // P1-07 / CG-09: 位域读取符号扩展判定——无符号整型族 zext，其余（含 isize）
 // sext。
 static bool bitFieldIsUnsigned(Type* t) {
@@ -210,11 +201,10 @@ llvm::Value* CodegenContext::loadValue(llvm::Value* ptr, Type* type) {
 llvm::Value* CodegenContext::loadBitFieldValue(llvm::Value* unitAddr,
                                                uint64_t bitOffset,
                                                uint32_t bitWidth,
-                                               Type* fieldType) {
+                                               Type* fieldType,
+                                               uint32_t unitBits) {
     if (!unitAddr) return nullptr;
-    Type* storageTy = bitFieldStorageType(fieldType);
-    llvm::Type* unit = getLLVMType(storageTy);
-    if (!unit || !unit->isIntegerTy()) return nullptr;
+    llvm::Type* unit = llvm::Type::getIntNTy(*context, unitBits);
     Type* ft = fieldType;
     while (ft && ft->kind == TypeKind::Typedef) {
         ft = static_cast<TypedefType*>(ft)->aliasedType;
@@ -230,30 +220,30 @@ llvm::Value* CodegenContext::loadBitFieldValue(llvm::Value* unitAddr,
     }
     llvm::Value* narrow =
         builder.CreateTrunc(raw, llvm::Type::getIntNTy(*context, bitWidth), "bf.trunc");
+    // 结果按基类型位宽扩展（非 packed 下与单元位宽一致；packed 区域单元可更宽）。
+    llvm::Type* baseLLVM = getLLVMType(fieldType);
     if (bitFieldIsUnsigned(ft)) {
-        return builder.CreateZExt(narrow, unit, "bf.zext");
+        return builder.CreateZExt(narrow, baseLLVM, "bf.zext");
     }
-    return builder.CreateSExt(narrow, unit, "bf.sext");
+    return builder.CreateSExt(narrow, baseLLVM, "bf.sext");
 }
 
 void CodegenContext::storeBitFieldValue(llvm::Value* unitAddr,
                                         uint64_t bitOffset,
                                         uint32_t bitWidth,
                                         Type* fieldType,
-                                        llvm::Value* val) {
+                                        llvm::Value* val,
+                                        uint32_t unitBits) {
     if (!unitAddr || !val) return;
-    Type* storageTy = bitFieldStorageType(fieldType);
-    llvm::Type* unit = getLLVMType(storageTy);
-    if (!unit || !unit->isIntegerTy()) return;
-    Type* ft = fieldType;
-    while (ft && ft->kind == TypeKind::Typedef) {
-        ft = static_cast<TypedefType*>(ft)->aliasedType;
-    }
-    if (ft && ft->kind == TypeKind::Bool) {
-        val = builder.CreateZExt(val, unit, "bf.boolext");
+    llvm::Type* unit = llvm::Type::getIntNTy(*context, unitBits);
+    // 值扩展/截断到单元位宽（packed 区域单元可宽于基类型）。
+    const unsigned valBits = val->getType()->getIntegerBitWidth();
+    if (valBits < unitBits) {
+        val = builder.CreateZExt(val, unit, "bf.wid");
+    } else if (valBits > unitBits) {
+        val = builder.CreateTrunc(val, unit, "bf.narrow");
     }
     llvm::Value* old = builder.CreateLoad(unit, unitAddr, "bf.old");
-    const unsigned unitBits = unit->getIntegerBitWidth();
     // wMask = 低 bitWidth 位全 1；fieldMask = wMask << bitOffset。
     llvm::Value* wMask = llvm::ConstantInt::get(
         unit, llvm::APInt::getLowBitsSet(unitBits, bitWidth));

@@ -338,6 +338,10 @@ public:
     bool isBitField = false;
     uint32_t bitWidth = 0;
     uint64_t bitOffset = 0;
+    // P1-07 / AGG-06: 存储单元总位宽（emitBitFieldGEP 从布局表填入）——
+    // 供 loadBitFieldValue/storeBitFieldValue 构造加载/掩码类型（packed
+    // 区域单元可为非基类型位宽，如 i40）。
+    uint32_t unitBits = 0;
     bool isBitFieldAccess() const override { return isBitField; }
 
 

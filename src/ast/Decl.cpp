@@ -17,9 +17,23 @@ static llvm::Value* readLValue(CodegenContext& ctx, ExprAST& e, llvm::Value* v) 
     if (!e.isLValue) return v;
     if (e.isBitFieldAccess()) {
         auto& ma = static_cast<MemberAccessExprAST&>(e);
-        return ctx.loadBitFieldValue(v, ma.bitOffset, ma.bitWidth, e.type);
+        return ctx.loadBitFieldValue(v, ma.bitOffset, ma.bitWidth, e.type, ma.unitBits);
     }
     return ctx.loadValue(v, e.type);
+}
+
+// P1-07 / AGG-06: 把 unitBits 宽整数常量拆成 [N x i8] 字节常量（小端）——
+// packed 位域区域字段以字节数组落盘。
+static llvm::Constant* buildByteArrayConstant(llvm::LLVMContext& llctx,
+                                              const llvm::APInt& v,
+                                              unsigned unitBits) {
+    unsigned nBytes = (unitBits + 7) / 8;
+    std::vector<llvm::Constant*> bytes;
+    llvm::Type* i8 = llvm::Type::getInt8Ty(llctx);
+    for (unsigned i = 0; i < nBytes; ++i) {
+        bytes.push_back(llvm::ConstantInt::get(i8, (v.lshr(i * 8)).trunc(8)));
+    }
+    return llvm::ConstantArray::get(llvm::ArrayType::get(i8, nBytes), bytes);
 }
 
 static llvm::Constant* foldToConstant(CodegenContext& ctx, const FoldedValue& fv) {
@@ -102,7 +116,8 @@ static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
                             v = ctx.castValue(v, item.type, dt);
                         }
                         ctx.storeBitFieldValue(memberPtr, it->second.bitOffset,
-                                               it->second.bitWidth, mtype, v);
+                                               it->second.bitWidth, mtype, v,
+                                               it->second.unitBits);
                     }
                 }
                 break;
@@ -194,9 +209,13 @@ static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
                 for (unsigned k = 0; k < fields->size(); ++k) {
                     if (!(*fields)[k].name.empty()) nameIdx[(*fields)[k].name] = k;
                 }
-                for (size_t i = 0; i < semFields->size() && i < init->initializers.size(); ++i) {
+                // 无名成员（含零宽/填充位域）不消费初始值——用独立 initIdx 对齐
+                // 命名成员与花括号列表元素（C 语义：仅命名成员可初始化）。
+                size_t initIdx = 0;
+                for (size_t i = 0; i < semFields->size() && initIdx < init->initializers.size(); ++i) {
                     auto& sf = (*semFields)[i];
-                    auto& item = *init->initializers[i];
+                    if (sf.name.empty()) continue;
+                    auto& item = *init->initializers[initIdx++];
                     if (sf.bitWidth != 0 || sf.name.empty()) {
                         auto it = bfMap->find(sf.name);
                         if (it == bfMap->end()) continue;
@@ -209,7 +228,8 @@ static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
                             v = ctx.castValue(v, item.type, dt);
                         }
                         ctx.storeBitFieldValue(fptr, it->second.bitOffset,
-                                               it->second.bitWidth, sf.type, v);
+                                               it->second.bitWidth, sf.type, v,
+                                               it->second.unitBits);
                     } else {
                         auto nit = nameIdx.find(sf.name);
                         if (nit == nameIdx.end()) continue;
@@ -349,9 +369,14 @@ static llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
                     if (!(*fields)[k].name.empty()) nameIdx[(*fields)[k].name] = k;
                 }
                 std::unordered_map<unsigned, llvm::APInt> bfAcc;
-                for (size_t i = 0; i < semFields->size() && i < init->initializers.size(); ++i) {
+                std::unordered_map<unsigned, uint32_t> accUnitBits;
+                // 无名成员（含零宽/填充位域）不消费初始值——用独立 initIdx 对齐
+                // 命名成员与花括号列表元素（C 语义：仅命名成员可初始化）。
+                size_t initIdx = 0;
+                for (size_t i = 0; i < semFields->size() && initIdx < init->initializers.size(); ++i) {
                     auto& sf = (*semFields)[i];
-                    auto& item = *init->initializers[i];
+                    if (sf.name.empty()) continue;
+                    auto& item = *init->initializers[initIdx++];
                     if (sf.bitWidth != 0 || sf.name.empty()) {
                         auto it = bfMap->find(sf.name);
                         if (it == bfMap->end()) continue;
@@ -359,10 +384,11 @@ static llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
                         auto* ci = llvm::dyn_cast_or_null<llvm::ConstantInt>(c);
                         if (!ci) return nullptr;  // 非常量 → 放弃（回退零初始化）
                         unsigned unitIdx = it->second.unitIndex;
-                        unsigned unitBits = stTy->getElementType(unitIdx)->getIntegerBitWidth();
+                        unsigned unitBits = it->second.unitBits;
                         // APInt 默认构造不初始化位宽——用 emplace 显式建零值。
                         if (bfAcc.find(unitIdx) == bfAcc.end()) {
                             bfAcc.emplace(unitIdx, llvm::APInt::getZero(unitBits));
+                            accUnitBits[unitIdx] = unitBits;
                         }
                         llvm::APInt& acc = bfAcc[unitIdx];
                         llvm::APInt wMask =
@@ -383,8 +409,15 @@ static llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
                     }
                 }
                 for (auto& kv : bfAcc) {
-                    elems[kv.first] =
-                        llvm::ConstantInt::get(stTy->getElementType(kv.first), kv.second);
+                    llvm::Type* et = stTy->getElementType(kv.first);
+                    if (et->isIntegerTy()) {
+                        elems[kv.first] = llvm::ConstantInt::get(et, kv.second);
+                    } else if (auto* at = llvm::dyn_cast<llvm::ArrayType>(et)) {
+                        // packed 位域区域字段 [N x i8]——整数常量拆字节落盘。
+                        (void)at;
+                        elems[kv.first] = buildByteArrayConstant(
+                            ctx.getContext(), kv.second, accUnitBits[kv.first]);
+                    }
                 }
                 return llvm::ConstantStruct::get(stTy, elems);
             }

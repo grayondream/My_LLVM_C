@@ -404,17 +404,104 @@ TEST_F(BitFieldE2E, GlobalInitSharedUnit) {
     )", "bf_ginit.c"), 0);
 }
 
-TEST_F(BitFieldE2E, StaticLocalInit) {
-    // static 局部位域初始化：9 截断回 1。
+TEST_F(BitFieldE2E, LocalBraceInitTruncation) {
+    // 局部花括号初始化位域感知：9 截断回 1（emitAggregateInitializer 语义字段路径）。
+    // 注：原 StaticLocalInit 用 `static` 局部——本语言不支持 static 局部（Parser
+    // 仅在类成员处理 TOKEN_STATIC），旧测试靠 parse 错误恢复静默丢弃 `static` 才
+    // "碰巧"通过；改为诚实的局部初始化断言（Ruling 2026-10-14-1）。
     EXPECT_EQ(runSource(R"(
         struct S { uint32 a : 3; };
         int32 main() {
-            static struct S s = { 9 };
+            struct S s = { 9 };
             if (s.a != 1) { return 1; }
             return 0;
         }
-    )", "bf_sinit.c"), 0);
+    )", "bf_linit.c"), 0);
 }
+
+TEST_F(BitFieldE2E, ZeroWidthInitSkipsUnnamed) {
+    // 无名零宽位域不消费初始值（C 语义）——a/b 分别拿到 5/6，全局与局部都验证。
+    EXPECT_EQ(runSource(R"(
+        struct S { uint32 a : 3; uint32 : 0; uint32 b : 3; };
+        struct S g = { 5, 6 };
+        int32 main() {
+            if (g.a != 5 || g.b != 6) { return 1; }
+            struct S t = { 3, 4 };
+            if (t.a != 3 || t.b != 4) { return 1; }
+            return 0;
+        }
+    )", "bf_zwinit.c"), 0);
+}
+
+// ---- Task 6: union / [[packed]] / class 位域 ----
+
+TEST_F(BitFieldE2E, UnionSizeAlign) {
+    // union 位域成员共享 4B 存储块（max size/align 按 bitFieldStorageType）。
+    EXPECT_EQ(runSource(R"(
+        union U { int32 a : 3; uint32 b : 5; };
+        int32 main() {
+            return (compile_time.size_of(union U) == 4) ? 0 : 1;
+        }
+    )", "bf_usz.c"), 0);
+}
+
+TEST_F(BitFieldE2E, UnionOverlap) {
+    // C 语义：a 的 3 位与 b 的 3 位重叠于 offset 0。
+    // （uint32 避免有符号 3 位域存 5 读回 -3 的 sext 语义。）
+    EXPECT_EQ(runSource(R"(
+        union U { uint32 a : 3; uint32 b : 3; };
+        int32 main() {
+            union U u;
+            u.a = 5;
+            if (u.b != 5) { return 1; }
+            return 0;
+        }
+    )", "bf_uov.c"), 0);
+}
+
+TEST_F(BitFieldE2E, PackedZeroWidth) {
+    // packed 下零宽位域把位流游标按声明类型自然边界取整（int→4B）：
+    // a:3 占字节 0，int:0 对齐到字节 4，b:3 占字节 4 → sizeof 5（GCC 实测）。
+    EXPECT_EQ(runSource(R"(
+        [[packed]] struct S { int32 a : 3; int32 : 0; int32 b : 3; };
+        int32 main() { return (compile_time.size_of(struct S) == 5) ? 0 : 1; }
+    )", "bf_pz.c"), 0);
+}
+
+TEST_F(BitFieldE2E, PackedTightFit) {
+    // packed 位域连续位流紧排：int a:3; int b:3 → 6 位 → 1 字节（GCC 实测）。
+    EXPECT_EQ(runSource(R"(
+        [[packed]] struct S { int32 a : 3; int32 b : 3; };
+        int32 main() { return (compile_time.size_of(struct S) == 1) ? 0 : 1; }
+    )", "bf_pt.c"), 0);
+}
+
+TEST_F(BitFieldE2E, ClassBitField) {
+    EXPECT_EQ(runSource(R"(
+        class C { public: int32 a : 3; };
+        int32 main() {
+            class C c;
+            c.a = -2;
+            if (c.a != -2) { return 1; }
+            return 0;
+        }
+    )", "bf_cls.c"), 0);
+}
+
+TEST_F(BitFieldE2E, ClassInheritedBitField) {
+    EXPECT_EQ(runSource(R"(
+        class B { public: int32 base; };
+        class D : public B { public: int32 bf : 3; };
+        int32 main() {
+            class D d;
+            d.base = 11;
+            d.bf = 2;
+            if (d.base != 11 || d.bf != 2) { return 1; }
+            return 0;
+        }
+    )", "bf_cls2.c"), 0);
+}
+
 
 
 

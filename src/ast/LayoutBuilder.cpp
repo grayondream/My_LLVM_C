@@ -109,53 +109,107 @@ LayoutResult LayoutBuilder::buildAggregate(Type* agg, llvm::LLVMContext& ctx,
         auto flushUnit = [&]() {
             curUnitBytes = 0; curUnitBits = 0; curBitUsed = 0;
         };
+        // P1-07 / AGG-06: packed 位域——连续位流"区域"模型（GCC packed 语义）。
+        // 区域 = 相邻位域（无普通字段隔断）共享的单一 [N x i8] 伪字段；区域内
+        // 位域按绝对位偏移落位，零宽无名位域把区域游标按声明类型自然字节边界
+        // 取整（不结束区域）。区域结束时（遇普通字段/循环尾）才落盘伪字段。
+        bool regionActive = false;
+        uint64_t regionBitCursor = 0;   // 区域内的绝对位偏移
+        struct PendingBF {
+            std::string name;
+            uint32_t bitOffset;
+            uint32_t bitWidth;
+        };
+        std::vector<PendingBF> pendingBFs;
+        auto closeRegion = [&]() {
+            if (!regionActive) return;
+            regionActive = false;
+            uint64_t regionBytes = (regionBitCursor + 7) / 8;
+            if (regionBytes == 0) regionBytes = 1;  // 空区域（仅零宽）占 1 字节
+            // packed 下 cursor 恒字节对齐，无填充。
+            padded.push_back(FieldInfo{
+                "", new ArrayType(TypeContext::instance().getInt8(),
+                                  static_cast<int>(regionBytes)),
+                {}});
+            const uint32_t regionFieldIndex =
+                static_cast<uint32_t>(padded.size()) - 1;
+            const uint32_t unitBits = static_cast<uint32_t>(regionBytes * 8);
+            for (auto& pb : pendingBFs) {
+                (*bitFields)[pb.name] = {regionFieldIndex, pb.bitOffset,
+                                         pb.bitWidth, unitBits};
+            }
+            pendingBFs.clear();
+            cursor += regionBytes;
+        };
         for (auto& f : *flds) {
             if (f.bitWidth != 0 || f.name.empty()) {
-                // ---- 位域（命名 / 无名填充 / 零宽对齐）----
-                Type* storageTy = bitFieldStorageType(f.type);
-                llvm::Type* ft = conv(storageTy);
-                if (!ft) continue;
-                int uBytes = static_cast<int>(dl.getTypeAllocSize(ft));
-                int uAlign = lr.isPacked
-                                 ? 1
-                                 : static_cast<int>(dl.getABITypeAlign(ft).value());
-                int uBits = uBytes * 8;
-                if (f.bitWidth == 0 && f.name.empty()) {
-                    // 零宽无名位域：结束当前单元（下一位域强制新单元）。
-                    flushUnit();
-                    continue;
-                }
-                // System V：新单元当且仅当 无当前单元 / 存储单元尺寸不同
-                // （基础类型不同，GCC 行为）/ 放不下（不跨单元拆分）。
-                bool needNew = curUnitBytes == 0 || curUnitBytes != uBytes ||
-                               curBitUsed + f.bitWidth > uBits;
-                if (needNew) {
-                    uint64_t off = alignUp(cursor, uAlign);
-                    if (off > cursor) {
-                        padded.push_back(FieldInfo{
-                            "", new ArrayType(TypeContext::instance().getInt8(),
-                                              static_cast<int>(off - cursor)),
-                            {}});
+                if (lr.isPacked) {
+                    // ---- packed 位域：连续位流区域模型 ----
+                    if (!regionActive) {
+                        regionActive = true;
+                        regionBitCursor = 0;
                     }
-                    padded.push_back(FieldInfo{"", storageTy, {}, 0});
-                    curUnitIndex = static_cast<uint32_t>(padded.size()) - 1;
-                    cursor = off + uBytes;
-                    curUnitBytes = uBytes;
-                    curUnitBits = uBits;
-                    curBitUsed = 0;
-                    // packed 语义（GNU）：自然对齐不抬整体对齐。
-                    if (!lr.isPacked) {
+                    Type* storageTy = bitFieldStorageType(f.type);
+                    if (f.bitWidth == 0 && f.name.empty()) {
+                        // 零宽无名：区域游标按声明类型自然字节边界取整
+                        // （int→4B/32 位，GCC packed 行为），不结束区域。
+                        llvm::Type* ft0 = conv(storageTy);
+                        unsigned natBits =
+                            ft0 ? static_cast<unsigned>(dl.getTypeAllocSize(ft0)) * 8
+                                : 32;
+                        regionBitCursor = alignUp(regionBitCursor, natBits);
+                        continue;
+                    }
+                    if (!f.name.empty()) {
+                        pendingBFs.push_back(
+                            {f.name, static_cast<uint32_t>(regionBitCursor),
+                             static_cast<uint32_t>(f.bitWidth)});
+                    }
+                    regionBitCursor += f.bitWidth;
+                } else {
+                    // ---- 非 packed：System V 单元分配 ----
+                    Type* storageTy = bitFieldStorageType(f.type);
+                    llvm::Type* ft = conv(storageTy);
+                    if (!ft) continue;
+                    int uBytes = static_cast<int>(dl.getTypeAllocSize(ft));
+                    int uAlign = static_cast<int>(dl.getABITypeAlign(ft).value());
+                    int uBits = uBytes * 8;
+                    if (f.bitWidth == 0 && f.name.empty()) {
+                        // 零宽无名位域：结束当前单元（下一位域强制新单元）。
+                        flushUnit();
+                        continue;
+                    }
+                    // System V：新单元当且仅当 无当前单元 / 存储单元尺寸不同
+                    // （基础类型不同，GCC 行为）/ 放不下（不跨单元拆分）。
+                    bool needNew = curUnitBytes == 0 || curUnitBytes != uBytes ||
+                                   curBitUsed + f.bitWidth > uBits;
+                    if (needNew) {
+                        uint64_t off = alignUp(cursor, uAlign);
+                        if (off > cursor) {
+                            padded.push_back(FieldInfo{
+                                "", new ArrayType(TypeContext::instance().getInt8(),
+                                                  static_cast<int>(off - cursor)),
+                                {}});
+                        }
+                        padded.push_back(FieldInfo{"", storageTy, {}, 0});
+                        curUnitIndex = static_cast<uint32_t>(padded.size()) - 1;
+                        cursor = off + uBytes;
+                        curUnitBytes = uBytes;
+                        curUnitBits = uBits;
+                        curBitUsed = 0;
                         structAlign = std::max<uint64_t>(structAlign, uAlign);
                     }
+                    if (!f.name.empty()) {
+                        (*bitFields)[f.name] = {curUnitIndex,
+                                                static_cast<uint32_t>(curBitUsed),
+                                                static_cast<uint32_t>(f.bitWidth),
+                                                static_cast<uint32_t>(uBits)};
+                    }
+                    curBitUsed += f.bitWidth;
                 }
-                if (!f.name.empty()) {
-                    (*bitFields)[f.name] = {curUnitIndex,
-                                            static_cast<uint32_t>(curBitUsed),
-                                            static_cast<uint32_t>(f.bitWidth)};
-                }
-                curBitUsed += f.bitWidth;
             } else {
                 // ---- 普通字段 ----
+                closeRegion();
                 flushUnit();
                 llvm::Type* ft = conv(f.type);
                 if (!ft) continue;
@@ -182,6 +236,8 @@ LayoutResult LayoutBuilder::buildAggregate(Type* agg, llvm::LLVMContext& ctx,
                 cursor = off + sz;
             }
         }
+        // 循环尾闭合未结束的 packed 位域区域。
+        closeRegion();
         if (forcedAlign) {
             structAlign = std::max(structAlign, forcedAlign);
         }
@@ -306,8 +362,14 @@ LayoutResult LayoutBuilder::buildUnion(UnionType* ut, llvm::LLVMContext& ctx,
             alignType = mt;
         }
         if ((m.bitWidth != 0 || m.name.empty()) && !m.name.empty()) {
-            ut->bitFields[m.name] = {0, 0, static_cast<uint32_t>(m.bitWidth)};
+            ut->bitFields[m.name] = {0, 0, static_cast<uint32_t>(m.bitWidth), 0};
         }
+    }
+    // P1-07 / AGG-06: union 位域成员共享 field[0]（alignType）——unitBits 统一为
+    // alignType 字节位宽（RMW 经该字段加载/掩码；float 等非整数成员按位宽读）。
+    if (alignType) {
+        const uint32_t alignBits = dl.getTypeAllocSize(alignType) * 8;
+        for (auto& kv : ut->bitFields) kv.second.unitBits = alignBits;
     }
     if (maxSize == 0) maxSize = 1;
     if (forcedAlign) {

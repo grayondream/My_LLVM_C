@@ -83,7 +83,7 @@ static llvm::Value* readLValue(CodegenContext& ctx, ExprAST& e, llvm::Value* v) 
     if (!e.isLValue) return v;
     if (e.isBitFieldAccess()) {
         auto& ma = static_cast<MemberAccessExprAST&>(e);
-        return ctx.loadBitFieldValue(v, ma.bitOffset, ma.bitWidth, e.type);
+        return ctx.loadBitFieldValue(v, ma.bitOffset, ma.bitWidth, e.type, ma.unitBits);
     }
     return ctx.loadValue(v, e.type);
 }
@@ -661,12 +661,12 @@ llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
             if (operand->isBitFieldAccess()) {
                 auto* ma = static_cast<MemberAccessExprAST*>(operand.get());
                 Type* ft = stripTypedefsT12(operand->type);
-                llvm::Value* oldVal = ctx.loadBitFieldValue(v, ma->bitOffset, ma->bitWidth, ft);
+                llvm::Value* oldVal = ctx.loadBitFieldValue(v, ma->bitOffset, ma->bitWidth, ft, ma->unitBits);
                 llvm::Value* one = llvm::ConstantInt::get(oldVal->getType(), 1);
                 llvm::Value* newVal = (op == UnaryOp::PreInc)
                     ? builder.CreateAdd(oldVal, one, "preinc")
                     : builder.CreateSub(oldVal, one, "predec");
-                ctx.storeBitFieldValue(v, ma->bitOffset, ma->bitWidth, ft, newVal);
+                ctx.storeBitFieldValue(v, ma->bitOffset, ma->bitWidth, ft, newVal, ma->unitBits);
                 return newVal;
             }
             // The operand is an lvalue; update it in place and yield the new
@@ -1379,7 +1379,7 @@ llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
         }
         if (op != AssignOp::Assign) {
             // 复合赋值：先读当前位域值（基础类型宽度），运算后 RMW 写回。
-            llvm::Value* cur = ctx.loadBitFieldValue(unitAddr, lma->bitOffset, lma->bitWidth, ft);
+            llvm::Value* cur = ctx.loadBitFieldValue(unitAddr, lma->bitOffset, lma->bitWidth, ft, lma->unitBits);
             switch (op) {
                 case AssignOp::AddAssign:   result = builder.CreateAdd(cur, result, "addassign"); break;
                 case AssignOp::SubAssign:   result = builder.CreateSub(cur, result, "subassign"); break;
@@ -1394,7 +1394,7 @@ llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
                 default: break;
             }
         }
-        ctx.storeBitFieldValue(unitAddr, lma->bitOffset, lma->bitWidth, ft, result);
+        ctx.storeBitFieldValue(unitAddr, lma->bitOffset, lma->bitWidth, ft, result, lma->unitBits);
         return result;
     }
 
@@ -1720,11 +1720,11 @@ llvm::Value* PostfixIncDecExprAST::codegen(CodegenContext& ctx) {
     if (operand->isBitFieldAccess()) {
         auto* ma = static_cast<MemberAccessExprAST*>(operand.get());
         Type* ft = stripTypedefsT12(operand->type);
-        llvm::Value* oldVal = ctx.loadBitFieldValue(addr, ma->bitOffset, ma->bitWidth, ft);
+        llvm::Value* oldVal = ctx.loadBitFieldValue(addr, ma->bitOffset, ma->bitWidth, ft, ma->unitBits);
         llvm::Value* one = llvm::ConstantInt::get(oldVal->getType(), 1);
         llvm::Value* newVal = isIncrement ? builder.CreateAdd(oldVal, one, "postinc")
                                           : builder.CreateSub(oldVal, one, "postdec");
-        ctx.storeBitFieldValue(addr, ma->bitOffset, ma->bitWidth, ft, newVal);
+        ctx.storeBitFieldValue(addr, ma->bitOffset, ma->bitWidth, ft, newVal, ma->unitBits);
         return oldVal;
     }
     llvm::Type* loadType = operand->type ? ctx.getLLVMType(operand->type) : llvm::Type::getInt32Ty(ctx.getContext());
@@ -1863,6 +1863,7 @@ static llvm::Value* emitBitFieldGEP(CodegenContext& ctx, Type* aggType,
         auto it = bf->find(node.memberName);
         if (it != bf->end()) {
             node.bitOffset = it->second.bitOffset;
+            node.unitBits = it->second.unitBits;
             llvm::Type* curLLVM = ctx.getLLVMType(cur);
             if (!curLLVM) return nullptr;
             return builder.CreateStructGEP(curLLVM, curPtr, it->second.unitIndex, "bfunit");

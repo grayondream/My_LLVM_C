@@ -2868,7 +2868,11 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
         StructType* definingStruct = nullptr;
         int walkDepth = 0;
         for (StructType* cur = structType; cur && !definingStruct;) {
-            for (auto& field : cur->fields) {
+            // P1-07 / AGG-06: 物化后 fields 已被替换为伪字段（位域名丢失）——
+            // 优先用物化前语义字段快照。
+            const auto& lookupFields = !cur->semanticFields.empty()
+                                           ? cur->semanticFields : cur->fields;
+            for (auto& field : lookupFields) {
                 if (field.name == node.memberName) {
                     node.type = field.type;
                     node.isLValue = true;
@@ -2899,7 +2903,10 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
         // compiler (评审 C1).
         int classWalkDepth = 0;
         while (classType) {
-            for (auto& field : classType->fields) {
+            // P1-07 / AGG-06: 物化后 fields 已被替换为伪字段——优先用语义快照。
+            const auto& lookupFields = !classType->semanticFields.empty()
+                                           ? classType->semanticFields : classType->fields;
+            for (auto& field : lookupFields) {
                 if (field.name == node.memberName) {
                     node.type = field.type;
                     node.isLValue = true;

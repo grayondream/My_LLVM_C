@@ -48,13 +48,18 @@ public:
     // P1-07 / CG-09: bit-field storage-unit read/write (read-modify-write).
     // unitAddr points at the integer storage unit (materialized LLVM field);
     // the field spans [bitOffset, bitOffset+bitWidth) of that unit, counted
-    // from the LSB. loadBitFieldValue returns the field as a base-type value
-    // (bool → i1; signed → sext; unsigned → zext). storeBitFieldValue clears
-    // the field bits, truncates+shifts the value in, and stores (no atomicity).
+    // from the LSB. unitBits is the storage unit's total bit width (base-type
+    // width for plain fields, region width for packed, alignType width for
+    // unions — recorded in BitFieldLayout at materialization). loadBitFieldValue
+    // returns the field as a base-type value (bool → i1; signed → sext;
+    // unsigned → zext). storeBitFieldValue clears the field bits, truncates+
+    // shifts the value in, and stores (no atomicity).
     llvm::Value* loadBitFieldValue(llvm::Value* unitAddr, uint64_t bitOffset,
-                                   uint32_t bitWidth, Type* fieldType);
+                                   uint32_t bitWidth, Type* fieldType,
+                                   uint32_t unitBits);
     void storeBitFieldValue(llvm::Value* unitAddr, uint64_t bitOffset,
-                            uint32_t bitWidth, Type* fieldType, llvm::Value* val);
+                            uint32_t bitWidth, Type* fieldType, llvm::Value* val,
+                            uint32_t unitBits);
 
     llvm::Type* getLLVMType(Type* type);
 

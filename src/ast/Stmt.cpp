@@ -13,7 +13,7 @@ llvm::Value* readLValue(CodegenContext& ctx, ExprAST& e, llvm::Value* v) {
     if (!e.isLValue) return v;
     if (e.isBitFieldAccess()) {
         auto& ma = static_cast<MemberAccessExprAST&>(e);
-        return ctx.loadBitFieldValue(v, ma.bitOffset, ma.bitWidth, e.type);
+        return ctx.loadBitFieldValue(v, ma.bitOffset, ma.bitWidth, e.type, ma.unitBits);
     }
     return ctx.loadValue(v, e.type);
 }
