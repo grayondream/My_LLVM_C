@@ -3886,7 +3886,16 @@ void SemanticAnalyzer::visit(UnionDeclAST& node) {
         typeCtx->addUnion(node.name, unionType);
     }
     for (auto& member : node.members) {
-        unionType->addMember(member.name, member.type, member.bitWidth);
+        // 防重复（镜像 struct 分支的 getFieldType guard）——Parser 已预注册
+        // 成员（含 bitWidth），此处不得二次追加。
+        bool exists = false;
+        for (auto& m : unionType->members) {
+            if (m.name == member.name && m.bitWidth == member.bitWidth) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) unionType->addMember(member.name, member.type, member.bitWidth);
     }
     // Redef 轮: duplicate definition of the same name (any kind) is E2004.
     if (!node.isForwardDecl && !node.name.empty()) {

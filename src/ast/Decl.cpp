@@ -448,10 +448,31 @@ static llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
             if (!stTy || ut->members.empty() || init->initializers.empty()) return nullptr;
             std::vector<llvm::Constant*> elems;
             llvm::Constant* first = nullptr;
-            if (auto* nested = dynamic_cast<InitializerListExprAST*>(init->initializers[0].get())) {
-                first = buildAggregateConstant(ctx, ut->members[0].type, nested);
-            } else {
-                first = constFor(*init->initializers[0], ut->members[0].type);
+            // P1-07: 位域首成员 → 全局常量须截断+移位掩码进存储单元（RMW 常量版）。
+            if (ut->members[0].bitWidth != 0 && !ut->members[0].name.empty()) {
+                auto it = ut->bitFields.find(ut->members[0].name);
+                if (it != ut->bitFields.end()) {
+                    llvm::Constant* raw =
+                        constFor(*init->initializers[0], ut->members[0].type);
+                    if (auto* ci = llvm::dyn_cast_or_null<llvm::ConstantInt>(raw)) {
+                        const uint32_t unitBits = it->second.unitBits;
+                        llvm::APInt wMask = llvm::APInt::getLowBitsSet(
+                            unitBits, it->second.bitWidth);
+                        llvm::APInt v = (ci->getValue().zextOrTrunc(unitBits) & wMask)
+                                            .shl(it->second.bitOffset);
+                        if (auto* f0 = llvm::dyn_cast<llvm::IntegerType>(
+                                stTy->getElementType(0))) {
+                            first = llvm::ConstantInt::get(f0, v);
+                        }
+                    }
+                }
+            }
+            if (!first && !init->initializers.empty()) {
+                if (auto* nested = dynamic_cast<InitializerListExprAST*>(init->initializers[0].get())) {
+                    first = buildAggregateConstant(ctx, ut->members[0].type, nested);
+                } else {
+                    first = constFor(*init->initializers[0], ut->members[0].type);
+                }
             }
             if (!first) first = llvm::Constant::getNullValue(stTy->getElementType(0));
             elems.push_back(first);

@@ -502,6 +502,65 @@ TEST_F(BitFieldE2E, ClassInheritedBitField) {
     )", "bf_cls2.c"), 0);
 }
 
+// ---- 评审修复回归（union 位域全通路、派生混合字段、位宽溢出）----
+
+TEST_F(BitFieldE2E, UnionBitFieldTruncates) {
+    // C1：union 位域必须是 RMW（截断），而非整字写。
+    EXPECT_EQ(runSource(R"(
+        union UB { uint32 a : 3; };
+        int32 main() {
+            union UB u;
+            u.a = 9;
+            if (u.a != 1) { return 1; }
+            return 0;
+        }
+    )", "bf_utrunc.c"), 0);
+}
+
+TEST_F(BitFieldE2E, UnionBitFieldAddrOfRejected) {
+    // C1：union 位域取址同样拒绝（E2027）。
+    auto errs = semaErrorsOf(
+        "union UB { uint32 a : 3; }; int32 main(){ union UB u; uint32* p = &u.a; return 0; }", "bf_uaddr.c");
+    ASSERT_FALSE(errs.empty());
+    EXPECT_EQ(errs.front().code, DiagnosticCode::SemBitFieldNotAddressable);
+}
+
+TEST_F(BitFieldE2E, UnionBitFieldGlobalInit) {
+    // C2：union 位域全局常量须截断（9 → 1）。
+    EXPECT_EQ(runSource(R"(
+        union UB { uint32 a : 3; };
+        union UB g = { 9 };
+        int32 main() { return (g.a == 1) ? 0 : 1; }
+    )", "bf_uginit.c"), 0);
+}
+
+TEST_F(BitFieldE2E, DerivedNormalAndBitField) {
+    // I1：派生聚合含基类 + 普通字段 + 位域——普通字段 GEP 不得因物化多 +1。
+    EXPECT_EQ(runSource(R"(
+        class BM { public: int32 base; };
+        class DM : public BM { public: int32 x; int32 bf : 3; };
+        int32 main() {
+            class DM d;
+            d.base = 11;
+            d.x = 111;
+            d.bf = 2;
+            if (d.base != 11 || d.x != 111 || d.bf != 2) { return 1; }
+            return 0;
+        }
+    )", "bf_dmix.c"), 0);
+}
+
+TEST_F(BitFieldE2E, WidthOverflowRejected) {
+    // M1：超 int32 范围位宽在 parse 期拒绝（防 static_cast<int> 回绕绕过 E2026）。
+    Lexer lexer("bf_wovf.c",
+        "struct S { int32 a : 4294967297; }; int32 main() { return 0; }");
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    EXPECT_FALSE(parser.getErrors().empty());
+}
+
 
 
 

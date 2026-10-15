@@ -2386,7 +2386,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
         if (!unionDecl->members.empty() || !unionDecl->nestedTypes.empty()) {
             auto unionType = new UnionType(unionDecl->name);
             for (auto& member : unionDecl->members) {
-                unionType->addMember(member.name, member.type);
+                unionType->addMember(member.name, member.type, member.bitWidth);
             }
             TypeContext::instance().addUnion(unionDecl->name, unionType);
         }
@@ -3773,6 +3773,12 @@ bool Parser::parseBitFieldWidth(int& width) {
     long long w = 0;
     if (!evalIntConstExpr(e.get(), w)) {
         error("bit-field width must be a constant expression", *peek());
+        return false;
+    }
+    // 溢出保护：static_cast<int> 前先检查 int32 范围，防止超宽值回绕成合法小值
+    // 绕过 sema 的 E2026 范围检查（如 4294967297 → 1）。
+    if (w > INT32_MAX || w < INT32_MIN) {
+        error("bit-field width out of range", *peek());
         return false;
     }
     width = static_cast<int>(w);

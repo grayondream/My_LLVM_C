@@ -1809,8 +1809,13 @@ static llvm::Value* emitClassFieldGEP(CodegenContext& ctx, Type* aggType,
         for (size_t i = 0; i < fields->size(); ++i) {
             if ((*fields)[i].name == memberName) {
                 unsigned idx = static_cast<unsigned>(i);
-                // Base sub-object occupies field index 0.
-                if (!baseClassName.empty()) idx += 1;
+                // Base sub-object occupies field index 0. 位域/注解聚合在物化时
+                // 已把基类伪字段压入 fields（索引 0），此时不再 +1；未物化路径
+                // 才需要（LLVM 结构体的字段 0 = 基类）。
+                bool materialized = cur->kind == TypeKind::Class
+                    ? static_cast<ClassType*>(cur)->layoutMaterialized
+                    : static_cast<StructType*>(cur)->layoutMaterialized;
+                if (!baseClassName.empty() && !materialized) idx += 1;
                 llvm::Type* curLLVM = ctx.getLLVMType(cur);
                 if (!curLLVM) return nullptr;
                 return builder.CreateStructGEP(curLLVM, curPtr, idx, "member");
@@ -1950,11 +1955,12 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
     if (valType && valType->kind == TypeKind::Union) {
         llvm::Type* unionLLVM = ctx.getLLVMType(valType);
         if (!unionLLVM) return nullptr;
-        // P1-07: union 位域——单元即字段 0；记录 bitOffset（恒 0）供 RMW。
+        // P1-07: union 位域——单元即字段 0；记录 bitOffset（恒 0）与 unitBits 供 RMW。
         if (isBitField) {
             auto it = static_cast<UnionType*>(valType)->bitFields.find(memberName);
             if (it != static_cast<UnionType*>(valType)->bitFields.end()) {
                 bitOffset = it->second.bitOffset;
+                unitBits = it->second.unitBits;
             }
         }
         return builder.CreateStructGEP(unionLLVM, objVal, 0, "unionmember");
@@ -1966,11 +1972,12 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
         }
         llvm::Type* unionLLVM = ctx.getLLVMType(valBase);
         if (!unionLLVM) return nullptr;
-        // P1-07: union 位域——记录 bitOffset 供 RMW。
+        // P1-07: union 位域——记录 bitOffset 与 unitBits 供 RMW。
         if (isBitField) {
             auto it = static_cast<UnionType*>(valBase)->bitFields.find(memberName);
             if (it != static_cast<UnionType*>(valBase)->bitFields.end()) {
                 bitOffset = it->second.bitOffset;
+                unitBits = it->second.unitBits;
             }
         }
         return builder.CreateStructGEP(unionLLVM, objVal, 0, "unionmember");
