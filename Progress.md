@@ -732,3 +732,14 @@
 - 整分支评审（subagent）：C1 union 位域被当普通字段（Parser 注册丢 bitWidth + sema 重复成员 → 无 RMW/E2027 绕过）；C2 union codegen unitBits 未设（IntNTy(0)）；I1 派生聚合物化 GEP 基类 +1 重复；M1 位宽溢出 cast 回绕绕过 E2026。修复提交 `26d432a` + 5 回归测试（UnionBitFieldTruncates/AddrOfRejected/GlobalInit、DerivedNormalAndBitField、WidthOverflowRejected）。
 - 验证：每任务提交后全量 ctest 全绿；最终 **1283/1283**（1244 基线 + 34 BitFieldE2E + 5 评审回归）。CLI 与 gcc 实测核对 packed 尺寸与位域值语义（signed sext / unsigned zext / 截断回绕）。
 - 已知限制（非本轮范围）：static 局部变量不支持（DEC 存储类）；packed 位域 RMW 用整数自然对齐（x86-64 容忍，严格对齐目标需 Align(1)，M2）；位域 struct 整体按值传参/返回（MEM-14 聚合 ABI）；readLValue 三份拷贝（计划已接受）。
+
+## 2026-10-15 — 全特性演示 examples/all_features.c + 3 个编译器 bug 修复
+
+- 产出：`examples/all_features.c`（单文件 20 节全特性演示，编译+运行通过，`ALL FEATURES OK`）。编译运行：`./bin/my_llvm_c -c examples/all_features.c -o /tmp/a.o && cc /tmp/a.o -o /tmp/a && /tmp/a`。
+- 建设过程中用 systematic-debugging 定位并修复 3 个编译器 bug（提交 `15bbbb6`，各配回归测试 `tests/e2e/test_demo_regressions.cpp`）：
+  - **A** `CompileTimeEvaluator::toLLVMType` 对 Class 用 `static_cast<StructType*>` 读 isPacked——ClassType 非 StructType 子类，跨类读偏移 UB，读垃圾值 → 布局损坏，`size_of(派生类)` 非确定性 `Invalid size request on a scalable vector` 崩溃。按 kind 分支读取 name/isPacked。
+  - **B** 无后缀整型字面量恒 int32 → `int64 v = 4000000000` 以有符号 int32 构造 APInt（Debug 断言崩溃 / Release 静默截断）。sema 按值域提升 int32→int64→int128。
+  - **C** `ForStmtAST::codegen` 循环变量无独立作用域 → 兄弟 for 循环复用同名 `i` 时第二个循环绑定首个循环的 i（=11），循环体不执行。pushScope/popScope 包住循环。
+- 调试方法：非确定性内存类 bug，gdb/valgrind/ASAN 均因堆布局改变不触发；`MALLOC_PERTURB_`（释放内存填 0xA5）使崩溃确定化（90%+），Debug 版 gdb 抓到精确行号，确认 `StructLayout::getElementOffset` 返回 scalable TypeSize（DataLayout 缓存被垃圾 isPacked 损坏的 Class 布局污染）。
+- 演示期间还发现（未修，记录）：数组 typedef 不支持下标/slice，`sizeof` 按指针退化（4）；演示已按实际行为调整断言。
+- 全量 ctest **1286/1286** 绿。
