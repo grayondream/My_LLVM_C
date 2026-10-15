@@ -404,10 +404,20 @@ llvm::Type* CompileTimeEvaluator::toLLVMType(Type* t) {
         case TypeKind::Struct:
         case TypeKind::Class: {
             // P1-05 / ANN: 布局单源化（LayoutBuilder；基类槽 0、packed/align）。
-            auto* agg = static_cast<StructType*>(t);
-            llvm::StructType* llvmSt = llvm::StructType::getTypeByName(ctx, agg->name);
+            // Class 不是 StructType 子类——name/isPacked 必须按 kind 分支读取，
+            // 不能 static_cast<StructType*> 跨类（成员偏移不同，读垃圾值 UB）。
+            std::string aggName;
+            bool aggPacked = false;
+            if (t->kind == TypeKind::Struct) {
+                aggName = static_cast<StructType*>(t)->name;
+                aggPacked = static_cast<StructType*>(t)->isPacked;
+            } else {
+                aggName = static_cast<ClassType*>(t)->name;
+                aggPacked = static_cast<ClassType*>(t)->isPacked;
+            }
+            llvm::StructType* llvmSt = llvm::StructType::getTypeByName(ctx, aggName);
             if (!llvmSt) {
-                llvmSt = llvm::StructType::create(ctx, agg->name);
+                llvmSt = llvm::StructType::create(ctx, aggName);
             }
             m_typeCache[t] = llvmSt;
             if (!llvmSt->isOpaque()) {
@@ -417,7 +427,7 @@ llvm::Type* CompileTimeEvaluator::toLLVMType(Type* t) {
             auto LR = LayoutBuilder::buildAggregate(t, ctx, m_module->getDataLayout(),
                 [this](Type* tt) { return toLLVMType(tt); },
                 [this](const std::string& n) -> Type* { return m_sema.resolveTypeByName(n); });
-            llvmSt->setBody(LR.fieldTypes(), agg->isPacked);
+            llvmSt->setBody(LR.fieldTypes(), aggPacked);
             result = llvmSt;
             break;
         }

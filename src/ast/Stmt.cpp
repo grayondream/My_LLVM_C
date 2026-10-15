@@ -220,6 +220,10 @@ llvm::Value* ForStmtAST::codegen(CodegenContext& ctx) {
     ctx.pushBreakBlock(endBB);
     ctx.pushContinueBlock(incBB);
 
+    // 循环变量作用域：`for (int32 i = ...)` 的 init 声明必须是循环局部——
+    // 否则 i 泄漏到函数作用域，同名兄弟循环会复用同一符号（第二个循环
+    // i 读到首个循环结束值，条件立即为假，循环体不执行）。
+    ctx.pushScope();
     if (init) init->codegen(ctx);
     ctx.getBuilder().CreateBr(condBB);
 
@@ -244,6 +248,7 @@ llvm::Value* ForStmtAST::codegen(CodegenContext& ctx) {
 
     ctx.popContinueBlock();
     ctx.popBreakBlock();
+    ctx.popScope();
 
     ctx.getBuilder().SetInsertPoint(endBB);
     return nullptr;

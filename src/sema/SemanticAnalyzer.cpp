@@ -9,6 +9,7 @@
 #include "support/Utf8.h"
 #include "sema/TemplateInstantiator.h"
 #include <algorithm>
+#include <climits>
 
 // Strip any number of typedef/alias layers, returning the underlying type.
 static Type* stripTypedef(Type* type) {
@@ -1434,6 +1435,19 @@ void SemanticAnalyzer::visit(NumberExprAST& node) {
     // LEX-15: the literal kind chooses the fixed-width type; fall back to int32.
     node.type = typeForLiteralKind(node.literalKind);
     if (!node.type) node.type = typeCtx->getInt32();
+    // 无后缀整型字面量按值域提升（C 语义：十进制取能容纳的最小有符号类型）——
+    // 否则 int64 v = 4000000000 会以 int32 有符号构造 APInt（Debug 断言崩溃，
+    // Release 静默截断为错误值）。
+    if (node.literalKind == LiteralKind::Int) {
+        const long long v = node.value;
+        if (v >= INT32_MIN && v <= INT32_MAX) {
+            node.type = typeCtx->getInt32();
+        } else if (v >= INT64_MIN && v <= INT64_MAX) {
+            node.type = typeCtx->getInt64();
+        } else {
+            node.type = typeCtx->getInt128();
+        }
+    }
     node.isLValue = false;
 }
 
