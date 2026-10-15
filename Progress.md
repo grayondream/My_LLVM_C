@@ -722,3 +722,13 @@
 - **修复** `42da409`：①Optional 分支读旧 valid 位 → `br srcValid ? body : staleBB`，staleBB 按 oldValid 决定是否 `freeBB`；②Result 分支读旧 ok 位 → okBB 尾 `br oldOk ? done : freeErrBB`、errBB 尾 `br oldOk ? freeValBB : done`；③新增 `emitStringValueRelease`/`emitAggregateStringRelease`（镜像拷贝递归，Struct/Class/Array/Optional/Result 全支持）：释放槽位内全部 string 缓冲（free null 守卫）+ 置零，维持"失效⟹槽位零化"不变量——否则再转换时 assign helper 对悬垂指针二次 free。非 string 承载 → 无操作。
 - **验证**：6 新 e2e RED（exit=2）→ GREEN；CLI 六实证 exit=0 + r7 再转换 exit=0；全量 `ctest -j8` → **1244/1244 绿**（1238 + 6；2 个既有 GTEST_SKIP 不变）。
 - **新遗留**：**已清空**。相关已知限制（不在本轮范围）：失效侧 RHS 临时值被丢弃（如 `{false, string.new("world")}` 的 "world" 缓冲）——语言无 RAII，未消费的 rvalue 临时一律丢弃（pre-existing）；可选后续：Issue-3 的 optional/result 测试仍用字段赋值构造（当初为规避本 bug），现可换自然嵌套 brace-init 语法。
+
+## 2026-10-15 — P1-07 位域完成（PAR-10/SEM-12/AGG-06/CG-09/DEC-08）
+
+- 流程：plan（docs/superpowers/plans/2026-10-13-bitfields.md）→ executing-plans native 6 任务 TDD（每任务 RED→GREEN→提交）。提交线：`2ba8de7`(T1 语法) → `9671a24`(T2 sema E2025/26/27) → `d9e5851`(T3 System V 布局物化) → `78537b8`(T4 RMW codegen) → `ccdcc45`(T5 全局/static 常量位域感知) → `a973db6`(T6 union/packed/class)。
+- 布局：非 packed 按 System V / GCC 单元分配（无当前单元/基类型尺寸不同/放不下 → 新单元；零宽结束单元；bool → i8 单元）。packed 用 GCC 连续位流"区域"模型：相邻位域共享单一 `[N x i8]` LLVM 伪字段、位偏移为区域内绝对位、零宽按声明类型自然字节边界取整（不结束区域）、普通字段结束区域——`int a:3;int b:3` packed → 1B、`a:3;:0;b:3` → 5B 等尺寸与 gcc 实测逐一核对一致。
+- 关键机制：`BitFieldLayout {unitIndex,bitOffset,bitWidth,unitBits}`；`semanticFields` 物化前快照；RMW 助手 `loadBitFieldValue`/`storeBitFieldValue`（unitBits 驱动加载/掩码，packed 区域单元可宽于基类型）；`buildAggregateConstant` OR 常量进存储单元（packed 区域拆字节数组）；局部花括号初始化按语义字段序消费。
+- Rulings（执行中）：①正向测试改显式 parser 管线断言 bitWidth（runSource 无法捕获静默丢弃）；②命名零宽 parse 期拒绝（FieldInfo 编码无法表示）；③AsArgAndReturn 去聚合返回调用（MEM-14 既有限制）；④NestedChain 测试缺陷（signed 3 位存 5 读 -3 是 C 语义）；⑤static 局部不支持（Parser 仅类成员处理 TOKEN_STATIC）——Task 5 StaticLocalInit 测试原靠 parse 错误恢复静默丢弃 `static` 才碰巧通过，改为诚实的 LocalBraceInitTruncation；⑥packed 布局按 GCC 区域模型（上）；⑦无名成员不消费花括号初始值（独立 initIdx，修 `{5,6}` 的 6 被 `int:0` 吞掉）；⑧sema 成员解析物化后优先 semanticFields（修 size_of 后访问失败）。
+- 整分支评审（subagent）：C1 union 位域被当普通字段（Parser 注册丢 bitWidth + sema 重复成员 → 无 RMW/E2027 绕过）；C2 union codegen unitBits 未设（IntNTy(0)）；I1 派生聚合物化 GEP 基类 +1 重复；M1 位宽溢出 cast 回绕绕过 E2026。修复提交 `26d432a` + 5 回归测试（UnionBitFieldTruncates/AddrOfRejected/GlobalInit、DerivedNormalAndBitField、WidthOverflowRejected）。
+- 验证：每任务提交后全量 ctest 全绿；最终 **1283/1283**（1244 基线 + 34 BitFieldE2E + 5 评审回归）。CLI 与 gcc 实测核对 packed 尺寸与位域值语义（signed sext / unsigned zext / 截断回绕）。
+- 已知限制（非本轮范围）：static 局部变量不支持（DEC 存储类）；packed 位域 RMW 用整数自然对齐（x86-64 容忍，严格对齐目标需 Align(1)，M2）；位域 struct 整体按值传参/返回（MEM-14 聚合 ABI）；readLValue 三份拷贝（计划已接受）。

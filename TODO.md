@@ -21,6 +21,8 @@
 
 > **进度快照（2026-10-12，新遗留项收尾）**：**optional/result valid→invalid 聚合赋值旧缓冲泄漏修复**（`42da409`）——根因 `emitAggregateStringCopy` 只按**源**有效位分支，目标中"变为失效"的槽位从不释放：optional valid→invalid、result ok→err / err→ok 时旧 string 缓冲泄漏且槽位残留旧内容（破坏"valid⟹value 含缓冲"不变量）。修复：读旧 valid/ok 位，槽位失效时 `emitStringValueRelease`/`emitAggregateStringRelease`（镜像拷贝递归，Struct/Class/Array/Optional/Result 全支持）free+置零，再转换时 assign helper 见 null 不双 free。6 个新 e2e（valid→invalid 释放 ×4、err→ok、再转换安全）RED→GREEN。当前全量 **1244** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。**新遗留清单已清空**。
 
+> **进度快照（2026-10-15，P1-07 位域完成）**：**C 位域全链路完成**（PAR-10/SEM-12/AGG-06/CG-09/DEC-08 全部 `[x]`，plan `docs/superpowers/plans/2026-10-13-bitfields.md` 6 任务 TDD）。语法 `T name : N`（struct/class/union/匿名成员）；sema E2025/26/27（基类型/宽度/取址）；布局 System V 存储单元（非 packed）与 GCC packed 连续位流区域模型（`[N x i8]`，零宽按声明类型自然边界取整，尺寸与 gcc 实测核对）；RMW 读写 + 复合赋值/++/--；全局/局部花括号初始化位域感知（无名成员不消费初始值）；union/class（继承链）位域；offset_of 位域拒绝。整分支评审修复：union 位域被当普通字段（Parser/Sema 注册 + unitBits + 全局常量掩码）、派生聚合物化 GEP +1、位宽溢出防回绕。当前全量 **1283** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。已知限制：static 局部变量不支持（DEC 存储类范围）；packed 位域 RMW 用整数自然对齐（x86-64 容忍，严格对齐目标待 Align(1)）。
+
 ---
 
 ## 0. 现状基线（已完成，勿重复实现）
@@ -90,7 +92,7 @@
 - `[x]` **PAR-07** `(新)` 注解挂载点：六处全落地（模块仅解析记录）（2026-10-07）。
 - `[ ]` **PAR-08** `(已实现)` 表达式：字面量/标识符/调用/成员访问/下标/一元/二元/三元/强转；补切片表达式。
 - `[x]` **PAR-09** `(改)` 语句：块、if/else、while、do-while、for、switch/case、return、break、continue、声明。（**不含 goto/label**，见 Non-goals；已移除 goto/标签解析）
-- `[ ]` **PAR-10** `(新)` 位域声明：`T name : N;`（struct/union 成员），含零宽位域。
+- `[x]` **PAR-10** `(新)` 位域声明：`T name : N;`（struct/union 成员），含零宽位域。**完成**（2026-10-15，P1-07）：struct/class/union/匿名内联成员四处循环解析 `: N`（parseBitFieldWidth，常量表达式求值）；命名零宽位域 parse 期拒绝（FieldInfo 编码无法区分，Ruling）；超 int32 范围位宽 parse 期拒绝（防回绕绕过 E2026）。
 - `[ ]` **PAR-11** `(新)` 简单 lambda：语法（建议 C++ 风格 `[capture](params) -> T { ... }` 或最简 `[](p){...}`）、捕获列表。
 - `[ ]` **PAR-12** `(新)` 匿名 class/struct/union：匿名类型定义、匿名成员提升。
 - `[ ]` **PAR-13** `(新)` 指定初始化器 `{.field = v}`、柔性数组 `T a[]`。
@@ -191,7 +193,7 @@
 - `[ ]` **SEM-09** 数组/Slice 边界检查策略：静态可证明或运行时检查（见 DEC-06）。
 - `[ ]` **SEM-10** 整数溢出检查策略：Debug 检查 / Release 行为（见 DEC-07）。
 - `[~]` **SEM-11** 警告：未使用变量（W3002）与不可达代码（W3003）已实现（`tests/sema/test_warnings.cpp`；任一引用算使用，`defer` 不影响可达性）；**W3004 弃用 API 已随 ANN-05 落地**（2026-10-07）；enum 穷尽性（依赖 DEC-13）待定；未初始化变量见 SEM-01/02（W3001）。
-- `[ ]` **SEM-12** 位域语义检查：宽度合法、跨存储单元规则。
+- `[x]` **SEM-12** 位域语义检查：宽度合法、跨存储单元规则。**完成**（2026-10-15，P1-07）：E2025（基类型非整型族）、E2026（宽度超基类型位宽/负宽）、E2027（取址拒绝）；基础类型放开 bool/int8..128/uint8..128/isize/usize；成员访问标记 isBitField/bitWidth；物化后成员解析优先 semanticFields 快照。
 - `[ ]` **SEM-13** UB 清单（**对齐 C 标准**）：为 SEM-09/10/11 与 UBSan 提供依据；不引入所有权/生命周期模型。
 - `[~]` **SEM-14** 静态分析诊断：错误码、源码位置、修复建议。主要检查点已带错误码与 fix 字段（见 `src/sema/Diagnostic.*`）。
 - `[~]` **SEM-15** `(新)` **求值顺序与序列点**：表达式/函数实参求值顺序，对齐 C 标准（细化 SEM-13）。（草案见 `docs/spec/semantics.md`）
@@ -209,7 +211,7 @@
 - `[x]` **AGG-03** `(新)` 匿名 struct/union 成员与成员提升。已实现（AGG-17 轮次）：struct/union 体内的匿名聚合成员按 C11 语义提升到外层（`s.i`/`s.x` 直接可用），名字冲突报错；`typedef struct/union` 别名的成员访问同步修复（`.` 与 `->` 均剥离 typedef）。文件作用域匿名 union 延后。
 - `[ ]` **AGG-04** `(新)` 柔性数组 `T a[]`。
 - `[ ]` **AGG-05** `(新)` 指定初始化器 `{.x=1}`。
-- `[ ]` **AGG-06** `(新)` 位域字段布局与 codegen。
+- `[x]` **AGG-06** `(新)` 位域字段布局与 codegen。**完成**（2026-10-15，P1-07）：LayoutBuilder 物化 System V 存储单元（非 packed）与 GCC packed 连续位流"区域"模型（`[N x i8]` 伪字段）；bitFields 布局表 {unitIndex,bitOffset,bitWidth,unitBits}；union 位域成员（对齐字段共享）；RMW 读写（loadBitFieldValue/storeBitFieldValue，含复合赋值/++/--）；全局/局部花括号初始化位域感知（常量 OR 进存储单元、无名成员不消费初始值）；class 继承链位域访问。
 
 ### class
 - `[ ]` **AGG-07** `class` 声明与 `public/private/protected` 段。**部分完成**：访问段 + 默认 private（DEC-01）+ E2009 访问诊断已实现；`static` 成员/嵌套类型已完成（AGG-10/11，2026-10-05）。
@@ -416,7 +418,7 @@
 - `[ ]` **CG-06** class 方法降级 `Vector_length(Vector* self)`、`static` 成员变量降级。
 - `[x]` **CG-07** **模板单态化代码生成**（GEN-05）、实例去重缓存。已实现（2026-10-06）：实例即普通声明走既有 codegen；TU 预扫（实例布局先行 + 函数签名）+ 调用点按需前向声明。
 - `[ ]` **CG-08** **继承布局与 `this`/`static_cast` codegen**（INH）。
-- `[ ]` **CG-09** **位域 codegen**：`iN` 与读-改-写位操作。
+- `[x]` **CG-09** **位域 codegen**：`iN` 与读-改-写位操作。**完成**（2026-10-15，P1-07）：统一读点 readLValue 分派位域 → loadBitFieldValue（shift+trunc+sext/zext 至基类型）；storeBitFieldValue 掩码 RMW；Assignment/CompoundAssign/PreInc/PostfixIncDec 位域路径；emitBitFieldGEP 沿继承链定位存储单元；union 分支记录 unitBits。
 - `[x]` **CG-10** **内联 `asm`** → LLVM `InlineAsm`（操作数约束/clobber/volatile/目标限定）。**完成**（2026-10-11，P1-08）：`AsmExprAST::codegen` 用 `llvm::InlineAsm`（AD_ATT）；输出映射 call 返回值（单值/struct）、`+r`→`=r`+尾部 tied 约束、GCC 模板翻译 `$`→`$$`/`%%`→`%`/`%N`→`$N`；e2e 6 用例 LLJIT 执行通过。
 - `[ ]` **CG-11** **lambda codegen**：无捕获→函数指针；有捕获→匿名 struct + 函数。
 - `[ ]` **CG-12** `compile_time` 常量折叠后 codegen；与 LLVM 常量集成。
@@ -469,7 +471,7 @@
 - `[x]` **DEC-05** `constexpr` 与 `compile_time` 的关系——裁决：并存 + 共享求值器内核（2026-10-06）；constexpr 保持既有语义（运行时可调用），CT 表达式内 constexpr 函数调用委托 `evaluateConstexpr`。
 - `[ ]` **DEC-06** Slice/数组边界检查默认策略：静态可证 or 运行时检查，Debug/Release 差异。
 - `[ ]` **DEC-07** 整数溢出默认行为：Debug 检查 / Release 回绕。
-- `[ ]` **DEC-08** 位域布局对齐哪个 C ABI（System V / MSVC）；与 `[[packed]]`/`[[align]]` 交互。
+- `[x]` **DEC-08** 位域布局对齐哪个 C ABI（System V / MSVC）；与 `[[packed]]`/`[[align]]` 交互。**完成**（2026-10-15，P1-07）：对齐 System V / GCC x86-64（非 packed）；packed 用 GCC packed 语义（连续位流 + 零宽按声明类型自然边界取整），各尺寸与 gcc 实测逐一核对；`[[packed]]` 下 bit-field 自然对齐不抬整体对齐。
 - `[x]` **DEC-09** 内联 `asm` 的语法与约束模型；是否仅限特定目标。**完成**（2026-10-11，P1-08）：sema 校验 outputs 左值标量/inputs 标量/约束非空（E2023）+ 模板 `%` 转义（E2024）；方言固定 AD_ATT、约束语义透传 LLVM（D2）；目标限定 x86-64 宿主基线。
 - `[ ]` **DEC-10** lambda 精确语法与捕获模型（默认按值/按引用？）。
 - `[ ]` **DEC-11** `atomic` 是类型限定符还是类型构造器。
