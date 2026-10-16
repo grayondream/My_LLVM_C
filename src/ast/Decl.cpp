@@ -71,6 +71,40 @@ static void storeScalarInitializer(CodegenContext& ctx, llvm::Value* dest,
 
 // Emit stores for `{a, b, ...}` into an already allocated aggregate `dest`.
 static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
+                                     Type* type, InitializerListExprAST* init);
+
+// PAR-13: 按 sema 解析的语义目标链写槽位（设计符 + 展开的位置式）。
+static void emitDesignatedInitializer(CodegenContext& ctx, llvm::Value* dest,
+                                      Type* type, InitializerListExprAST* init);
+
+// P1-07 / AGG-06 / PAR-13: 单个初始值项写入一个字段（嵌套/string 深拷贝/标量）。
+static void emitFieldItemImpl(CodegenContext& ctx, ExprAST& item, Type* ftype,
+                              llvm::Value* fptr) {
+    if (auto* nested = dynamic_cast<InitializerListExprAST*>(&item)) {
+        emitAggregateInitializer(ctx, fptr, ftype, nested);
+        return;
+    }
+    Type* fr = ftype;
+    while (fr && fr->kind == TypeKind::Typedef)
+        fr = static_cast<TypedefType*>(fr)->aliasedType;
+    // I4 (D7): brace-init string 字段活值深拷贝（新鲜值直接 store）。
+    if (fr && fr->kind == TypeKind::String &&
+        !ctx.isFreshStringValue(item)) {
+        llvm::Value* v = item.codegen(ctx);
+        if (v) {
+            v = readLValue(ctx, item, v);
+            v = ctx.castValue(v, item.type, ctx.getLLVMType(ftype));
+            auto savedIP = ctx.getBuilder().saveIP();
+            llvm::Function* copyFn = ctx.getStringCopyFn();
+            ctx.getBuilder().restoreIP(savedIP);
+            ctx.getBuilder().CreateCall(copyFn, {fptr, v});
+        }
+    } else {
+        storeScalarInitializer(ctx, fptr, ctx.getLLVMType(ftype), item, ftype);
+    }
+}
+
+static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
                                      Type* type, InitializerListExprAST* init) {
     type = stripTypedefs(type);
     if (!type || !init) return;
@@ -78,6 +112,17 @@ static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
     auto& builder = ctx.getBuilder();
     llvm::Type* destLLVM = ctx.getLLVMType(type);
     if (!destLLVM) return;
+
+    // PAR-13: sema 已填充 resolvedTargets（语义目标链）→ 走设计符写槽位；
+    // 纯位置式/Optional/Result/标量列表无解析结果，走既有 switch。
+    bool hasResolved = false;
+    for (auto& t : init->resolvedTargets) {
+        if (!t.empty()) { hasResolved = true; break; }
+    }
+    if (hasResolved) {
+        emitDesignatedInitializer(ctx, dest, type, init);
+        return;
+    }
 
     switch (type->kind) {
         case TypeKind::Array: {
@@ -179,28 +224,7 @@ static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
             }
             // P1-07 / AGG-06: 单个初始值项写入一个字段（嵌套/string 深拷贝/标量）。
             auto emitFieldItem = [&](ExprAST& item, Type* ftype, llvm::Value* fptr) {
-                if (auto* nested = dynamic_cast<InitializerListExprAST*>(&item)) {
-                    emitAggregateInitializer(ctx, fptr, ftype, nested);
-                    return;
-                }
-                Type* fr = ftype;
-                while (fr && fr->kind == TypeKind::Typedef)
-                    fr = static_cast<TypedefType*>(fr)->aliasedType;
-                // I4 (D7): brace-init string 字段活值深拷贝（新鲜值直接 store）。
-                if (fr && fr->kind == TypeKind::String &&
-                    !ctx.isFreshStringValue(item)) {
-                    llvm::Value* v = item.codegen(ctx);
-                    if (v) {
-                        v = readLValue(ctx, item, v);
-                        v = ctx.castValue(v, item.type, ctx.getLLVMType(ftype));
-                        auto savedIP = ctx.getBuilder().saveIP();
-                        llvm::Function* copyFn = ctx.getStringCopyFn();
-                        ctx.getBuilder().restoreIP(savedIP);
-                        ctx.getBuilder().CreateCall(copyFn, {fptr, v});
-                    }
-                } else {
-                    storeScalarInitializer(ctx, fptr, ctx.getLLVMType(ftype), item, ftype);
-                }
+                emitFieldItemImpl(ctx, item, ftype, fptr);
             };
             if (semFields) {
                 // P1-07 / AGG-06: 位域感知初始化——按语义字段序消费初始值；
@@ -255,6 +279,172 @@ static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
                                        *init->initializers.back(), type);
             }
             break;
+    }
+}
+
+// PAR-13: 语义字段名 → 物化 GEP 指针（含基类下降）。位域返回存储单元指针 +
+// bitfield 布局；普通字段返回字段指针 + 类型。
+static llvm::Value* resolveFieldGEP(CodegenContext& ctx, llvm::Value* aggPtr,
+                                    Type* aggTy, const std::string& name,
+                                    Type*& outType, bool& outBF,
+                                    unsigned& outO, unsigned& outW, unsigned& outU) {
+    Type* ct = stripTypedefs(aggTy);
+    if (!ct || (ct->kind != TypeKind::Struct && ct->kind != TypeKind::Class)) {
+        return nullptr;
+    }
+    std::vector<FieldInfo>* fields = nullptr;
+    std::vector<FieldInfo>* semFields = nullptr;
+    std::unordered_map<std::string, BitFieldLayout>* bfMap = nullptr;
+    unsigned base = 0;
+    Type* baseType = nullptr;
+    if (ct->kind == TypeKind::Struct) {
+        auto* st = static_cast<StructType*>(ct);
+        fields = &st->fields;
+        baseType = st->base;
+        if (!st->semanticFields.empty()) {
+            semFields = &st->semanticFields;
+            bfMap = &st->bitFields;
+        }
+    } else {
+        auto* cl = static_cast<ClassType*>(ct);
+        fields = &cl->fields;
+        baseType = cl->base;
+        if (!cl->semanticFields.empty()) {
+            semFields = &cl->semanticFields;
+            bfMap = &cl->bitFields;
+        }
+    }
+    if (baseType) base = 1; // 基类子对象槽 0（struct/class 一致）
+    llvm::Type* curLLVM = ctx.getLLVMType(ct);
+    auto& builder = ctx.getBuilder();
+
+    if (semFields) {
+        for (size_t k = 0; k < semFields->size(); ++k) {
+            auto& sf = (*semFields)[k];
+            if (sf.name != name) continue;
+            if (sf.bitWidth != 0) {
+                auto it = bfMap->find(sf.name);
+                if (it == bfMap->end()) return nullptr;
+                outType = sf.type;
+                outBF = true;
+                outO = it->second.bitOffset;
+                outW = it->second.bitWidth;
+                outU = it->second.unitBits;
+                return builder.CreateStructGEP(
+                    curLLVM, aggPtr, base + it->second.unitIndex, "dsg.bfunit");
+            }
+            unsigned fi = 0;
+            for (size_t j = 0; j < fields->size(); ++j) {
+                if ((*fields)[j].name == name) { fi = (unsigned)j; break; }
+            }
+            outType = sf.type;
+            outBF = false;
+            return builder.CreateStructGEP(
+                curLLVM, aggPtr, base + fi, "dsg.field");
+        }
+    } else {
+        for (size_t j = 0; j < fields->size(); ++j) {
+            if ((*fields)[j].name == name) {
+                outType = (*fields)[j].type;
+                outBF = false;
+                return builder.CreateStructGEP(
+                    curLLVM, aggPtr, base + (unsigned)j, "dsg.field");
+            }
+        }
+    }
+    // 本层未命中 → 沿基类下降（GEP 到基类子对象槽 0 再递归）。
+    if (baseType) {
+        llvm::Value* basePtr = builder.CreateStructGEP(curLLVM, aggPtr, 0, "dsg.base");
+        return resolveFieldGEP(ctx, basePtr, baseType, name,
+                               outType, outBF, outO, outW, outU);
+    }
+    return nullptr;
+}
+
+// PAR-13: 按 sema 解析的语义目标链（resolvedTargets）写槽位。链节：
+//   Field → struct/class 语义字段（物化槽位映射：普通字段 nameIdx、位域存储单元）
+//          / union 槽 0；Index → 数组下标。链末嵌套列表递归 / 位域 RMW / 标量。
+static void emitDesignatedInitializer(CodegenContext& ctx, llvm::Value* dest,
+                                      Type* type, InitializerListExprAST* init) {
+    auto& builder = ctx.getBuilder();
+    llvm::Type* destLLVM = ctx.getLLVMType(type);
+    if (!destLLVM) return;
+    auto* i64 = llvm::Type::getInt64Ty(ctx.getContext());
+
+    for (size_t i = 0; i < init->initializers.size(); ++i) {
+        auto& item = *init->initializers[i];
+        if (i >= init->resolvedTargets.size() || init->resolvedTargets[i].empty()) {
+            continue;
+        }
+        const auto& chain = init->resolvedTargets[i];
+
+        llvm::Value* curPtr = dest;
+        Type* curType = type;
+        bool isBitField = false;
+        unsigned bfOffset = 0, bfWidth = 0, bfUnitBits = 0;
+        Type* bfDeclType = nullptr;
+
+        for (size_t c = 0; c < chain.size(); ++c) {
+            const Designator& des = chain[c];
+            Type* ct = stripTypedefs(curType);
+            if (!ct) break;
+            if (des.kind == Designator::Kind::Field) {
+                if (ct->kind == TypeKind::Union) {
+                    curPtr = builder.CreateStructGEP(ctx.getLLVMType(ct), curPtr, 0, "dsg.union");
+                    auto* ut = static_cast<UnionType*>(ct);
+                    for (auto& m : ut->members) {
+                        if (m.name == des.field) { curType = m.type; break; }
+                    }
+                } else if (ct->kind == TypeKind::Struct || ct->kind == TypeKind::Class) {
+                    Type* fty = nullptr;
+                    bool bf = false;
+                    unsigned bo = 0, bw = 0, bu = 0;
+                    llvm::Value* fp = resolveFieldGEP(ctx, curPtr, ct, des.field,
+                                                      fty, bf, bo, bw, bu);
+                    if (fp) {
+                        curPtr = fp;
+                        if (bf) {
+                            isBitField = true;
+                            bfOffset = bo;
+                            bfWidth = bw;
+                            bfUnitBits = bu;
+                            bfDeclType = fty;
+                        } else {
+                            curType = fty;
+                        }
+                    }
+                }
+            } else {
+                // Index 设计符
+                if (ct && ct->kind == TypeKind::Array) {
+                    auto* at = static_cast<ArrayType*>(ct);
+                    curPtr = builder.CreateInBoundsGEP(
+                        ctx.getLLVMType(ct), curPtr,
+                        {llvm::ConstantInt::get(i64, 0),
+                         llvm::ConstantInt::get(i64, des.index)}, "dsg.idx");
+                    curType = at->elementType;
+                }
+            }
+        }
+
+        // 写值
+        if (isBitField) {
+            llvm::Value* v = item.codegen(ctx);
+            if (v) {
+                v = readLValue(ctx, item, v);
+                if (llvm::Type* dt = ctx.getLLVMType(bfDeclType)) {
+                    v = ctx.castValue(v, item.type, dt);
+                }
+                ctx.storeBitFieldValue(curPtr, bfOffset, bfWidth, bfDeclType,
+                                       v, bfUnitBits);
+            }
+            continue;
+        }
+        if (auto* nested = dynamic_cast<InitializerListExprAST*>(&item)) {
+            emitAggregateInitializer(ctx, curPtr, curType, nested);
+        } else {
+            emitFieldItemImpl(ctx, item, curType, curPtr);
+        }
     }
 }
 
