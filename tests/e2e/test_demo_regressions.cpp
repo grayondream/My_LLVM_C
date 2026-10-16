@@ -137,3 +137,65 @@ TEST_F(DemoRegressionE2E, ClassBitFieldWithSizeOfDerived) {
         }
     )", "reg_cls.c"), 0);
 }
+
+// Bug D：指针后缀 ++/-- 须按元素步进（GEP），不能字节 add——int32* ++ 只前进
+// 1 字节时解引用读到错位值。
+TEST_F(DemoRegressionE2E, PointerPostfixIncDecStepsByElement) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            int32 arr[3] = {10, 20, 30};
+            int32* p = &arr[0];
+            p++;
+            if (*p != 20) { return 1; }
+            p--;
+            if (*p != 10) { return 2; }
+            p++;
+            int32* q = &arr[0];
+            ++q;
+            if (*q != 20) { return 3; }
+            int32* r = &arr[2];
+            r--;
+            if (*r != 20) { return 4; }
+            return 0;
+        }
+    )", "reg_postinc.c"), 0);
+}
+
+// Bug E：浮点复合赋值走整数指令（CreateMul 等）→ 位模式乘法垃圾值；须 F 系。
+TEST_F(DemoRegressionE2E, FloatCompoundAssignmentUsesFloatOps) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            float64 fd = 1.5;
+            fd *= 2.0;
+            if (fd != 3.0) { return 1; }
+            fd += 0.5;
+            if (fd != 3.5) { return 2; }
+            fd -= 1.0;
+            if (fd != 2.5) { return 3; }
+            fd /= 2.5;
+            if (fd != 1.0) { return 4; }
+            float32 h = 10.0f;
+            h /= 4.0f;
+            if (h != 2.5f) { return 5; }
+            return 0;
+        }
+    )", "reg_fcmpd.c"), 0);
+}
+
+// Bug F：无符号复合赋值走有符号指令——`>>=` 算术移、`/=`/`%=` 高位错值。
+TEST_F(DemoRegressionE2E, UnsignedCompoundAssignmentUsesUnsignedOps) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            uint32 w = 0x80000000;
+            w >>= 4;
+            if (w != 0x08000000) { return 1; }
+            uint32 d = 0x80000000;
+            d /= 2;
+            if (d != 0x40000000) { return 2; }
+            uint32 m = 0x80000000;
+            m %= 3;                  // 2147483648 % 3 = 2
+            if (m != 2) { return 3; }
+            return 0;
+        }
+    )", "reg_ucomp.c"), 0);
+}

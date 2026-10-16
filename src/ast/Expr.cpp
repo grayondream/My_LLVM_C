@@ -1423,17 +1423,43 @@ llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
         // 复合赋值 lhs 必为可写左值（位域 lhs 已在函数顶部早退）；无条件取值
         // 保持既有行为（测试手工构造 AST 时 isLValue 可能未置位）。
         llvm::Value* loadedLhs = ctx.loadValue(lhsVal, lhs->type);
+        // 浮点操作数须走 F 系指令——CreateAdd 等按整数位模式运算，浮点复合
+        // 赋值（fd *= 2.0）会得到垃圾值（1.5*2.0 → 0）。无符号走 U 系
+        // （udiv/urem/lshr），否则高位值被当有符号（0x80000000 >>= 4 变算术移）。
+        const bool fpLhs = loadedLhs->getType()->isFloatingPointTy();
+        const bool unsignedLhs =
+            lhs->type && isUnsignedArithmeticType(stripTypedefsT12(lhs->type));
         switch (op) {
-            case AssignOp::AddAssign:   result = builder.CreateAdd(loadedLhs, result, "addassign"); break;
-            case AssignOp::SubAssign:   result = builder.CreateSub(loadedLhs, result, "subassign"); break;
-            case AssignOp::MulAssign:   result = builder.CreateMul(loadedLhs, result, "mulassign"); break;
-            case AssignOp::DivAssign:   result = builder.CreateSDiv(loadedLhs, result, "divassign"); break;
-            case AssignOp::ModAssign:   result = builder.CreateSRem(loadedLhs, result, "modassign"); break;
+            case AssignOp::AddAssign:
+                result = fpLhs ? builder.CreateFAdd(loadedLhs, result, "addassign")
+                               : builder.CreateAdd(loadedLhs, result, "addassign");
+                break;
+            case AssignOp::SubAssign:
+                result = fpLhs ? builder.CreateFSub(loadedLhs, result, "subassign")
+                               : builder.CreateSub(loadedLhs, result, "subassign");
+                break;
+            case AssignOp::MulAssign:
+                result = fpLhs ? builder.CreateFMul(loadedLhs, result, "mulassign")
+                               : builder.CreateMul(loadedLhs, result, "mulassign");
+                break;
+            case AssignOp::DivAssign:
+                result = fpLhs ? builder.CreateFDiv(loadedLhs, result, "divassign")
+                               : (unsignedLhs ? builder.CreateUDiv(loadedLhs, result, "divassign")
+                                              : builder.CreateSDiv(loadedLhs, result, "divassign"));
+                break;
+            case AssignOp::ModAssign:
+                result = fpLhs ? builder.CreateFRem(loadedLhs, result, "modassign")
+                               : (unsignedLhs ? builder.CreateURem(loadedLhs, result, "modassign")
+                                              : builder.CreateSRem(loadedLhs, result, "modassign"));
+                break;
             case AssignOp::BitAndAssign: result = builder.CreateAnd(loadedLhs, result, "bandassign"); break;
             case AssignOp::BitOrAssign:  result = builder.CreateOr(loadedLhs, result, "borassign"); break;
             case AssignOp::BitXorAssign: result = builder.CreateXor(loadedLhs, result, "bxorassign"); break;
             case AssignOp::LShiftAssign: result = builder.CreateShl(loadedLhs, result, "lshiftassign"); break;
-            case AssignOp::RShiftAssign: result = builder.CreateAShr(loadedLhs, result, "rshiftassign"); break;
+            case AssignOp::RShiftAssign:
+                result = unsignedLhs ? builder.CreateLShr(loadedLhs, result, "rshiftassign")
+                                     : builder.CreateAShr(loadedLhs, result, "rshiftassign");
+                break;
             default: break;
         }
     }
@@ -1729,8 +1755,22 @@ llvm::Value* PostfixIncDecExprAST::codegen(CodegenContext& ctx) {
     }
     llvm::Type* loadType = operand->type ? ctx.getLLVMType(operand->type) : llvm::Type::getInt32Ty(ctx.getContext());
     llvm::Value* oldVal = builder.CreateLoad(loadType, addr, "postold");
-    llvm::Value* one = llvm::ConstantInt::get(loadType->isIntegerTy() ? loadType : llvm::Type::getInt32Ty(ctx.getContext()), 1);
-    llvm::Value* newVal = isIncrement ? builder.CreateAdd(oldVal, one, "postinc") : builder.CreateSub(oldVal, one, "postdec");
+    llvm::Value* newVal = nullptr;
+    if (loadType->isPointerTy()) {
+        // 指针自增/自减按元素步进（GEP），不能 CreateAdd（opaque ptr 是字节
+        // 算术）——否则 int32* ++ 只前进 1 字节，解引用读到错位值。
+        llvm::Type* elemTy = (operand->type && operand->type->base)
+            ? ctx.getLLVMType(operand->type->base)
+            : llvm::Type::getInt8Ty(ctx.getContext());
+        if (!elemTy) elemTy = llvm::Type::getInt8Ty(ctx.getContext());
+        llvm::Value* step = llvm::ConstantInt::get(
+            llvm::Type::getInt64Ty(ctx.getContext()), isIncrement ? 1 : -1);
+        newVal = builder.CreateGEP(elemTy, oldVal, step, "postptr");
+    } else {
+        llvm::Value* one = llvm::ConstantInt::get(loadType, 1);
+        newVal = isIncrement ? builder.CreateAdd(oldVal, one, "postinc")
+                             : builder.CreateSub(oldVal, one, "postdec");
+    }
     builder.CreateStore(newVal, addr);
     return oldVal;
 }
