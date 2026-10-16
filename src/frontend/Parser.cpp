@@ -1025,10 +1025,15 @@ std::unique_ptr<ReturnStmtAST> Parser::parseReturnStmt() {
         return nullptr;
     }
 
-    auto value = parseExpr();
-    if (!value) {
-        errorUnexpected("expected expression after 'return'");
-        return nullptr;
+    // 允许裸 `return;`（void 函数早退）——sema/codegen 已就绪（void 检查 +
+    // CreateRetVoid），仅解析器硬性要求表达式。
+    std::unique_ptr<ExprAST> value;
+    if (peek() && peek()->type != TokenType::TOKEN_SEMICOLON) {
+        value = parseExpr();
+        if (!value) {
+            errorUnexpected("expected expression after 'return'");
+            return nullptr;
+        }
     }
 
     expect(TokenType::TOKEN_SEMICOLON, "expected ';' after return statement");
@@ -1134,10 +1139,14 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
 
     // return statement
     if (auto retToken = match(TokenType::TOKEN_RETURN)) {
-        auto value = parseExpr();
-        if (!value) {
-            errorUnexpected("expected expression after 'return'");
-            return nullptr;
+        // 允许裸 `return;`（void 函数早退）。
+        std::unique_ptr<ExprAST> value;
+        if (peek() && peek()->type != TokenType::TOKEN_SEMICOLON) {
+            value = parseExpr();
+            if (!value) {
+                errorUnexpected("expected expression after 'return'");
+                return nullptr;
+            }
         }
 
         expect(TokenType::TOKEN_SEMICOLON, "expected ';' after return statement");

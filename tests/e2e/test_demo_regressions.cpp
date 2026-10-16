@@ -221,3 +221,21 @@ TEST_F(DemoRegressionE2E, OperatorOverloadExpressionTypeIsReturnType) {
         }
     )", "reg_opov.c"), 0);
 }
+
+// Bug H：void 函数裸 `return;`（早退）此前解析器硬性要求表达式被拒；
+// sema/codegen 早已支持（void 检查 + CreateRetVoid），仅解析放行。
+TEST_F(DemoRegressionE2E, BareReturnInVoidFunction) {
+    EXPECT_EQ(runSource(R"(
+        int32 trace = 0;
+        void early(int32 x) {
+            if (x < 0) return;
+            if (x == 0) return;
+            trace = trace + x;
+        }
+        int32 main() {
+            early(5); early(-1); early(0); early(7);
+            if (trace != 12) { return 1; }
+            return 0;
+        }
+    )", "reg_ret.c"), 0);
+}

@@ -1888,7 +1888,8 @@ TEST_F(ParserErrorTest, MissingEqualsInArrayInitReportsError) {
 }
 
 TEST_F(ParserErrorTest, UnexpectedTokenInExpression) {
-    auto [tu, errors] = parseWithErrors("int32 f() { return ; }");
+    // 裸 `return;` 现已合法（void 早退），改用真正非法 token 测表达式错误恢复。
+    auto [tu, errors] = parseWithErrors("int32 f() { return ) ; }");
     ASSERT_FALSE(errors.empty());
     bool found = false;
     for (const auto& err : errors) {
@@ -1898,6 +1899,13 @@ TEST_F(ParserErrorTest, UnexpectedTokenInExpression) {
         }
     }
     ASSERT_TRUE(found);
+}
+
+TEST_F(ParserErrorTest, BareReturnParses) {
+    // FUN-02 / PAR-02：void 函数裸 `return;` 早退——解析器放行（sema 检查
+    // 函数返回类型，非 void 报 "must return a value"）。
+    auto [tu, errors] = parseWithErrors("void f() { if (1) return; return; }");
+    ASSERT_TRUE(errors.empty());
 }
 
 TEST_F(ParserErrorTest, NestedCompoundStmtError) {
