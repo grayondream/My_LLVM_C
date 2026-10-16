@@ -748,3 +748,14 @@
 
 - 按 tests/e2e 清单逐项对照，发现并补齐行为级缺口：算术转换语义（混合符号比较→无符号、无符号除/模、逻辑移 vs 算术移、uint8 零扩展、char 提升、uint→int64 零扩展、uint→float、float/int 公共类型提升）、const/constexpr 变量、全局零初始化/全局切片、方法数组成员写入。
 - examples/all_features.c 现 21 节；实测 8/8 编译干净、8/8 运行 `ALL FEATURES OK` exit 0（提交 `5afeeef`）。
+
+## 2026-10-16 — 基座能力边界探测 + 5 个 codegen/语义 bug 修复
+
+- 方法：按 TODO 第 0 节 BASE-01..10（初步能力）逐域写边界压力探测（`/tmp/probe/p_*.c`，check 助手累加失败），覆盖控制流/类型与字面量/表达式与语法/聚合/字符串与格式/函数指针/模板/namespace/optional·result/运算符重载/数组·切片/constexpr·compile_time/驱动 flag。每域全绿后收口，共修复 5 个真 bug（各配回归测试，提交 `9a06963`、`f4aa8a9`、`7e26546`）：
+  - 指针后缀 `++`/`--` 用 `CreateAdd`（opaque ptr 字节算术）→ `int32* p++` 只前进 1 字节，解引用读错位值（20→20<<24）。镜像前缀路径改 `CreateGEP` 按元素步进。
+  - 复合赋值恒走整数指令 → `fd *= 2.0` 按整数位模式乘法得 0（1.5 低 32 位为 0）。按操作数浮点/无符号分派 F 系 / U 系。
+  - 无符号复合赋值 `>>=` 恒 `AShr`（0x80000000>>4 得 0xF8000000 而非 0x08000000）、`/=`/`%=` 恒有符号。按 lhs 无符号性选 `LShr`/`UDiv`/`URem`。
+  - 运算符重载解析成功时表达式类型被设成左操作数类型（非 operator 函数返回类型）→ `int32 s = p + q` 报 got 'struct V2'、`p + q == 10` 报 V2 与 int32 不可比。从 resolved Symbol 的 FunctionType 取 returnType（镜像普通调用）。
+  - **裸 `return;`（void 函数早退）**：sema/codegen 早已支持（void 检查 + CreateRetVoid），仅解析器硬性要求表达式被拒（Progress 两轮遗留）。两处 return 解析放行。更新 `ParserErrorTest.UnexpectedTokenInExpression`（原用 `return ;` 当非法载体，改用 `return )`），新增 `BareReturnParses`。
+- 验证：全部探测文件绿；演示 `ALL FEATURES OK` exit 0；全量 ctest **1292/1292**（1286 + 6 新回归）。
+- 已知缺口（未修，另项评估）：指针相减 `ptr - ptr` 不支持；函数返回函数指针语法不支持；`&fn` 取函数地址不支持；int128 字面量 >64 位被 E0003 拒；string_view 下标 `s[0]` 不支持（用 char_at/sub）；数组 typedef 下标/slice/sizeof 按指针退化。
