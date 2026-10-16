@@ -134,3 +134,29 @@ TEST_F(DesignatedInitE2E, LocalUnionDesignator) {
         }
     )", "di_local_union.c"), 0);
 }
+
+TEST_F(DesignatedInitE2E, GlobalStruct) {
+    EXPECT_EQ(runSource(R"(
+        struct Point { int32 x; int32 y; };
+        struct Point g = { .y = 5 };
+        struct Point h = { .x = 1, 2 };
+        int32 main() {
+            if (g.x != 0 || g.y != 5) { return 1; }
+            if (h.x != 1 || h.y != 2) { return 2; }
+            return 0;
+        }
+    )", "di_global_struct.c"), 0);
+}
+
+TEST_F(DesignatedInitE2E, GlobalArrayAndBitfield) {
+    EXPECT_EQ(runSource(R"(
+        struct BF { int32 a : 3; int32 b : 5; };
+        struct BF gbf = { .b = 7 };
+        int32 ga[4] = { [2] = 9 };
+        int32 main() {
+            if (gbf.b != 7) { return 1; }
+            if (ga[2] != 9 || ga[0] != 0) { return 2; }
+            return 0;
+        }
+    )", "di_global_bf.c"), 0);
+}
