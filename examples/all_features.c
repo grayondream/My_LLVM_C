@@ -36,6 +36,7 @@ void section_types() {
     int32  oct = 0o755;            // 八进制
     int64  big = 4000000000;       // 十进制定宽
     uint64 ul  = 4000000000ul;     // ul 后缀
+    int128 huge = 170141183460469231731687303715884105727;   // 2^127-1 128 位字面量
     isize  sz  = 100;
     usize  nz  = 1_000_000;        // 下划线分隔
     float32 f  = 3.5f;
@@ -53,6 +54,7 @@ void section_types() {
     check(oct == 493, "octal literal");
     check(big == 4000000000, "int64 literal");
     check(ul == 4000000000, "ul suffix");
+    check(huge == 170141183460469231731687303715884105727, "int128 literal");
     check(sz == 100, "isize");
     check(nz == 1000000, "underscore literal");
     check(f == 3.5f, "float32");
@@ -88,7 +90,11 @@ void section_aliases() {
     check(n == 7, "typedef int32");
     check(p.x + p.y == 3, "anonymous struct typedef");
     check(ip == null, "typedef pointer");
-    // 注：数组 typedef 目前不支持下标/slice/sizeof(按指针退化)，仅演示声明。
+    // 数组 typedef：下标 / sizeof / slice 退化全部可用。
+    check(arr[0] == 0 && arr[9] == 9, "array typedef subscript");
+    check(sizeof(arr) == 40, "array typedef sizeof");
+    int32[] arrv = arr;
+    check(arrv.len == 10, "array typedef slice");
     check(o.valid && o.value == 42, "optional typedef");
     check(s == 9, "using alias");
     check(sp == 3.25, "type alias");
@@ -268,6 +274,9 @@ void section_pointers() {
     int32* q = arr;                            // 数组退化
     check(*(q + 2) == 3, "pointer arithmetic");
     check(*(q + 4) - *(q + 1) == 3, "pointer subtraction");
+    int32* pa = &arr[0];
+    int32* pb = &arr[4];
+    check(pb - pa == 4, "pointer difference (elements)");
     check(q == arr, "array decay");
     int32 (*fp)(int32, int32) = add;           // 函数指针变量
     check(fp(3, 4) == 7, "function pointer call");
