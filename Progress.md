@@ -743,3 +743,8 @@
 - 调试方法：非确定性内存类 bug，gdb/valgrind/ASAN 均因堆布局改变不触发；`MALLOC_PERTURB_`（释放内存填 0xA5）使崩溃确定化（90%+），Debug 版 gdb 抓到精确行号，确认 `StructLayout::getElementOffset` 返回 scalable TypeSize（DataLayout 缓存被垃圾 isPacked 损坏的 Class 布局污染）。
 - 演示期间还发现（未修，记录）：数组 typedef 不支持下标/slice，`sizeof` 按指针退化（4）；演示已按实际行为调整断言。
 - 全量 ctest **1286/1286** 绿。
+
+## 2026-10-16 — 演示覆盖补齐（§21 算术转换/const·constexpr/全局/方法数组）
+
+- 按 tests/e2e 清单逐项对照，发现并补齐行为级缺口：算术转换语义（混合符号比较→无符号、无符号除/模、逻辑移 vs 算术移、uint8 零扩展、char 提升、uint→int64 零扩展、uint→float、float/int 公共类型提升）、const/constexpr 变量、全局零初始化/全局切片、方法数组成员写入。
+- examples/all_features.c 现 21 节；实测 8/8 编译干净、8/8 运行 `ALL FEATURES OK` exit 0（提交 `5afeeef`）。
