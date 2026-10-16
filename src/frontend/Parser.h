@@ -79,7 +79,7 @@ private:
 
     // Turn `T name` into `T name[N]` when an array suffix follows a member
     // declarator (used for struct/class/union members).
-    Type* parseMemberArraySuffix(Type* base);
+    Type* parseMemberArraySuffix(Type* base, bool* outFlexibleArray = nullptr);
 
     // P1-07 / PAR-10: parse a bit-field width after the caller consumed ':':
     //   width = parseExpr(2); evalIntConstExpr must succeed (constant expr).

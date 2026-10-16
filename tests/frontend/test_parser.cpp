@@ -2131,3 +2131,47 @@ TEST_F(ParserTest, AsmTemplateMustBeLiteral) {
     EXPECT_NE(tu, nullptr);
     EXPECT_FALSE(parser.getErrors().empty());
 }
+
+// ========== Designated Initializers + Flexible Array Member (PAR-13/AGG-04) ==========
+
+TEST(ParserDesignatedInitTest, ParsesDesignators) {
+    auto expr = parseExpr("{ .x = 1, 2, [1] = 3 }");
+    ASSERT_NE(expr, nullptr);
+    auto il = dynamic_cast<InitializerListExprAST*>(expr);
+    ASSERT_NE(il, nullptr);
+    ASSERT_EQ(il->initializers.size(), 3u);
+    ASSERT_EQ(il->designators.size(), 3u);
+    ASSERT_EQ(il->designators[0].size(), 1u);
+    EXPECT_EQ(il->designators[0][0].kind, Designator::Kind::Field);
+    EXPECT_EQ(il->designators[0][0].field, "x");
+    EXPECT_TRUE(il->designators[1].empty());
+    ASSERT_EQ(il->designators[2].size(), 1u);
+    EXPECT_EQ(il->designators[2][0].kind, Designator::Kind::Index);
+}
+
+TEST(ParserDesignatedInitTest, ParsesNestedDesignators) {
+    auto expr = parseExpr("{ .a.b = 2 }");
+    ASSERT_NE(expr, nullptr);
+    auto il = dynamic_cast<InitializerListExprAST*>(expr);
+    ASSERT_NE(il, nullptr);
+    ASSERT_EQ(il->designators.size(), 1u);
+    ASSERT_EQ(il->designators[0].size(), 2u);
+    EXPECT_EQ(il->designators[0][0].kind, Designator::Kind::Field);
+    EXPECT_EQ(il->designators[0][0].field, "a");
+    EXPECT_EQ(il->designators[0][1].field, "b");
+}
+
+TEST(ParserDesignatedInitTest, MemberEmptyDimIsFlexibleArray) {
+    auto tu = parse("struct S { int32 n; int32 data[]; };");
+    ASSERT_NE(tu, nullptr);
+    StructDeclAST* sd = nullptr;
+    for (auto& d : tu->declarations) {
+        if (auto* s = dynamic_cast<StructDeclAST*>(d.get())) { sd = s; break; }
+    }
+    ASSERT_NE(sd, nullptr);
+    ASSERT_EQ(sd->fields.size(), 2u);
+    EXPECT_TRUE(sd->fields[1].flexibleArray);
+    ASSERT_NE(sd->fields[1].type, nullptr);
+    ASSERT_EQ(sd->fields[1].type->kind, TypeKind::Array);
+    EXPECT_EQ(static_cast<ArrayType*>(sd->fields[1].type)->size, 0);
+}

@@ -406,9 +406,23 @@ public:
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
+// PAR-13: 指定初始化器设计符。Field = `.name`；Index = `[expr]`（parser 存
+// indexExpr，sema 常量折叠写回 index）。designators 与 initializers 平行。
+struct Designator {
+    enum class Kind { Field, Index } kind{Kind::Field};
+    std::string field;             // Kind::Field
+    int64_t index = 0;             // Kind::Index，sema 折叠后
+    std::unique_ptr<ExprAST> indexExpr;  // Kind::Index，parser 原始表达式
+};
+
 class InitializerListExprAST : public ExprAST {
 public:
     std::vector<std::unique_ptr<ExprAST>> initializers;
+    // PAR-13: 与 initializers 平行的设计符链；空 vector = 位置式。
+    std::vector<std::vector<Designator>> designators;
+    // PAR-13 (Task 2 sema 填充)：每个元素展开后的显式语义目标链（非空），
+    // codegen 直接消费，不再推导续位规则。
+    std::vector<std::vector<Designator>> resolvedTargets;
 
     InitializerListExprAST(std::vector<std::unique_ptr<ExprAST>> initList)
         : initializers(std::move(initList)) {}

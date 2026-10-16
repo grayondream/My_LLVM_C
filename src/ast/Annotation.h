@@ -41,4 +41,7 @@ struct FieldInfo {
     // P1-07 / PAR-10: 位域宽度。0 = 普通字段；>0 = 位域（命名/无名位域以
     // name 区分）；无名零宽位域 = bitWidth 0 且 name == ""。
     int bitWidth{0};
+    // P1-07 / AGG-04: 柔性数组成员（struct 尾成员 `T data[]`，类型
+    // ArrayType(T, 0)）。仅 struct 允许；布局/sizeof 见 spec 2026-10-16。
+    bool flexibleArray{false};
 };

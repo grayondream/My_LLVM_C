@@ -802,23 +802,59 @@ std::unique_ptr<ExprAST> Parser::parsePrimaryImpl() {
         return expr;
     }
 
-    // Initializer list: {expr, expr, ...}
+    // Initializer list: {expr, expr, ...} — PAR-13: 支持 C99 指定初始化器
+    // 设计符（.field / [idx] 链），designators 与元素平行存储。
     if (token->type == TokenType::TOKEN_LBRACE) {
         advance();
         std::vector<std::unique_ptr<ExprAST>> initList;
+        std::vector<std::vector<Designator>> designatorList;
 
         if (!check(TokenType::TOKEN_RBRACE)) {
             while (true) {
+                // 设计符链：仅 `{` 内元素前识别（`.`/`[` 不是表达式起始，无歧义）。
+                std::vector<Designator> designators;
+                while (check(TokenType::TOKEN_DOT) || check(TokenType::TOKEN_LBRACKET)) {
+                    Designator d;
+                    if (match(TokenType::TOKEN_DOT)) {
+                        d.kind = Designator::Kind::Field;
+                        auto id = match(TokenType::TOKEN_IDENTIFIER);
+                        if (!id) {
+                            errorUnexpected("expected field name after '.' in designated initializer");
+                            return nullptr;
+                        }
+                        d.field = id->lexeme;
+                    } else {
+                        advance(); // '['
+                        d.kind = Designator::Kind::Index;
+                        d.indexExpr = parseExpr(); // 常量表达式，sema 折叠
+                        if (!d.indexExpr) return nullptr;
+                        if (!expect(TokenType::TOKEN_RBRACKET,
+                                    "expected ']' after designator index")) {
+                            return nullptr;
+                        }
+                    }
+                    designators.push_back(std::move(d));
+                }
+                if (!designators.empty()) {
+                    // C99: 设计符后须 '='（省略值语法 `.x,` 不做，YAGNI）。
+                    if (!match(TokenType::TOKEN_ASSIGN)) {
+                        errorUnexpected("expected '=' after designator");
+                        return nullptr;
+                    }
+                }
                 auto expr = parseExpr(2); // minPrec=2: ',' separates elements
                 if (expr) {
                     initList.push_back(std::move(expr));
+                    designatorList.push_back(std::move(designators));
                 }
                 if (!match(TokenType::TOKEN_COMMA)) break;
             }
         }
 
         expect(TokenType::TOKEN_RBRACE, "expected '}' to end initializer list");
-        return std::make_unique<InitializerListExprAST>(std::move(initList));
+        auto node = std::make_unique<InitializerListExprAST>(std::move(initList));
+        node->designators = std::move(designatorList);
+        return node;
     }
 
     errorUnexpected("expected expression");
@@ -1823,8 +1859,11 @@ Type* Parser::parseBaseType() {
                         match(TokenType::TOKEN_SEMICOLON);
                         continue;
                     }
-                    fieldType = parseMemberArraySuffix(fieldType);
+                    bool isFlexMember = false;
+                    fieldType = parseMemberArraySuffix(fieldType, &isFlexMember);
                     structType->addField(fieldName, fieldType);
+                    if (isFlexMember && !structType->fields.empty())
+                        structType->fields.back().flexibleArray = true;
                     match(TokenType::TOKEN_SEMICOLON);
                 }
                 match(TokenType::TOKEN_RBRACE);
@@ -1887,8 +1926,11 @@ Type* Parser::parseBaseType() {
                         match(TokenType::TOKEN_SEMICOLON);
                         continue;
                     }
-                    memberType = parseMemberArraySuffix(memberType);
+                    bool isFlexMember = false;
+                    memberType = parseMemberArraySuffix(memberType, &isFlexMember);
                     unionType->addMember(memberName, memberType);
+                    if (isFlexMember && !unionType->members.empty())
+                        unionType->members.back().flexibleArray = true;
                     match(TokenType::TOKEN_SEMICOLON);
                 }
                 match(TokenType::TOKEN_RBRACE);
@@ -3307,9 +3349,12 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
             match(TokenType::TOKEN_SEMICOLON);
             continue;
         }
-        fieldType = parseMemberArraySuffix(fieldType);
+        bool isFlexMember = false;
+        fieldType = parseMemberArraySuffix(fieldType, &isFlexMember);
 
-        fields.push_back(FieldInfo{fieldName, fieldType, std::move(memberAnns)});
+        FieldInfo fi{fieldName, fieldType, std::move(memberAnns)};
+        fi.flexibleArray = isFlexMember;
+        fields.push_back(std::move(fi));
 
         match(TokenType::TOKEN_SEMICOLON);
     }
@@ -3678,8 +3723,11 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                         match(TokenType::TOKEN_SEMICOLON);
                         continue;
                     }
-                    declType = parseMemberArraySuffix(declType);
-                    fields.push_back(FieldInfo{memberName, declType, std::move(memberAnns)});
+                    bool isFlexMember = false;
+                    declType = parseMemberArraySuffix(declType, &isFlexMember);
+                    FieldInfo fi{memberName, declType, std::move(memberAnns)};
+                    fi.flexibleArray = isFlexMember;
+                    fields.push_back(std::move(fi));
                     memberAccess[memberName] = currentAccess;
                     match(TokenType::TOKEN_SEMICOLON);
                 }
@@ -3734,7 +3782,7 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
     return decl;
 }
 
-Type* Parser::parseMemberArraySuffix(Type* base) {
+Type* Parser::parseMemberArraySuffix(Type* base, bool* outFlexibleArray) {
     if (!base || !check(TokenType::TOKEN_LBRACKET)) return base;
     std::vector<int> dims;
     std::vector<bool> explicitDim;
@@ -3766,6 +3814,12 @@ Type* Parser::parseMemberArraySuffix(Type* base) {
             errorUnexpected("expected array dimension: only the first dimension may be empty");
             return nullptr;
         }
+    }
+    // P1-07 / AGG-04: 单维空 `[]` = 柔性数组（FAM）——size 记 0 并置标记。
+    // `data[3]`（显式）与 `data[][3]`（多维）保持既有行为（非 FAM）。
+    if (dims.size() == 1 && !explicitDim[0]) {
+        if (outFlexibleArray) *outFlexibleArray = true;
+        dims[0] = 0;
     }
     // Right-to-left: `T g[2][3]` = array of 2 arrays of 3 T (C semantics).
     Type* result = base;
@@ -3946,9 +4000,12 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
             match(TokenType::TOKEN_SEMICOLON);
             continue;
         }
-        memberType = parseMemberArraySuffix(memberType);
+        bool isFlexMember = false;
+        memberType = parseMemberArraySuffix(memberType, &isFlexMember);
 
-        members.push_back(FieldInfo{memberName, memberType, std::move(memberAnns)});
+        FieldInfo fi{memberName, memberType, std::move(memberAnns)};
+        fi.flexibleArray = isFlexMember;
+        members.push_back(std::move(fi));
 
         match(TokenType::TOKEN_SEMICOLON);
     }
