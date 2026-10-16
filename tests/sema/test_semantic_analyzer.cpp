@@ -2557,3 +2557,95 @@ TEST_F(SemanticAnalyzerTest, BoolLiteralMatchesBoolParam) {
     EXPECT_TRUE(analyzeOk(
         "int32 main() { bool b = true; int32 x = false; return (int32)b + x; }"));
 }
+
+// ========== Designated Initializers + Flexible Array (PAR-13/AGG-04) ==========
+
+static std::vector<std::string> semaErrorsOf(const std::string& source) {
+    Lexer lexer("t.c", source);
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    if (!ast) return {"parse failed"};
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    std::vector<std::string> out;
+    for (auto& d : analyzer.getErrors()) out.push_back(d.message);
+    return out;
+}
+
+static bool hasMsg(const std::vector<std::string>& msgs, const std::string& needle) {
+    for (auto& m : msgs) if (m.find(needle) != std::string::npos) return true;
+    return false;
+}
+
+TEST(SemaDesignatedInitTest, UnknownFieldReportsError) {
+    auto errs = semaErrorsOf(
+        "struct Point { int32 x; int32 y; };\n"
+        "int32 main() { Point p = { .nosuch = 1 }; return 0; }");
+    EXPECT_TRUE(hasMsg(errs, "nosuch")) << "expected 'no member' error";
+}
+
+TEST(SemaDesignatedInitTest, OutOfBoundsIndexReportsError) {
+    auto errs = semaErrorsOf(
+        "int32 main() { int32 a[2] = { [5] = 1 }; return 0; }");
+    EXPECT_TRUE(hasMsg(errs, "5")) << "expected out-of-bounds index error";
+}
+
+TEST(SemaDesignatedInitTest, ArraySizeInferredByMaxDesignator) {
+    // C99: { [2] = 5, 6 } → 大小 max(2+1, 2) = 4。手建 AST（visit(ArrayDeclAST)
+    // 就地改写 node.size），检查推断结果。不能用 sizeof(局部数组) 于
+    // compile_time.static_assert——CT 求值器只接受 compile_time.size_of(类型名)。
+    auto analyzer = std::make_unique<SemanticAnalyzer>();
+    std::vector<std::unique_ptr<ExprAST>> elems;
+    elems.push_back(std::make_unique<NumberExprAST>(5));
+    elems.push_back(std::make_unique<NumberExprAST>(6));
+    auto il = std::make_unique<InitializerListExprAST>(std::move(elems));
+    il->designators.resize(2);
+    Designator d;
+    d.kind = Designator::Kind::Index;
+    d.indexExpr = std::make_unique<NumberExprAST>(2);
+    il->designators[0].push_back(std::move(d));
+
+    auto arrDecl = std::make_unique<ArrayDeclAST>("a", TypeContext::instance().getInt32(), 0, std::move(il));
+    ArrayDeclAST* raw = arrDecl.get();
+    std::vector<std::unique_ptr<DeclAST>> decls;
+    decls.push_back(std::move(arrDecl));
+    TranslationUnitAST tu(std::move(decls));
+    analyzer->analyze(tu);
+    EXPECT_TRUE(analyzer->getErrors().empty());
+    EXPECT_EQ(raw->size, 4);
+}
+
+TEST(SemaDesignatedInitTest, OptionalPseudoFieldDesignatorRejected) {
+    auto errs = semaErrorsOf(
+        "int32 main() { int32? o = { .value = 1, true }; return 0; }");
+    EXPECT_TRUE(hasMsg(errs, "designator cannot target pseudo-field"))
+        << "expected pseudo-field designator rejection";
+}
+
+TEST(SemaDesignatedInitTest, BaseFieldPrivateAccessReportsE2009) {
+    auto errs = semaErrorsOf(
+        "class B { private: int32 bf; public: int32 pb; };\n"
+        "class D : B { public: int32 x; };\n"
+        "int32 main() { D d = { .bf = 1 }; return 0; }");
+    EXPECT_TRUE(hasMsg(errs, "bf")) << "expected E2009 on private base field";
+}
+
+TEST(SemaFlexArrayTest, RejectsFlexArrayNotLast) {
+    auto errs = semaErrorsOf("struct S { int32 n; int32 data[]; int32 m; };");
+    EXPECT_TRUE(hasMsg(errs, "flexible array"));
+}
+
+TEST(SemaFlexArrayTest, RejectsFlexArrayInClassAndUnion) {
+    auto errs1 = semaErrorsOf("class C { int32 n; int32 data[]; };");
+    EXPECT_TRUE(hasMsg(errs1, "flexible array")) << "class FAM rejected";
+    auto errs2 = semaErrorsOf("union U { int32 n; int32 data[]; };");
+    EXPECT_TRUE(hasMsg(errs2, "flexible array")) << "union FAM rejected";
+}
+
+TEST(SemaFlexArrayTest, RejectsInitOfFlexArray) {
+    auto errs = semaErrorsOf(
+        "struct S { int32 n; int32 data[]; };\n"
+        "int32 main() { S s = { 1, 2, 3 }; return 0; }");
+    EXPECT_TRUE(hasMsg(errs, "flexible array member cannot be initialized"));
+}

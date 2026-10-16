@@ -278,6 +278,17 @@ private:
     // (namespace prefix included), matching what access sites resolve.
     std::unordered_map<std::string, std::pair<ClassType*, std::string>> staticMemberIndex;
     void checkStaticMemberAccess(const std::string& originalName, ExprAST& node);
+    // PAR-13: 指定初始化器设计符解析——把每个元素展开为显式语义目标链写入
+    // InitializerListExprAST::resolvedTargets（codegen 直接消费）。aggType 为
+    // 列表目标类型（已剥 typedef）。
+    void resolveDesignators(InitializerListExprAST& node, Type* aggType,
+                            const std::string& ctxName);
+    // PAR-13: 数组首维推断（C99 max 设计符下标+1）——顶层元素游标推进求最大下标。
+    int inferArrayInitSize(InitializerListExprAST& node);
+    // PAR-13: 折叠设计符 `[expr]` 常量表达式（CompileTimeEvaluator）。
+    bool foldDesignatorIndex(ExprAST* expr, int64_t& out, ASTNode& at);
+    // PAR-13/AGG-04: FAM 五条约束（struct 尾成员/具名/非位域/≥1 前导具名；class/union 拒绝）。
+    void checkFlexibleArrayConstraint(StructDeclAST& node);
     // AGG-11: flattened enclosing-class path for nested-type visits, e.g.
     // "Outer_" while visiting a type nested directly in Outer. Accumulated
     // from BARE class names so desugared static-member symbols inside nested

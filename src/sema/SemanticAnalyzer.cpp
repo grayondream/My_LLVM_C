@@ -3149,6 +3149,306 @@ void SemanticAnalyzer::visit(InitializerListExprAST& node) {
     node.isLValue = false;
 }
 
+// PAR-13: struct/class 类型侧语义字段序（物化优先，未物化用原始序）。
+static std::vector<FieldInfo>* semanticFieldList(Type* t) {
+    if (t->kind == TypeKind::Struct) {
+        auto* st = static_cast<StructType*>(t);
+        return st->semanticFields.empty() ? &st->fields : &st->semanticFields;
+    }
+    if (t->kind == TypeKind::Class) {
+        auto* ct = static_cast<ClassType*>(t);
+        return ct->semanticFields.empty() ? &ct->fields : &ct->semanticFields;
+    }
+    return nullptr;
+}
+
+bool SemanticAnalyzer::foldDesignatorIndex(ExprAST* expr, int64_t& out, ASTNode& at) {
+    if (!expr) return false;
+    auto v = ctEval().eval(expr, at);
+    if (!v) return false;
+    if (v->type != CompileTimeEvaluator::ConstValue::INT) return false;
+    out = v->intVal;
+    return true;
+}
+
+int SemanticAnalyzer::inferArrayInitSize(InitializerListExprAST& node) {
+    int64_t maxIdx = -1;
+    size_t cursor = 0;
+    for (size_t i = 0; i < node.initializers.size(); ++i) {
+        bool hasDs = i < node.designators.size() && !node.designators[i].empty();
+        int64_t idx;
+        if (!hasDs) {
+            idx = (int64_t)cursor;
+        } else {
+            const auto& dspec = node.designators[i];
+            // 顶层数组初始化的设计符链必须是恰一个 Index；否则非法（由
+            // resolveDesignators 报错），推断保守取游标。
+            if (dspec.size() != 1 || dspec[0].kind != Designator::Kind::Index ||
+                !foldDesignatorIndex(dspec[0].indexExpr.get(), idx, node)) {
+                idx = (int64_t)cursor;
+            }
+        }
+        if (idx > maxIdx) maxIdx = idx;
+        cursor = (size_t)(idx + 1);
+    }
+    return (maxIdx < 0) ? 0 : (int)(maxIdx + 1);
+}
+
+void SemanticAnalyzer::resolveDesignators(InitializerListExprAST& node, Type* aggType,
+                                          const std::string& ctxName) {
+    aggType = stripTypedef(aggType);
+    if (!aggType) return;
+    node.resolvedTargets.clear();
+    node.resolvedTargets.resize(node.initializers.size());
+
+    // Optional/Result：伪字段不作设计符目标——resolvedTargets 留空（codegen 走
+    // 既有位置式路径）；含设计符 → 明确拒绝。
+    if (aggType->kind == TypeKind::Optional || aggType->kind == TypeKind::Result) {
+        for (size_t i = 0; i < node.initializers.size(); ++i) {
+            if (i < node.designators.size() && !node.designators[i].empty()) {
+                emitError("designator cannot target pseudo-field of optional/result; use a positional initializer",
+                          node);
+            }
+        }
+        return;
+    }
+
+    size_t structCursor = 0; // struct/class 语义字段游标（跳过 name==""）
+    size_t arrayCursor = 0;  // 数组下标游标
+
+    for (size_t i = 0; i < node.initializers.size(); ++i) {
+        auto& item = *node.initializers[i];
+        const bool hasDs = i < node.designators.size() && !node.designators[i].empty();
+        Type* elemType = nullptr;
+        std::vector<Designator> chain;
+
+        if (!hasDs) {
+            // 位置式：按游标推进（AGG-06：name=="" 伪字段不消费初始化值）。
+            if (aggType->kind == TypeKind::Array) {
+                auto* at = static_cast<ArrayType*>(aggType);
+                if ((int64_t)arrayCursor >= at->size) {
+                    emitError("too many elements in initializer for array '" + ctxName + "'", node);
+                } else {
+                    Designator d;
+                    d.kind = Designator::Kind::Index;
+                    d.index = (int64_t)arrayCursor;
+                    chain.push_back(std::move(d));
+                    elemType = at->elementType;
+                }
+                ++arrayCursor;
+            } else if (aggType->kind == TypeKind::Struct || aggType->kind == TypeKind::Class) {
+                auto* fields = semanticFieldList(aggType);
+                while (structCursor < fields->size() && (*fields)[structCursor].name.empty())
+                    ++structCursor;
+                if (structCursor >= fields->size()) {
+                    emitError("too many initializers for '" + ctxName + "'", node);
+                } else {
+                    auto& f = (*fields)[structCursor];
+                    if (f.flexibleArray) {
+                        emitError("flexible array member cannot be initialized in a brace-enclosed initializer", node);
+                    } else {
+                        Designator d;
+                        d.kind = Designator::Kind::Field;
+                        d.field = f.name;
+                        chain.push_back(std::move(d));
+                        elemType = f.type;
+                    }
+                    ++structCursor;
+                }
+            } else if (aggType->kind == TypeKind::Union) {
+                auto* ut = static_cast<UnionType*>(aggType);
+                if (!ut->members.empty()) {
+                    Designator d;
+                    d.kind = Designator::Kind::Field;
+                    d.field = ut->members[0].name;
+                    chain.push_back(std::move(d));
+                    elemType = ut->members[0].type;
+                }
+            } else {
+                emitError("initializer list cannot initialize type '" + typeToString(aggType) + "'", node);
+            }
+        } else {
+            // 设计符链：逐链节解析。
+            const auto& dspec = node.designators[i];
+            Type* cur = aggType;
+            bool chainOk = true;
+            for (const auto& des : dspec) {
+                if (des.kind == Designator::Kind::Field) {
+                    if (cur->kind == TypeKind::Struct || cur->kind == TypeKind::Class) {
+                        auto* fields = semanticFieldList(cur);
+                        size_t found = SIZE_MAX;
+                        for (size_t k = 0; k < fields->size(); ++k) {
+                            if ((*fields)[k].name == des.field) { found = k; break; }
+                        }
+                        Type* fieldType = nullptr;
+                        bool ownField = false;
+                        if (found != SIZE_MAX) {
+                            ownField = true;
+                            fieldType = (*fields)[found].type;
+                            if ((*fields)[found].flexibleArray) {
+                                emitError("flexible array member cannot be initialized in a brace-enclosed initializer", node);
+                                fieldType = nullptr;
+                            }
+                        } else {
+                            // INH: 沿 base 链查找（含访问控制 E2009）。
+                            Type* walk = cur;
+                            int depth = 0;
+                            while (walk && (walk->kind == TypeKind::Struct || walk->kind == TypeKind::Class)) {
+                                auto* wf = semanticFieldList(walk);
+                                size_t wk = SIZE_MAX;
+                                for (size_t k = 0; k < wf->size(); ++k) {
+                                    if ((*wf)[k].name == des.field) { wk = k; break; }
+                                }
+                                if (wk != SIZE_MAX) {
+                                    fieldType = (*wf)[wk].type;
+                                    // 访问控制：非公有成员仅定义类内可写。
+                                    if (walk->kind == TypeKind::Class) {
+                                        auto* ct = static_cast<ClassType*>(walk);
+                                        AccessLevel lvl = ct->memberAccessLevel(des.field);
+                                        if (lvl != AccessLevel::Public && currentClass != ct) {
+                                            emitError(DiagnosticCode::SemPrivateMemberAccess,
+                                                      "cannot access " +
+                                                          std::string(lvl == AccessLevel::Private ? "private" : "protected") +
+                                                          " member '" + des.field + "' of class '" + ct->name +
+                                                          "' outside the class; make it public or add an accessor",
+                                                      node);
+                                            fieldType = nullptr;
+                                        }
+                                    }
+                                    break;
+                                }
+                                if (walk->kind == TypeKind::Struct) {
+                                    auto* st = static_cast<StructType*>(walk);
+                                    if (st->baseClass.empty() || !st->base) break;
+                                    walk = st->base;
+                                } else {
+                                    auto* ct = static_cast<ClassType*>(walk);
+                                    if (ct->baseClass.empty() || !ct->base) break;
+                                    walk = ct->base;
+                                }
+                                if (++depth > 64) break;
+                            }
+                        }
+                        if (!fieldType) {
+                            if (ownField) {
+                                // flexibleArray 已报，不重复。
+                            } else {
+                                emitError("no member named '" + des.field + "' in '" + typeToString(cur) + "'", node);
+                            }
+                            chainOk = false;
+                            break;
+                        }
+                        Designator d;
+                        d.kind = Designator::Kind::Field;
+                        d.field = des.field;
+                        chain.push_back(std::move(d));
+                        // 续位：自身字段 → 之后继续；基类字段 → 派生字段 0 起。
+                        if (cur == aggType) {
+                            if (ownField) structCursor = found + 1;
+                            else structCursor = 0;
+                        }
+                        cur = stripTypedef(fieldType);
+                    } else if (cur->kind == TypeKind::Union) {
+                        auto* ut = static_cast<UnionType*>(cur);
+                        Type* fieldType = nullptr;
+                        for (auto& m : ut->members) {
+                            if (m.name == des.field) { fieldType = m.type; break; }
+                        }
+                        if (!fieldType) {
+                            emitError("no member named '" + des.field + "' in '" + typeToString(cur) + "'", node);
+                            chainOk = false;
+                            break;
+                        }
+                        Designator d;
+                        d.kind = Designator::Kind::Field;
+                        d.field = des.field;
+                        chain.push_back(std::move(d));
+                        cur = stripTypedef(fieldType);
+                    } else {
+                        emitError("cannot apply designator '.' to non-aggregate type '" + typeToString(cur) + "'", node);
+                        chainOk = false;
+                        break;
+                    }
+                } else {
+                    // Index 设计符
+                    if (cur->kind != TypeKind::Array) {
+                        emitError("cannot apply designator '[' to non-array type '" + typeToString(cur) + "'", node);
+                        chainOk = false;
+                        break;
+                    }
+                    auto* at = static_cast<ArrayType*>(cur);
+                    int64_t idx = 0;
+                    if (!foldDesignatorIndex(des.indexExpr.get(), idx, node)) {
+                        emitError("designator index must be a constant expression", node);
+                        chainOk = false;
+                        break;
+                    }
+                    if (idx < 0 || idx >= at->size) {
+                        emitError("array designator index " + std::to_string(idx) +
+                                      " is out of bounds for size " + std::to_string(at->size),
+                                  node);
+                        chainOk = false;
+                        break;
+                    }
+                    Designator d;
+                    d.kind = Designator::Kind::Index;
+                    d.index = idx;
+                    chain.push_back(std::move(d));
+                    if (cur == aggType) arrayCursor = (size_t)idx + 1;
+                    cur = stripTypedef(at->elementType);
+                }
+            }
+            if (chainOk) elemType = cur;
+        }
+
+        if (chain.empty()) continue;
+        node.resolvedTargets[i] = std::move(chain);
+
+        // 嵌套列表递归：目标类型 = 链末元素类型。
+        if (auto* nested = dynamic_cast<InitializerListExprAST*>(&item)) {
+            nested->type = elemType;
+            nested->isLValue = false;
+            for (auto& e : nested->initializers) getExprType(*e);
+            resolveDesignators(*nested, elemType, ctxName);
+        }
+    }
+}
+
+void SemanticAnalyzer::checkFlexibleArrayConstraint(StructDeclAST& node) {
+    for (size_t i = 0; i < node.fields.size(); ++i) {
+        auto& f = node.fields[i];
+        if (!f.flexibleArray) continue;
+        if (node.isClassDecl) {
+            emitError("flexible array member is not allowed in a class", node);
+            f.flexibleArray = false;
+            continue;
+        }
+        if (i != node.fields.size() - 1) {
+            emitError("flexible array member must be the last member of a struct", node);
+            f.flexibleArray = false;
+            continue;
+        }
+        if (f.name.empty()) {
+            emitError("flexible array member must be named", node);
+            f.flexibleArray = false;
+            continue;
+        }
+        if (f.bitWidth != 0) {
+            emitError("flexible array member cannot be a bit-field", node);
+            f.flexibleArray = false;
+            continue;
+        }
+        bool hasNamedBefore = false;
+        for (size_t k = 0; k < i; ++k) {
+            if (!node.fields[k].name.empty()) { hasNamedBefore = true; break; }
+        }
+        if (!hasNamedBefore) {
+            emitError("flexible array member requires at least one preceding named member", node);
+            f.flexibleArray = false;
+        }
+    }
+}
+
 void SemanticAnalyzer::visit(CompoundStmtAST& node) {
     enterScope();
     bool terminated = false;
@@ -3341,6 +3641,10 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
             initList->type = node.type;
             initList->isLValue = false;
             for (auto& e : initList->initializers) getExprType(*e);
+            // PAR-13: 设计符解析（struct/class/union/数组/嵌套；Optional/Result
+            // 仅拒绝伪字段设计符）。结构变量在 codegen 前由 emitAggregateInitializer
+            // 消费 resolvedTargets。
+            resolveDesignators(*initList, node.type, node.name);
             // P1-02 (TYP-13/14): aggregate shape check for Optional/Result —
             // arity and per-field types (DS4 layout: flag, value[, error]).
             Type* vt = node.type;
@@ -3462,7 +3766,14 @@ void SemanticAnalyzer::visit(ArrayDeclAST& node) {
     node.name = scopedName(node.name);
     if (auto* initList = dynamic_cast<InitializerListExprAST*>(node.initExpr.get())) {
         if (node.size == 0) {
-            node.size = static_cast<int>(initList->initializers.size());
+            // PAR-13: 含设计符时按 C99 最大下标+1 推断（含设计符后位置式续位）；
+            // 无设计符维持既有"列表元素数"。
+            bool hasDs = false;
+            for (auto& d : initList->designators) {
+                if (!d.empty()) { hasDs = true; break; }
+            }
+            node.size = hasDs ? inferArrayInitSize(*initList)
+                              : static_cast<int>(initList->initializers.size());
         }
     }
     Type* arrayType = new ArrayType(node.elementType, node.size);
@@ -3471,6 +3782,7 @@ void SemanticAnalyzer::visit(ArrayDeclAST& node) {
             initList->type = arrayType;
             initList->isLValue = false;
             for (auto& e : initList->initializers) getExprType(*e);
+            resolveDesignators(*initList, arrayType, node.name);
         } else {
             // A non-list initializer cannot populate an array: at global scope
             // it was silently zero-filled, locally it stored a scalar into an
@@ -3608,6 +3920,8 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
         // P1-07 / SEM-12: 位域基础类型与宽度范围校验。
         checkBitFieldField(f, node);
     }
+    // P1-07 / AGG-04: 柔性数组成员约束（struct 尾成员/具名/非位域/≥1 前导；class 拒绝）。
+    checkFlexibleArrayConstraint(node);
     for (auto& m : node.methods) {
         m->returnType = resolveTypeInstance(m->returnType, node);
         for (auto& p : m->params) p->type = resolveTypeInstance(p->type, node);
@@ -3686,6 +4000,8 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
         for (auto& field : node.fields) {
             if (!classType->getFieldType(field.name)) {
                 classType->addField(field.name, field.type, field.bitWidth);
+                if (field.flexibleArray && !classType->fields.empty())
+                    classType->fields.back().flexibleArray = true;
             }
         }
 
@@ -3864,6 +4180,8 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
         for (auto& field : node.fields) {
             if (!structType->getFieldType(field.name)) {
                 structType->addField(field.name, field.type, field.bitWidth);
+                if (field.flexibleArray && !structType->fields.empty())
+                    structType->fields.back().flexibleArray = true;
             }
         }
         // INH-01: single public inheritance — wire the base before layout
@@ -3944,6 +4262,11 @@ void SemanticAnalyzer::visit(UnionDeclAST& node) {
         typeCtx->addUnion(node.name, unionType);
     }
     for (auto& member : node.members) {
+        // P1-07 / AGG-04: union 不允许柔性数组。
+        if (member.flexibleArray) {
+            emitError("flexible array member is not allowed in a union", node);
+            member.flexibleArray = false;
+        }
         // 防重复（镜像 struct 分支的 getFieldType guard）——Parser 已预注册
         // 成员（含 bitWidth），此处不得二次追加。
         bool exists = false;
@@ -3953,7 +4276,11 @@ void SemanticAnalyzer::visit(UnionDeclAST& node) {
                 break;
             }
         }
-        if (!exists) unionType->addMember(member.name, member.type, member.bitWidth);
+        if (!exists) {
+            unionType->addMember(member.name, member.type, member.bitWidth);
+            if (member.flexibleArray && !unionType->members.empty())
+                unionType->members.back().flexibleArray = true;
+        }
     }
     // Redef 轮: duplicate definition of the same name (any kind) is E2004.
     if (!node.isForwardDecl && !node.name.empty()) {

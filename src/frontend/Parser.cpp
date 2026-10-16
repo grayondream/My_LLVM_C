@@ -2370,6 +2370,8 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
             auto structType = new StructType(structDecl->name);
             for (auto& field : structDecl->fields) {
                 structType->addField(field.name, field.type, field.bitWidth);
+                if (field.flexibleArray && !structType->fields.empty())
+                    structType->fields.back().flexibleArray = true;
             }
             TypeContext::instance().addStruct(structDecl->name, structType);
         }
@@ -2412,6 +2414,8 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
             auto* classType = new ClassType(classDecl->name);
             for (auto& field : classDecl->fields) {
                 classType->addField(field.name, field.type);
+                if (field.flexibleArray && !classType->fields.empty())
+                    classType->fields.back().flexibleArray = true;
             }
             TypeContext::instance().addClass(classDecl->name, classType);
         }
@@ -2441,6 +2445,8 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
             auto unionType = new UnionType(unionDecl->name);
             for (auto& member : unionDecl->members) {
                 unionType->addMember(member.name, member.type, member.bitWidth);
+                if (member.flexibleArray && !unionType->members.empty())
+                    unionType->members.back().flexibleArray = true;
             }
             TypeContext::instance().addUnion(unionDecl->name, unionType);
         }
@@ -3381,12 +3387,20 @@ void Parser::registerNestedDeclType(DeclAST* decl) {
         if (sd->isClassDecl) {
             if (!tc.getClass(sd->name)) {
                 auto* classType = new ClassType(sd->name);
-                for (auto& f : sd->fields) classType->addField(f.name, f.type, f.bitWidth);
+                for (auto& f : sd->fields) {
+                    classType->addField(f.name, f.type, f.bitWidth);
+                    if (f.flexibleArray && !classType->fields.empty())
+                        classType->fields.back().flexibleArray = true;
+                }
                 tc.addClass(sd->name, classType);
             }
         } else if (!tc.getStruct(sd->name)) {
             auto* structType = new StructType(sd->name);
-            for (auto& f : sd->fields) structType->addField(f.name, f.type, f.bitWidth);
+            for (auto& f : sd->fields) {
+                structType->addField(f.name, f.type, f.bitWidth);
+                if (f.flexibleArray && !structType->fields.empty())
+                    structType->fields.back().flexibleArray = true;
+            }
             tc.addStruct(sd->name, structType);
         }
         return;
@@ -3403,7 +3417,11 @@ void Parser::registerNestedDeclType(DeclAST* decl) {
     if (auto* ud = dynamic_cast<UnionDeclAST*>(decl)) {
         if (!tc.getUnion(ud->name)) {
             auto* unionType = new UnionType(ud->name);
-            for (auto& m : ud->members) unionType->addMember(m.name, m.type, m.bitWidth);
+            for (auto& m : ud->members) {
+                unionType->addMember(m.name, m.type, m.bitWidth);
+                if (m.flexibleArray && !unionType->members.empty())
+                    unionType->members.back().flexibleArray = true;
+            }
             tc.addUnion(ud->name, unionType);
         }
         return;
