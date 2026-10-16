@@ -647,6 +647,76 @@ void section_libc() {
     printf("  [libc] printf: %d %s\n", 42, "str");
 }
 
+// ---------------------------------------------------------------------------
+// 21. 算术转换 / const·constexpr / 全局 / 方法数组参数
+// ---------------------------------------------------------------------------
+const int32 g_const = 7;
+constexpr int32 g_ctexpr = 10 * 4 + 2;
+int32 g_zero;
+int32 g_init = 5;
+int32 g_counter;
+int32[] g_slice;                                   // 未初始化全局切片 = {null, 0}
+
+class Bag {
+public:
+    int32 data[3];
+    int32 sum() { return this->data[0] + this->data[1] + this->data[2]; }
+    void set(int32 v) { this->data[0] = v; }
+};
+
+void bump_global() { g_counter = g_counter + 1; }
+
+int32 take_slice(int32[] s) {
+    int32 t = 0;
+    for (int32 i = 0; i < s.len; i = i + 1) { t = t + s[i]; }
+    return t;
+}
+
+void section_conversions() {
+    println("== 21. conversions / const / globals ==");
+    const int32 cx = 42;
+    constexpr int32 cy = 42 - 2;
+    check(cx == 42 && cy == 40, "const / constexpr vars");
+    check(g_const * 6 == 42, "global const");
+    check(g_ctexpr == 42, "global constexpr expr");
+    check(g_zero == 0, "uninitialized global zero-init");
+    check(g_init == 5, "initialized global value");
+    bump_global(); bump_global();
+    check(g_counter == 2, "global write visible");
+    check(g_slice.len == 0, "global slice zero-init");
+    uint8 a8v = 200;
+    check((a8v + 100) - 300 == 0, "uint8 zero-extend");
+    char ca = 100; char cb = 100;
+    int32 csum = ca + cb;
+    check(csum == 200, "char arithmetic promotes to int");
+    int32 neg = -1; uint32 one = 1;
+    check(!(neg < one), "mixed signedness comparison is unsigned");
+    uint32 p = 1;
+    p = p - 2;
+    check((int32)(p / 2) == 2147483647, "unsigned division is unsigned");
+    check((int32)(p % 3) == 0, "unsigned modulo");
+    uint32 sh = 1; sh = sh << 31;
+    check((int32)(sh >> 31) == 1, "unsigned >> logical");
+    int32 sneg = -8;
+    check((sneg >> 1) == -4, "signed >> arithmetic");
+    uint32 w = 1; w = w - 2;
+    int64 w64 = w;
+    check(w64 > 0 && (int32)(w64 / 2) == 2147483647, "uint widens to int64 zero-extend");
+    uint32 uf = 1; uf = uf - 2;
+    float64 df = uf;
+    check(df > 4000000000.0, "unsigned int -> float");
+    float32 ff = 3.5f; int32 fi = 2;
+    float64 fd = ff + fi;
+    check((int32)(fd * 2.0) == 11, "float/int common type widens");
+    int32 s3[3] = {1, 2, 3};
+    check(take_slice(s3) == 6, "array param -> slice");
+    Bag bag;
+    bag.data[0] = 1; bag.data[1] = 2; bag.data[2] = 3;
+    check(bag.sum() == 6, "method member array");
+    bag.set(9);
+    check(bag.data[0] == 9, "method array write-through");
+}
+
 // 全局 f() 已在文件前部定义（第 13 节 namespace 隔离用）
 
 int32 main() {
@@ -670,6 +740,7 @@ int32 main() {
     section_compile_time();
     section_asm();
     section_libc();
+    section_conversions();
     if (fails == 0) {
         println("ALL FEATURES OK");
     }
