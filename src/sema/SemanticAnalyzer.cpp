@@ -503,6 +503,12 @@ Type* SemanticAnalyzer::checkBinaryTypes(BinaryOp op, Type* left, Type* right, E
             }
             if (isPointerOrArray(left) && isIntegerType(right)) return left;
             if (isIntegerType(left) && isPointerOrArray(right)) return right;
+            // 指针差 `p - q` → 元素个数（ptrdiff_t，映射 isize），C 语义。
+            if (op == BinaryOp::Sub &&
+                stripTypedef(left) && stripTypedef(left)->kind == TypeKind::Pointer &&
+                stripTypedef(right) && stripTypedef(right)->kind == TypeKind::Pointer) {
+                return typeCtx->getISize();
+            }
             emitError("invalid operands to binary '" + binaryOpToString(op) + "': cannot apply '" 
                 + binaryOpToString(op) + "' to '" + typeToString(left) + "' and '" + typeToString(right) + "'", node);
             return nullptr;
@@ -1435,6 +1441,16 @@ void SemanticAnalyzer::visit(NumberExprAST& node) {
     // LEX-15: the literal kind chooses the fixed-width type; fall back to int32.
     node.type = typeForLiteralKind(node.literalKind);
     if (!node.type) node.type = typeCtx->getInt32();
+    // LEX-17: 128 位字面量（valueHi != 0）直接映射 int128/uint128——value 只
+    // 是低 64 位，不能再按它做值域提升。
+    if (node.valueHi != 0) {
+        node.type = (node.literalKind == LiteralKind::UInt ||
+                     node.literalKind == LiteralKind::ULong)
+                        ? typeCtx->getUInt128()
+                        : typeCtx->getInt128();
+        node.isLValue = false;
+        return;
+    }
     // 无后缀整型字面量按值域提升（C 语义：十进制取能容纳的最小有符号类型）——
     // 否则 int64 v = 4000000000 会以 int32 有符号构造 APInt（Debug 断言崩溃，
     // Release 静默截断为错误值）。
@@ -1735,6 +1751,18 @@ void SemanticAnalyzer::visit(UnaryExprAST& node) {
                     emitError(DiagnosticCode::SemBitFieldNotAddressable,
                               "cannot take the address of a bit-field", node);
                     node.type = nullptr;
+                    break;
+                }
+            }
+            // 函数设计符 `&fn`：函数名在值位置已 decay 为 Pointer(Function)
+            // 且非 lvalue；C 语义下 &fn 与 fn 同为函数指针，取址是无操作。
+            {
+                Type* strippedOp = operandType;
+                while (strippedOp && strippedOp->kind == TypeKind::Typedef)
+                    strippedOp = static_cast<TypedefType*>(strippedOp)->aliasedType;
+                if (strippedOp && strippedOp->kind == TypeKind::Pointer &&
+                    strippedOp->base && strippedOp->base->kind == TypeKind::Function) {
+                    node.type = operandType;
                     break;
                 }
             }
@@ -2364,7 +2392,10 @@ void SemanticAnalyzer::visit(CallExprAST& node) {
 
     // Indirect call through a function-pointer variable?
     if (Symbol* sym = lookup(node.callee)) {
+        // 函数指针 typedef（typedef int32 (*BinOp)(...)）变量调用——剥 typedef。
         Type* st = sym->type;
+        while (st && st->kind == TypeKind::Typedef)
+            st = static_cast<TypedefType*>(st)->aliasedType;
         if (st && st->kind == TypeKind::Pointer && st->base &&
             st->base->kind == TypeKind::Function) {
             auto* funcType = static_cast<FunctionType*>(st->base);
@@ -2716,16 +2747,22 @@ void SemanticAnalyzer::visit(ArrayAccessExprAST& node) {
         emitError("array subscript must be integer, but got '" + typeToString(indexType) + "'", node);
     }
 
-    if (arrayType && arrayType->kind == TypeKind::Array) {
-        node.type = static_cast<ArrayType*>(arrayType)->elementType;
-    } else if (arrayType && arrayType->kind == TypeKind::Pointer) {
-        node.type = arrayType->base;
-    } else if (arrayType && arrayType->kind == TypeKind::Slice) {
+    // 数组 typedef（typedef int32 IntArr[4]）剥开再判种类。
+    Type* strippedArray = stripTypedef(arrayType);
+    if (strippedArray && strippedArray->kind == TypeKind::Array) {
+        node.type = static_cast<ArrayType*>(strippedArray)->elementType;
+    } else if (strippedArray && strippedArray->kind == TypeKind::Pointer) {
+        node.type = strippedArray->base;
+    } else if (strippedArray && strippedArray->kind == TypeKind::Slice) {
         // TYP-12: subscripting a slice yields an lvalue of the element type.
-        node.type = static_cast<SliceType*>(arrayType)->elementType;
-    } else if (arrayType && arrayType->kind == TypeKind::String) {
+        node.type = static_cast<SliceType*>(strippedArray)->elementType;
+    } else if (strippedArray && strippedArray->kind == TypeKind::String) {
         // P1-06 (FMT-02): subscripting a string yields a byte (char) lvalue;
         // no bounds check (DEC-06 policy).
+        node.type = typeCtx->getChar();
+    } else if (strippedArray && strippedArray->kind == TypeKind::Str) {
+        // P1-06 (FMT-01): subscripting a string_view yields a byte (char)
+        // lvalue——等价 char_at(i)。
         node.type = typeCtx->getChar();
     } else {
         emitError("subscripted value is neither array, slice nor pointer, but '" + typeToString(arrayType) + "'", node);

@@ -239,3 +239,106 @@ TEST_F(DemoRegressionE2E, BareReturnInVoidFunction) {
         }
     )", "reg_ret.c"), 0);
 }
+
+// Gap 1：`&fn` 取函数地址（函数设计符 &fn == fn，C 语义）。
+TEST_F(DemoRegressionE2E, AddressOfFunctionDesignator) {
+    EXPECT_EQ(runSource(R"(
+        int32 add(int32 a, int32 b) { return a + b; }
+        int32 main() {
+            int32 (*fp)(int32, int32) = &add;
+            if (fp(2, 3) != 5) { return 1; }
+            int32 (*fp2)(int32, int32) = add;
+            if (fp2(4, 5) != 9) { return 2; }
+            return 0;
+        }
+    )", "reg_andfn.c"), 0);
+}
+
+// Gap 2：string_view 下标 s[i] 取字节（等价 char_at）。
+TEST_F(DemoRegressionE2E, StringViewSubscript) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string_view s = "hello";
+            if (s[0] != 'h' || s[4] != 'o') { return 1; }
+            if (s.char_at(1) != 'e') { return 2; }
+            int32 sum2 = s[0] + s[1] + s[2];
+            if (sum2 != 'h' + 'e' + 'l') { return 3; }
+            return 0;
+        }
+    )", "reg_stridx.c"), 0);
+}
+
+// Gap 3：指针相减 p - q → 元素个数（ptrdiff）。
+TEST_F(DemoRegressionE2E, PointerDifference) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            int32 arr[5] = {10, 20, 30, 40, 50};
+            int32* a = &arr[0];
+            int32* b = &arr[4];
+            if (b - a != 4) { return 1; }
+            if (a - b != -4) { return 2; }
+            int32* m = &arr[2];
+            if (b - m != 2) { return 3; }
+            return 0;
+        }
+    )", "reg_ptrdiff.c"), 0);
+}
+
+// Gap 4：数组 typedef（下标 / slice / sizeof / 多维）。
+TEST_F(DemoRegressionE2E, ArrayTypedefWorks) {
+    EXPECT_EQ(runSource(R"(
+        typedef int32 IntArr[4];
+        typedef int32 Mat[2][3];
+        int32 sum(int32[] s) {
+            int32 t = 0;
+            for (int32 i = 0; i < s.len; i = i + 1) { t = t + s[i]; }
+            return t;
+        }
+        int32 main() {
+            IntArr arr = {1, 2, 3, 4};
+            if (arr[0] != 1 || arr[3] != 4) { return 1; }
+            if (sizeof(arr) != 16) { return 2; }
+            int32[] s = arr;
+            if (s.len != 4 || sum(arr) != 10) { return 3; }
+            Mat m = {{1, 2, 3}, {4, 5, 6}};
+            if (m[1][2] != 6 || sizeof(m) != 24) { return 4; }
+            return 0;
+        }
+    )", "reg_arrtyp.c"), 0);
+}
+
+// Gap 5：函数指针 typedef + 函数返回函数指针（经 typedef 惯用法）。
+TEST_F(DemoRegressionE2E, FunctionPointerTypedefAndReturn) {
+    EXPECT_EQ(runSource(R"(
+        typedef int32 (*BinOp)(int32, int32);
+        int32 add(int32 a, int32 b) { return a + b; }
+        int32 mul(int32 a, int32 b) { return a * b; }
+        BinOp pick(bool useAdd) { return useAdd ? add : mul; }
+        int32 main() {
+            BinOp f = add;
+            if (f(2, 3) != 5) { return 1; }
+            BinOp g = pick(true);
+            if (g(3, 4) != 7) { return 2; }
+            g = pick(false);
+            if (g(3, 4) != 12) { return 3; }
+            return 0;
+        }
+    )", "reg_fnptrtyp.c"), 0);
+}
+
+// Gap 6：int128/uint128 字面量（>64 位）。
+TEST_F(DemoRegressionE2E, Int128Literal) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            int128 big = 170141183460469231731687303715884105727;
+            if (big != 170141183460469231731687303715884105727) { return 1; }
+            if (!(big > 0)) { return 2; }
+            int128 shifted = 1;
+            shifted = shifted << 100;
+            if (shifted != 1267650600228229401496703205376) { return 3; }
+            uint128 ub = 340282366920938463463374607431768211455;
+            if (!(ub > 170141183460469231731687303715884105727)) { return 4; }
+            return 0;
+        }
+    )", "reg_i128.c"), 0);
+}

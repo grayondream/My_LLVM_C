@@ -386,17 +386,17 @@ LiteralKind Lexer::consumeFloatSuffix() {
 }
 
 Token Lexer::scanNumber(){
-    // LEX-17: accumulate integer literals in 64 bits so overflow is detected
+    // LEX-17: accumulate integer literals in 128 bits so overflow is detected
     // without invoking signed-overflow UB, and diagnose E0003 once when the
-    // value no longer fits in uint64 (recovery: keep scanning the literal).
+    // value no longer fits in uint128 (recovery: keep scanning the literal).
     bool overflowed = false;
-    const unsigned long long maxVal = std::numeric_limits<unsigned long long>::max();
-    auto addDigit = [&](unsigned long long& acc, unsigned base, unsigned digit) {
+    const unsigned __int128 maxVal = ~(unsigned __int128)0;
+    auto addDigit = [&](unsigned __int128& acc, unsigned base, unsigned digit) {
         if (overflowed) return;
         if (acc > (maxVal - digit) / base) {
             overflowed = true;
             report(DiagnosticCode::LexIntegerOverflow,
-                   "integer literal overflows 64 bits",
+                   "integer literal overflows 128 bits",
                    m_tokenStartLine, m_tokenStartCol);
         } else {
             acc = acc * base + digit;
@@ -426,14 +426,14 @@ Token Lexer::scanNumber(){
             const auto lexName = lexeme();
             validateDigitSeparators(lexName, radix);
 
-            unsigned long long value = 0;
+            unsigned __int128 value = 0;
             for(size_t i = 2; i < lexName.size(); i++) {
                 const char c = lexName[i];
                 if(c == '_') continue;
                 if(!isDigitForRadix(c, radix)) break;
                 addDigit(value, radix, digitValue(c));
             }
-            Token token = makeToken(TokenType::TOKEN_NUMBER, lexName, static_cast<long long>(value));
+            Token token = makeToken(TokenType::TOKEN_NUMBER, lexName, value);
             token.literalKind = kind;
             return token;
         }
@@ -514,13 +514,13 @@ Token Lexer::scanNumber(){
     const auto lexName = lexeme();
     validateDigitSeparators(lexName, 10);
 
-    unsigned long long value = 0;
+    unsigned __int128 value = 0;
     for(char c : lexName) {
         if(c == '_') continue;
         if(!isDigitForRadix(c, 10)) break;
         addDigit(value, 10, digitValue(c));
     }
-    Token token = makeToken(TokenType::TOKEN_NUMBER, lexName, static_cast<long long>(value));
+    Token token = makeToken(TokenType::TOKEN_NUMBER, lexName, value);
     token.literalKind = kind;
     return token;
 }

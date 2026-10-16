@@ -139,9 +139,20 @@ static std::string TokenTypeToString(TokenType type) {
     }
 }
 
+static std::string toDecimal128(unsigned __int128 v) {
+    if (v == 0) return "0";
+    std::string s;
+    while (v > 0) {
+        s.insert(s.begin(), static_cast<char>('0' + (int)(v % 10)));
+        v /= 10;
+    }
+    return s;
+}
+
 static std::string TokenValueToString(const TokenValue& value) {
     if (std::holds_alternative<std::monostate>(value)) return "null";
-    if (std::holds_alternative<long long>(value)) return std::to_string(std::get<long long>(value));
+    if (std::holds_alternative<unsigned __int128>(value))
+        return toDecimal128(std::get<unsigned __int128>(value));
     if (std::holds_alternative<double>(value)) return std::to_string(std::get<double>(value));
     if (std::holds_alternative<char>(value)) return std::string(1, std::get<char>(value));
     if (std::holds_alternative<std::string>(value)) return std::get<std::string>(value);

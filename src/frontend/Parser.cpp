@@ -631,9 +631,12 @@ std::unique_ptr<ExprAST> Parser::parsePrimaryImpl() {
     // Number literal
     if (token->type == TokenType::TOKEN_NUMBER) {
         advance();
-        // LEX-15: carry the full 64-bit value and the literal kind into the AST.
-        return std::make_unique<NumberExprAST>(std::get<long long>(token->value),
-                                               token->literalKind);
+        // LEX-15/17: carry the full 128-bit value (low + high words) and the
+        // literal kind into the AST. ≤64-bit literals have hi == 0.
+        unsigned __int128 v = std::get<unsigned __int128>(token->value);
+        long long lo = static_cast<long long>(v);
+        long long hi = static_cast<long long>(v >> 64);
+        return std::make_unique<NumberExprAST>(lo, hi, token->literalKind);
     }
 
     // Float literal
@@ -732,7 +735,7 @@ std::unique_ptr<ExprAST> Parser::parsePrimaryImpl() {
                 while (true) {
                     if (check(TokenType::TOKEN_NUMBER)) {
                         auto numTok = advance();
-                        explicitTemplateValues.push_back(std::get<long long>(numTok->value));
+                        explicitTemplateValues.push_back(static_cast<long long>(std::get<unsigned __int128>(numTok->value)));
                     } else {
                         Type* argType = parseType();
                         if (!argType) {
@@ -2055,7 +2058,7 @@ Type* Parser::parseBaseType() {
                 while (true) {
                     if (check(TokenType::TOKEN_NUMBER)) {
                         auto numTok = advance();
-                        inst->valueArgs.push_back(std::get<long long>(numTok->value));
+                        inst->valueArgs.push_back(static_cast<long long>(std::get<unsigned __int128>(numTok->value)));
                     } else if (check(TokenType::TOKEN_FLOAT)) {
                         error("non-type template argument must be an integer constant", *peek());
                         restoreRshift();
@@ -2742,7 +2745,7 @@ std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string
                 return nullptr;
             }
             if (auto numTok = match(TokenType::TOKEN_NUMBER)) {
-                size = static_cast<int>(std::get<long long>(numTok->value));
+                size = static_cast<int>(static_cast<long long>(std::get<unsigned __int128>(numTok->value)));
                 hasNumber = true;
             }
             if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after array size")) {
@@ -2822,7 +2825,7 @@ std::unique_ptr<ParamDeclAST> Parser::parseParamDecl() {
                     return nullptr;
                 }
                 if (auto numTok = match(TokenType::TOKEN_NUMBER)) {
-                    dimSize = static_cast<int>(std::get<long long>(numTok->value));
+                    dimSize = static_cast<int>(static_cast<long long>(std::get<unsigned __int128>(numTok->value)));
                     hasNumber = true;
                 }
                 if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after array parameter size")) {
@@ -3745,7 +3748,7 @@ Type* Parser::parseMemberArraySuffix(Type* base) {
         std::string sizeParam;
         if (check(TokenType::TOKEN_NUMBER)) {
             auto numTok = advance();
-            size = static_cast<int>(std::get<long long>(numTok->value));
+            size = static_cast<int>(static_cast<long long>(std::get<unsigned __int128>(numTok->value)));
             hasNumber = true;
         } else if (!m_templateScopes.empty() && check(TokenType::TOKEN_IDENTIFIER) &&
                    m_templateScopes.back().valueParams.count(peek()->lexeme)) {
@@ -4043,8 +4046,57 @@ std::unique_ptr<TypedefDeclAST> Parser::parseTypedefDecl() {
     Type* type = parseType();
     if (!type) return nullptr;
 
-    std::string name = qualifyTypeDeclName(parseQualifiedTypeName());
-    if (name.empty()) return nullptr;
+    // 函数指针 typedef：`typedef int32 (*BinOp)(int32, int32);` ——名字在
+    // `(*name)(params)` declarator 里，别名做成 Pointer(FunctionType)。
+    std::string name;
+    if (check(TokenType::TOKEN_LPAREN)) {
+        std::string fpName;
+        if (Type* fpType = parseFunctionPointerDeclarator(type, fpName, true)) {
+            name = qualifyTypeDeclName(fpName);
+            type = fpType;
+        }
+    }
+    if (name.empty()) {
+        name = qualifyTypeDeclName(parseQualifiedTypeName());
+        if (name.empty()) return nullptr;
+    }
+
+    // typedef 数组：`typedef int32 IntArr[4]`（可多维 `[2][3]`）——名字后的
+    // 数组后缀必须包装进别名类型（右到左建嵌套 ArrayType），否则 IntArr 只
+    // 拿到基础类型（丢维度，下标/slice/sizeof 全坏）。
+    if (check(TokenType::TOKEN_LBRACKET)) {
+        std::vector<int> dims;
+        std::vector<bool> explicitDim;
+        while (check(TokenType::TOKEN_LBRACKET)) {
+            advance();
+            int size = 0;
+            bool hasNumber = false;
+            if (!check(TokenType::TOKEN_NUMBER) && !check(TokenType::TOKEN_RBRACKET)) {
+                errorUnexpected("variable-length arrays are not supported: array size must be an integer literal");
+                return nullptr;
+            }
+            if (auto numTok = match(TokenType::TOKEN_NUMBER)) {
+                size = static_cast<int>(static_cast<long long>(std::get<unsigned __int128>(numTok->value)));
+                hasNumber = true;
+            }
+            if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after array size")) {
+                return nullptr;
+            }
+            dims.push_back(size);
+            explicitDim.push_back(hasNumber);
+        }
+        for (size_t i = 1; i < dims.size(); ++i) {
+            if (!explicitDim[i]) {
+                errorUnexpected("expected array dimension: only the first dimension may be empty");
+                return nullptr;
+            }
+        }
+        Type* elemType = type;
+        for (size_t i = dims.size() - 1; i >= 1; --i) {
+            elemType = new ArrayType(elemType, dims[i]);
+        }
+        type = new ArrayType(elemType, dims[0]);
+    }
 
     match(TokenType::TOKEN_SEMICOLON);
 

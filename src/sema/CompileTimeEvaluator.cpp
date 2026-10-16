@@ -66,6 +66,12 @@ std::optional<ConstValue> CompileTimeEvaluator::eval(ExprAST* expr, ASTNode& at)
     ++m_depth;
 
     if (auto* num = dynamic_cast<NumberExprAST*>(expr)) {
+        if (num->valueHi != 0) {
+            // 128 位字面量：编译期求值/折叠仍按 64 位 ConstValue 承载——
+            // 高 64 位无法无损表示，拒绝并给出明确诊断（运行时值不受影响）。
+            m_sema.emitError("128-bit integer literal is not supported in a constant expression", *expr);
+            return std::nullopt;
+        }
         ConstValue cv;
         cv.type = ConstValue::INT;
         cv.intVal = num->value;

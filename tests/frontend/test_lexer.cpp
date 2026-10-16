@@ -105,7 +105,8 @@ TEST(LexerDiagnosticsTest, UnterminatedBlockCommentReportsE0002) {
 }
 
 TEST(LexerDiagnosticsTest, DecimalLiteralOverflowReportsE0003) {
-    Lexer lexer("bad.c", "int32 x = 999999999999999999999999;");
+    // 128 位承载（LEX-17）：仅超 2^128-1 才报 E0003。2^128 恰溢出。
+    Lexer lexer("bad.c", "int32 x = 340282366920938463463374607431768211456;");
     lexer.tokenize();
     const Diagnostic* d = findDiag(lexer.getDiagnostics(), DiagnosticCode::LexIntegerOverflow);
     ASSERT_NE(d, nullptr);
@@ -114,11 +115,19 @@ TEST(LexerDiagnosticsTest, DecimalLiteralOverflowReportsE0003) {
 }
 
 TEST(LexerDiagnosticsTest, HexLiteralOverflowReportsE0003) {
-    Lexer lexer("bad.c", "int32 x = 0x1FFFFFFFFFFFFFFFFF;");
+    // 33 个 F = 132 位 > 128 位 → E0003。
+    Lexer lexer("bad.c", "int32 x = 0x1FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;");
     lexer.tokenize();
     const Diagnostic* d = findDiag(lexer.getDiagnostics(), DiagnosticCode::LexIntegerOverflow);
     ASSERT_NE(d, nullptr);
     EXPECT_EQ(diagnosticId(d->code), "E0003");
+}
+
+TEST(LexerDiagnosticsTest, LargeDecimalWithin128BitsIsAccepted) {
+    // 超 64 位但 ≤ 128 位不再报溢出——128 位字面量是合法特性。
+    Lexer lexer("ok.c", "int128 x = 170141183460469231731687303715884105727;");
+    lexer.tokenize();
+    EXPECT_TRUE(lexer.getDiagnostics().empty());
 }
 
 TEST(LexerDiagnosticsTest, LargeDecimalWithin64BitsIsAccepted) {
@@ -171,7 +180,7 @@ TEST(LexerNumberSuffixTest, IntegerSuffixesAreRecognizedOnAllRadixes) {
     EXPECT_EQ(tokens[8].literalKind, LiteralKind::UInt);
     EXPECT_EQ(tokens[9].literalKind, LiteralKind::Long);
     EXPECT_EQ(tokens[10].literalKind, LiteralKind::UInt);
-    EXPECT_EQ(std::get<long long>(tokens[0].value), 1);
+    EXPECT_EQ(std::get<unsigned __int128>(tokens[0].value), 1);
 }
 
 TEST(LexerNumberSuffixTest, FloatSuffixesMapToKinds) {
@@ -259,7 +268,7 @@ TEST(LexerSeparatorTest, RecoveryKeepsNumberTokenAndRestOfStream) {
     EXPECT_FALSE(lexer.getDiagnostics().empty());
     ASSERT_EQ(tokens.size(), 10u);
     EXPECT_EQ(tokens[3].type, TokenType::TOKEN_NUMBER);
-    EXPECT_EQ(std::get<long long>(tokens[3].value), 10);
+    EXPECT_EQ(std::get<unsigned __int128>(tokens[3].value), 10);
 }
 
 // LEX-05: floating-point exponents (e/E, optional sign, decimal digits).
@@ -296,7 +305,7 @@ TEST(LexerFloatExponentTest, HexEIsADigitNotAnExponent) {
     ASSERT_EQ(tokens.size(), 1u);
     EXPECT_EQ(tokens[0].type, TokenType::TOKEN_NUMBER);
     EXPECT_EQ(tokens[0].literalKind, LiteralKind::Int);
-    EXPECT_EQ(std::get<long long>(tokens[0].value), 0x1e10);
+    EXPECT_EQ(std::get<unsigned __int128>(tokens[0].value), 0x1e10);
 }
 
 TEST(LexerFloatExponentTest, IncompleteExponentIsLeftAlone) {
@@ -304,7 +313,7 @@ TEST(LexerFloatExponentTest, IncompleteExponentIsLeftAlone) {
     auto tokens = lexer.tokenize();
     ASSERT_EQ(tokens.size(), 6u);
     EXPECT_EQ(tokens[0].type, TokenType::TOKEN_NUMBER);
-    EXPECT_EQ(std::get<long long>(tokens[0].value), 1);
+    EXPECT_EQ(std::get<unsigned __int128>(tokens[0].value), 1);
     EXPECT_EQ(tokens[1].type, TokenType::TOKEN_IDENTIFIER);
     EXPECT_EQ(tokens[1].lexeme, "e");
     EXPECT_EQ(tokens[2].type, TokenType::TOKEN_NUMBER);
@@ -444,9 +453,10 @@ TEST(LexerValueWidthTest, LargeIntegerIsNotTruncated) {
     auto tokens = lexer.tokenize();
 
     ASSERT_GE(tokens.size(), 2u);
-    EXPECT_EQ(std::get<long long>(tokens[0].value), 4000000000LL);
-    // 0xFFFFFFFFFFFFFFFF is the two's-complement bit pattern for -1 in int64.
-    EXPECT_EQ(std::get<long long>(tokens[1].value), -1LL);
+    EXPECT_EQ(std::get<unsigned __int128>(tokens[0].value), 4000000000LL);
+    // 0xFFFFFFFFFFFFFFFF 现以 unsigned __int128 承载真实值 2^64-1（不再按
+    // long long 位模式 -1）。
+    EXPECT_EQ(std::get<unsigned __int128>(tokens[1].value), 18446744073709551615ULL);
 }
 
 // LEX-12: `asm` is a keyword token; `volatile` stays a keyword beside it.

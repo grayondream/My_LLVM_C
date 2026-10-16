@@ -63,7 +63,7 @@ TEST_F(NewFeaturesTest, BinaryLiterals) {
             if (lexeme.find("0b") != std::string::npos || lexeme.find("0B") != std::string::npos) {
                 foundBinary = true;
                 // 检查值是否正确 (0b1010 = 10)
-                long long value = std::get<long long>(token.value);
+                long long value = std::get<unsigned __int128>(token.value);
                 EXPECT_EQ(value, 10);
             }
         }
@@ -92,7 +92,7 @@ TEST_F(NewFeaturesTest, OctalLiterals) {
             if (lexeme.find("0o") != std::string::npos || lexeme.find("0O") != std::string::npos) {
                 foundOctal = true;
                 // 检查值是否正确 (0o755 = 493)
-                long long value = std::get<long long>(token.value);
+                long long value = std::get<unsigned __int128>(token.value);
                 EXPECT_EQ(value, 493);
             }
         }
@@ -121,7 +121,7 @@ TEST_F(NewFeaturesTest, UnderscoreLiterals) {
             if (lexeme.find("_") != std::string::npos) {
                 foundUnderscore = true;
                 // 检查值是否正确
-                long long value = std::get<long long>(token.value);
+                long long value = std::get<unsigned __int128>(token.value);
                 EXPECT_EQ(value, 1000000);
             }
         }

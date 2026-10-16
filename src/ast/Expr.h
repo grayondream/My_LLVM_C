@@ -100,11 +100,16 @@ public:
 class NumberExprAST : public ExprAST {
 public:
     long long value;
+    // P1-07 / LEX-17: 128 位整型字面量的高 64 位（≤64 位字面量恒 0）。value 为
+    // 低 64 位（有符号位模式）；组合出 unsigned __int128 = (hi<<64)|lo。
+    int64_t valueHi = 0;
     // LEX-15: suffix/default kind of the literal, used by sema/codegen to pick
     // the fixed-width type instead of a fixed `int`/`i32`.
     LiteralKind literalKind{LiteralKind::Int};
     explicit NumberExprAST(int val) : value(val) {}
     NumberExprAST(long long val, LiteralKind kind) : value(val), literalKind(kind) {}
+    NumberExprAST(long long lo, long long hi, LiteralKind kind)
+        : value(lo), valueHi(hi), literalKind(kind) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 

@@ -293,6 +293,12 @@ llvm::Value* NumberExprAST::codegen(CodegenContext& ctx) {
                 break;
         }
     }
+    if (valueHi != 0) {
+        // LEX-17: 128 位字面量按 {lo, hi} 两字构造 APInt。
+        llvm::APInt ap(bits, llvm::ArrayRef<uint64_t>(
+            {static_cast<uint64_t>(value), static_cast<uint64_t>(valueHi)}));
+        return llvm::ConstantInt::get(ctx.getContext(), ap);
+    }
     return llvm::ConstantInt::get(
         ctx.getContext(), llvm::APInt(bits, static_cast<uint64_t>(value), isSigned));
 }
@@ -578,8 +584,19 @@ llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
     switch (op) {
         case BinaryOp::Add:    return isFloat ? builder.CreateFAdd(lhs, rhs, "addtmp")
                                               : builder.CreateAdd(lhs, rhs, "addtmp");
-        case BinaryOp::Sub:    return isFloat ? builder.CreateFSub(lhs, rhs, "subtmp")
-                                              : builder.CreateSub(lhs, rhs, "subtmp");
+        case BinaryOp::Sub: {
+            // 指针差 `p - q`：LLVM CreatePtrDiff 按元素计数（ptrdiff）。
+            if (lhs->getType()->isPointerTy() && rhs->getType()->isPointerTy()) {
+                Type* leftAstT = stripTypedefsT12(leftAst);
+                llvm::Type* elemTy = llvm::Type::getInt8Ty(ctx.getContext());
+                if (leftAstT && leftAstT->kind == TypeKind::Pointer && leftAstT->base)
+                    elemTy = ctx.getLLVMType(leftAstT->base);
+                if (!elemTy) elemTy = llvm::Type::getInt8Ty(ctx.getContext());
+                return builder.CreatePtrDiff(elemTy, lhs, rhs, "ptrdiff");
+            }
+            return isFloat ? builder.CreateFSub(lhs, rhs, "subtmp")
+                           : builder.CreateSub(lhs, rhs, "subtmp");
+        }
         case BinaryOp::Mul:    return isFloat ? builder.CreateFMul(lhs, rhs, "multmp")
                                               : builder.CreateMul(lhs, rhs, "multmp");
         case BinaryOp::Div:    return isFloat ? builder.CreateFDiv(lhs, rhs, "divtmp")
@@ -1786,7 +1803,7 @@ llvm::Value* ArrayAccessExprAST::codegen(CodegenContext& ctx) {
 
     // Determine the element type and, for a pointer operand, load the pointer
     // value (an array operand is already the address of its first element).
-    Type* arrType = array->type;
+    Type* arrType = stripTypedefsT12(array->type);
     llvm::Type* elemTy = llvm::Type::getInt32Ty(ctx.getContext());
     if (arrType && arrType->kind == TypeKind::Array) {
         auto* at = static_cast<ArrayType*>(arrType);
@@ -1809,6 +1826,13 @@ llvm::Value* ArrayAccessExprAST::codegen(CodegenContext& ctx) {
         if (array->isLValue) arrVal = builder.CreateLoad(strTy, arrVal);
         elemTy = llvm::Type::getInt8Ty(ctx.getContext());
         arrVal = builder.CreateExtractValue(arrVal, {0}, "string.ptr");
+    } else if (arrType && arrType->kind == TypeKind::Str) {
+        // P1-06 (FMT-01): load the {ptr, len} header, index its buffer.
+        auto* strTy = ctx.getLLVMType(arrType);
+        auto& builder = ctx.getBuilder();
+        if (array->isLValue) arrVal = builder.CreateLoad(strTy, arrVal);
+        elemTy = llvm::Type::getInt8Ty(ctx.getContext());
+        arrVal = builder.CreateExtractValue(arrVal, {0}, "str.ptr");
     }
 
     auto& builder = ctx.getBuilder();

@@ -134,7 +134,9 @@ enum class TokenType : int32_t {
     TOKEN_EOS
 };
 
-using TokenValue = std::variant<std::monostate, long long, double, char, std::string>;
+// 整型字面量统一以 unsigned __int128 承载（LEX-17：累加/溢出到 128 位；
+// 消费端按需拆 low/high 或截断）。≤64 位值 hi 恒 0，行为与旧 long long 一致。
+using TokenValue = std::variant<std::monostate, unsigned __int128, double, char, std::string>;
 class Token {
 public:
     TokenType type{}; 
