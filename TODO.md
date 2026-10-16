@@ -61,7 +61,7 @@
 ## 2. 词法分析（LEX）
 
 - `[ ]` **LEX-01** `(已实现)` 关键字与基础类型关键字词法；核对与规范一致。
-- `[~]` **LEX-02** `(新)` 新增关键字 token：`template`、`typename`、`this`；弃用未使用的 `generic`。（`generic`/`comptime` token 已按 DEC-18 移除；`template`/`typename`/`this` 待补）
+- `[x]` **LEX-02** `(新)` 新增关键字 token：`template`、`typename`；弃用未使用的 `generic`。（`generic`/`comptime` token 已按 DEC-18 移除；`template`/`typename` 已注册为 `TOKEN_TEMPLATE`/`TOKEN_TYPENAME`（GEN-01/P1-03）；`this` 按 PAR-17 上下文标识符处理——方法体内隐式 this 参数，非保留关键字 token）
 - `[x]` **LEX-03** `(改)` 移除/废弃：C 预处理器与宏相关 token（`#include/#define/#if`）与 `-E/-I/-D`（见 Non-goals）。`#` 仍作为 `TOKEN_HASH` 词法识别，由解析器以“不支持预处理指令”报错。
 - `[ ]` **LEX-04** `(已实现)` 整型字面量：十进制/十六进制/二进制/八进制/分隔符/后缀；补全测试。
 - `[x]` **LEX-05** `(已实现)` 浮点字面量：小数/指数/`f16/f32/f64/f128` 后缀；补全测试。**已完成**：小数（含“结尾点”形式 `1.` / `1.e3`，数字后紧跟 `.` 一律进入小数部分）、指数 `e/E`（可带 `+`/`-`，数字间允许 `_`）、后缀走 LEX-15；带指数即浮点，无后缀默认 `float64`（`tests/frontend/test_lexer.cpp` 的 `LexerFloatExponentTest`/`LexerTrailingDotFloatTest`）。**明确延后**：十六进制浮点 `0x1p3` 不入规范（无 std.math/位级用例，YAGNI；如需再挂靠 LEX-04/TYP-04）。
@@ -72,9 +72,9 @@
 - `[x]` **LEX-10** 注解 token——不新增 token；`[[` = 两个 TOKEN_LBRACKET，parser 声明位置前瞻特判（2026-10-07）。
 - `[x]` **LEX-11** `static_cast<T>(x)` / `reinterpret_cast<T>(x)` 等转换关键字（为 INH/CRTP 铺路）。已实现为**上下文关键字**（紧跟 `<类型>` 时解析），见 PAR-18。
 - `[x]` **LEX-12** 内联汇编 `asm` token。**完成**（2026-10-11，P1-08）：keywordMap 注册 `{"asm", TOKEN_ASM}`（Task 1）；parser/sema/codegen 全链路见 PAR-16/CG-10/DEC-09。
-- `[x]` **LEX-13** 错误恢复与词法诊断（非法字符、未闭合字面量、整型溢出）。已实现：`Lexer::getDiagnostics()` 产出 E0001（非法字符，跳过并继续）、E0002（未闭合字符串/字符/块注释，含原始字符串）、E0003（整型字面量超过 64 位）；`skipTrivia` 统一跳过空白与注释（修复行注释后空行被误判）；诊断在 `CompilerDriver`/`ModuleLoader`/`StdPrelude` 中上报并使编译失败（`tests/frontend/test_lexer.cpp`、`tests/driver/test_compiler_driver.cpp`、`tests/diagnostics/snapshots/lexical_invalid_character.txt`）。
-- `[~]` **LEX-14** `(新)` **关键字/保留字总表落地**（配合 INF-11）：`register`/`cast`/`typeof` 已按 DEC-18 移除 token；`namespace` 关键字与 `::` token 已新增；`template`/`typename`/`this` 待补。
-- `[~]` **LEX-15** `(新)` **字面量默认类型与后缀映射**：无后缀整型/浮点的默认类型，`u`/`l`/`f16`…后缀 → 底层类型表。**词法层已完成**：`Token::literalKind`（`Int/UInt/Long/ULong/Float16/Float32/Float64/Float128`）+ `literalKindName` 映射表；识别 `u`/`l`/`ul`/`lu`（各进制通用）与 `f`/`f16`/`f32`/`f64`/`f128`（兼容 `l`/`L`）；无后缀默认 `int32`/`float64`；规范见 `docs/spec/grammar.ebnf`、`conversions.md §7`（`tests/frontend/test_lexer.cpp`）。**已完成**：LEX-15 消费端——AST 节点携带 `literalKind`，sema 按 kind 赋定宽类型（无后缀默认 `int32`/`float64`），codegen 按宽度/符号（含无符号）与 APFloat 语义（half/single/double/quad）生成常量，大整数不再截断。
+- `[x]` **LEX-13** 错误恢复与词法诊断（非法字符、未闭合字面量、整型溢出）。已实现：`Lexer::getDiagnostics()` 产出 E0001（非法字符，跳过并继续）、E0002（未闭合字符串/字符/块注释，含原始字符串）、E0003（整型字面量超过 128 位，累加器 `unsigned __int128`，LEX-17）；`skipTrivia` 统一跳过空白与注释（修复行注释后空行被误判）；诊断在 `CompilerDriver`/`ModuleLoader`/`StdPrelude` 中上报并使编译失败（`tests/frontend/test_lexer.cpp`、`tests/driver/test_compiler_driver.cpp`、`tests/diagnostics/snapshots/lexical_invalid_character.txt`）。
+- `[x]` **LEX-14** `(新)` **关键字/保留字总表落地**（配合 INF-11）：`register`/`cast`/`typeof` 已按 DEC-18 移除 token；`namespace` 关键字与 `::` token 已新增；`template`/`typename` 已注册（LEX-02），`this` 走上下文标识符（PAR-17）。
+- `[x]` **LEX-15** `(新)` **字面量默认类型与后缀映射**：无后缀整型/浮点的默认类型，`u`/`l`/`f16`…后缀 → 底层类型表。**词法层已完成**：`Token::literalKind`（`Int/UInt/Long/ULong/Float16/Float32/Float64/Float128`）+ `literalKindName` 映射表；识别 `u`/`l`/`ul`/`lu`（各进制通用）与 `f`/`f16`/`f32`/`f64`/`f128`（兼容 `l`/`L`）；无后缀默认 `int32`/`float64`；规范见 `docs/spec/grammar.ebnf`、`conversions.md §7`（`tests/frontend/test_lexer.cpp`）。**消费端已完成**（2026-09-29）：AST 节点携带 `literalKind`，sema 按 kind 赋定宽类型（无后缀默认 `int32`/`float64`），codegen 按宽度/符号（含无符号）与 APFloat 语义（half/single/double/quad）生成常量，大整数不再截断。**128 位字面量已支持**（2026-10-16）：TokenValue 整数值统一 `unsigned __int128`，lexer 累加至 128 位（E0003 移到超 2^128-1），sema 映射 int128/uint128，codegen APInt 两字构造。
 - `[ ]` **LEX-16** `(新)` **转义字符全集、原始字符串与多行字符串**的精确词法规则（细化 LEX-06）。
 - `[x]` **LEX-17** `(新)` **数字分隔符位置规则、进制前缀、整型字面量溢出诊断**（细化 LEX-04/13）。二/八/十六/十进制均按 64 位无符号累加并检测溢出，超 64 位报 **E0003**；分隔符 `_` 仅可位于两个数字之间，前导/结尾/连续/紧邻进制前缀或小数点均报 **E0004**（`src/frontend/Lexer.cpp`；`docs/spec/grammar.ebnf`）。
 - `[ ]` **LEX-18** `(新)` **标识符 UTF-8/Unicode 规则**：允许范围、NFC 规范化、与关键字冲突处理。
@@ -96,7 +96,7 @@
 - `[ ]` **PAR-11** `(新)` 简单 lambda：语法（建议 C++ 风格 `[capture](params) -> T { ... }` 或最简 `[](p){...}`）、捕获列表。
 - `[ ]` **PAR-12** `(新)` 匿名 class/struct/union：匿名类型定义、匿名成员提升。
 - `[ ]` **PAR-13** `(新)` 指定初始化器 `{.field = v}`、柔性数组 `T a[]`。
-- `[ ]` **PAR-14** `(已实现)` `sizeof`；`(新)` `alignof`、`offsetof`。
+- `[~]` **PAR-14** `(已实现)` `sizeof`；`(新)` `alignof`、`offsetof`。（`compile_time.size_of/align_of/offset_of` 已实现，CT-06/P1-04；独立 `alignof`/`offsetof` 关键字形式未做，见 CT-07/13 反射收口）
 - `[x]` **PAR-15** `(新)` `compile_time` 表达式：`static_assert`、`if`、目标/构建查询完成（2026-10-06）；反射部分未含（另轮）。
 - `[x]` **PAR-16** `(新)` 内联汇编 `asm` 语句/表达式。**完成**（2026-10-11，P1-08）：`AsmOperand`/`AsmExprAST` 节点 + `parseAsmExpr()`（至多三段操作数、模板/约束须字符串字面量、`decodeEscapes` 去引号），见 plan `2026-10-10-p108-inline-asm`。
 - `[x]` **PAR-17** `(新)` `this` 表达式（2026-10-06）。方法体内 `this` 走隐式 this 参数按普通变量解析；`this.field` 点号对指针自动解引用；static 方法内 this 钉死诊断。
@@ -189,7 +189,7 @@
 - `[ ]` **SEM-05** 类型检查：表达式/赋值/调用/返回/字段访问。
 - `[x]` **SEM-06** 泛型实例化检查（GEN-06）。已实现（2026-10-06）：实例点全量 sema + 惰性方法体。
 - `[x]` **SEM-07** `compile_time` 条件求值与死代码消除——sema 期选分支原位展开，codegen 仅出选中分支（2026-10-06）。死分支类型占位毒化（`Type::ctDeadBranch`），活分支 sema 注册新对象解毒。
-- `[ ]` **SEM-08** 格式字符串类型检查：`{}`、`{:x}`、`{:f}`、`{:02}`、`{:.2f}`（`print/println`）。
+- `[x]` **SEM-08** 格式字符串类型检查：`{}`、`{:x}`、`{:f}`、`{:02}`、`{:.2f}`（`print/println`）。**已完成**（2026-10-09，随 FMT-09）：字面量 fmt 全检（E2020~22）；动态 fmt 只查实参可格式化。
 - `[ ]` **SEM-09** 数组/Slice 边界检查策略：静态可证明或运行时检查（见 DEC-06）。
 - `[ ]` **SEM-10** 整数溢出检查策略：Debug 检查 / Release 行为（见 DEC-07）。
 - `[~]` **SEM-11** 警告：未使用变量（W3002）与不可达代码（W3003）已实现（`tests/sema/test_warnings.cpp`；任一引用算使用，`defer` 不影响可达性）；**W3004 弃用 API 已随 ANN-05 落地**（2026-10-07）；enum 穷尽性（依赖 DEC-13）待定；未初始化变量见 SEM-01/02（W3001）。
@@ -417,11 +417,11 @@
 - `[ ]` **CG-05** `(已实现)` 表达式 codegen（含指针 GEP、fneg、前缀/后缀 `++/--`）；补测试。
 - `[ ]` **CG-06** class 方法降级 `Vector_length(Vector* self)`、`static` 成员变量降级。
 - `[x]` **CG-07** **模板单态化代码生成**（GEN-05）、实例去重缓存。已实现（2026-10-06）：实例即普通声明走既有 codegen；TU 预扫（实例布局先行 + 函数签名）+ 调用点按需前向声明。
-- `[ ]` **CG-08** **继承布局与 `this`/`static_cast` codegen**（INH）。
+- `[x]` **CG-08** **继承布局与 `this`/`static_cast` codegen**（INH）。**已完成**（2026-10-05，随 INH-01~05/P1-03）：基类子对象槽 0、`this` 隐式参数、`static_cast<Derived*>` 下行、模板基类实例化（CG-07 同轮）。
 - `[x]` **CG-09** **位域 codegen**：`iN` 与读-改-写位操作。**完成**（2026-10-15，P1-07）：统一读点 readLValue 分派位域 → loadBitFieldValue（shift+trunc+sext/zext 至基类型）；storeBitFieldValue 掩码 RMW；Assignment/CompoundAssign/PreInc/PostfixIncDec 位域路径；emitBitFieldGEP 沿继承链定位存储单元；union 分支记录 unitBits。
 - `[x]` **CG-10** **内联 `asm`** → LLVM `InlineAsm`（操作数约束/clobber/volatile/目标限定）。**完成**（2026-10-11，P1-08）：`AsmExprAST::codegen` 用 `llvm::InlineAsm`（AD_ATT）；输出映射 call 返回值（单值/struct）、`+r`→`=r`+尾部 tied 约束、GCC 模板翻译 `$`→`$$`/`%%`→`%`/`%N`→`$N`；e2e 6 用例 LLJIT 执行通过。
 - `[ ]` **CG-11** **lambda codegen**：无捕获→函数指针；有捕获→匿名 struct + 函数。
-- `[ ]` **CG-12** `compile_time` 常量折叠后 codegen；与 LLVM 常量集成。
+- `[x]` **CG-12** `compile_time` 常量折叠后 codegen；与 LLVM 常量集成。**已完成**（2026-10-06，随 CT-12）：表达式节点 `ctInt/ctFloat/ctHandled`，codegen 直接出 `llvm::Constant`，零运行时指令。
 - `[ ]` **CG-13** 原子操作与 `thread_local`。
 - `[ ]` **CG-14** 调试信息：DWARF、源码位置。
 - `[ ]` **CG-15** 优化级别 O0/O1/O2/O3/Os/Oz。
@@ -525,7 +525,7 @@
 - `[x]` **P1-04** `compile_time` 与反射——核心纵向切片完成（2026-10-06）：CT-01/02/03/04/05/06/12/14 + PAR-15 部分 + SEM-07 + DEC-05；反射 CT-07/08/13 另轮（与 P1-06 str 排序协调）。
 - `[x]` **P1-05** 注解系统（ANN）——核心纵向完成（2026-10-07）：ANN-01~06/09/10 + LEX-10/PAR-07 + W3004/W3005；ANN-07/08 挂账。
 - `[x]` **P1-06** str / String / format（FMT、STD-10/11）。核心纵向完成（2026-10-08）：FMT-01/02/03/04 + FMT-05 比较 + TYP-26/DEC-20 + 内建类型小写化（`optional`/`result`，DEC-18 先例）；E2015 新诊断；`grammar.ebnf` 同步。format（FMT-06~09）与 STD-10 高层操作另轮。spec `docs/superpowers/specs/2026-10-08-str-string-design.md`，plan `docs/superpowers/plans/2026-10-08-str-string.md`。挂账：`string` 不参与 constexpr；CT `+` 已移除；SSO 不做。
-- `[ ]` **P1-07** 位域、匿名类型、指定初始化器、lambda（AGG-03~06、PAR-10~13）。
+- `[~]` **P1-07** 位域、匿名类型、指定初始化器、lambda（AGG-03~06、PAR-10~13）。**位域全链路已完成**（2026-10-15：PAR-10/SEM-12/AGG-06/CG-09/DEC-08）；**剩余**：匿名类型定义（PAR-12，匿名成员提升 AGG-03 已做）、指定初始化器 `{.x=1}` 与柔性数组 `T a[]`（PAR-13/AGG-04/05）、lambda（PAR-11/CG-11/DEC-10）。
 - `[x]` **P1-08** `static_cast` / 内联 `asm`（PAR-18、CG-10）。`static_cast`/`reinterpret_cast` 已完成（LEX-11/PAR-18）；内联 `asm` 全链路完成（2026-10-11）：LEX-12/PAR-16/CG-10/DEC-09，spec `docs/superpowers/specs/2026-10-10-p108-inline-asm-design.md`，plan `docs/superpowers/plans/2026-10-10-p108-inline-asm.md`，e2e 6 用例 LLJIT 执行通过（全量 1203 绿）。
 - `[~]` **P1-09** std.mem / std.string / std.format / std.math / **std.collections**（STD-05~14）。字符串库 + format 体系完成（2026-10-09）：FMT-06~11 全落地、FMT-12 单缓冲、STD-10 组合库、STD-11 核心；E2020~22 新诊断；顺带修复既有编译器 bug 两枚——`&&`/`||` 按位降级（真值截断 + 无短路）与派生→基类赋值整结构 store 溢出（潜在栈腐败）。spec `docs/superpowers/specs/2026-10-09-p109-string-format-design.md`，plan `docs/superpowers/plans/2026-10-09-p109-string-format.md`。挂账：StrBuilder 类导出缺口（语言层）、模块类导出（parse 期类型名注册）、`replace`/字典序/to_lower|upper 不做、std.mem/math/collections 另轮。**终审 I4（string 值拷贝别名双 free）已收口**（2026-10-11）：string 拥有型值语义 + string_view 硬改名，spec `docs/superpowers/specs/2026-10-11-string-ownership-design.md`，plan `docs/superpowers/plans/2026-10-11-string-ownership.md`，e2e 16 用例（全量 1229 绿）。
 
