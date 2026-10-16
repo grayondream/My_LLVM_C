@@ -1631,7 +1631,14 @@ void SemanticAnalyzer::visit(BinaryExprAST& node) {
                 if (resolved) {
                     // Store the mangled name for codegen
                     node.mangledCallee = mangledName;
-                    node.type = leftType; // Return type will be resolved during codegen
+                    // 表达式类型 = operator 函数声明的返回类型（镜像普通调用
+                    // node.type = funcType->returnType）——设成左操作数类型会
+                    // 让外层表达式（int32 s = p + q / p + q == 10）看到错误类型。
+                    if (resolved->type && resolved->type->kind == TypeKind::Function) {
+                        node.type = static_cast<FunctionType*>(resolved->type)->returnType;
+                    } else {
+                        node.type = leftType;
+                    }
                     node.isLValue = false;
                     return;
                 } else {

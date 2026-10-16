@@ -199,3 +199,25 @@ TEST_F(DemoRegressionE2E, UnsignedCompoundAssignmentUsesUnsignedOps) {
         }
     )", "reg_ucomp.c"), 0);
 }
+
+// Bug G：运算符重载解析后表达式类型被设为左操作数类型而非 operator 函数
+// 返回类型 → `int32 s = p + q` 类型不匹配、`p + q == 10` 比较 V2 与 int32。
+TEST_F(DemoRegressionE2E, OperatorOverloadExpressionTypeIsReturnType) {
+    EXPECT_EQ(runSource(R"(
+        struct V2 { int32 x; int32 y; };
+        int32 operator+(V2 a, V2 b) { return a.x + b.x + a.y + b.y; }
+        bool operator==(V2 a, V2 b) { return a.x == b.x && a.y == b.y; }
+        int32 main() {
+            V2 p = {1, 2};
+            V2 q = {3, 4};
+            int32 s = p + q;                 // 直接赋值
+            if (s != 10) { return 1; }
+            if (!(p + q == 10)) { return 2; } // 复合比较
+            int32 c = p + q + 1;              // 与 int 链接
+            if (c != 11) { return 3; }
+            V2 r = {1, 2};
+            if (!(p == r)) { return 4; }
+            return 0;
+        }
+    )", "reg_opov.c"), 0);
+}
