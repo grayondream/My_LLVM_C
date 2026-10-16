@@ -759,3 +759,15 @@
   - **裸 `return;`（void 函数早退）**：sema/codegen 早已支持（void 检查 + CreateRetVoid），仅解析器硬性要求表达式被拒（Progress 两轮遗留）。两处 return 解析放行。更新 `ParserErrorTest.UnexpectedTokenInExpression`（原用 `return ;` 当非法载体，改用 `return )`），新增 `BareReturnParses`。
 - 验证：全部探测文件绿；演示 `ALL FEATURES OK` exit 0；全量 ctest **1292/1292**（1286 + 6 新回归）。
 - 已知缺口（未修，另项评估）：指针相减 `ptr - ptr` 不支持；函数返回函数指针语法不支持；`&fn` 取函数地址不支持；int128 字面量 >64 位被 E0003 拒；string_view 下标 `s[0]` 不支持（用 char_at/sub）；数组 typedef 下标/slice/sizeof 按指针退化。
+
+## 2026-10-16 — 补齐基座已知缺口（5 项特性 + int128 字面量）
+
+- 按用户要求补齐上轮记录的全部已知缺口（提交 `bfdecdc`，各配回归测试）：
+  - **`&fn` 取函数地址**：函数设计符 decay 后是 Pointer(Function) 且非 lvalue，AddressOf 误报"cannot take address"；C 语义 &fn==fn，取址无操作。
+  - **string_view 下标 `s[i]`**：sema/codegen 加 Str 分支（解包 {ptr,len} 后 GEP i8），等价 char_at(i)。
+  - **指针相减 `p - q`**：sema 允许 Pointer-Pointer → isize；codegen 用 LLVM CreatePtrDiff 按元素计数。
+  - **数组 typedef**（根因是 parser 丢维度）：`typedef int32 IntArr[4]` 此前只注册 int32（`[4]` 被丢），下标/slice/sizeof 全坏；parseTypedefDecl 处理名字后 `[N]` 后缀（右到左嵌套 ArrayType）+ 全链路剥 typedef。
+  - **函数指针 typedef + 函数返回函数指针**：parseTypedefDecl 复用 parseFunctionPointerDeclarator（`typedef int32 (*BinOp)(int32,int32)`）；间接调用按 typedef 变量解析。原始声明形式 `int32 (*f(p))(params)` 仍不支持（罕见，typedef 惯用法可替代）。
+  - **int128/uint128 字面量（>64 位）**：TokenValue 整数值统一 unsigned __int128，lexer 累加到 128 位（E0003 移到超 2^128-1）；NumberExprAST 加 valueHi；sema 映射 int128/uint128；codegen APInt 两字构造；constexpr 对 128 位字面量明确拒绝（64 位 ConstValue 无损承载）。
+- 验证：全量 ctest **1299/1299**（1292 + 6 新回归 + 1 新 lexer 正例）；20 探测全绿；演示 `ALL FEATURES OK`（新增数组 typedef/指针差/int128 用例）。
+- 遗留（已记）：原始函数返回函数指针声明语法不支持（typedef 可用）；128 位字面量在常量表达式中被拒（运行时值可用）。
