@@ -121,9 +121,13 @@ type-alias          = 'typedef' , type , identifier , ';'
 (* --- 记录类型 --- *)
 record-decl         = struct-decl | class-decl | union-decl ;
 
-struct-decl         = 'struct' , identifier , [ '{' , { field-decl } , '}' ] , ';' ;
+(* PAR-12 [impl] 2026-10-17: 匿名聚合定义——无 tag 的
+   struct/union/class 定义 + 内联变量声明符（`struct { ... } v;`）。
+   每个匿名定义是独立类型（合成名 __anon_N，C 语义）。*)
+struct-decl         = 'struct' , [ identifier ] , [ '{' , { field-decl } , '}' ] , ';'
+                    | 'struct' , '{' , { field-decl } , '}' , identifier , { ',' , identifier } , ';' ;
 
-class-decl          = 'class' , identifier
+class-decl          = 'class' , [ identifier ]
                       [ ':' , [ access-specifier ] , qualified-name ]   (* [impl] 仅记录 baseClass; 继承语义 INH-01 [plan] *)
                       [ '{' , { class-member } , '}' ] , ';' ;
 class-member        = access-section
@@ -131,7 +135,8 @@ class-member        = access-section
                     | function-decl ;
 access-section      = ( 'public' | 'private' | 'protected' ) , ':' ;  (* [plan] protected 见 PAR-04；默认级别 DEC-01 *)
 
-union-decl          = 'union' , identifier , [ '{' , { field-decl } , '}' ] , ';' ;
+union-decl          = 'union' , [ identifier ] , [ '{' , { field-decl } , '}' ] , ';'
+                    | 'union' , '{' , { field-decl } , '}' , identifier , { ',' , identifier } , ';' ;
 
 field-decl          = type , identifier , [ '[' , const-expr , ']' ]
                     | bit-field-decl ;                              (* [plan] AGG-06 / PAR-10 *)

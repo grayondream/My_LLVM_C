@@ -785,3 +785,15 @@
 - 测试：ParserDesignatedInitTest 3 + SemaDesignatedInitTest 5 + SemaFlexArrayTest 3 + DesignatedInitE2E 10（含 5 终审回归）+ FlexArrayE2E 4。
 - 验证：每任务 TDD RED→GREEN；终审后全量 ctest **1326/1326** 绿（2 个既有 GTEST_SKIP 不变）。工作区 clean。
 - 遗留/P1-07 剩余：匿名类型定义（PAR-12，匿名成员提升 AGG-03 已做）；lambda（PAR-11/CG-11/DEC-10）。相关既有缺口：裸结构体名顶层变量声明不识别；`compile_time` 表达式内 `sizeof(变量)` 不折叠。
+
+## 2026-10-17 — P1-07 匿名类型定义完成（PAR-12）
+
+- 流程：brainstorming（用户选定「逐个执行」P1-07 剩余）→ spec（docs/superpowers/specs/2026-10-17-anonymous-types-design.md）→ plan（docs/superpowers/plans/2026-10-17-anonymous-types.md，3 任务 TDD）→ executing-plans Native 内联（master 直接提交）。
+- 提交线：`ccf9a76`(T1 合成名身份) → `8730e27`(T2 匿名 class 注册) → `1635135`(T3 名义身份强制)。
+- **探查实证**：匿名 struct/union 定义+变量（全局/局部）已基本可用；匿名 **class** 不可用（`no member named 'v' in class ''`——parseDeclarationImpl class 分支丢弃 classDecl AST，sema 永不注册字段/方法，占位 ClassType 由 parseClassDecl 预注册故字段也不进）；类型身份错误（两匿名 struct `a=b` 通过）；附带发现 pre-existing 洞：`struct S {...}; S s;` 全局裸类型名变量把 `s` 当类型名（`@S`，另立项）、命名 struct/class 交叉赋值同 kind 放行（spec 要求按名字）、局部命名 struct/class 定义+变量不支持。
+- **Task 1（合成名身份）**：`TypeContext::nextAnonId()`（进程内单调 `__anon_<N>`）；parseType inline struct/union 路径与 parseStructDecl/parseClassDecl/parseUnionDecl 在无 tag+`{` 时分配；`qualifyTypeDeclName` 对 `__anon_` 前缀不再加 namespace 前缀（否则 `S___anon_0` 失配 AGG-03 判定）；`isAnonymousAggregate` 扩为「空名或 `__anon_` 前缀」；struct/class/union 声明分支改 `parseVariableDeclList`（支持 `, v2`）。
+- **Task 2（匿名 class 注册）**：根因同上；`StructDeclAST::attachedVars`（unique_ptr<DeclAST>）挂载内联变量，class 分支返回聚合 AST 而非丢弃；sema `visit(StructDeclAST)` 尾处理 attachedVars（analyzeTopLevelDecl 分派）；codegen `StructDeclAST::codegen` 尾 emit；局部 `class { ... } c;` 走 parseDeclaration（isTypeStart 不含 class）。附带修复命名 class 内联变量 `class C { ... } c;`（p47 同病）。
+- **Task 3（名义身份强制）**：`checkAssignmentTypes`/`typesCompatible` 同 kind 兜底对 Struct/Class/Union 收紧——`typesEqual`（同名）或派生→基（新 `isDerivedFrom` helper，沿 baseClass 链 walk，Struct/Class 双形态，保 INH-04 值切片）；否则报错。两次独立匿名定义赋值/初始化/实参/返回/比较互斥（C 语义）；同声明多变量（`struct { ... } a, b;`）共享类型可互赋；typedef 命名后同型可互赋。顺带修复命名 struct/class 交叉赋值 pre-existing 洞。
+- 测试：ParserAnonTypeTest 3 + AnonClassE2E 4 + AnonTypeE2E 7。
+- 验证：每任务 TDD RED→GREEN；最终全量 ctest **1340/1340** 绿（2 个既有 GTEST_SKIP 不变）。工作区 clean。
+- 遗留/P1-07 剩余：**lambda（PAR-11/CG-11/DEC-10）**。相关既有缺口：裸类型名全局变量（`S s;`）、局部命名 struct/class 定义+变量、struct-with-method 内联变量（struct 方法路径不完整）、匿名类型函数签名跨声明点（须 typedef 命名，C 同）。
