@@ -352,6 +352,9 @@ public:
     ClassType* getClass(const std::string& name) const;
     ClassType* getOrCreateClass(const std::string& name);
 
+    // PAR-12: 匿名聚合类型的唯一合成名 `__anon_<N>`（进程内单调）。
+    std::string nextAnonId();
+
     // P1-03 / GEN: 模板体 parse 会经普通声明路径注册类型名（占位）——模板
     // 注册时须撤销，保证裸模板名（无实参）在类型位置不可解析。
     void removeStruct(const std::string& name);

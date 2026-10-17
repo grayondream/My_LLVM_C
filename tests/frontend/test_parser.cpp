@@ -2,6 +2,7 @@
 #include "frontend/Lexer.h"
 #include "frontend/Parser.h"
 #include "ast/Expr.h"
+#include "ast/Symbol.h"
 #include "ast/Type.h"
 #include <spdlog/spdlog.h>
 
@@ -2174,4 +2175,67 @@ TEST(ParserDesignatedInitTest, MemberEmptyDimIsFlexibleArray) {
     ASSERT_NE(sd->fields[1].type, nullptr);
     ASSERT_EQ(sd->fields[1].type->kind, TypeKind::Array);
     EXPECT_EQ(static_cast<ArrayType*>(sd->fields[1].type)->size, 0);
+}
+
+// ========== PAR-12: 匿名类型定义（synthetic identity） ==========
+
+TEST(ParserAnonTypeTest, AnonymousStructGetsUniqueSyntheticName) {
+    // 两次独立的 `struct { int32 x; }` 顶层匿名定义 → 两个不同的合成名类型，
+    // 名字以 __anon_ 开头且互不相同（C 语义：每次匿名定义 = 独立类型）。
+    auto tu = parse(
+        "struct { int32 x; } a;\n"
+        "struct { int32 x; } b;\n");
+    ASSERT_NE(tu, nullptr);
+    Type* ta = nullptr;
+    Type* tb = nullptr;
+    for (auto& d : tu->declarations) {
+        if (auto* v = dynamic_cast<VarDeclAST*>(d.get())) {
+            if (v->name == "a") ta = v->type;
+            if (v->name == "b") tb = v->type;
+        }
+    }
+    ASSERT_NE(ta, nullptr);
+    ASSERT_NE(tb, nullptr);
+    ASSERT_EQ(ta->kind, TypeKind::Struct);
+    ASSERT_EQ(tb->kind, TypeKind::Struct);
+    auto* sa = static_cast<StructType*>(ta);
+    auto* sb = static_cast<StructType*>(tb);
+    EXPECT_NE(sa->name, "");
+    EXPECT_NE(sb->name, "");
+    EXPECT_NE(sa->name, sb->name);
+    EXPECT_TRUE(sa->name.rfind("__anon_", 0) == 0);
+    EXPECT_FALSE(typesEqual(ta, tb));
+}
+
+TEST(ParserAnonTypeTest, AnonymousUnionGetsUniqueSyntheticName) {
+    auto tu = parse("union { int32 i; float32 f; } u;");
+    ASSERT_NE(tu, nullptr);
+    Type* tu_t = nullptr;
+    for (auto& d : tu->declarations) {
+        if (auto* v = dynamic_cast<VarDeclAST*>(d.get())) {
+            if (v->name == "u") tu_t = v->type;
+        }
+    }
+    ASSERT_NE(tu_t, nullptr);
+    ASSERT_EQ(tu_t->kind, TypeKind::Union);
+    auto* u = static_cast<UnionType*>(tu_t);
+    EXPECT_NE(u->name, "");
+    EXPECT_TRUE(u->name.rfind("__anon_", 0) == 0);
+}
+
+TEST(ParserAnonTypeTest, AnonymousMemberPromotionStillDetected) {
+    // AGG-03: 匿名 struct 成员提升的判定仍须命中（名字以 __anon_ 开头）。
+    auto tu = parse(
+        "struct Outer { int32 tag; struct { int32 a; int32 b; }; };\n");
+    ASSERT_NE(tu, nullptr);
+    StructDeclAST* sd = nullptr;
+    for (auto& d : tu->declarations) {
+        if (auto* s = dynamic_cast<StructDeclAST*>(d.get())) { sd = s; break; }
+    }
+    ASSERT_NE(sd, nullptr);
+    // tag + 提升的 a + b
+    ASSERT_EQ(sd->fields.size(), 3u);
+    EXPECT_EQ(sd->fields[0].name, "tag");
+    EXPECT_EQ(sd->fields[1].name, "a");
+    EXPECT_EQ(sd->fields[2].name, "b");
 }

@@ -97,8 +97,7 @@ void TypeContext::removeEnum(const std::string& name) {
     m_enums.erase(name);
 }
 
-void TypeContext::removeInstanceTypes() {
-    for (auto it = m_structs.begin(); it != m_structs.end();) {
+void TypeContext::removeInstanceTypes() {    for (auto it = m_structs.begin(); it != m_structs.end();) {
         if (it->first.find('$') != std::string::npos)
             it = m_structs.erase(it);
         else
@@ -128,6 +127,12 @@ ClassType* TypeContext::getOrCreateClass(const std::string& name) {
     auto* classType = new ClassType(name);
     m_classes[name] = classType;
     return classType;
+}
+
+// PAR-12: 匿名聚合类型唯一合成名。进程内单调递增，测试间不冲突。
+std::string TypeContext::nextAnonId() {
+    static uint64_t counter = 0;
+    return "__anon_" + std::to_string(counter++);
 }
 
 // 新增类型获取方法

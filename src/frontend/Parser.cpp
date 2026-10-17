@@ -320,12 +320,18 @@ AssignOp Parser::tokenTypeToAssignOp(TokenType type) const {
 
 // ========== Unary Operators ==========
 
-// AGG-03: true if `t` is an anonymous (unnamed) struct or union type — the
-// shape produced by parseType's inline-definition path for `union { ... };`.
+// AGG-03 + PAR-12: true if `t` is an anonymous (unnamed) struct or union
+// type — either the legacy empty-name shape or the synthetic `__anon_<N>`
+// name (PAR-12 assigns unique synthetic names so each anonymous definition
+// is a distinct type). Both must be treated as anonymous for member
+// promotion.
 static bool isAnonymousAggregate(Type* t) {
+    auto isAnon = [](const std::string& n) {
+        return n.empty() || n.rfind("__anon_", 0) == 0;
+    };
     if (!t) return false;
-    if (t->kind == TypeKind::Struct) return static_cast<StructType*>(t)->name.empty();
-    if (t->kind == TypeKind::Union) return static_cast<UnionType*>(t)->name.empty();
+    if (t->kind == TypeKind::Struct) return isAnon(static_cast<StructType*>(t)->name);
+    if (t->kind == TypeKind::Union) return isAnon(static_cast<UnionType*>(t)->name);
     return false;
 }
 
@@ -1707,6 +1713,10 @@ std::string Parser::parseQualifiedTypeName() {
 
 std::string Parser::qualifyTypeDeclName(const std::string& name) const {
     if (name.empty()) return name;
+    // PAR-12: 合成名（`__anon_<N>`）进程内全局唯一，不再加 namespace 前缀
+    // ——否则 `struct Outer { struct { ... }; };` 里前缀化后
+    // `S___anon_0` 使 isAnonymousAggregate 的 `__anon_` 前缀判定失配。
+    if (name.rfind("__anon_", 0) == 0) return name;
     if (name.find("::") != std::string::npos || name.find('.') != std::string::npos) {
         return mangleQualifiedTypeName(name);
     }
@@ -1821,6 +1831,11 @@ Type* Parser::parseBaseType() {
         case TokenType::TOKEN_STRUCT: {
             advance(); // consume 'struct'
             std::string name = parseQualifiedTypeName();
+            // PAR-12: 匿名定义 `struct { ... }` 获得唯一合成名（C 语义：每次
+            // 匿名定义 = 独立类型）。
+            if (name.empty() && check(TokenType::TOKEN_LBRACE)) {
+                name = TypeContext::instance().nextAnonId();
+            }
             std::string key = qualifyTypeDeclName(name);
 
             // Check if this is a definition or just a reference
@@ -1889,6 +1904,10 @@ Type* Parser::parseBaseType() {
         case TokenType::TOKEN_UNION: {
             advance(); // consume 'union'
             std::string name = parseQualifiedTypeName();
+            // PAR-12: 匿名 union 定义获得唯一合成名。
+            if (name.empty() && check(TokenType::TOKEN_LBRACE)) {
+                name = TypeContext::instance().nextAnonId();
+            }
             std::string key = qualifyTypeDeclName(name);
 
             if (check(TokenType::TOKEN_LBRACE)) {
@@ -2385,7 +2404,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
                 type = new StructType(structDecl->name);
                 TypeContext::instance().addStruct(structDecl->name, static_cast<StructType*>(type));
             }
-            return parseVariableDecl(type, nameTok->lexeme);
+            return parseVariableDeclList(type, nameTok->lexeme);
         }
 
         // If this is a forward declaration (empty fields) and not followed by ';',
@@ -2428,7 +2447,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
                 type = new ClassType(classDecl->name);
                 TypeContext::instance().addClass(classDecl->name, static_cast<ClassType*>(type));
             }
-            return parseVariableDecl(type, nameTok->lexeme);
+            return parseVariableDeclList(type, nameTok->lexeme);
         }
 
         return classDecl;
@@ -2458,7 +2477,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
                 type = new UnionType(unionDecl->name);
                 TypeContext::instance().addUnion(unionDecl->name, static_cast<UnionType*>(type));
             }
-            return parseVariableDecl(type, nameTok->lexeme);
+            return parseVariableDeclList(type, nameTok->lexeme);
         }
 
         // If this is a forward declaration (empty members) and not followed by ';',
@@ -3114,6 +3133,12 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
     if (!match(TokenType::TOKEN_STRUCT)) return nullptr;
 
     std::string bareName = parseQualifiedTypeName();
+    // PAR-12: 匿名 struct 定义 `struct { ... } v;` 获得唯一合成名（C 语义：
+    // 每次匿名定义 = 独立类型；类型不可被后续源码按名引用）。仅当确实紧跟
+    // `{`（定义）时分配——前向声明/引用场景无匿名形态。
+    if (bareName.empty() && check(TokenType::TOKEN_LBRACE)) {
+        bareName = TypeContext::instance().nextAnonId();
+    }
     std::string name = qualifyTypeDeclName(bareName);
 
     // INH-01/DS2: optional single public inheritance — `struct D : [public] B`.
@@ -3452,6 +3477,10 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
     if (!match(TokenType::TOKEN_CLASS)) return nullptr;
 
     std::string bareName = parseQualifiedTypeName();
+    // PAR-12: 匿名 class 定义获得唯一合成名。
+    if (bareName.empty() && check(TokenType::TOKEN_LBRACE)) {
+        bareName = TypeContext::instance().nextAnonId();
+    }
     std::string name = qualifyTypeDeclName(bareName);
 
     // Parse optional inheritance: : public BaseName
@@ -3873,6 +3902,10 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
     if (!match(TokenType::TOKEN_UNION)) return nullptr;
 
     std::string bareName = parseQualifiedTypeName();
+    // PAR-12: 匿名 union 定义获得唯一合成名。
+    if (bareName.empty() && check(TokenType::TOKEN_LBRACE)) {
+        bareName = TypeContext::instance().nextAnonId();
+    }
     std::string name = qualifyTypeDeclName(bareName);
 
     if (!check(TokenType::TOKEN_LBRACE)) {
