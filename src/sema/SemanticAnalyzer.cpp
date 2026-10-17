@@ -3181,10 +3181,13 @@ int SemanticAnalyzer::inferArrayInitSize(InitializerListExprAST& node) {
             idx = (int64_t)cursor;
         } else {
             const auto& dspec = node.designators[i];
-            // 顶层数组初始化的设计符链必须是恰一个 Index；否则非法（由
-            // resolveDesignators 报错），推断保守取游标。
-            if (dspec.size() != 1 || dspec[0].kind != Designator::Kind::Index ||
-                !foldDesignatorIndex(dspec[0].indexExpr.get(), idx, node)) {
+            // 顶层数组初始化：设计符链首节为 Index → 该下标即顶层维度位置
+            //（链可含多节，如 `[1][2]=5` 命中外层维度 1）。非 Index 首节
+            //（非法，由 resolveDesignators 报错）推断保守取游标。
+            if (!dspec.empty() && dspec[0].kind == Designator::Kind::Index &&
+                foldDesignatorIndex(dspec[0].indexExpr.get(), idx, node)) {
+                // idx 已折叠
+            } else {
                 idx = (int64_t)cursor;
             }
         }

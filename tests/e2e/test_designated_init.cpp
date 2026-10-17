@@ -160,3 +160,73 @@ TEST_F(DesignatedInitE2E, GlobalArrayAndBitfield) {
         }
     )", "di_global_bf.c"), 0);
 }
+// ---- 终审修复回归测试（C1/C2/I1/I2/I3）----
+
+TEST_F(DesignatedInitE2E, BaseWithBitfieldDesignators) {
+    // C1: 物化路径 base 双计数 → 位域设计符写错槽/越界。
+    EXPECT_EQ(runSource(R"(
+        struct Base { int32 b0; };
+        struct D : Base { int32 a : 3; int32 c : 5; int32 reg; };
+        int32 main() {
+            struct D d = { .a = 1, .c = 5, .reg = 9 };
+            if (d.a != 1 || d.c != 5 || d.reg != 9) { return 1; }
+            return 0;
+        }
+    )", "di_base_bf.c"), 0);
+}
+
+TEST_F(DesignatedInitE2E, GlobalBaseFieldAndMultiLink) {
+    // C2: 全局常量丢基类字段 / 丢多链设计符。
+    EXPECT_EQ(runSource(R"(
+        struct Base { int32 b0; };
+        struct D : Base { int32 own; };
+        struct D g = { .b0 = 7, .own = 3 };
+        struct S { int32 x; int32 y; };
+        struct S ss[2] = { [1].x = 9 };
+        struct BF { int32 a : 3; int32 b : 5; };
+        struct BF ga[2] = { [1].b = 7 };
+        int32 main() {
+            if (g.b0 != 7 || g.own != 3) { return 1; }
+            if (ss[1].x != 9 || ss[0].x != 0) { return 2; }
+            if (ga[1].b != 7 || ga[0].a != 0) { return 3; }
+            return 0;
+        }
+    )", "di_global_base_multi.c"), 0);
+}
+
+TEST_F(DesignatedInitE2E, GlobalUnionLastWins) {
+    // I1: 全局 union 多设计符后写覆盖。
+    EXPECT_EQ(runSource(R"(
+        union U { int32 i; float32 f; };
+        union U g = { .f = 2.5f, .i = 42 };
+        int32 main() {
+            if (g.i != 42) { return 1; }
+            return 0;
+        }
+    )", "di_global_union_lw.c"), 0);
+}
+
+TEST_F(DesignatedInitE2E, TypedefArrayZeroFill) {
+    // I2: VarDeclAST(typedef 数组) 设计符初始化补零。
+    EXPECT_EQ(runSource(R"(
+        typedef int32 Arr[4];
+        int32 main() {
+            int32 junk[8];
+            for (int32 i = 0; i < 8; ++i) junk[i] = 0x7f7f7f7f;
+            Arr a = { [1] = 7 };
+            if (a[0] != 0 || a[1] != 7 || a[2] != 0 || a[3] != 0) { return 1; }
+            return 0;
+        }
+    )", "di_typedef_arr_zero.c"), 0);
+}
+
+TEST_F(DesignatedInitE2E, MultiDimDesignatorInference) {
+    // I3: 多链 `[1][2]=5` 顶层维度大小推断。
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            int32 a[][3] = { [1][2] = 5 };
+            if (a[1][2] != 5 || a[0][0] != 0) { return 1; }
+            return 0;
+        }
+    )", "di_multi_dim.c"), 0);
+}

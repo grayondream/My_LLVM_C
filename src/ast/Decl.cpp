@@ -36,6 +36,21 @@ static llvm::Constant* buildByteArrayConstant(llvm::LLVMContext& llctx,
     return llvm::ConstantArray::get(llvm::ArrayType::get(i8, nBytes), bytes);
 }
 
+// PAR-13: buildByteArrayConstant 的逆——[N x i8] 常量按 little-endian 还原 APInt。
+static llvm::APInt buildAPIntFromByteArray(llvm::Constant* arr,
+                                           unsigned bitWidth) {
+    llvm::APInt v = llvm::APInt::getZero(bitWidth);
+    auto* at = arr ? llvm::dyn_cast<llvm::ArrayType>(arr->getType()) : nullptr;
+    if (!at) return v;
+    for (unsigned i = 0; i < at->getNumElements(); ++i) {
+        if (auto* ci = llvm::dyn_cast_or_null<llvm::ConstantInt>(
+                arr->getAggregateElement(i))) {
+            v |= ci->getValue().zext(bitWidth).shl(i * 8);
+        }
+    }
+    return v;
+}
+
 static llvm::Constant* foldToConstant(CodegenContext& ctx, const FoldedValue& fv) {
     switch (fv.type) {
         case FoldedValue::INT:
@@ -229,6 +244,8 @@ static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
             if (semFields) {
                 // P1-07 / AGG-06: 位域感知初始化——按语义字段序消费初始值；
                 // 位域值 RMW 进存储单元，普通字段按物化索引 GEP。
+                // 物化路径：fields/unitIndex/nameIdx 已含 base 伪字段于槽 0，
+                // 索引直接绝对（不加 baseOffset，否则双计数越界）。
                 std::unordered_map<std::string, unsigned> nameIdx;
                 for (unsigned k = 0; k < fields->size(); ++k) {
                     if (!(*fields)[k].name.empty()) nameIdx[(*fields)[k].name] = k;
@@ -244,7 +261,7 @@ static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
                         auto it = bfMap->find(sf.name);
                         if (it == bfMap->end()) continue;
                         llvm::Value* fptr = builder.CreateStructGEP(
-                            destLLVM, dest, baseOffset + it->second.unitIndex, "bfinit");
+                            destLLVM, dest, it->second.unitIndex, "bfinit");
                         llvm::Value* v = item.codegen(ctx);
                         if (!v) continue;
                         v = readLValue(ctx, item, v);
@@ -258,7 +275,7 @@ static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
                         auto nit = nameIdx.find(sf.name);
                         if (nit == nameIdx.end()) continue;
                         emitFieldItem(item, sf.type, builder.CreateStructGEP(
-                            destLLVM, dest, baseOffset + nit->second, "fieldinit"));
+                            destLLVM, dest, nit->second, "fieldinit"));
                     }
                 }
                 break;
@@ -319,6 +336,7 @@ static llvm::Value* resolveFieldGEP(CodegenContext& ctx, llvm::Value* aggPtr,
     auto& builder = ctx.getBuilder();
 
     if (semFields) {
+        // 物化路径：fields/unitIndex 已含 base 伪字段于槽 0 → 索引直接绝对。
         for (size_t k = 0; k < semFields->size(); ++k) {
             auto& sf = (*semFields)[k];
             if (sf.name != name) continue;
@@ -331,7 +349,7 @@ static llvm::Value* resolveFieldGEP(CodegenContext& ctx, llvm::Value* aggPtr,
                 outW = it->second.bitWidth;
                 outU = it->second.unitBits;
                 return builder.CreateStructGEP(
-                    curLLVM, aggPtr, base + it->second.unitIndex, "dsg.bfunit");
+                    curLLVM, aggPtr, it->second.unitIndex, "dsg.bfunit");
             }
             unsigned fi = 0;
             for (size_t j = 0; j < fields->size(); ++j) {
@@ -340,9 +358,10 @@ static llvm::Value* resolveFieldGEP(CodegenContext& ctx, llvm::Value* aggPtr,
             outType = sf.type;
             outBF = false;
             return builder.CreateStructGEP(
-                curLLVM, aggPtr, base + fi, "dsg.field");
+                curLLVM, aggPtr, fi, "dsg.field");
         }
     } else {
+        // 非物化路径：fields 为原始 own 字段 → 需 base 偏移。
         for (size_t j = 0; j < fields->size(); ++j) {
             if ((*fields)[j].name == name) {
                 outType = (*fields)[j].type;
@@ -453,11 +472,16 @@ static void emitDesignatedInitializer(CodegenContext& ctx, llvm::Value* dest,
 // 未指定槽位由调用方预置 getNullValue 补零。
 static llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
                                               InitializerListExprAST* init);
-static llvm::Constant* buildDesignatedConstant(CodegenContext& ctx, Type* type,
-                                               InitializerListExprAST* init) {
-    type = stripTypedefs(type);
-    if (!type || !init) return nullptr;
 
+// PAR-13: 递归把设计符链 chain[linkIdx..] 应用到聚合类型 aggType 的累积常量
+// acc（null = 全零）上，返回更新后的常量。acc 跨设计符元素持久化 → 同槽位
+// 后写覆盖、位域掩码 OR、基类子对象常量均正确累积。
+static llvm::Constant* placeDesignatorValue(CodegenContext& ctx, Type* aggType,
+                                            llvm::Constant* acc,
+                                            const std::vector<Designator>& chain,
+                                            size_t linkIdx, ExprAST* item) {
+    aggType = stripTypedefs(aggType);
+    if (!aggType) return acc;
     auto constFor = [&](ExprAST& e, Type* target) -> llvm::Constant* {
         if (e.isLValue) return nullptr;
         llvm::Constant* c = llvm::dyn_cast_or_null<llvm::Constant>(e.codegen(ctx));
@@ -468,40 +492,60 @@ static llvm::Constant* buildDesignatedConstant(CodegenContext& ctx, Type* type,
         return c;
     };
 
-    if (type->kind == TypeKind::Array) {
-        auto* at = static_cast<ArrayType*>(type);
-        auto* arrTy = llvm::dyn_cast<llvm::ArrayType>(ctx.getLLVMType(type));
-        if (!arrTy) return nullptr;
-        std::vector<llvm::Constant*> elems(
-            (size_t)at->size, llvm::Constant::getNullValue(arrTy->getElementType()));
-        for (size_t i = 0; i < init->initializers.size(); ++i) {
-            auto& item = *init->initializers[i];
-            if (i >= init->resolvedTargets.size() || init->resolvedTargets[i].empty()) {
-                continue;
-            }
-            const auto& chain = init->resolvedTargets[i];
-            if (chain.size() != 1 || chain[0].kind != Designator::Kind::Index) continue;
-            int64_t idx = chain[0].index;
-            if (idx < 0 || idx >= at->size) continue;
-            llvm::Constant* c = nullptr;
-            if (auto* nested = dynamic_cast<InitializerListExprAST*>(&item)) {
-                c = buildAggregateConstant(ctx, at->elementType, nested);
-            } else {
-                c = constFor(item, at->elementType);
-            }
-            elems[(size_t)idx] = c ? c : llvm::Constant::getNullValue(arrTy->getElementType());
+    // 链尽：item 即值。
+    if (linkIdx >= chain.size()) {
+        if (auto* nested = dynamic_cast<InitializerListExprAST*>(item)) {
+            return buildAggregateConstant(ctx, aggType, nested);
         }
+        return constFor(*item, aggType);
+    }
+
+    const Designator& des = chain[linkIdx];
+    llvm::Type* aggLLVM = ctx.getLLVMType(aggType);
+    if (!aggLLVM) return acc;
+    if (!acc) acc = llvm::Constant::getNullValue(aggLLVM);
+
+    if (aggType->kind == TypeKind::Array) {
+        auto* at = static_cast<ArrayType*>(aggType);
+        auto* arrTy = llvm::dyn_cast<llvm::ArrayType>(aggLLVM);
+        if (!arrTy || des.kind != Designator::Kind::Index ||
+            des.index < 0 || des.index >= at->size) {
+            return acc;
+        }
+        std::vector<llvm::Constant*> elems;
+        for (unsigned e = 0; e < arrTy->getNumElements(); ++e) {
+            elems.push_back(acc->getAggregateElement(e));
+        }
+        llvm::Constant* elem = acc->getAggregateElement((unsigned)des.index);
+        elems[(size_t)des.index] =
+            placeDesignatorValue(ctx, at->elementType, elem, chain, linkIdx + 1, item);
         return llvm::ConstantArray::get(arrTy, elems);
     }
 
-    if (type->kind == TypeKind::Struct || type->kind == TypeKind::Class) {
+    if (aggType->kind == TypeKind::Union) {
+        auto* stTy = llvm::dyn_cast<llvm::StructType>(aggLLVM);
+        if (!stTy || des.kind != Designator::Kind::Field) return acc;
+        auto* ut = static_cast<UnionType*>(aggType);
+        Type* mtype = nullptr;
+        for (auto& m : ut->members) {
+            if (m.name == des.field) { mtype = m.type; break; }
+        }
+        if (!mtype) return acc;
+        llvm::Constant* cur = acc->getAggregateElement(0u);
+        llvm::Constant* v = placeDesignatorValue(ctx, mtype, cur, chain, linkIdx + 1, item);
+        if (!v) v = llvm::Constant::getNullValue(stTy->getElementType(0));
+        return llvm::ConstantStruct::get(stTy, {v});
+    }
+
+    if (aggType->kind == TypeKind::Struct || aggType->kind == TypeKind::Class) {
+        if (des.kind != Designator::Kind::Field) return acc;
         std::vector<FieldInfo>* fields = nullptr;
         std::vector<FieldInfo>* semFields = nullptr;
         std::unordered_map<std::string, BitFieldLayout>* bfMap = nullptr;
         unsigned base = 0;
         Type* baseType = nullptr;
-        if (type->kind == TypeKind::Struct) {
-            auto* st = static_cast<StructType*>(type);
+        if (aggType->kind == TypeKind::Struct) {
+            auto* st = static_cast<StructType*>(aggType);
             fields = &st->fields;
             baseType = st->base;
             if (!st->semanticFields.empty()) {
@@ -509,7 +553,7 @@ static llvm::Constant* buildDesignatedConstant(CodegenContext& ctx, Type* type,
                 bfMap = &st->bitFields;
             }
         } else {
-            auto* ct = static_cast<ClassType*>(type);
+            auto* ct = static_cast<ClassType*>(aggType);
             fields = &ct->fields;
             baseType = ct->base;
             if (!ct->semanticFields.empty()) {
@@ -518,131 +562,108 @@ static llvm::Constant* buildDesignatedConstant(CodegenContext& ctx, Type* type,
             }
         }
         if (baseType) base = 1;
-        auto* stTy = llvm::dyn_cast<llvm::StructType>(ctx.getLLVMType(type));
-        if (!stTy) return nullptr;
+        auto* stTy = llvm::dyn_cast<llvm::StructType>(aggLLVM);
+        if (!stTy) return acc;
         std::vector<llvm::Constant*> elems;
         for (unsigned e = 0; e < stTy->getNumElements(); ++e) {
-            elems.push_back(llvm::Constant::getNullValue(stTy->getElementType(e)));
+            elems.push_back(acc->getAggregateElement(e));
         }
-        std::unordered_map<std::string, unsigned> nameIdx;
-        for (unsigned k = 0; k < fields->size(); ++k) {
-            if (!(*fields)[k].name.empty()) nameIdx[(*fields)[k].name] = k;
-        }
-        std::unordered_map<unsigned, llvm::APInt> bfAcc;
-        std::unordered_map<unsigned, uint32_t> accUnitBits;
 
-        for (size_t i = 0; i < init->initializers.size(); ++i) {
-            auto& item = *init->initializers[i];
-            if (i >= init->resolvedTargets.size() || init->resolvedTargets[i].empty()) {
-                continue;
-            }
-            const auto& chain = init->resolvedTargets[i];
-            if (chain.empty() || chain[0].kind != Designator::Kind::Field) continue;
-            const std::string& nm = chain[0].field;
-            // 本层查找
-            bool found = false;
-            bool isBF = false;
-            unsigned slotIdx = 0, bfo = 0, bfw = 0, bfu = 0;
-            Type* fty = nullptr;
-            if (semFields) {
-                for (size_t k = 0; k < semFields->size(); ++k) {
-                    auto& sf = (*semFields)[k];
-                    if (sf.name != nm) continue;
-                    found = true;
-                    if (sf.bitWidth != 0) {
-                        auto it = bfMap->find(sf.name);
-                        if (it != bfMap->end()) {
-                            isBF = true;
-                            slotIdx = base + it->second.unitIndex;
-                            bfo = it->second.bitOffset;
-                            bfw = it->second.bitWidth;
-                            bfu = it->second.unitBits;
-                            fty = sf.type;
-                        }
-                    } else {
-                        auto nit = nameIdx.find(sf.name);
-                        if (nit != nameIdx.end()) slotIdx = base + nit->second;
-                        fty = sf.type;
+        Type* fty = nullptr;
+        bool isBF = false;
+        unsigned slotIdx = 0, bfo = 0, bfw = 0, bfu = 0;
+        bool found = false;
+        if (semFields) {
+            // 物化路径：slot 绝对（base 伪字段已含于槽 0，不再加 base）。
+            for (size_t k = 0; k < semFields->size(); ++k) {
+                auto& sf = (*semFields)[k];
+                if (sf.name != des.field) continue;
+                found = true;
+                if (sf.bitWidth != 0) {
+                    auto it = bfMap->find(sf.name);
+                    if (it == bfMap->end()) return acc;
+                    isBF = true;
+                    slotIdx = it->second.unitIndex;
+                    bfo = it->second.bitOffset;
+                    bfw = it->second.bitWidth;
+                    bfu = it->second.unitBits;
+                    fty = sf.type;
+                } else {
+                    unsigned fi = 0;
+                    for (size_t j = 0; j < fields->size(); ++j) {
+                        if ((*fields)[j].name == des.field) { fi = (unsigned)j; break; }
                     }
+                    slotIdx = fi;
+                    fty = sf.type;
+                }
+                break;
+            }
+        } else {
+            // 非物化路径：fields 为原始 own 字段 → base 偏移。
+            for (size_t j = 0; j < fields->size(); ++j) {
+                if ((*fields)[j].name == des.field) {
+                    found = true;
+                    slotIdx = base + (unsigned)j;
+                    fty = (*fields)[j].type;
                     break;
                 }
-            } else {
-                for (size_t j = 0; j < fields->size(); ++j) {
-                    if ((*fields)[j].name == nm) {
-                        found = true;
-                        slotIdx = base + (unsigned)j;
-                        fty = (*fields)[j].type;
-                        break;
-                    }
-                }
-            }
-            if (!found) {
-                // base 下降（常量场景，仅顶层已够测试覆盖）
-                continue;
-            }
-            if (isBF) {
-                llvm::Constant* c = constFor(item, fty);
-                auto* ci = llvm::dyn_cast_or_null<llvm::ConstantInt>(c);
-                if (!ci) return nullptr;
-                if (bfAcc.find(slotIdx) == bfAcc.end()) {
-                    bfAcc.emplace(slotIdx, llvm::APInt::getZero(bfu));
-                    accUnitBits[slotIdx] = bfu;
-                }
-                llvm::APInt& acc = bfAcc[slotIdx];
-                llvm::APInt wMask = llvm::APInt::getLowBitsSet(bfu, bfw);
-                acc |= (ci->getValue().zext(bfu) & wMask).shl(bfo);
-            } else {
-                llvm::Constant* c = nullptr;
-                if (auto* nested = dynamic_cast<InitializerListExprAST*>(&item)) {
-                    c = buildAggregateConstant(ctx, fty, nested);
-                } else {
-                    c = constFor(item, fty);
-                }
-                if (!c) c = llvm::Constant::getNullValue(stTy->getElementType(slotIdx));
-                elems[slotIdx] = c;
             }
         }
-        for (auto& kv : bfAcc) {
-            llvm::Type* et = stTy->getElementType(kv.first);
-            if (et->isIntegerTy()) {
-                elems[kv.first] = llvm::ConstantInt::get(et, kv.second);
-            } else if (llvm::dyn_cast<llvm::ArrayType>(et)) {
-                elems[kv.first] = buildByteArrayConstant(ctx.getContext(), kv.second,
-                                                         accUnitBits[kv.first]);
+
+        if (found) {
+            if (isBF) {
+                // 位域必为链末：值 OR 进存储单元（保留已有位）。
+                llvm::Constant* c = constFor(*item, fty);
+                auto* ci = llvm::dyn_cast_or_null<llvm::ConstantInt>(c);
+                if (!ci) return acc;
+                llvm::Type* et = stTy->getElementType(slotIdx);
+                llvm::APInt unit = llvm::APInt::getZero(bfu);
+                if (auto* prev = llvm::dyn_cast_or_null<llvm::ConstantInt>(elems[slotIdx])) {
+                    unit = prev->getValue().zextOrTrunc(bfu);
+                } else if (llvm::dyn_cast<llvm::ArrayType>(et)) {
+                    unit = buildAPIntFromByteArray(elems[slotIdx], bfu);
+                }
+                llvm::APInt wMask = llvm::APInt::getLowBitsSet(bfu, bfw);
+                unit |= (ci->getValue().zext(bfu) & wMask).shl(bfo);
+                if (et->isIntegerTy()) {
+                    elems[slotIdx] = llvm::ConstantInt::get(et, unit);
+                } else if (llvm::dyn_cast<llvm::ArrayType>(et)) {
+                    elems[slotIdx] = buildByteArrayConstant(ctx.getContext(), unit, bfu);
+                }
+            } else {
+                llvm::Constant* sub = acc->getAggregateElement(slotIdx);
+                llvm::Constant* v =
+                    placeDesignatorValue(ctx, fty, sub, chain, linkIdx + 1, item);
+                if (v) elems[slotIdx] = v;
             }
+        } else if (baseType) {
+            // 基类下降：整个链应用到 base 子对象（槽 0）。
+            llvm::Constant* baseAcc = acc->getAggregateElement(0u);
+            llvm::Constant* v =
+                placeDesignatorValue(ctx, baseType, baseAcc, chain, linkIdx, item);
+            if (v) elems[0] = v;
         }
         return llvm::ConstantStruct::get(stTy, elems);
     }
 
-    if (type->kind == TypeKind::Union) {
-        auto* ut = static_cast<UnionType*>(type);
-        auto* stTy = llvm::dyn_cast<llvm::StructType>(ctx.getLLVMType(type));
-        if (!stTy || ut->members.empty()) return nullptr;
-        // union 设计符 `.m = v` 或位置式：写槽 0，类型为指名成员（或成员 0）。
-        Type* mtype = ut->members[0].type;
-        for (size_t i = 0; i < init->initializers.size(); ++i) {
-            if (i >= init->resolvedTargets.size() || init->resolvedTargets[i].empty()) {
-                continue;
-            }
-            const auto& chain = init->resolvedTargets[i];
-            if (chain.empty() || chain[0].kind != Designator::Kind::Field) continue;
-            for (auto& m : ut->members) {
-                if (m.name == chain[0].field) { mtype = m.type; break; }
-            }
-            break; // 只写第一个元素（C 语义）
-        }
-        llvm::Constant* c = nullptr;
-        if (auto* nested = dynamic_cast<InitializerListExprAST*>(
-                init->initializers[0].get())) {
-            c = buildAggregateConstant(ctx, mtype, nested);
-        } else {
-            c = constFor(*init->initializers[0], mtype);
-        }
-        if (!c) c = llvm::Constant::getNullValue(stTy);
-        return llvm::ConstantStruct::get(stTy, {c});
-    }
+    return acc;
+}
 
-    return nullptr;
+static llvm::Constant* buildDesignatedConstant(CodegenContext& ctx, Type* type,
+                                               InitializerListExprAST* init) {
+    type = stripTypedefs(type);
+    if (!type || !init) return nullptr;
+    // 逐设计符元素把链应用到累积常量（后写覆盖；null=全零兜底）。
+    llvm::Constant* acc = nullptr;
+    for (size_t i = 0; i < init->initializers.size(); ++i) {
+        if (i >= init->resolvedTargets.size() || init->resolvedTargets[i].empty()) {
+            continue;
+        }
+        acc = placeDesignatorValue(ctx, type, acc, init->resolvedTargets[i], 0,
+                                   init->initializers[i].get());
+    }
+    if (!acc) acc = llvm::Constant::getNullValue(ctx.getLLVMType(type));
+    return acc;
 }
 
 // Build a constant for a global brace initializer, or nullptr if it is not a
@@ -956,7 +977,8 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
         if (auto* initList = dynamic_cast<InitializerListExprAST*>(initExpr.get())) {
             // Zero the whole object first so unspecified fields stay zero.
             Type* elem = stripTypedefs(type);
-            if (elem && (elem->kind == TypeKind::Struct || elem->kind == TypeKind::Class ||
+            if (elem && (elem->kind == TypeKind::Array ||
+                         elem->kind == TypeKind::Struct || elem->kind == TypeKind::Class ||
                          elem->kind == TypeKind::Union ||
                          elem->kind == TypeKind::Optional ||
                          elem->kind == TypeKind::Result)) {
