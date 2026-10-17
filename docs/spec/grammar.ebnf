@@ -302,7 +302,7 @@ primary-expr        = literal
                     | qualified-name
                     | '(' , expr , ')'
                     | initializer-list
-                    | lambda-expr ;                                 (* [plan] PAR-11 *)
+                    | lambda-expr ;                                 (* [impl] PAR-11, 2026-10-17 *)
 
 literal             = integer-literal | float-literal | char-literal
                     | string-literal | boolean-literal | null-literal ;
@@ -315,9 +315,10 @@ designated-initializer = '.' , identifier , '=' , initializer ;
 
 lambda-expr         = '[' , [ lambda-capture ] , ']'
                       '(' , [ parameter-list ] , ')'
-                      [ '->' , type ] , block ;                     (* [plan] PAR-11 / DEC-10 *)
-lambda-capture      = capture-item , { ',' , capture-item } ;
-capture-item        = '&' , [ identifier ] | [ identifier ] ;
+                      [ '->' , type ] , block ;                     (* [impl] PAR-11 / DEC-10, 2026-10-17 *)
+lambda-capture      = '='                                            (* [impl] 全部按值 *)
+                    | capture-item , { ',' , capture-item } ;
+capture-item        = '&' , identifier | identifier ;
 
 
 (* =========================================================================

@@ -27,6 +27,8 @@
 
 > **进度快照（2026-10-17，P1-07 匿名类型定义完成）**：**匿名 class/struct/union 类型定义全链路完成**（PAR-12 `[x]`，plan `docs/superpowers/plans/2026-10-17-anonymous-types.md` 3 任务 TDD + 终审）。每个匿名定义获得唯一合成名 `__anon_N`（`TypeContext::nextAnonId`，C 语义独立类型）；`struct/union/class { ... } v, v2;` 全局/局部/嵌套/数组/指针全通路；匿名 class 字段/方法/访问段注册（`attachedVars` 挂载聚合 AST，sema/codegen 先类型后变量）；**名义身份强制**——两次独立匿名定义赋值/初始化/实参/返回/比较互斥（`checkAssignmentTypes`/`typesCompatible` 同 kind 收紧，保派生→基 INH-04 切片，顺带修复命名 struct 交叉赋值 pre-existing 洞）；AGG-03 匿名成员提升、AGG-11 嵌套类型、位域不回退。当前全量 **1340** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。P1-07 剩余：**lambda（PAR-11/CG-11/DEC-10）**。
 
+> **进度快照（2026-10-17，P1-07 lambda 完成）**：**lambda 表达式全链路完成**（PAR-11/CG-11/DEC-10 `[x]`，plan `docs/superpowers/plans/2026-10-17-lambda.md`）。语法 `[captures](params) -> Ret { body }`（`[]`/`[=]`/`[a,&b]`，返回类型显式或推断，表达式起始 `[` 无歧义识别）；**无捕获 → 函数指针**（零开销：可赋 `int32 (*)(int32)`、立即调用、qsort 回调）；**有捕获 → 匿名闭包 struct + 调用函数** `__lambda_<N>__call(Closure*, params...)`（按值捕获拷贝、按引用捕获写穿原对象；语言无 `auto` → 闭包不可命名，实际形态为**立即调用** DEC 裁决）；`[=]` 语句感知捕获扫描。当前全量 **1351** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。**P1-07 全部完成**。下一里程碑：P1-09 剩余（std.mem/math/collections）与 P2。
+
 ---
 
 ## 0. 现状基线（已完成，勿重复实现）
@@ -97,7 +99,7 @@
 - `[ ]` **PAR-08** `(已实现)` 表达式：字面量/标识符/调用/成员访问/下标/一元/二元/三元/强转；补切片表达式。
 - `[x]` **PAR-09** `(改)` 语句：块、if/else、while、do-while、for、switch/case、return、break、continue、声明。（**不含 goto/label**，见 Non-goals；已移除 goto/标签解析）
 - `[x]` **PAR-10** `(新)` 位域声明：`T name : N;`（struct/union 成员），含零宽位域。**完成**（2026-10-15，P1-07）：struct/class/union/匿名内联成员四处循环解析 `: N`（parseBitFieldWidth，常量表达式求值）；命名零宽位域 parse 期拒绝（FieldInfo 编码无法区分，Ruling）；超 int32 范围位宽 parse 期拒绝（防回绕绕过 E2026）。
-- `[ ]` **PAR-11** `(新)` 简单 lambda：语法（建议 C++ 风格 `[capture](params) -> T { ... }` 或最简 `[](p){...}`）、捕获列表。
+- `[x]` **PAR-11** `(新)` 简单 lambda：语法（建议 C++ 风格 `[capture](params) -> T { ... }` 或最简 `[](p){...}`）、捕获列表。**完成**（2026-10-17，随 P1-07）：`[captures](params) -> Ret { body }`；`[]`/`[=]`/`[a,&b]` 捕获列表；返回类型显式或推断；表达式起始 `[` 识别（下标是后缀无歧义）；立即调用 `[...](...)(args)`。plan `docs/superpowers/plans/2026-10-17-lambda.md`。
 - `[x]` **PAR-12** `(新)` 匿名 class/struct/union：匿名类型定义、匿名成员提升。**完成**（2026-10-17）：每个匿名定义获得唯一合成名 `__anon_N`（`TypeContext::nextAnonId`，C 语义独立类型）；`struct/union/class { ... } v, v2;` 全局/局部/嵌套（字段类型）/数组/指针全通路；匿名 class 字段/方法/访问段正确注册（`attachedVars` 挂载聚合 AST）；**名义身份强制**——两次独立匿名定义赋值/初始化/实参/返回/比较互斥（`checkAssignmentTypes`/`typesCompatible` 同 kind 收紧，保留派生→基 INH-04 切片）；匿名成员提升 AGG-03 不回退（`__anon_` 前缀判定）。plan `docs/superpowers/plans/2026-10-17-anonymous-types.md`。
 - `[x]` **PAR-13** `(新)` 指定初始化器 `{.field = v}`、柔性数组 `T a[]`。**完成**（2026-10-16）：`.name`/`.a.b`/`[i]` 设计符链（AST `Designator`/`designators`，parser 解析）；sema `resolveDesignators` 展开语义目标链（`resolvedTargets`，继承链 + E2009、union 槽 0、位域、Optional/Result 伪字段拒绝）、数组大小推断 = C99 `max(位置式, 最大下标+1)`（含多链 `[1][2]=5` 外层维）；局部 codegen 整块补零 + 按链写槽（含 typedef 数组）；全局常量递归累积（后写覆盖/位域掩码 OR/基类下降）；乱序/重复/混排均 C99 语义。plan `docs/superpowers/plans/2026-10-16-designated-init-flexarray.md`。
 - `[~]` **PAR-14** `(已实现)` `sizeof`；`(新)` `alignof`、`offsetof`。（`compile_time.size_of/align_of/offset_of` 已实现，CT-06/P1-04；独立 `alignof`/`offsetof` 关键字形式未做，见 CT-07/13 反射收口）
@@ -424,7 +426,7 @@
 - `[x]` **CG-08** **继承布局与 `this`/`static_cast` codegen**（INH）。**已完成**（2026-10-05，随 INH-01~05/P1-03）：基类子对象槽 0、`this` 隐式参数、`static_cast<Derived*>` 下行、模板基类实例化（CG-07 同轮）。
 - `[x]` **CG-09** **位域 codegen**：`iN` 与读-改-写位操作。**完成**（2026-10-15，P1-07）：统一读点 readLValue 分派位域 → loadBitFieldValue（shift+trunc+sext/zext 至基类型）；storeBitFieldValue 掩码 RMW；Assignment/CompoundAssign/PreInc/PostfixIncDec 位域路径；emitBitFieldGEP 沿继承链定位存储单元；union 分支记录 unitBits。
 - `[x]` **CG-10** **内联 `asm`** → LLVM `InlineAsm`（操作数约束/clobber/volatile/目标限定）。**完成**（2026-10-11，P1-08）：`AsmExprAST::codegen` 用 `llvm::InlineAsm`（AD_ATT）；输出映射 call 返回值（单值/struct）、`+r`→`=r`+尾部 tied 约束、GCC 模板翻译 `$`→`$$`/`%%`→`%`/`%N`→`$N`；e2e 6 用例 LLJIT 执行通过。
-- `[ ]` **CG-11** **lambda codegen**：无捕获→函数指针；有捕获→匿名 struct + 函数。
+- `[x]` **CG-11** **lambda codegen**：无捕获→函数指针；有捕获→匿名 struct + 函数。**完成**（2026-10-17，随 P1-07）：无捕获 → 静态函数 `__lambda_<N>` + 表达式 bitcast 函数指针（可赋 `int32 (*)(int32)`、qsort 回调、直接调用）；有捕获 → 闭包 struct（`__lambda_<N>`，按值拷贝/按引用指针）+ 调用函数 `__lambda_<N>__call(Closure*, params...)`（body 捕获名按引用写穿原对象）；立即调用经 `LambdaCallExprAST`（栈上构造闭包 → call）。
 - `[x]` **CG-12** `compile_time` 常量折叠后 codegen；与 LLVM 常量集成。**已完成**（2026-10-06，随 CT-12）：表达式节点 `ctInt/ctFloat/ctHandled`，codegen 直接出 `llvm::Constant`，零运行时指令。
 - `[ ]` **CG-13** 原子操作与 `thread_local`。
 - `[ ]` **CG-14** 调试信息：DWARF、源码位置。
@@ -477,7 +479,7 @@
 - `[ ]` **DEC-07** 整数溢出默认行为：Debug 检查 / Release 回绕。
 - `[x]` **DEC-08** 位域布局对齐哪个 C ABI（System V / MSVC）；与 `[[packed]]`/`[[align]]` 交互。**完成**（2026-10-15，P1-07）：对齐 System V / GCC x86-64（非 packed）；packed 用 GCC packed 语义（连续位流 + 零宽按声明类型自然边界取整），各尺寸与 gcc 实测逐一核对；`[[packed]]` 下 bit-field 自然对齐不抬整体对齐。
 - `[x]` **DEC-09** 内联 `asm` 的语法与约束模型；是否仅限特定目标。**完成**（2026-10-11，P1-08）：sema 校验 outputs 左值标量/inputs 标量/约束非空（E2023）+ 模板 `%` 转义（E2024）；方言固定 AD_ATT、约束语义透传 LLVM（D2）；目标限定 x86-64 宿主基线。
-- `[ ]` **DEC-10** lambda 精确语法与捕获模型（默认按值/按引用？）。
+- `[x]` **DEC-10** lambda 精确语法与捕获模型（默认按值/按引用？）。**完成**（2026-10-17）：`[captures](params) -> Ret { body }` C++ 风格；按值 `[a]`/按引用 `[&a]`/`[=]` 全部按值；**语言无 `auto` → 有捕获闭包不可命名，实际形态为立即调用**（DEC 裁决，见 spec `docs/superpowers/specs/2026-10-17-lambda-design.md`）。
 - `[ ]` **DEC-11** `atomic` 是类型限定符还是类型构造器。
 - `[ ]` **DEC-12** `thread_local` 存储类语法细节。
 - `[ ]` **DEC-13** enum 穷尽检查是警告还是错误。
@@ -529,7 +531,7 @@
 - `[x]` **P1-04** `compile_time` 与反射——核心纵向切片完成（2026-10-06）：CT-01/02/03/04/05/06/12/14 + PAR-15 部分 + SEM-07 + DEC-05；反射 CT-07/08/13 另轮（与 P1-06 str 排序协调）。
 - `[x]` **P1-05** 注解系统（ANN）——核心纵向完成（2026-10-07）：ANN-01~06/09/10 + LEX-10/PAR-07 + W3004/W3005；ANN-07/08 挂账。
 - `[x]` **P1-06** str / String / format（FMT、STD-10/11）。核心纵向完成（2026-10-08）：FMT-01/02/03/04 + FMT-05 比较 + TYP-26/DEC-20 + 内建类型小写化（`optional`/`result`，DEC-18 先例）；E2015 新诊断；`grammar.ebnf` 同步。format（FMT-06~09）与 STD-10 高层操作另轮。spec `docs/superpowers/specs/2026-10-08-str-string-design.md`，plan `docs/superpowers/plans/2026-10-08-str-string.md`。挂账：`string` 不参与 constexpr；CT `+` 已移除；SSO 不做。
-- `[~]` **P1-07** 位域、匿名类型、指定初始化器、lambda（AGG-03~06、PAR-10~13）。**位域全链路已完成**（2026-10-15：PAR-10/SEM-12/AGG-06/CG-09/DEC-08）；**指定初始化器与柔性数组已完成**（2026-10-16：PAR-13/AGG-04/05，plan `docs/superpowers/plans/2026-10-16-designated-init-flexarray.md`，全量 1326 绿）；**匿名类型定义已完成**（2026-10-17：PAR-12，plan `docs/superpowers/plans/2026-10-17-anonymous-types.md`，全量 1340 绿）；**剩余**：lambda（PAR-11/CG-11/DEC-10）。
+- `[x]` **P1-07** 位域、匿名类型、指定初始化器、lambda（AGG-03~06、PAR-10~13）。**位域全链路已完成**（2026-10-15：PAR-10/SEM-12/AGG-06/CG-09/DEC-08）；**指定初始化器与柔性数组已完成**（2026-10-16：PAR-13/AGG-04/05）；**匿名类型定义已完成**（2026-10-17：PAR-12）；**lambda 已完成**（2026-10-17：PAR-11/CG-11/DEC-10，plan `docs/superpowers/plans/2026-10-17-lambda.md`，全量 1351 绿）。**P1-07 全部完成**。
 - `[x]` **P1-08** `static_cast` / 内联 `asm`（PAR-18、CG-10）。`static_cast`/`reinterpret_cast` 已完成（LEX-11/PAR-18）；内联 `asm` 全链路完成（2026-10-11）：LEX-12/PAR-16/CG-10/DEC-09，spec `docs/superpowers/specs/2026-10-10-p108-inline-asm-design.md`，plan `docs/superpowers/plans/2026-10-10-p108-inline-asm.md`，e2e 6 用例 LLJIT 执行通过（全量 1203 绿）。
 - `[~]` **P1-09** std.mem / std.string / std.format / std.math / **std.collections**（STD-05~14）。字符串库 + format 体系完成（2026-10-09）：FMT-06~11 全落地、FMT-12 单缓冲、STD-10 组合库、STD-11 核心；E2020~22 新诊断；顺带修复既有编译器 bug 两枚——`&&`/`||` 按位降级（真值截断 + 无短路）与派生→基类赋值整结构 store 溢出（潜在栈腐败）。spec `docs/superpowers/specs/2026-10-09-p109-string-format-design.md`，plan `docs/superpowers/plans/2026-10-09-p109-string-format.md`。挂账：StrBuilder 类导出缺口（语言层）、模块类导出（parse 期类型名注册）、`replace`/字典序/to_lower|upper 不做、std.mem/math/collections 另轮。**终审 I4（string 值拷贝别名双 free）已收口**（2026-10-11）：string 拥有型值语义 + string_view 硬改名，spec `docs/superpowers/specs/2026-10-11-string-ownership-design.md`，plan `docs/superpowers/plans/2026-10-11-string-ownership.md`，e2e 16 用例（全量 1229 绿）。
 

@@ -93,6 +93,14 @@
 - `compile_time` 必须 **零运行时开销**（ACC-04），求值结果以 LLVM 常量落地（CT-12）。
 - 沙箱：限制文件/网络/系统访问（CT-11）。
 
+## 7.5 Lambda（PAR-11/CG-11/DEC-10）`[impl]`
+
+- 语法 `[captures](params) -> Ret { body }`；捕获 `[]`/`[=]`/`[a,&b]`；返回类型显式或推断（body 首个 return 表达式类型，多 return 不兼容未处理）。
+- **无捕获 → 函数指针**（零开销）：可赋给 `int32 (*)(int32)`、作回调实参（qsort）、直接调用。
+- **有捕获 → 匿名闭包 struct + 调用函数**：按值捕获拷贝、按引用捕获存指针（body 内写穿原对象）。
+- **DEC-10 裁决**：语言无 `auto`，有捕获闭包类型不可命名——实际可用形态为**立即调用** `[&a](){ ... }();`；捕获闭包不可存于变量。
+- 设计：`docs/superpowers/specs/2026-10-17-lambda-design.md`。
+
 ## 8. 参考实现位置
 
 - 语义检查：`src/sema/SemanticAnalyzer.cpp`

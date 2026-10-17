@@ -797,3 +797,15 @@
 - 测试：ParserAnonTypeTest 3 + AnonClassE2E 4 + AnonTypeE2E 7。
 - 验证：每任务 TDD RED→GREEN；最终全量 ctest **1340/1340** 绿（2 个既有 GTEST_SKIP 不变）。工作区 clean。
 - 遗留/P1-07 剩余：**lambda（PAR-11/CG-11/DEC-10）**。相关既有缺口：裸类型名全局变量（`S s;`）、局部命名 struct/class 定义+变量、struct-with-method 内联变量（struct 方法路径不完整）、匿名类型函数签名跨声明点（须 typedef 命名，C 同）。
+
+## 2026-10-17 — P1-07 lambda 完成（PAR-11/CG-11/DEC-10）
+
+- 流程：brainstorming（用户选定「逐个执行」P1-07 剩余）→ spec（docs/superpowers/specs/2026-10-17-lambda-design.md）→ plan（docs/superpowers/plans/2026-10-17-lambda.md，4 任务 TDD）→ executing-plans Native 内联（master 直接提交）。
+- 提交线：`fbf86ba`(T1 解析) → `bc59bbc`(T2+T3 sema+codegen) → 文档轮（本次）。
+- **探查**：无 lambda token/AST/codegen；`[` 仅下标（后缀）与声明注解——表达式起始 `[` 无下标含义，可安全识别为 lambda；语言无 `auto` → 有捕获闭包类型不可命名（DEC-10 裁决：实际形态为立即调用）。
+- **Task 1（解析）**：`LambdaExprAST`（captures{captureAll,name,byRef}/params/returnType/hasExplicitReturnType/body/closureName/closureType）；前向声明 ParamDeclAST/CompoundStmtAST（Decl.h→Stmt.h→Expr.h 循环）；析构 out-of-line 于 Expr.cpp；`parseLambdaExpr()`——capture list（`]`/`[=]`/`[a,&b]`）、`(params)` 复用 parseParamDecl、可选 `-> Ret`、`{body}`；`parsePrimaryImpl` 遇 `[` → lambda。后缀 `(` 作用于 lambda → `LambdaCallExprAST`（立即调用）。
+- **Task 2（sema）**：参数/捕获解析（`[=]` 语句感知扫描 `collectUsedNamesStmt/Decl`）；返回类型推断（body 作用域内取首个 return 表达式类型，多 return 不兼容未处理）；闭包 struct（`__lambda_<N>`，字段=按值拷贝/按引用指针）或函数指针类型（无捕获）；body 分析（入作用域、声明参数与捕获、伪 FunctionDeclAST 承载返回类型检查——注意其构造会 move params/body，须传局部空容器）。
+- **Task 3（codegen）**：生成静态函数——有捕获 `__lambda_<N>__call(Closure*, params...)`（body 捕获名声明：按值=字段拷贝 alloca，按引用=把闭包字段指针直接作为捕获名地址，**写穿原对象** `a=9` 生效）；无捕获 `__lambda_<N>(params...)`（表达式 bitcast 函数指针，可赋/回调/直接调用）；`LambdaCallExprAST` 立即调用（栈上构造闭包→call）；`saveIP/restoreIP` 保护调用方插入点（嵌套函数生成不串位）。
+- 测试：ParserLambdaTest 4 + LambdaE2E 7（无捕获函数指针/立即调用/按值捕获/按引用写穿/`[=]`/qsort 回调/返回类型推断）。
+- 验证：每任务 TDD RED→GREEN；最终全量 ctest **1351/1351** 绿（2 个既有 GTEST_SKIP 不变）。工作区 clean。
+- 遗留/P1-07 相关：lambda 多 return 不兼容推断（只取首个）；嵌套 lambda 捕获内层未深度处理；有捕获闭包不可命名（无 auto，DEC-10 裁决）。**P1-07 全部完成**。下一里程碑：P1-09 剩余（std.mem/std.math/std.collections，STD-05/06/07/13/14）与 P2。
