@@ -357,6 +357,16 @@ bool SemanticAnalyzer::typesCompatible(Type* left, Type* right) const {
         return true;
     if (left->kind == TypeKind::String && right->kind == TypeKind::String)
         return true;
+    // PAR-12 (TYP-19 落点): 聚合是名义类型——struct/class/union 同 kind 必须
+    // 名字相同；派生→基（INH-04 切片）是唯一隐式跨聚合兼容。两次独立的
+    // 匿名定义名字不同 → 比较/三元/返回/初始化/实参互斥（C 语义）。
+    if (left->kind == right->kind &&
+        (left->kind == TypeKind::Struct || left->kind == TypeKind::Class ||
+         left->kind == TypeKind::Union)) {
+        if (typesEqual(left, right)) return true;
+        if (isDerivedFrom(right, left)) return true;
+        return false;
+    }
     if (left->kind == right->kind) return true;
     if (isArithmeticType(left) && isArithmeticType(right)) return true;
     if (left->kind == TypeKind::Pointer && right->kind == TypeKind::Pointer) return true;
@@ -636,6 +646,19 @@ Type* SemanticAnalyzer::checkAssignmentTypes(Type* lhs, Type* rhs, ExprAST& node
         // int32? = float64?.
         if (lhsS->kind == TypeKind::Optional || lhsS->kind == TypeKind::Result)
             return typesEqual(lhsS, rhsS) ? lhsRaw : nullptr;
+        // PAR-12 (TYP-19 落点): 聚合是名义类型——struct/class/union 必须
+        // 名字相同（typesEqual）才可赋值；两次独立的匿名定义名字不同，
+        // 赋值拒绝（C 语义）。例外：派生→基 值赋值（INH-04 切片语义）。
+        if (lhsS->kind == TypeKind::Struct || lhsS->kind == TypeKind::Class ||
+            lhsS->kind == TypeKind::Union) {
+            if (typesEqual(lhsS, rhsS)) return lhsRaw;
+            if (isDerivedFrom(rhsS, lhsS)) return lhsRaw;
+            emitError(DiagnosticCode::SemIncompatibleAssignment,
+                      "cannot assign '" + typeToString(rhs) + "' to '" +
+                          typeToString(lhs) + "': distinct types",
+                      node);
+            return nullptr;
+        }
         return lhsRaw;
     }
     if (isPointerOrArray(lhsS) && isPointerOrArray(rhsS)) return lhsRaw;
@@ -5049,6 +5072,31 @@ bool SemanticAnalyzer::hasCircularInheritance(const std::string& className, cons
         current = next;
     }
 
+    return false;
+}
+
+// PAR-12 / INH-04: 沿基类链判定 derived 是否为 base 的派生（含 Struct/Class
+// 双形态，与 hasCircularInheritance 的 walk 同构）。仅公有继承（INH-01）。
+bool SemanticAnalyzer::isDerivedFrom(Type* derived, Type* base) const {
+    derived = stripTypedef(derived);
+    base = stripTypedef(base);
+    if (!derived || !base) return false;
+    if (derived->kind != TypeKind::Struct && derived->kind != TypeKind::Class) return false;
+    if (base->kind != TypeKind::Struct && base->kind != TypeKind::Class) return false;
+    std::string current;
+    if (derived->kind == TypeKind::Class) current = static_cast<ClassType*>(derived)->baseClass;
+    else current = static_cast<StructType*>(derived)->baseClass;
+    std::string target = base->kind == TypeKind::Class
+        ? static_cast<ClassType*>(base)->name
+        : static_cast<StructType*>(base)->name;
+    int guard = 0;
+    while (!current.empty() && guard++ < 128) {
+        if (current == target) return true;
+        std::string next;
+        if (auto* t = typeCtx->getClass(current)) next = t->baseClass;
+        else if (auto* st = typeCtx->getStruct(current)) next = st->baseClass;
+        current = next;
+    }
     return false;
 }
 

@@ -152,6 +152,9 @@ private:
     void analyzeStringMethod(MethodCallExprAST& node, Type* objType);
     bool lowerToString(CallExprAST& node, size_t argIndex, Type* argType);
     bool hasCircularInheritance(const std::string& className, const std::string& baseClass) const;
+    // PAR-12 / INH-04: 聚合名义身份——`derived` 是否沿基类链是 `base` 的派生
+    // （派生→基 值赋值切片允许；基→派生须 static_cast）。
+    bool isDerivedFrom(Type* derived, Type* base) const;
 
     // SEM-01/02: definite-assignment analysis. Warns when a local variable or
     // pointer may be read before being assigned. Path-sensitive through
