@@ -2239,3 +2239,51 @@ TEST(ParserAnonTypeTest, AnonymousMemberPromotionStillDetected) {
     EXPECT_EQ(sd->fields[1].name, "a");
     EXPECT_EQ(sd->fields[2].name, "b");
 }
+
+// ========== PAR-11: lambda 解析 ==========
+
+TEST(ParserLambdaTest, ParsesNoCaptureLambda) {
+    auto expr = parseExpr("[](int32 x) -> int32 { return x; }");
+    ASSERT_NE(expr, nullptr);
+    auto lam = dynamic_cast<LambdaExprAST*>(expr);
+    ASSERT_NE(lam, nullptr);
+    EXPECT_TRUE(lam->captures.empty());
+    EXPECT_FALSE(lam->captureAll);
+    ASSERT_EQ(lam->params.size(), 1u);
+    EXPECT_EQ(lam->params[0]->name, "x");
+    EXPECT_EQ(lam->params[0]->type->kind, TypeKind::Int32);
+    EXPECT_NE(lam->returnType, nullptr);
+    EXPECT_TRUE(lam->hasExplicitReturnType);
+    EXPECT_NE(lam->body, nullptr);
+}
+
+TEST(ParserLambdaTest, ParsesCaptureListByValueAndRef) {
+    auto expr = parseExpr("[a, &b](int32 x) { return x; }");
+    ASSERT_NE(expr, nullptr);
+    auto lam = dynamic_cast<LambdaExprAST*>(expr);
+    ASSERT_NE(lam, nullptr);
+    ASSERT_EQ(lam->captures.size(), 2u);
+    EXPECT_EQ(lam->captures[0].name, "a");
+    EXPECT_FALSE(lam->captures[0].byRef);
+    EXPECT_EQ(lam->captures[1].name, "b");
+    EXPECT_TRUE(lam->captures[1].byRef);
+    EXPECT_FALSE(lam->hasExplicitReturnType);  // 返回类型省略 → 推断
+}
+
+TEST(ParserLambdaTest, ParsesCaptureAll) {
+    auto expr = parseExpr("[=](int32 x) { return x + 1; }");
+    ASSERT_NE(expr, nullptr);
+    auto lam = dynamic_cast<LambdaExprAST*>(expr);
+    ASSERT_NE(lam, nullptr);
+    EXPECT_TRUE(lam->captureAll);
+}
+
+TEST(ParserLambdaTest, LambdaVsSubscriptDisambiguated) {
+    // 数组下标仍走 ArrayAccessExprAST。
+    auto expr = parseExpr("arr[2]");
+    ASSERT_NE(expr, nullptr);
+    EXPECT_NE(dynamic_cast<ArrayAccessExprAST*>(expr), nullptr);
+    // 表达式起始 `[` 是 lambda（下标是后缀）。
+    auto lam = parseExpr("[](int32 x) { return x; }");
+    EXPECT_NE(dynamic_cast<LambdaExprAST*>(lam), nullptr);
+}

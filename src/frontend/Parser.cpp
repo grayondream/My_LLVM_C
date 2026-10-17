@@ -619,6 +619,75 @@ std::unique_ptr<ExprAST> Parser::parseAsmExpr() {
                                         std::move(clobbers));
 }
 
+// PAR-11: lambda 表达式 `[captures](params) -> Ret { body }`。
+// 调用点：parsePrimaryImpl 遇 `[`（表达式起始位置，无下标歧义）。
+std::unique_ptr<ExprAST> Parser::parseLambdaExpr() {
+    if (!match(TokenType::TOKEN_LBRACKET)) return nullptr;
+    auto lambda = std::make_unique<LambdaExprAST>();
+
+    // capture list: `]` | `=]` | `[=]` | `[a, &b, ...]`
+    if (match(TokenType::TOKEN_RBRACKET)) {
+        // empty capture
+    } else if (match(TokenType::TOKEN_ASSIGN)) {
+        lambda->captureAll = true;
+        if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after '=' in lambda capture list")) {
+            return nullptr;
+        }
+    } else {
+        while (true) {
+            LambdaExprAST::Capture cap;
+            if (match(TokenType::TOKEN_BIT_AND)) cap.byRef = true;
+            auto name = match(TokenType::TOKEN_IDENTIFIER);
+            if (!name) {
+                errorUnexpected("expected capture name or ']' in lambda capture list");
+                return nullptr;
+            }
+            cap.name = name->lexeme;
+            lambda->captures.push_back(std::move(cap));
+            if (match(TokenType::TOKEN_COMMA)) continue;
+            if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after lambda capture list")) {
+                return nullptr;
+            }
+            break;
+        }
+    }
+
+    // (params) — reuse function parameter parsing.
+    if (!expect(TokenType::TOKEN_LPAREN, "expected '(' after lambda capture list")) return nullptr;
+    if (!check(TokenType::TOKEN_RPAREN)) {
+        while (true) {
+            auto param = parseParamDecl();
+            if (!param) {
+                errorUnexpected("lambda parameter");
+                return nullptr;
+            }
+            lambda->params.push_back(std::move(param));
+            if (match(TokenType::TOKEN_COMMA)) continue;
+            break;
+        }
+    }
+    if (!expect(TokenType::TOKEN_RPAREN, "expected ')' after lambda parameters")) return nullptr;
+
+    // optional -> Ret
+    if (match(TokenType::TOKEN_ARROW)) {
+        lambda->returnType = parseType();
+        if (!lambda->returnType) {
+            errorUnexpected("lambda return type after '->'");
+            return nullptr;
+        }
+        lambda->hasExplicitReturnType = true;
+    }
+
+    // { body }
+    if (!check(TokenType::TOKEN_LBRACE)) {
+        errorUnexpected("expected '{' to begin lambda body");
+        return nullptr;
+    }
+    lambda->body = parseCompoundStmt();
+
+    return lambda;
+}
+
 std::unique_ptr<ExprAST> Parser::parsePrimary() {
     auto startTok = peek();
     auto expr = parsePrimaryImpl();
@@ -798,6 +867,16 @@ std::unique_ptr<ExprAST> Parser::parsePrimaryImpl() {
         }
 
         return std::make_unique<VariableExprAST>(name);
+    }
+
+    // PAR-11: lambda 表达式 `[captures](params) -> Ret { body }`。
+    // 表达式起始位置的 `[` 无下标含义（下标是后缀），安全识别为 lambda。
+    if (token->type == TokenType::TOKEN_LBRACKET) {
+        if (auto lambda = parseLambdaExpr()) {
+            return lambda;
+        }
+        errorUnexpected("expected lambda capture list or array subscript");
+        return nullptr;
     }
 
     // Parenthesized expression

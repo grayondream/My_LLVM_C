@@ -7,6 +7,12 @@
 #include "PrintFormat.h"
 #include "support/LiteralKind.h"
 
+// PAR-11: lambda 成员引用 Decl.h/Stmt.h 中的类型——前向声明避免循环包含
+// （Decl.h → Stmt.h → Expr.h）。unique_ptr 到不完整类型在头文件合法，
+// 析构在使用处（各 .cpp 全量包含）实例化。
+class ParamDeclAST;
+class CompoundStmtAST;
+
 #include "llvm/IR/Value.h"
 
 class CodegenContext;
@@ -426,5 +432,30 @@ public:
 
     InitializerListExprAST(std::vector<std::unique_ptr<ExprAST>> initList)
         : initializers(std::move(initList)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+// PAR-11/CG-11/DEC-10: lambda 表达式 `[captures](params) -> Ret { body }`。
+// 无捕获 → 函数指针（零开销）；有捕获 → 匿名闭包 struct + 生成调用函数。
+class LambdaExprAST : public ExprAST {
+public:
+    struct Capture {
+        std::string name;
+        bool byRef = false;  // true = `&name`；false = 按值
+    };
+    std::vector<Capture> captures;
+    bool captureAll = false;  // `[=]` 全部按值
+    std::vector<std::unique_ptr<ParamDeclAST>> params;
+    Type* returnType{nullptr};  // 显式或 sema 推断
+    bool hasExplicitReturnType = false;
+    std::unique_ptr<CompoundStmtAST> body;
+    // sema 填充：闭包 struct 名（有捕获）或空（无捕获 → 函数指针）。
+    std::string closureName;
+    Type* closureType{nullptr};
+
+    LambdaExprAST() = default;
+    // PAR-11: params/body 持有不完整类型（前向声明）——析构须在包含
+    // Decl.h/Stmt.h 的翻译单元定义（Expr.cpp）。
+    ~LambdaExprAST() override;
     llvm::Value* codegen(CodegenContext& ctx) override;
 };

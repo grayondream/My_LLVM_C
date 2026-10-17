@@ -4,6 +4,8 @@
 #include "codegen/CodegenContext.h"
 #include "support/Log.h"
 #include "Mangle.h"
+#include "ast/Decl.h"
+#include "ast/Stmt.h"
 
 #include "llvm/IR/InlineAsm.h"
 
@@ -2150,6 +2152,14 @@ llvm::Value* SizeofExprAST::codegen(CodegenContext& ctx) {
 llvm::Value* InitializerListExprAST::codegen(CodegenContext& ctx) {
     if (initializers.empty()) return nullptr;
     return initializers.back()->codegen(ctx);
+}
+
+// PAR-11/CG-11: lambda codegen（Task 3 实现）。此处仅占位保证链接。
+LambdaExprAST::~LambdaExprAST() = default;
+
+llvm::Value* LambdaExprAST::codegen(CodegenContext& ctx) {
+    (void)ctx;
+    return nullptr;
 }
 
 // ===== P1-06 (FMT-01/02/04): builtin str/string method lowering =====

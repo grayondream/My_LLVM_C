@@ -169,6 +169,9 @@ private:
     // P1-08 / PAR-16: inline asm —— `asm` 已被 parseUnaryImpl 消费后调用。
     std::unique_ptr<ExprAST> parseAsmExpr();
 
+    // PAR-11: lambda 表达式 `[captures](params) -> Ret { body }`。
+    std::unique_ptr<ExprAST> parseLambdaExpr();
+
     std::unique_ptr<ExprAST> parseUnary();
 
     std::unique_ptr<ExprAST> parsePostfix(std::unique_ptr<ExprAST> lhs);
