@@ -1,0 +1,136 @@
+// ===== std.bit — 位级工具 (P1-09 / STD-14) =====
+// Import with `import std.bit;` and use as `std::popcount32(...)` etc.
+// 纯语言实现（无编译器内建/asm）：SWAR popcount、二分 clz、循环 ctz、
+// 移位+或 rotl/rotr、reinterpret_cast bitcast 包装。LLVM 优化可折叠
+// SWAR 为单条 popcnt 指令。
+// clz/ctz 对 0 返回位宽（冻结语义，文档注明）。
+// 注：超 int64 字面量在常量折叠有限制，64 位高位经运行时移位构造。
+module std.bit;
+
+export namespace std {
+
+// ----- popcount（SWAR） -----
+
+int32 popcount32(uint32 x) {
+    x = x - ((x >> 1) & 0x55555555u);
+    x = (x & 0x33333333u) + ((x >> 2) & 0x33333333u);
+    x = (x + (x >> 4)) & 0x0F0F0F0Fu;
+    return (int32)((x * 0x01010101u) >> 24);
+}
+
+int32 popcount64(uint64 x) {
+    // 64 位掩码经 `ul`（uint64）字面量 + 移位构造（无 `ull` 后缀，超 int64
+    // 常量折叠亦受限）：
+    // m1 = 0x5555... ; m2 = 0x3333... ; m4 = 0x0F0F... ; h01 = 0x0101...
+    uint64 m1 = 0x55555555ul;
+    uint64 m2 = 0x33333333ul;
+    uint64 m4 = 0x0F0F0F0Ful;
+    uint64 h01 = 0x01010101ul;
+    m1 = m1 | (m1 << 32);
+    m2 = m2 | (m2 << 32);
+    m4 = m4 | (m4 << 32);
+    h01 = h01 | (h01 << 32);
+    x = x - ((x >> 1) & m1);
+    x = (x & m2) + ((x >> 2) & m2);
+    x = (x + (x >> 4)) & m4;
+    return (int32)((x * h01) >> 56);
+}
+
+// ----- clz / ctz（二分/循环，对 0 返回位宽） -----
+
+int32 clz32(uint32 x) {
+    if (x == 0) return 32;
+    int32 n = 0;
+    if ((x >> 16) == 0) { n = n + 16; x = x << 16; }
+    if ((x >> 24) == 0) { n = n + 8;  x = x << 8; }
+    if ((x >> 28) == 0) { n = n + 4;  x = x << 4; }
+    if ((x >> 30) == 0) { n = n + 2;  x = x << 2; }
+    if ((x >> 31) == 0) { n = n + 1; }
+    return n;
+}
+
+int32 clz64(uint64 x) {
+    if (x == 0) return 64;
+    int32 n = 0;
+    if ((x >> 32) == 0) { n = n + 32; x = x << 32; }
+    if ((x >> 48) == 0) { n = n + 16; x = x << 16; }
+    if ((x >> 56) == 0) { n = n + 8;  x = x << 8; }
+    if ((x >> 60) == 0) { n = n + 4;  x = x << 4; }
+    if ((x >> 62) == 0) { n = n + 2;  x = x << 2; }
+    if ((x >> 63) == 0) { n = n + 1; }
+    return n;
+}
+
+int32 ctz32(uint32 x) {
+    if (x == 0) return 32;
+    int32 i = 0;
+    while ((x & 1) == 0) {
+        x = x >> 1;
+        i = i + 1;
+    }
+    return i;
+}
+
+int32 ctz64(uint64 x) {
+    if (x == 0) return 64;
+    int32 i = 0;
+    while ((x & 1) == 0) {
+        x = x >> 1;
+        i = i + 1;
+    }
+    return i;
+}
+
+// ----- rotl / rotr（n 按位宽取模） -----
+
+uint32 rotl32(uint32 x, int32 n) {
+    n = n & 31;
+    if (n == 0) return x;
+    return (x << n) | (x >> (32 - n));
+}
+
+uint32 rotr32(uint32 x, int32 n) {
+    n = n & 31;
+    if (n == 0) return x;
+    return (x >> n) | (x << (32 - n));
+}
+
+uint64 rotl64(uint64 x, int32 n) {
+    n = n & 63;
+    if (n == 0) return x;
+    return (x << n) | (x >> (64 - n));
+}
+
+uint64 rotr64(uint64 x, int32 n) {
+    n = n & 63;
+    if (n == 0) return x;
+    return (x >> n) | (x << (64 - n));
+}
+
+// ----- bitcast 包装（reinterpret_cast） -----
+
+uint32 f32_to_bits(float32 f) {
+    return (uint32)reinterpret_cast<int32>(f);
+}
+
+float32 bits_to_f32(uint32 b) {
+    return reinterpret_cast<float32>((int32)b);
+}
+
+uint64 f64_to_bits(float64 f) {
+    return (uint64)reinterpret_cast<int64>(f);
+}
+
+float64 bits_to_f64(uint64 b) {
+    return reinterpret_cast<float64>((int64)b);
+}
+
+uint32 i32_to_u32(int32 x) {
+    return (uint32)x;
+}
+
+int32 u32_to_i32(uint32 x) {
+    return (int32)x;
+}
+
+} // namespace std
