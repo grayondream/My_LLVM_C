@@ -452,10 +452,25 @@ public:
     // sema 填充：闭包 struct 名（有捕获）或空（无捕获 → 函数指针）。
     std::string closureName;
     Type* closureType{nullptr};
+    // PAR-11: codegen 生成的调用函数符号名（供 LambdaCallExprAST 调用）。
+    std::string lambdaFnName;
 
     LambdaExprAST() = default;
     // PAR-11: params/body 持有不完整类型（前向声明）——析构须在包含
     // Decl.h/Stmt.h 的翻译单元定义（Expr.cpp）。
     ~LambdaExprAST() override;
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+// PAR-11: 立即调用 `[captures](params){...}(args)` —— 后缀 `(` 直接作用于
+// lambda 表达式。持 lambda 与实参，codegen 构造闭包/函数指针后调用。
+class LambdaCallExprAST : public ExprAST {
+public:
+    std::unique_ptr<LambdaExprAST> lambda;
+    std::vector<std::unique_ptr<ExprAST>> args;
+
+    LambdaCallExprAST(std::unique_ptr<LambdaExprAST> lam,
+                      std::vector<std::unique_ptr<ExprAST>> arguments)
+        : lambda(std::move(lam)), args(std::move(arguments)) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };

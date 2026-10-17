@@ -1006,6 +1006,11 @@ std::unique_ptr<ExprAST> Parser::parsePostfix(std::unique_ptr<ExprAST> lhs) {
                     auto object = std::move(memberAccess->object);
                     lhs = std::make_unique<MethodCallExprAST>(
                         std::move(object), memberAccess->memberName, std::move(args));
+                } else if (auto* lam = dynamic_cast<LambdaExprAST*>(lhs.get())) {
+                    // PAR-11: 立即调用 `[...](...){} (args)`。
+                    auto lamPtr = std::unique_ptr<LambdaExprAST>(
+                        static_cast<LambdaExprAST*>(lhs.release()));
+                    lhs = std::make_unique<LambdaCallExprAST>(std::move(lamPtr), std::move(args));
                 }
                 break;
             }

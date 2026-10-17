@@ -3172,6 +3172,262 @@ void SemanticAnalyzer::visit(InitializerListExprAST& node) {
     node.isLValue = false;
 }
 
+// PAR-11: `[=]` 全部按值捕获——收集 body 表达式引用的变量名。
+void SemanticAnalyzer::collectUsedNames(ExprAST* expr, std::unordered_set<std::string>& out) {
+    if (!expr) return;
+    if (auto* v = dynamic_cast<VariableExprAST*>(expr)) {
+        out.insert(v->name);
+        return;
+    }
+    if (auto* b = dynamic_cast<BinaryExprAST*>(expr)) {
+        collectUsedNames(b->left.get(), out);
+        collectUsedNames(b->right.get(), out);
+        return;
+    }
+    if (auto* u = dynamic_cast<UnaryExprAST*>(expr)) {
+        collectUsedNames(u->operand.get(), out);
+        return;
+    }
+    if (auto* c = dynamic_cast<CallExprAST*>(expr)) {
+        for (auto& a : c->args) collectUsedNames(a.get(), out);
+        return;
+    }
+    if (auto* m = dynamic_cast<MethodCallExprAST*>(expr)) {
+        collectUsedNames(m->object.get(), out);
+        for (auto& a : m->args) collectUsedNames(a.get(), out);
+        return;
+    }
+    if (auto* ma = dynamic_cast<MemberAccessExprAST*>(expr)) {
+        collectUsedNames(ma->object.get(), out);
+        return;
+    }
+    if (auto* t = dynamic_cast<TernaryExprAST*>(expr)) {
+        collectUsedNames(t->cond.get(), out);
+        collectUsedNames(t->then.get(), out);
+        collectUsedNames(t->elseExpr.get(), out);
+        return;
+    }
+    if (auto* a = dynamic_cast<AssignmentExprAST*>(expr)) {
+        collectUsedNames(a->lhs.get(), out);
+        collectUsedNames(a->rhs.get(), out);
+        return;
+    }
+    if (auto* s = dynamic_cast<SizeofExprAST*>(expr)) {
+        collectUsedNames(s->expr.get(), out);
+        return;
+    }
+    if (auto* il = dynamic_cast<InitializerListExprAST*>(expr)) {
+        for (auto& e : il->initializers) collectUsedNames(e.get(), out);
+        return;
+    }
+    if (auto* lc = dynamic_cast<LambdaCallExprAST*>(expr)) {
+        for (auto& a : lc->args) collectUsedNames(a.get(), out);
+        return;
+    }
+    if (auto* lam = dynamic_cast<LambdaExprAST*>(expr)) {
+        for (auto& stmt : lam->body->stmts) collectUsedNamesStmt(stmt.get(), out);
+        return;
+    }
+}
+
+void SemanticAnalyzer::collectUsedNamesStmt(StmtAST* stmt, std::unordered_set<std::string>& out) {
+    if (!stmt) return;
+    if (auto* es = dynamic_cast<ExprStmtAST*>(stmt)) {
+        collectUsedNames(es->expr.get(), out);
+        return;
+    }
+    if (auto* rs = dynamic_cast<ReturnStmtAST*>(stmt)) {
+        collectUsedNames(rs->value.get(), out);
+        return;
+    }
+    if (auto* cs = dynamic_cast<CompoundStmtAST*>(stmt)) {
+        for (auto& s : cs->stmts) collectUsedNamesStmt(s.get(), out);
+        return;
+    }
+    if (auto* is = dynamic_cast<IfStmtAST*>(stmt)) {
+        collectUsedNames(is->cond.get(), out);
+        collectUsedNamesStmt(is->thenStmt.get(), out);
+        collectUsedNamesStmt(is->elseStmt.get(), out);
+        return;
+    }
+    if (auto* ws = dynamic_cast<WhileStmtAST*>(stmt)) {
+        collectUsedNames(ws->cond.get(), out);
+        collectUsedNamesStmt(ws->body.get(), out);
+        return;
+    }
+    if (auto* dws = dynamic_cast<DoWhileStmtAST*>(stmt)) {
+        collectUsedNames(dws->cond.get(), out);
+        collectUsedNamesStmt(dws->body.get(), out);
+        return;
+    }
+    if (auto* fs = dynamic_cast<ForStmtAST*>(stmt)) {
+        collectUsedNamesStmt(fs->init.get(), out);
+        collectUsedNames(fs->cond.get(), out);
+        collectUsedNames(fs->inc.get(), out);
+        collectUsedNamesStmt(fs->body.get(), out);
+        return;
+    }
+    if (auto* ds = dynamic_cast<DeclStmtAST*>(stmt)) {
+        if (ds->decl) collectUsedNamesDecl(ds->decl.get(), out);
+        return;
+    }
+}
+
+void SemanticAnalyzer::collectUsedNamesDecl(DeclAST* decl, std::unordered_set<std::string>& out) {
+    if (!decl) return;
+    if (auto* v = dynamic_cast<VarDeclAST*>(decl)) {
+        collectUsedNames(v->initExpr.get(), out);
+        return;
+    }
+    if (auto* a = dynamic_cast<ArrayDeclAST*>(decl)) {
+        collectUsedNames(a->initExpr.get(), out);
+        return;
+    }
+}
+
+// PAR-11: lambda 表达式语义。无捕获 → 函数指针类型；有捕获 → 闭包 struct。
+void SemanticAnalyzer::visit(LambdaExprAST& node) {
+    // 1) 参数类型。
+    std::vector<Type*> paramTypes;
+    for (auto& p : node.params) {
+        p->type = resolveTypeInstance(p->type, node);
+        paramTypes.push_back(p->type);
+    }
+
+    // 2) 捕获解析：`[=]` 扫描 body 引用的局部/参数名；显式列出则逐个查找。
+    std::vector<LambdaExprAST::Capture> effective;
+    if (node.captureAll) {
+        // 扫描 body 全部语句/表达式引用的变量名（含 return/if/循环）。
+        std::unordered_set<std::string> used;
+        if (node.body) {
+            for (auto& stmt : node.body->stmts) {
+                collectUsedNamesStmt(stmt.get(), used);
+            }
+        }
+        for (auto& n : used) {
+            LambdaExprAST::Capture c;
+            c.name = n;
+            effective.push_back(std::move(c));
+        }
+        node.captures = effective;  // 写回供 codegen 使用
+    } else {
+        for (auto& c : node.captures) effective.push_back(c);
+    }
+
+    // 3) 返回类型：显式或从 body 推断（推断在 body 作用域内，参数/捕获已声明）。
+    Type* retType = node.returnType;
+
+    // 4) 闭包类型：无捕获 → 函数指针；有捕获 → 闭包 struct。
+    //    需先建闭包（字段类型引用外层符号），再推断返回类型（body 需要
+    //    闭包字段可解析），最后分析 body。
+    if (effective.empty()) {
+        node.type = nullptr;  // 暂置，codegen 前由下面 FunctionType 决定
+        node.closureType = nullptr;
+    } else {
+        std::string closureKey = "__lambda_" + typeCtx->nextAnonId();
+        auto* closure = new StructType(closureKey);
+        for (auto& c : effective) {
+            Symbol* sym = currentScope ? currentScope->lookup(c.name) : nullptr;
+            if (!sym || !sym->type) {
+                emitError("unknown capture '" + c.name + "' in lambda", node);
+                continue;
+            }
+            Type* capType = c.byRef ? new Type(TypeKind::Pointer, sym->type) : sym->type;
+            closure->addField(c.name, capType);
+        }
+        typeCtx->addStruct(closureKey, closure);
+        node.closureName = closureKey;
+        node.closureType = closure;
+    }
+
+    // 5) 分析 body：入作用域，声明参数与捕获，再推断返回类型、访问 body。
+    if (node.body) {
+        // visit(ReturnStmtAST) 读 currentFunction->returnType——临时挂一个
+        // 伪函数承载返回类型检查（lambda 返回类型已推断）。注意 FunctionDeclAST
+        // 构造会 move 掉 params/body，故传局部空容器，body 仍由 node 持有。
+        FunctionDeclAST* prev = currentFunction;
+        std::vector<std::unique_ptr<ParamDeclAST>> emptyParams;
+        std::unique_ptr<CompoundStmtAST> emptyBody;
+        FunctionDeclAST tmpFn("<lambda>", retType ? retType : typeCtx->getVoid(),
+                              emptyParams, emptyBody, false);
+        currentFunction = &tmpFn;
+        enterScope();
+        for (auto& p : node.params) {
+            if (!declare(p->name, p->type)) {
+                emitError("redeclaration of lambda parameter '" + p->name + "'", *p);
+            }
+        }
+        // 捕获按声明为局部（使 body 内引用 name 可解析）。
+        for (auto& c : effective) {
+            if (currentScope->lookup(c.name)) continue;  // 与参数同名冲突
+            Symbol* sym = nullptr;
+            // 从外层作用域解析捕获类型。
+            for (Scope* s = currentScope->parent; s; s = s->parent) {
+                if ((sym = s->lookup(c.name))) break;
+            }
+            if (sym && sym->type) {
+                declare(c.name, sym->type);
+            }
+        }
+        // 推断返回类型：在 body 作用域内取首个 return 表达式类型。
+        if (!retType && node.body) {
+            for (auto& stmt : node.body->stmts) {
+                if (auto* rs = dynamic_cast<ReturnStmtAST*>(stmt.get())) {
+                    if (rs->value) {
+                        retType = getExprType(*rs->value);
+                        break;
+                    }
+                }
+            }
+            if (!retType) retType = typeCtx->getVoid();
+            node.returnType = retType;
+            tmpFn.returnType = retType;  // 同步伪函数的返回类型供 return 检查
+        }
+        visit(*node.body);
+        exitScope();
+        currentFunction = prev;
+    }
+    if (!retType) retType = typeCtx->getVoid();
+    node.returnType = retType;
+
+    // 6) 表达式类型落定。
+    auto* fnType = new FunctionType(retType, paramTypes);
+    if (node.closureType) {
+        node.type = node.closureType;
+    } else {
+        node.type = new Type(TypeKind::Pointer, fnType);
+    }
+    node.isLValue = false;
+}
+
+// PAR-11: 立即调用 `[...](...){...}(args)` —— 校验实参，类型 = 返回类型。
+void SemanticAnalyzer::visit(LambdaCallExprAST& node) {
+    getExprType(*node.lambda);
+    Type* retType = node.lambda->returnType;
+    if (!retType) retType = typeCtx->getVoid();
+    node.type = retType;
+    node.isLValue = false;
+
+    // 实参数量/类型与形参匹配（复用函数调用检查的宽松路径）。
+    size_t np = node.lambda->params.size();
+    if (node.args.size() != np) {
+        emitError("lambda call expects " + std::to_string(np) + " argument(s), got " +
+                      std::to_string(node.args.size()),
+                  node);
+        return;
+    }
+    for (size_t i = 0; i < np; ++i) {
+        Type* argType = getExprType(*node.args[i]);
+        Type* paramType = node.lambda->params[i]->type;
+        if (argType && paramType && !typesCompatible(paramType, argType)) {
+            emitError("lambda argument " + std::to_string(i) + ": expected '" +
+                          typeToString(paramType) + "', got '" + typeToString(argType) + "'",
+                      node);
+        }
+    }
+}
+
+
 // PAR-13: struct/class 类型侧语义字段序（物化优先，未物化用原始序）。
 static std::vector<FieldInfo>* semanticFieldList(Type* t) {
     if (t->kind == TypeKind::Struct) {
@@ -5022,6 +5278,8 @@ void SemanticAnalyzer::visit(ExprAST& expr) {
     if (auto* e = dynamic_cast<MethodCallExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<SizeofExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<InitializerListExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<LambdaExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<LambdaCallExprAST*>(&expr)) { visit(*e); return; }
 }
 
 void SemanticAnalyzer::visit(StmtAST& stmt) {

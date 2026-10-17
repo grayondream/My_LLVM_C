@@ -2154,12 +2154,187 @@ llvm::Value* InitializerListExprAST::codegen(CodegenContext& ctx) {
     return initializers.back()->codegen(ctx);
 }
 
-// PAR-11/CG-11: lambda codegen（Task 3 实现）。此处仅占位保证链接。
+// PAR-11/CG-11: lambda codegen。
+// 无捕获 → 生成静态函数并返回函数指针。
+// 有捕获 → 生成闭包调用函数 `__lambda_<N>__call(Closure*, params...)`，
+// body 内捕获名声明为从闭包加载的局部变量；表达式本身返回闭包 struct 值
+// （立即调用由 LambdaCallExprAST 组装：栈上构造闭包 → 调用）。
 LambdaExprAST::~LambdaExprAST() = default;
 
 llvm::Value* LambdaExprAST::codegen(CodegenContext& ctx) {
-    (void)ctx;
-    return nullptr;
+    auto& builder = ctx.getBuilder();
+    llvm::LLVMContext& c = ctx.getContext();
+
+    std::vector<Type*> paramTypes;
+    for (auto& p : params) paramTypes.push_back(p->type);
+    Type* retType = returnType ? returnType : TypeContext::instance().getVoid();
+
+    // 函数名：无捕获 `__lambda_<N>`，有捕获 `__lambda_<N>__call`。
+    static int fnCounter = 0;
+    if (lambdaFnName.empty()) {
+        lambdaFnName = "__lambda_" + std::to_string(fnCounter++);
+        if (closureType) lambdaFnName += "__call";
+    }
+
+    llvm::Function* fn = ctx.getModule().getFunction(lambdaFnName);
+    if (!fn) {
+        std::vector<llvm::Type*> argLLVM;
+        if (closureType) argLLVM.push_back(ctx.getLLVMType(
+            new Type(TypeKind::Pointer, closureType)));
+        for (auto* t : paramTypes) argLLVM.push_back(ctx.getLLVMType(t));
+        llvm::FunctionType* FT = llvm::FunctionType::get(
+            ctx.getLLVMType(retType), argLLVM, false);
+        fn = llvm::Function::Create(FT, llvm::Function::InternalLinkage,
+                                    lambdaFnName, ctx.getModule());
+    }
+    if (fn->size() == 0) {
+        // 嵌套生成函数体——保存调用方插入点，body 在 lambda 函数内生成后恢复。
+        auto savedIP = builder.saveIP();
+        llvm::BasicBlock* entry = llvm::BasicBlock::Create(c, "entry", fn);
+        builder.SetInsertPoint(entry);
+        ctx.pushScope();
+
+        // 有捕获：闭包首参，按捕获字段声明局部变量。
+        if (closureType) {
+            llvm::Value* closurePtr = fn->getArg(0);
+            auto* st = static_cast<StructType*>(closureType);
+            for (size_t i = 0; i < captures.size(); ++i) {
+                auto& cap = captures[i];
+                Type* capTy = st->fields[i].type;
+                llvm::Value* fieldPtr = builder.CreateStructGEP(
+                    ctx.getLLVMType(closureType), closurePtr, (unsigned)i,
+                    "capgep." + cap.name);
+                if (cap.byRef) {
+                    // 按引用：字段是 `T*`。把该指针直接作为捕获名的地址声明，
+                    // body 内读/写经此指针直达原对象（`a = 9` 写穿）。
+                    llvm::Value* refPtr = builder.CreateLoad(
+                        llvm::PointerType::get(c, 0), fieldPtr);
+                    ctx.declareVariable(cap.name, refPtr,
+                                        capTy->kind == TypeKind::Pointer ? capTy->base : capTy);
+                } else {
+                    // 按值：字段是拷贝，加载进局部 alloca。
+                    llvm::AllocaInst* alloca = builder.CreateAlloca(
+                        ctx.getLLVMType(capTy), nullptr, "cap." + cap.name);
+                    llvm::Value* fieldVal = builder.CreateLoad(
+                        ctx.getLLVMType(capTy), fieldPtr);
+                    builder.CreateStore(fieldVal, alloca);
+                    ctx.declareVariable(cap.name, alloca, capTy);
+                }
+            }
+            for (size_t i = 0; i < params.size(); ++i) {
+                llvm::Argument* arg = fn->getArg((unsigned)(i + 1));
+                arg->setName(params[i]->name);
+                llvm::AllocaInst* alloca = builder.CreateAlloca(
+                    ctx.getLLVMType(params[i]->type), nullptr, params[i]->name);
+                builder.CreateStore(arg, alloca);
+                ctx.declareVariable(params[i]->name, alloca, params[i]->type);
+            }
+        } else {
+            for (size_t i = 0; i < params.size(); ++i) {
+                llvm::Argument* arg = fn->getArg((unsigned)i);
+                arg->setName(params[i]->name);
+                llvm::AllocaInst* alloca = builder.CreateAlloca(
+                    ctx.getLLVMType(params[i]->type), nullptr, params[i]->name);
+                builder.CreateStore(arg, alloca);
+                ctx.declareVariable(params[i]->name, alloca, params[i]->type);
+            }
+        }
+
+        if (body) body->codegen(ctx);
+        if (!builder.GetInsertBlock()->getTerminator()) {
+            if (retType->kind == TypeKind::Void) builder.CreateRetVoid();
+            else builder.CreateUnreachable();
+        }
+        ctx.popScope();
+        builder.restoreIP(savedIP);
+    }
+
+    // 无捕获：返回函数指针（bitcast 成指针）。
+    if (!closureType) {
+        return llvm::ConstantExpr::getBitCast(
+            fn, llvm::PointerType::get(c, 0));
+    }
+
+    // 有捕获：表达式求值——栈上构造闭包并返回其值。
+    llvm::AllocaInst* closureAlloca = builder.CreateAlloca(
+        ctx.getLLVMType(closureType), nullptr, "lambda.closure");
+    auto* st = static_cast<StructType*>(closureType);
+    for (size_t i = 0; i < captures.size(); ++i) {
+        auto& cap = captures[i];
+        llvm::Value* fieldPtr = builder.CreateStructGEP(
+            ctx.getLLVMType(closureType), closureAlloca, (unsigned)i, "capset." + cap.name);
+        if (cap.byRef) {
+            llvm::Value* addr = ctx.lookupVariableAddr(cap.name);
+            if (!addr) return nullptr;
+            builder.CreateStore(addr, fieldPtr);
+        } else {
+            llvm::Value* addr = ctx.lookupVariableAddr(cap.name);
+            if (!addr) return nullptr;
+            llvm::Value* val = builder.CreateLoad(
+                ctx.getLLVMType(st->fields[i].type), addr);
+            builder.CreateStore(val, fieldPtr);
+        }
+    }
+    return builder.CreateLoad(ctx.getLLVMType(closureType), closureAlloca,
+                              "lambda.closure.val");
+}
+
+// PAR-11: 立即调用——构造闭包（复用 lambda 表达式的构造逻辑）+ 调用生成函数。
+llvm::Value* LambdaCallExprAST::codegen(CodegenContext& ctx) {
+    auto& builder = ctx.getBuilder();
+    llvm::LLVMContext& c = ctx.getContext();
+
+    // 先生成 lambda（无捕获→函数指针；有捕获→闭包值 + 记录调用符号）。
+    llvm::Value* lambdaVal = lambda->codegen(ctx);
+    (void)lambdaVal;
+
+    llvm::Function* callFn = ctx.getModule().getFunction(lambda->lambdaFnName);
+    if (!callFn) return nullptr;
+
+    std::vector<llvm::Value*> argsV;
+    // 有捕获：闭包地址作首参（重新构造闭包——lambda 表达式刚构造的值已含捕获，
+    // 但立即调用路径直接传地址更稳；捕获拷贝在 lambda codegen 里已完成）。
+    if (lambda->closureType) {
+        llvm::AllocaInst* closureAlloca = builder.CreateAlloca(
+            ctx.getLLVMType(lambda->closureType), nullptr, "lambda.closure");
+        auto* st = static_cast<StructType*>(lambda->closureType);
+        for (size_t i = 0; i < lambda->captures.size(); ++i) {
+            auto& cap = lambda->captures[i];
+            llvm::Value* fieldPtr = builder.CreateStructGEP(
+                ctx.getLLVMType(lambda->closureType), closureAlloca, (unsigned)i,
+                "capset." + cap.name);
+            if (cap.byRef) {
+                llvm::Value* addr = ctx.lookupVariableAddr(cap.name);
+                if (!addr) return nullptr;
+                builder.CreateStore(addr, fieldPtr);
+            } else {
+                llvm::Value* addr = ctx.lookupVariableAddr(cap.name);
+                if (!addr) return nullptr;
+                llvm::Value* val = builder.CreateLoad(
+                    ctx.getLLVMType(st->fields[i].type), addr);
+                builder.CreateStore(val, fieldPtr);
+            }
+        }
+        argsV.push_back(closureAlloca);
+    }
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        llvm::Value* argVal = args[i]->codegen(ctx);
+        if (!argVal) return nullptr;
+        if (args[i]->isLValue) argVal = readLValue(ctx, *args[i], argVal);
+        if (i < lambda->params.size()) {
+            argVal = ctx.castValue(argVal, args[i]->type,
+                                   ctx.getLLVMType(lambda->params[i]->type));
+        }
+        argsV.push_back(argVal);
+    }
+
+    Type* retType = lambda->returnType;
+    if (retType && retType->kind != TypeKind::Void) {
+        return builder.CreateCall(callFn, argsV, "lambdacall");
+    }
+    builder.CreateCall(callFn, argsV);
+    return llvm::ConstantInt::get(llvm::Type::getInt32Ty(c), 0);
 }
 
 // ===== P1-06 (FMT-01/02/04): builtin str/string method lowering =====

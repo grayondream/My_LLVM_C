@@ -251,6 +251,12 @@ private:
     void visit(MethodCallExprAST& node);
     void visit(SizeofExprAST& node);
     void visit(InitializerListExprAST& node);
+    // PAR-11: lambda 表达式与立即调用。
+    void visit(LambdaExprAST& node);
+    void visit(LambdaCallExprAST& node);
+    void collectUsedNames(ExprAST* expr, std::unordered_set<std::string>& out);
+    void collectUsedNamesStmt(StmtAST* stmt, std::unordered_set<std::string>& out);
+    void collectUsedNamesDecl(DeclAST* decl, std::unordered_set<std::string>& out);
 
     void visit(ExprAST& expr);
     void visit(StmtAST& stmt);
