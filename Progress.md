@@ -809,3 +809,14 @@
 - 测试：ParserLambdaTest 4 + LambdaE2E 7（无捕获函数指针/立即调用/按值捕获/按引用写穿/`[=]`/qsort 回调/返回类型推断）。
 - 验证：每任务 TDD RED→GREEN；最终全量 ctest **1351/1351** 绿（2 个既有 GTEST_SKIP 不变）。工作区 clean。
 - 遗留/P1-07 相关：lambda 多 return 不兼容推断（只取首个）；嵌套 lambda 捕获内层未深度处理；有捕获闭包不可命名（无 auto，DEC-10 裁决）。**P1-07 全部完成**。下一里程碑：P1-09 剩余（std.mem/std.math/std.collections，STD-05/06/07/13/14）与 P2。
+
+## 2026-10-17 — P1-09 std.mem 纯函数层完成（STD-05 范围 a）
+
+- 流程：brainstorming（用户选定 std.mem，范围 a：纯函数层）→ spec（docs/superpowers/specs/2026-10-17-stdmem-design.md）→ plan（docs/superpowers/plans/2026-10-17-stdmem.md，3 任务 TDD）→ executing-plans Native 内联（master 直接提交）。
+- 提交线：`840b287`（Task 1+2 合并：mem.smc + std.c posix_memalign + 7 e2e）。
+- **探查实证（关键约束）**：函数可跨模块导出；**struct/class 类型不可**——parse 期类型名注册先于 import 处理（`std::Point` 报 `expected ';'`）；模块内 `template<typename T>` 亦不可见（`tprobe::tmax<int32>` 报 undeclared）。此即 stdlib.md:149 已挂账的「class 无法跨模块导出」（StrBuilder 同因）。→ Allocator/Arena/Pool 需类型，本轮**挂账写草案**。
+- **Task 1+2（mem.smc + std.c）**：`libs/std/mem.smc`（模块自包含 extern，io.smc 先例）——`alloc`（malloc）/`alloc_zeroed`（calloc）/`resize`（realloc，避 extern 重名）/`dealloc`（free，避重名）/`align_up(n,a)=(n+a-1)&~(a-1)`/`align_down=n&~(a-1)`/`is_aligned(p,a)`（2 的幂位运算，非 2 的幂行为未定义文档注明）/`aligned_alloc`（posix_memalign 包装：成功返回 ptr、失败返回 null；align 须 2 的幂且 ≥ sizeof(void*)）/`aligned_free`（=free）。`libs/std/c.smc` 与 `src/driver/StdPrelude.cpp` 内嵌兜底同步补 `posix_memalign` 声明。
+- 测试：`tests/e2e/test_std_mem.cpp`（runWithImports harness）7 项——alloc 非空/alloc_zeroed 置零/resize 保数据/align_up_down/is_aligned/aligned_alloc 64 对齐/aligned_alloc 非 2 幂对齐失败 null。测试修正两处：①is_aligned 用栈变量地址测对齐不可靠（地址不保证），改 aligned_alloc 已知对齐指针；②断言 p 非 128 对齐错误（posix_memalign 保证至少 64 对齐，128 字节块可能更高对齐），改 16 对齐 + 偏移 1 字节验证。
+- 文档：stdlib.md §11 std.mem 函数表 + §11.1 Allocator/Arena/Pool 接口草案（含 `struct Allocator`/`Arena`/`Pool` 蓝本，标注阻塞原因）；TODO STD-05 `[x]`、MEM-06 `[~]`（包装已落 std.mem）、MEM-07 草案挂账、P1-09 快照 1358。
+- 验证：每任务 TDD RED→GREEN；最终全量 ctest **1358/1358** 绿（2 个既有 GTEST_SKIP 不变）。工作区 clean。
+- 遗留/P1-09 剩余：**std.math/std.bit（STD-13/14）**（纯函数，不受模块导出类型阻塞，可本轮）；**std.collections（STD-06~08）**（泛型容器，阻塞于「模块导出类型」语言缺口）；std.mem 的 Allocator/Arena/Pool（随语言层缺口一并）。

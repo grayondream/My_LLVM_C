@@ -188,9 +188,62 @@ type  := 'x' | 'X' | 'o' | 'b' | 'f' | 'e' | 's'
 占位符多于实参 → 多余忽略；少于 → 缺位读空串即停；未终止 `{` → 扫描即止。
 以上动态行为**不做检查不 panic**，格式串自担（stdlib 边界，spec §2.3.3）。
 
-## 11. 待办 `[plan]`
+## 11. `std.mem`（P1-09 / STD-05）`[impl]`
 
-- `std.mem`（STD-05）、`std.collections`（STD-06~08）、`std.string`（STD-10）、
+`import std.mem;` 后用 `std::alloc(...)` 等。纯函数层（范围 a，2026-10-17）：
+分配失败返回 `null`（C 语义，调用方检查），不抛异常不 abort。模块自包含
+extern 声明（io.smc 先例）。
+
+| 函数 | 语义 |
+|---|---|
+| `void* alloc(usize size)` | malloc 包装 |
+| `void* alloc_zeroed(usize count, usize size)` | calloc 包装（零初始化） |
+| `void* resize(void* p, usize size)` | realloc 包装（保内容，失败 null 原指针有效） |
+| `void  dealloc(void* p)` | free 包装 |
+| `usize align_up(usize n, usize align)` | 向上取整到 2 的幂倍数 |
+| `usize align_down(usize n, usize align)` | 向下取整到 2 的幂倍数 |
+| `bool is_aligned(void* p, usize align)` | 指针按 2 的幂对齐检测 |
+| `void* aligned_alloc(usize align, usize size)` | posix_memalign 包装（失败 null） |
+| `void  aligned_free(void* p)` | = free |
+
+`align_up/down/is_aligned` 的 `align` 须为 2 的幂（非 2 的幂行为未定义）；
+`aligned_alloc` 的 `align` 须为 2 的幂且为 `sizeof(void*)` 的倍数（POSIX 要求，违反返回 null）。
+
+### 11.1 Allocator / Arena / Pool 接口草案 `[plan]`（挂账）
+
+**阻塞原因**：语言层「类型无法跨模块导出」（parse 期类型名注册先于 import 处理，
+`std::T` 不可解析；`template<typename T>` 亦不可见）——与 StrBuilder 同因
+（见 §9.2 挂账）。语言层修复（模块导出类型/模板）后按此蓝本实现：
+
+```smc
+// Allocator：函数指针字段 struct，可选上下文指针。
+struct Allocator {
+    void* (*alloc_fn)(void* ctx, usize size);
+    void* (*resize_fn)(void* ctx, void* p, usize size);
+    void  (*free_fn)(void* ctx, void* p);
+    void* ctx;   // 可空
+};
+
+// Arena：连续区 + 游标（栈式分配，一次性释放）。
+struct Arena {
+    void*  base;
+    usize  cap;
+    usize  used;
+};
+// arena_init(base, cap) / arena_alloc(&arena, size, align) / arena_reset / arena_destroy
+
+// Pool：固定块大小链表。
+struct Pool {
+    void*  head;      // 空闲块链表
+    usize  block_size;
+};
+// pool_init(&pool, block_size) / pool_alloc / pool_free / pool_destroy
+```
+
+## 12. 待办 `[plan]`
+
+- `std.mem` 的 Allocator/Arena/Pool（STD-05，随语言层「模块导出类型」）、
+  `std.collections`（STD-06~08）、`std.string`（STD-10）、
   `std.format`（STD-11）、`std.math`/`std.bit`（STD-13/14）、`std.fs`（STD-19）等。
 - `assert` 的释放模式（Release 关闭）若需要，将随 DEC-06/07（边界/溢出检查策略）
   一并裁决；当前**始终启用**。

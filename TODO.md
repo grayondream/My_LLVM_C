@@ -29,6 +29,8 @@
 
 > **进度快照（2026-10-17，P1-07 lambda 完成）**：**lambda 表达式全链路完成**（PAR-11/CG-11/DEC-10 `[x]`，plan `docs/superpowers/plans/2026-10-17-lambda.md`）。语法 `[captures](params) -> Ret { body }`（`[]`/`[=]`/`[a,&b]`，返回类型显式或推断，表达式起始 `[` 无歧义识别）；**无捕获 → 函数指针**（零开销：可赋 `int32 (*)(int32)`、立即调用、qsort 回调）；**有捕获 → 匿名闭包 struct + 调用函数** `__lambda_<N>__call(Closure*, params...)`（按值捕获拷贝、按引用捕获写穿原对象；语言无 `auto` → 闭包不可命名，实际形态为**立即调用** DEC 裁决）；`[=]` 语句感知捕获扫描。当前全量 **1351** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。**P1-07 全部完成**。下一里程碑：P1-09 剩余（std.mem/math/collections）与 P2。
 
+> **进度快照（2026-10-17，P1-09 std.mem 纯函数层完成）**：**std.mem（STD-05 范围 a）完成**（spec `docs/superpowers/specs/2026-10-17-stdmem-design.md`，plan `docs/superpowers/plans/2026-10-17-stdmem.md`）。`libs/std/mem.smc`：`alloc`（malloc）/`alloc_zeroed`（calloc）/`resize`（realloc）/`dealloc`（free）/`align_up`/`align_down`/`is_aligned`（2 的幂位运算）/`aligned_alloc`（posix_memalign 包装，失败 null）/`aligned_free`；`std.c` 与内嵌兜底补 `posix_memalign`。**探查实证**：函数可跨模块导出，但 struct/class/template 不可（parse 期类型名注册先于 import）——Allocator/Arena/Pool 接口草案挂账（stdlib.md §11.1），待语言层「模块导出类型」修复后实现；std.collections（STD-06~08）同受此堵。当前全量 **1358** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。P1-09 剩余：std.math/std.bit（STD-13/14）、std.collections（STD-06~08，阻塞于模块导出类型）。
+
 ---
 
 ## 0. 现状基线（已完成，勿重复实现）
@@ -276,9 +278,8 @@
 - `[ ]` **MEM-03** `(已实现)` 函数指针；补回调与 ABI 测试。
 - `[ ]` **MEM-04** 限定符：`const/volatile/restrict/atomic` 语义。
 - `[ ]` **MEM-05** `[[nonnull]]`：调用处检查、函数内假设。
-- `[ ]` **MEM-06** `malloc/calloc/realloc/free` 声明与标准库包装（libsafec）。
-- `[ ]` **MEM-07** 预留：allocator 接口、arena、pool、placement 分配。
-- `[ ]` **MEM-08** 无隐藏分配；无隐藏控制流（不插入异常/GC/析构）。
+- `[~]` **MEM-06** `malloc/calloc/realloc/free` 声明与标准库包装（libsafec）。**声明在 `std.c`；包装在 `std.mem`**（2026-10-17：`alloc/alloc_zeroed/resize/dealloc/aligned_alloc/aligned_free`，STD-05）。
+- `[ ]` **MEM-07** 预留：allocator 接口、arena、pool、placement 分配。（接口草案见 `docs/spec/stdlib.md` §11.1，阻塞于「模块导出类型」语言缺口）- `[ ]` **MEM-08** 无隐藏分配；无隐藏控制流（不插入异常/GC/析构）。
 - `[ ]` **MEM-09** ABI：`[[repr(C)]]`、`[[packed]]`、`[[align(64)]]`；位域布局（DEC-08）。
 - `[x]` **MEM-10** FFI：与 C 函数/结构体/回调互操作（绑定层见 MOD-09）。已支持：`extern` 声明、函数指针形参（含无名与嵌套回调）、`T*`↔`void*` 传参与 C 风格类型转换 `(int*)p`/`((struct S*)p)->f`；libc `qsort/bsearch/atexit` 可直接传入用户函数作为回调。结构体**按值**传参/返回见 MEM-14。
 - `[ ]` **MEM-11** 调用约定：C 调用约定（可选其他）。
@@ -374,7 +375,7 @@
 - `[ ]` **STD-04** 整数运算与溢出辅助。
 
 ### std.mem
-- `[ ]` **STD-05** `malloc/calloc/realloc/free` 包装；Allocator 接口；Arena/Pool；placement 分配；对齐工具。
+- `[x]` **STD-05** `malloc/calloc/realloc/free` 包装；Allocator 接口；Arena/Pool；placement 分配；对齐工具。**纯函数层完成**（2026-10-17，范围 a）：`libs/std/mem.smc`——`alloc/alloc_zeroed/resize/dealloc/align_up/align_down/is_aligned/aligned_alloc/aligned_free`（posix_memalign 包装）；`std.c` 补 posix_memalign；7 e2e。**Allocator/Arena/Pool 接口草案挂账**（类型不可跨模块导出，语言层修复后实现；草案见 `docs/spec/stdlib.md` §11.1）。spec `docs/superpowers/specs/2026-10-17-stdmem-design.md`。
 
 ### std.collections 〔新〕
 - `[ ]` **STD-06** `Vec`/`ArrayList`（增长、容量、索引、迭代）。
@@ -533,7 +534,7 @@
 - `[x]` **P1-06** str / String / format（FMT、STD-10/11）。核心纵向完成（2026-10-08）：FMT-01/02/03/04 + FMT-05 比较 + TYP-26/DEC-20 + 内建类型小写化（`optional`/`result`，DEC-18 先例）；E2015 新诊断；`grammar.ebnf` 同步。format（FMT-06~09）与 STD-10 高层操作另轮。spec `docs/superpowers/specs/2026-10-08-str-string-design.md`，plan `docs/superpowers/plans/2026-10-08-str-string.md`。挂账：`string` 不参与 constexpr；CT `+` 已移除；SSO 不做。
 - `[x]` **P1-07** 位域、匿名类型、指定初始化器、lambda（AGG-03~06、PAR-10~13）。**位域全链路已完成**（2026-10-15：PAR-10/SEM-12/AGG-06/CG-09/DEC-08）；**指定初始化器与柔性数组已完成**（2026-10-16：PAR-13/AGG-04/05）；**匿名类型定义已完成**（2026-10-17：PAR-12）；**lambda 已完成**（2026-10-17：PAR-11/CG-11/DEC-10，plan `docs/superpowers/plans/2026-10-17-lambda.md`，全量 1351 绿）。**P1-07 全部完成**。
 - `[x]` **P1-08** `static_cast` / 内联 `asm`（PAR-18、CG-10）。`static_cast`/`reinterpret_cast` 已完成（LEX-11/PAR-18）；内联 `asm` 全链路完成（2026-10-11）：LEX-12/PAR-16/CG-10/DEC-09，spec `docs/superpowers/specs/2026-10-10-p108-inline-asm-design.md`，plan `docs/superpowers/plans/2026-10-10-p108-inline-asm.md`，e2e 6 用例 LLJIT 执行通过（全量 1203 绿）。
-- `[~]` **P1-09** std.mem / std.string / std.format / std.math / **std.collections**（STD-05~14）。字符串库 + format 体系完成（2026-10-09）：FMT-06~11 全落地、FMT-12 单缓冲、STD-10 组合库、STD-11 核心；E2020~22 新诊断；顺带修复既有编译器 bug 两枚——`&&`/`||` 按位降级（真值截断 + 无短路）与派生→基类赋值整结构 store 溢出（潜在栈腐败）。spec `docs/superpowers/specs/2026-10-09-p109-string-format-design.md`，plan `docs/superpowers/plans/2026-10-09-p109-string-format.md`。挂账：StrBuilder 类导出缺口（语言层）、模块类导出（parse 期类型名注册）、`replace`/字典序/to_lower|upper 不做、std.mem/math/collections 另轮。**终审 I4（string 值拷贝别名双 free）已收口**（2026-10-11）：string 拥有型值语义 + string_view 硬改名，spec `docs/superpowers/specs/2026-10-11-string-ownership-design.md`，plan `docs/superpowers/plans/2026-10-11-string-ownership.md`，e2e 16 用例（全量 1229 绿）。
+- `[~]` **P1-09** std.mem / std.string / std.format / std.math / **std.collections**（STD-05~14）。字符串库 + format 体系完成（2026-10-09）：FMT-06~11 全落地、FMT-12 单缓冲、STD-10 组合库、STD-11 核心；E2020~22 新诊断；顺带修复既有编译器 bug 两枚——`&&`/`||` 按位降级（真值截断 + 无短路）与派生→基类赋值整结构 store 溢出（潜在栈腐败）。spec `docs/superpowers/specs/2026-10-09-p109-string-format-design.md`，plan `docs/superpowers/plans/2026-10-09-p109-string-format.md`。挂账：StrBuilder 类导出缺口（语言层）、模块类导出（parse 期类型名注册）、`replace`/字典序/to_lower|upper 不做、std.mem/math/collections 另轮。**终审 I4（string 值拷贝别名双 free）已收口**（2026-10-11）：string 拥有型值语义 + string_view 硬改名，spec `docs/superpowers/specs/2026-10-11-string-ownership-design.md`，plan `docs/superpowers/plans/2026-10-11-string-ownership.md`，e2e 16 用例（全量 1229 绿）。**std.mem 纯函数层完成**（2026-10-17，STD-05 范围 a：alloc/alloc_zeroed/resize/dealloc/align_up/align_down/is_aligned/aligned_alloc/aligned_free，7 e2e，全量 1358 绿；Allocator/Arena/Pool 接口草案挂账于「模块导出类型」语言缺口，见 stdlib.md §11.1）。**剩余**：std.math/std.bit（STD-13/14）、std.collections（STD-06~08，受「模块导出类型」阻塞）。
 
 ### P2：工程化与并发
 - `[ ]` **P2-01** atomic / thread_local / std.thread（CON、STD-24/25）。
