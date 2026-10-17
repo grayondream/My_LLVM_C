@@ -12,6 +12,10 @@ extern void*  calloc(usize count, usize size);
 extern void*  realloc(void* ptr, usize size);
 extern void   free(void* ptr);
 
+// Aligned allocation (STD-05): POSIX posix_memalign — align must be a power of
+// two and a multiple of sizeof(void*); returns 0 on success, else an errno.
+extern int32  posix_memalign(void** memptr, usize alignment, usize size);
+
 extern usize  strlen(char* s);
 extern int32    strcmp(char* a, char* b);
 extern int32    strncmp(char* a, char* b, usize n);

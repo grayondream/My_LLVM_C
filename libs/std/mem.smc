@@ -1,0 +1,75 @@
+// ===== std.mem — 内存分配包装与对齐工具 (P1-09 / STD-05) =====
+// Import with `import std.mem;` and use as `std::alloc(...)` etc.
+// 纯函数层（范围 a）：分配/释放包装 + 对齐运算 + 对齐分配。
+// 语义与 C 一致：分配失败返回 null（调用方检查），不抛异常不 abort。
+// Allocator 接口 / Arena / Pool 需类型，因「类型无法跨模块导出」挂账
+// （语言层修复后另行落地），接口草案见 docs/spec/stdlib.md。
+// libc 声明自包含（io.smc 先例），模块私有。
+module std.mem;
+
+extern void*  malloc(usize size);
+extern void*  calloc(usize count, usize size);
+extern void*  realloc(void* ptr, usize size);
+extern void   free(void* ptr);
+extern int32  posix_memalign(void** memptr, usize alignment, usize size);
+
+export namespace std {
+
+// ----- 分配包装 -----
+
+// malloc 包装：返回 size 字节未初始化内存，失败返回 null。
+void* alloc(usize size) {
+    return malloc(size);
+}
+
+// calloc 包装：count*size 字节零初始化内存，失败返回 null。
+void* alloc_zeroed(usize count, usize size) {
+    return calloc(count, size);
+}
+
+// realloc 包装：调整分配大小，保留原内容（新块扩展部分未初始化），失败返回
+// null（原指针仍有效）。
+void* resize(void* ptr, usize size) {
+    return realloc(ptr, size);
+}
+
+// free 包装：释放 alloc/alloc_zeroed/resize/aligned_alloc 返回的块。
+void dealloc(void* ptr) {
+    free(ptr);
+}
+
+// ----- 对齐工具 -----
+
+// 向上取整到 align 的倍数。align 须为 2 的幂（非 2 的幂行为未定义）。
+usize align_up(usize n, usize align) {
+    return (n + align - 1) & ~(align - 1);
+}
+
+// 向下取整到 align 的倍数。align 须为 2 的幂（非 2 的幂行为未定义）。
+usize align_down(usize n, usize align) {
+    return n & ~(align - 1);
+}
+
+// 指针是否按 align 对齐（align 须为 2 的幂）。
+bool is_aligned(void* p, usize align) {
+    return ((usize)p & (align - 1)) == 0;
+}
+
+// ----- 对齐分配 -----
+
+// posix_memalign 包装：返回按 align 对齐的 size 字节内存，失败返回 null。
+// align 须为 2 的幂且为 sizeof(void*) 的倍数（POSIX 要求，违反返回 null）。
+void* aligned_alloc(usize align, usize size) {
+    void* ptr = null;
+    if (posix_memalign(&ptr, align, size) != 0) {
+        return null;
+    }
+    return ptr;
+}
+
+// 释放 aligned_alloc 返回的块（posix_memalign 分配的块可经 free 释放）。
+void aligned_free(void* p) {
+    free(p);
+}
+
+} // namespace std
