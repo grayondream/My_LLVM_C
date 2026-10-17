@@ -771,3 +771,17 @@
   - **int128/uint128 字面量（>64 位）**：TokenValue 整数值统一 unsigned __int128，lexer 累加到 128 位（E0003 移到超 2^128-1）；NumberExprAST 加 valueHi；sema 映射 int128/uint128；codegen APInt 两字构造；constexpr 对 128 位字面量明确拒绝（64 位 ConstValue 无损承载）。
 - 验证：全量 ctest **1299/1299**（1292 + 6 新回归 + 1 新 lexer 正例）；20 探测全绿；演示 `ALL FEATURES OK`（新增数组 typedef/指针差/int128 用例）。
 - 遗留（已记）：原始函数返回函数指针声明语法不支持（typedef 可用）；128 位字面量在常量表达式中被拒（运行时值可用）。
+
+## 2026-10-16 — P1-07 指定初始化器 + 柔性数组完成（PAR-13/AGG-04/05）
+
+- 流程：brainstorming → spec（docs/superpowers/specs/2026-10-16-designated-init-flexarray-design.md）→ plan（docs/superpowers/plans/2026-10-16-designated-init-flexarray.md，5 任务 TDD）→ executing-plans Native 内联（master 直接提交，项目惯例）。
+- 提交线：`82ff6d6`(T1 解析) → `da0c144`(T2 sema) → `eb42bca`(T3 局部 codegen) → `9afa55b`(T4 全局常量) → `6e89e71`(T5 FAM e2e) → `4bbab6f`(终审修复)。
+- **Task 1（解析）**：`Designator{kind, field, index, indexExpr}`（Ruling：计划原 `int64 index` 不足以承载常量表达式设计符如 `[Red]`——parser 无求值能力，增 `indexExpr` 节点，sema 折叠回写 `index`）；`InitializerListExprAST::designators`（与 initializers 平行，空=位置式）；`FieldInfo::flexibleArray`；`parseMemberArraySuffix` 末维 `[]` → `ArrayType(T,0)` 置标记。
+- **Task 2（sema）**：`resolveDesignators` 逐元素展开语义目标链（`resolvedTargets`）——位置式游标（跳过 `name==""` 伪字段，AGG-06 规则）/设计符逐链节（`.name` 查 semanticFields 或 fields，class 沿 base 链 + E2009、union 命中即槽 0、`[i]` 仅数组、链节间须聚合、重复/乱序不报错、Optional/Result 伪字段明确拒绝）；数组大小推断 = C99 `max(位置式计数位置, 最大 Index+1)`；FAM 约束（仅 struct 尾、非匿名/位域、前有具名成员、class/union/花括号初始化拒绝）。Rulings：①`sizeof(局部数组变量)` 在 compile_time.static_assert 不折叠 → 推断测试改手建 AST 检查 `node.size==4`；②Parser/sema 共 6+3 处 `addField/addMember` 拷贝丢 flexibleArray → 逐处补标记；③Designator 含 unique_ptr 不可拷贝 → `push_back(std::move)`+resize 而非 assign。
+- **Task 3（局部 codegen）**：整块补零（`CreateMemSet`，未指定补零 `Point p={1}` → `p.y==0`）+ 逐元素按 `resolvedTargets` 链写（`emitDesignatedInitializer`/`resolveFieldGEP`：semanticFields 物化索引绝对、基类下降 slot 0、位域 `storeBitFieldValue`、union 槽 0 指名成员类型、嵌套列表递归、string 深拷贝路径复用）。Ruling：基类下降 GEP 用 slot 0 而非 base 偏移（base 只用于自身字段）。
+- **Task 4（全局 codegen）**：`buildDesignatedConstant` 数组下标/struct-class 字段（含 base 偏移）/位域 bfAcc 掩码 OR/union 槽 0；顶层 hasResolved dispatch。Rulings：①裸结构体名 `Point g` 顶层声明不识别（既有缺口）→ 全局测试改 `struct Point g` C 风格；②dispatch 使 union 位置式列表进入 buildDesignatedConstant 但原无 Union 分支 → 回退零初始化致 `BitFieldE2E.UnionBitFieldGlobalInit` 失败 → 补 Union 分支。
+- **Task 5（FAM）**：关键发现——FAM 功能经 T1/T2（解析标记+语义约束）+ 既有 LayoutBuilder 零长数组（`[0 x T]` allocSize=0）**天然正确，零源码改动**，仅补测试锁定。gcc 基线核对：默认 sizeof/offsetof `1 1 | 4 4 | 1 1`（packed）；align(16) sizeof=16 但 offsetof(data)=4（FAM 偏移取自然对齐，align 只抬 size）；位域+FAM sizeof=固定部分。Rulings：①JIT e2e harness 需前置 std prelude（parseStdCPrelude+prependDeclarations），否则 malloc/free undeclared（CLI 自动注入而 JIT 不注入）；②offset_of 字段名须字符串字面量。
+- **终审修复（`4bbab6f`）**：C1 物化路径字段/位域 GEP 双计数 base 伪字段（baseOffset+unitIndex，base 在槽 0 后索引即绝对）——`emitAggregateInitializer`/`resolveFieldGEP` 去 baseOffset；C2 全局常量丢基类字段/多链——`buildDesignatedConstant` 重写为递归 `placeDesignatorValue`（累积常量：后写覆盖、位域掩码 OR 保留已有位、基类子对象下降、`buildAPIntFromByteArray` 逆还原 packed 位域单元）；I1 全局 union 多设计符后写覆盖（原先写者赢）；I2 VarDeclAST 局部数组（含 typedef 数组）设计符初始化补零——零填充守卫加 Array kind；I3 顶层数组大小推断接受多链 `[1][2]=5`（首节 Index 即外层维度位置）。
+- 测试：ParserDesignatedInitTest 3 + SemaDesignatedInitTest 5 + SemaFlexArrayTest 3 + DesignatedInitE2E 10（含 5 终审回归）+ FlexArrayE2E 4。
+- 验证：每任务 TDD RED→GREEN；终审后全量 ctest **1326/1326** 绿（2 个既有 GTEST_SKIP 不变）。工作区 clean。
+- 遗留/P1-07 剩余：匿名类型定义（PAR-12，匿名成员提升 AGG-03 已做）；lambda（PAR-11/CG-11/DEC-10）。相关既有缺口：裸结构体名顶层变量声明不识别；`compile_time` 表达式内 `sizeof(变量)` 不折叠。

@@ -23,6 +23,8 @@
 
 > **进度快照（2026-10-15，P1-07 位域完成）**：**C 位域全链路完成**（PAR-10/SEM-12/AGG-06/CG-09/DEC-08 全部 `[x]`，plan `docs/superpowers/plans/2026-10-13-bitfields.md` 6 任务 TDD）。语法 `T name : N`（struct/class/union/匿名成员）；sema E2025/26/27（基类型/宽度/取址）；布局 System V 存储单元（非 packed）与 GCC packed 连续位流区域模型（`[N x i8]`，零宽按声明类型自然边界取整，尺寸与 gcc 实测核对）；RMW 读写 + 复合赋值/++/--；全局/局部花括号初始化位域感知（无名成员不消费初始值）；union/class（继承链）位域；offset_of 位域拒绝。整分支评审修复：union 位域被当普通字段（Parser/Sema 注册 + unitBits + 全局常量掩码）、派生聚合物化 GEP +1、位宽溢出防回绕。当前全量 **1283** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。已知限制：static 局部变量不支持（DEC 存储类范围）；packed 位域 RMW 用整数自然对齐（x86-64 容忍，严格对齐目标待 Align(1)）。
 
+> **进度快照（2026-10-16，P1-07 指定初始化器 + 柔性数组完成）**：**C99 指定初始化器 + 柔性数组全链路完成**（PAR-13/AGG-04/05 `[x]`，plan `docs/superpowers/plans/2026-10-16-designated-init-flexarray.md` 5 任务 TDD + 终审修复轮）。`.name`/`.a.b`/`[i]` 设计符（parser 链解析 + `indexExpr` 常量表达式承载）；sema `resolveDesignators` 语义目标链（继承链+E2009/union 槽 0/位域/Optional·Result 伪字段拒绝）、数组大小 C99 推断（含多链 `[1][2]=5`）；局部整块补零 + 按链写槽（typedef 数组含）；全局常量递归累积（后写覆盖/位域掩码 OR/基类下降）；乱序/重复/混排全 C99。FAM：`FieldInfo::flexibleArray` 标记 + 约束（仅 struct 尾、非匿名/位域、class/union/初始化拒绝）+ `sizeof` 不含 FAM（gcc 核对）+ malloc 惯用法 + 按值拷贝只拷固定部分。终审修复：物化路径 base 双计数 GEP、全局常量丢基类/多链、union 后写覆盖、typedef 数组补零、多链推断。当前全量 **1326** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。P1-07 剩余：匿名类型定义（PAR-12）、lambda（PAR-11/CG-11/DEC-10）。
+
 ---
 
 ## 0. 现状基线（已完成，勿重复实现）
@@ -94,8 +96,8 @@
 - `[x]` **PAR-09** `(改)` 语句：块、if/else、while、do-while、for、switch/case、return、break、continue、声明。（**不含 goto/label**，见 Non-goals；已移除 goto/标签解析）
 - `[x]` **PAR-10** `(新)` 位域声明：`T name : N;`（struct/union 成员），含零宽位域。**完成**（2026-10-15，P1-07）：struct/class/union/匿名内联成员四处循环解析 `: N`（parseBitFieldWidth，常量表达式求值）；命名零宽位域 parse 期拒绝（FieldInfo 编码无法区分，Ruling）；超 int32 范围位宽 parse 期拒绝（防回绕绕过 E2026）。
 - `[ ]` **PAR-11** `(新)` 简单 lambda：语法（建议 C++ 风格 `[capture](params) -> T { ... }` 或最简 `[](p){...}`）、捕获列表。
-- `[ ]` **PAR-12** `(新)` 匿名 class/struct/union：匿名类型定义、匿名成员提升。
-- `[ ]` **PAR-13** `(新)` 指定初始化器 `{.field = v}`、柔性数组 `T a[]`。
+- `[ ]` **PAR-12** `(新)` 匿名 class/struct/union：匿名类型定义、匿名成员提升。（匿名成员提升 AGG-03 已做；**匿名类型定义**待办）
+- `[x]` **PAR-13** `(新)` 指定初始化器 `{.field = v}`、柔性数组 `T a[]`。**完成**（2026-10-16）：`.name`/`.a.b`/`[i]` 设计符链（AST `Designator`/`designators`，parser 解析）；sema `resolveDesignators` 展开语义目标链（`resolvedTargets`，继承链 + E2009、union 槽 0、位域、Optional/Result 伪字段拒绝）、数组大小推断 = C99 `max(位置式, 最大下标+1)`（含多链 `[1][2]=5` 外层维）；局部 codegen 整块补零 + 按链写槽（含 typedef 数组）；全局常量递归累积（后写覆盖/位域掩码 OR/基类下降）；乱序/重复/混排均 C99 语义。plan `docs/superpowers/plans/2026-10-16-designated-init-flexarray.md`。
 - `[~]` **PAR-14** `(已实现)` `sizeof`；`(新)` `alignof`、`offsetof`。（`compile_time.size_of/align_of/offset_of` 已实现，CT-06/P1-04；独立 `alignof`/`offsetof` 关键字形式未做，见 CT-07/13 反射收口）
 - `[x]` **PAR-15** `(新)` `compile_time` 表达式：`static_assert`、`if`、目标/构建查询完成（2026-10-06）；反射部分未含（另轮）。
 - `[x]` **PAR-16** `(新)` 内联汇编 `asm` 语句/表达式。**完成**（2026-10-11，P1-08）：`AsmOperand`/`AsmExprAST` 节点 + `parseAsmExpr()`（至多三段操作数、模板/约束须字符串字面量、`decodeEscapes` 去引号），见 plan `2026-10-10-p108-inline-asm`。
@@ -209,8 +211,8 @@
 - `[ ]` **AGG-01** 声明、字段、初始化、赋值、嵌套、前向声明。
 - `[ ]` **AGG-02** 默认公开；无隐藏数据；C ABI 兼容布局。
 - `[x]` **AGG-03** `(新)` 匿名 struct/union 成员与成员提升。已实现（AGG-17 轮次）：struct/union 体内的匿名聚合成员按 C11 语义提升到外层（`s.i`/`s.x` 直接可用），名字冲突报错；`typedef struct/union` 别名的成员访问同步修复（`.` 与 `->` 均剥离 typedef）。文件作用域匿名 union 延后。
-- `[ ]` **AGG-04** `(新)` 柔性数组 `T a[]`。
-- `[ ]` **AGG-05** `(新)` 指定初始化器 `{.x=1}`。
+- `[ ]` **AGG-04** `(新)` 柔性数组 `T a[]`。**完成**（2026-10-16，随 PAR-13）：`FieldInfo::flexibleArray` 标记（`parseMemberArraySuffix` 末维 `[]` → `ArrayType(T,0)`）；约束——仅 struct 尾成员、非匿名/非位域、前有具名成员、class/union 拒绝、花括号初始化拒绝；`sizeof` 不含 FAM（对齐 GCC，packed/align 变体实测核对）；`s->data[i]` malloc 惯用法读写；按值拷贝只拷固定部分。plan 同上。
+- `[ ]` **AGG-05** `(新)` 指定初始化器 `{.x=1}`。**完成**（2026-10-16，随 PAR-13）：见 PAR-13 条目；`[i]` 数组设计符、`.field` 嵌套、混排/乱序/重复（后覆盖）、未指定补零（局部整块 memset、全局 getNullValue）。plan 同上。
 - `[x]` **AGG-06** `(新)` 位域字段布局与 codegen。**完成**（2026-10-15，P1-07）：LayoutBuilder 物化 System V 存储单元（非 packed）与 GCC packed 连续位流"区域"模型（`[N x i8]` 伪字段）；bitFields 布局表 {unitIndex,bitOffset,bitWidth,unitBits}；union 位域成员（对齐字段共享）；RMW 读写（loadBitFieldValue/storeBitFieldValue，含复合赋值/++/--）；全局/局部花括号初始化位域感知（常量 OR 进存储单元、无名成员不消费初始值）；class 继承链位域访问。
 
 ### class
@@ -525,7 +527,7 @@
 - `[x]` **P1-04** `compile_time` 与反射——核心纵向切片完成（2026-10-06）：CT-01/02/03/04/05/06/12/14 + PAR-15 部分 + SEM-07 + DEC-05；反射 CT-07/08/13 另轮（与 P1-06 str 排序协调）。
 - `[x]` **P1-05** 注解系统（ANN）——核心纵向完成（2026-10-07）：ANN-01~06/09/10 + LEX-10/PAR-07 + W3004/W3005；ANN-07/08 挂账。
 - `[x]` **P1-06** str / String / format（FMT、STD-10/11）。核心纵向完成（2026-10-08）：FMT-01/02/03/04 + FMT-05 比较 + TYP-26/DEC-20 + 内建类型小写化（`optional`/`result`，DEC-18 先例）；E2015 新诊断；`grammar.ebnf` 同步。format（FMT-06~09）与 STD-10 高层操作另轮。spec `docs/superpowers/specs/2026-10-08-str-string-design.md`，plan `docs/superpowers/plans/2026-10-08-str-string.md`。挂账：`string` 不参与 constexpr；CT `+` 已移除；SSO 不做。
-- `[~]` **P1-07** 位域、匿名类型、指定初始化器、lambda（AGG-03~06、PAR-10~13）。**位域全链路已完成**（2026-10-15：PAR-10/SEM-12/AGG-06/CG-09/DEC-08）；**剩余**：匿名类型定义（PAR-12，匿名成员提升 AGG-03 已做）、指定初始化器 `{.x=1}` 与柔性数组 `T a[]`（PAR-13/AGG-04/05）、lambda（PAR-11/CG-11/DEC-10）。
+- `[~]` **P1-07** 位域、匿名类型、指定初始化器、lambda（AGG-03~06、PAR-10~13）。**位域全链路已完成**（2026-10-15：PAR-10/SEM-12/AGG-06/CG-09/DEC-08）；**指定初始化器与柔性数组已完成**（2026-10-16：PAR-13/AGG-04/05，plan `docs/superpowers/plans/2026-10-16-designated-init-flexarray.md`，全量 1326 绿）；**剩余**：匿名类型定义（PAR-12）、lambda（PAR-11/CG-11/DEC-10）。
 - `[x]` **P1-08** `static_cast` / 内联 `asm`（PAR-18、CG-10）。`static_cast`/`reinterpret_cast` 已完成（LEX-11/PAR-18）；内联 `asm` 全链路完成（2026-10-11）：LEX-12/PAR-16/CG-10/DEC-09，spec `docs/superpowers/specs/2026-10-10-p108-inline-asm-design.md`，plan `docs/superpowers/plans/2026-10-10-p108-inline-asm.md`，e2e 6 用例 LLJIT 执行通过（全量 1203 绿）。
 - `[~]` **P1-09** std.mem / std.string / std.format / std.math / **std.collections**（STD-05~14）。字符串库 + format 体系完成（2026-10-09）：FMT-06~11 全落地、FMT-12 单缓冲、STD-10 组合库、STD-11 核心；E2020~22 新诊断；顺带修复既有编译器 bug 两枚——`&&`/`||` 按位降级（真值截断 + 无短路）与派生→基类赋值整结构 store 溢出（潜在栈腐败）。spec `docs/superpowers/specs/2026-10-09-p109-string-format-design.md`，plan `docs/superpowers/plans/2026-10-09-p109-string-format.md`。挂账：StrBuilder 类导出缺口（语言层）、模块类导出（parse 期类型名注册）、`replace`/字典序/to_lower|upper 不做、std.mem/math/collections 另轮。**终审 I4（string 值拷贝别名双 free）已收口**（2026-10-11）：string 拥有型值语义 + string_view 硬改名，spec `docs/superpowers/specs/2026-10-11-string-ownership-design.md`，plan `docs/superpowers/plans/2026-10-11-string-ownership.md`，e2e 16 用例（全量 1229 绿）。
 
