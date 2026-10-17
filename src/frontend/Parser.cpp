@@ -1229,6 +1229,17 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
         }
     }
 
+    // PAR-12: 局部 class 定义 `class { ... } c;` / `class C { ... };` ——
+    // isTypeStart 不含 TOKEN_CLASS（class 仅作声明起始），走 parseDeclaration
+    // 复用顶层 class 分支（含 attachedVars 内联变量）。局部 struct/union 既有
+    // 内联路径不经此（isTypeStart 含 struct/union）。
+    if (check(TokenType::TOKEN_CLASS)) {
+        auto decl = parseDeclaration();
+        if (decl) {
+            return makeDeclStmt(std::move(decl));
+        }
+    }
+
     // local declaration (type keyword or typedef name)
     if (isTypeStart() || check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE)) {
         size_t savedPos = m_currentTokenPos;
@@ -2447,7 +2458,11 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
                 type = new ClassType(classDecl->name);
                 TypeContext::instance().addClass(classDecl->name, static_cast<ClassType*>(type));
             }
-            return parseVariableDeclList(type, nameTok->lexeme);
+            // PAR-12: 变量挂在 classDecl AST 上（不丢弃聚合 AST）——sema 先
+            // 注册字段/方法/访问段，再处理变量；codegen 同理。此前直接返回
+            // 变量导致字段/方法从未注册（`class { ... } c;` 成员不可用）。
+            classDecl->attachedVars = parseVariableDeclList(type, nameTok->lexeme);
+            return classDecl;
         }
 
         return classDecl;

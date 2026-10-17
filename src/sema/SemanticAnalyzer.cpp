@@ -4230,6 +4230,12 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
             visit(*vd);
         }
     }
+
+    // PAR-12: 内联变量 `class { ... } c;` / `struct S { ... } s;` ——类型已
+    // 注册完毕，现在处理变量（进入普通声明分派，含 MultiVarDeclAST 展开）。
+    if (node.attachedVars) {
+        analyzeTopLevelDecl(*node.attachedVars);
+    }
 }
 
 void SemanticAnalyzer::visit(UnionDeclAST& node) {

@@ -148,6 +148,10 @@ public:
     // order. Registered under flat keys (`Outer_Inner`) at parse time.
     std::vector<std::unique_ptr<DeclAST>> nestedTypes;
     bool isClassDecl = false;
+    // PAR-12: 内联变量声明 `class { ... } c;` / `struct S { ... } s;` ——
+    // 类型定义与变量在同一声明里。变量挂在聚合 AST 上（sema/codegen 先处理
+    // 类型再处理变量，字段/方法/访问段随类型注册，变量随后可见）。
+    std::unique_ptr<DeclAST> attachedVars;
 
     StructDeclAST(const std::string& n, std::vector<FieldInfo> flds)
         : name(n), fields(std::move(flds)) {}

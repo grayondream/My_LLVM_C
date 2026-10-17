@@ -1333,6 +1333,12 @@ llvm::Value* StructDeclAST::codegen(CodegenContext& ctx) {
         }
     }
 
+    // PAR-12: 内联变量 `class { ... } c;` / `struct S { ... } s;` ——类型
+    // 生成完毕后 emit 变量（全局变量走 GlobalVariable，含 MultiVarDeclAST）。
+    if (attachedVars) {
+        attachedVars->codegen(ctx);
+    }
+
     return nullptr;
 }
 
