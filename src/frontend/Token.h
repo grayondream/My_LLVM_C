@@ -77,6 +77,12 @@ enum class TokenType : int32_t {
     TOKEN_FLOAT64,
     TOKEN_FLOAT16,
     TOKEN_FLOAT128,
+    // TYP-05: char8/char16/char32 (unsigned fixed-width aliases).
+    TOKEN_CHAR8,
+    TOKEN_CHAR16,
+    TOKEN_CHAR32,
+    // CON-04: thread_local storage class.
+    TOKEN_THREAD_LOCAL,
 
     // 运算符
     TOKEN_PLUS,         // +

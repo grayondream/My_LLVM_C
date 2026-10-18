@@ -522,3 +522,18 @@ TEST(LexerUnicodeTest, UnicodeIdentifierAccepted) {
     EXPECT_EQ(tokens[1].lexeme, "变量");
     EXPECT_TRUE(lexer.getDiagnostics().empty());
 }
+
+// TYP-05 / CON-04: char8/char16/char32 type keywords and thread_local storage
+// class token.
+TEST(LexerNewKeywordsTest, Char8Char16Char32ThreadLocalKeywords) {
+    spdlog::set_level(spdlog::level::off);
+    Lexer lexer("kw.c", "char8 a; char16 b; char32 c; thread_local int32 x;");
+    auto tokens = lexer.tokenize();
+    // tokens: char8 a ; char16 b ; char32 c ; thread_local int32 x ;
+    ASSERT_GE(tokens.size(), 13u);
+    EXPECT_EQ(tokens[0].type, TokenType::TOKEN_CHAR8);
+    EXPECT_EQ(tokens[3].type, TokenType::TOKEN_CHAR16);
+    EXPECT_EQ(tokens[6].type, TokenType::TOKEN_CHAR32);
+    EXPECT_EQ(tokens[9].type, TokenType::TOKEN_THREAD_LOCAL);
+    EXPECT_TRUE(lexer.getDiagnostics().empty());
+}

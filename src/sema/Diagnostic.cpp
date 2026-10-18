@@ -37,6 +37,7 @@ const DiagnosticInfo kRegistry[] = {
     {DiagnosticCode::SemBitFieldInvalidType,      "E2025", "invalid bit-field base type"},
     {DiagnosticCode::SemBitFieldWidthOutOfRange,  "E2026", "bit-field width out of range"},
     {DiagnosticCode::SemBitFieldNotAddressable,   "E2027", "bit-field is not addressable"},
+    {DiagnosticCode::SemInvalidThreadLocalOnFunction, "E2028", "thread_local cannot be applied to a function"},
 
     {DiagnosticCode::WarnUninitializedVariable,  "W3001", "variable may be uninitialized"},
     {DiagnosticCode::WarnUnusedVariable,         "W3002", "unused variable"},

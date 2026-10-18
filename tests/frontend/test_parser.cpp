@@ -2287,3 +2287,32 @@ TEST(ParserLambdaTest, LambdaVsSubscriptDisambiguated) {
     auto lam = parseExpr("[](int32 x) { return x; }");
     EXPECT_NE(dynamic_cast<LambdaExprAST*>(lam), nullptr);
 }
+
+// TYP-05: char8/char16/char32 are type keywords mapping to the unsigned
+// fixed-width integers (aliases, not nominal types — design decision).
+TEST_F(ParserTest, Char8DeclaresUInt8) {
+    auto tu = parse("char8 c;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_FALSE(tu->declarations.empty());
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->type, TypeContext::instance().getUInt8());
+}
+
+TEST_F(ParserTest, Char16DeclaresUInt16) {
+    auto tu = parse("char16 c;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_FALSE(tu->declarations.empty());
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->type, TypeContext::instance().getUInt16());
+}
+
+TEST_F(ParserTest, Char32DeclaresUInt32) {
+    auto tu = parse("char32 c;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_FALSE(tu->declarations.empty());
+    auto var = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(var, nullptr);
+    EXPECT_EQ(var->type, TypeContext::instance().getUInt32());
+}

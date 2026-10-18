@@ -75,6 +75,12 @@ static const std::unordered_map<std::string, TokenType> keywordMap = {
     // ===== C99 / 扩展（可选）=====
     {"inline", TokenType::TOKEN_INLINE},
     {"restrict", TokenType::TOKEN_RESTRICT},
+    // TYP-05: char8/char16/char32 (unsigned fixed-width aliases).
+    {"char8", TokenType::TOKEN_CHAR8},
+    {"char16", TokenType::TOKEN_CHAR16},
+    {"char32", TokenType::TOKEN_CHAR32},
+    // CON-04: thread_local storage class.
+    {"thread_local", TokenType::TOKEN_THREAD_LOCAL},
 
     // ===== 布尔（如果你支持）=====
     {"bool", TokenType::TOKEN_BOOL},

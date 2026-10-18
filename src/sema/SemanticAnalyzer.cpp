@@ -4692,6 +4692,11 @@ void SemanticAnalyzer::visit(DeclStmtAST& node) {
 }
 
 void SemanticAnalyzer::visit(FunctionDeclAST& node) {
+    // CON-04: `thread_local` is a variable storage class — invalid on a function.
+    if (node.isThreadLocal) {
+        emitError(DiagnosticCode::SemInvalidThreadLocalOnFunction,
+                  "thread_local cannot be applied to a function", node);
+    }
     // P1-05 / ANN-06: 函数与参数注解验证。
     validateAnnotations(node.annotations, node, "function");
     for (auto& p : node.params) {

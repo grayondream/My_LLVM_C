@@ -36,6 +36,9 @@ public:
     std::optional<FoldedValue> foldedValue;
     // P1-05 / ANN-03: [[align(N)]] 折叠值（sema 写入，codegen setAlignment）。
     uint64_t declAlign = 0;
+    // CON-04: `thread_local` storage class — emitted as an LLVM thread-local
+    // global (per-thread copy) for file/namespace scope.
+    bool isThreadLocal = false;
 
     VarDeclAST(const std::string& n, Type* t, std::unique_ptr<ExprAST> init = nullptr, bool constexpr_ = false)
         : name(n), type(t), initExpr(std::move(init)), isConstexpr(constexpr_) {}
@@ -68,6 +71,9 @@ public:
     // (unmangled, no namespace prefix), and the call site resolves through
     // the bare C name.
     bool isExtern = false;
+    // CON-04: `thread_local` storage class is invalid on a function — set by
+    // the parser so sema can diagnose SemInvalidThreadLocalOnFunction.
+    bool isThreadLocal = false;
 
     FunctionDeclAST(const std::string& n, Type* ret,
                     std::vector<std::unique_ptr<ParamDeclAST>>& parameters,

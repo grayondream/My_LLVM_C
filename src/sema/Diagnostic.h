@@ -44,6 +44,8 @@ enum class DiagnosticCode {
     SemBitFieldInvalidType,
     SemBitFieldWidthOutOfRange,
     SemBitFieldNotAddressable,
+    // CON-04: thread_local applied to a non-variable (function) declaration.
+    SemInvalidThreadLocalOnFunction,
 
     WarnUninitializedVariable,
     WarnUnusedVariable,

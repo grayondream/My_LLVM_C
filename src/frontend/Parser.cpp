@@ -1,5 +1,6 @@
 #include "Parser.h"
 #include <memory>
+#include <functional>
 #include "ast/Decl.h"
 #include "ast/Mangle.h"
 #include "frontend/OperatorPrecedence.h"
@@ -1753,6 +1754,9 @@ bool Parser::isTypeStart() const {
         case TokenType::TOKEN_UINT32:
         case TokenType::TOKEN_UINT64:
         case TokenType::TOKEN_UINT128:
+        case TokenType::TOKEN_CHAR8:
+        case TokenType::TOKEN_CHAR16:
+        case TokenType::TOKEN_CHAR32:
         case TokenType::TOKEN_ISIZE:
         case TokenType::TOKEN_USIZE:
         case TokenType::TOKEN_FLOAT32:
@@ -1898,6 +1902,20 @@ Type* Parser::parseBaseType() {
             return TypeContext::instance().getUInt16();
         }
         case TokenType::TOKEN_UINT32: {
+            advance();
+            return TypeContext::instance().getUInt32();
+        }
+        // TYP-05: char8/char16/char32 are aliases of the unsigned fixed-width
+        // integers (design decision — no nominal char types).
+        case TokenType::TOKEN_CHAR8: {
+            advance();
+            return TypeContext::instance().getUInt8();
+        }
+        case TokenType::TOKEN_CHAR16: {
+            advance();
+            return TypeContext::instance().getUInt16();
+        }
+        case TokenType::TOKEN_CHAR32: {
             advance();
             return TypeContext::instance().getUInt32();
         }
@@ -2427,6 +2445,26 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
                 markNamespaceCName(fn->name);
             }
         }
+        return decl;
+    }
+
+    // CON-04: `thread_local T name = init;` — storage class for variables only.
+    // Functions are rejected at sema (SemInvalidThreadLocalOnFunction).
+    if (check(TokenType::TOKEN_THREAD_LOCAL)) {
+        advance();
+        auto decl = parseDeclaration();
+        // CON-04: `thread_local` applies to variables only; a function or other
+        // declaration keeps the flag for sema to diagnose.
+        std::function<void(DeclAST*)> markVar = [&markVar](DeclAST* d) {
+            if (auto* var = dynamic_cast<VarDeclAST*>(d)) {
+                var->isThreadLocal = true;
+            } else if (auto* multi = dynamic_cast<MultiVarDeclAST*>(d)) {
+                for (auto& sub : multi->decls) markVar(sub.get());
+            } else if (auto* fn = dynamic_cast<FunctionDeclAST*>(d)) {
+                fn->isThreadLocal = true;
+            }
+        };
+        markVar(decl.get());
         return decl;
     }
 

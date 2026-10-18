@@ -936,6 +936,10 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
             : llvm::GlobalVariable::ExternalLinkage;
         llvm::GlobalVariable* global = new llvm::GlobalVariable(
             ctx.getModule(), llvmType, type->isConst, linkage, initConstant, name);
+        // CON-04: `thread_local` → per-thread copy of the global.
+        if (isThreadLocal) {
+            global->setThreadLocal(true);
+        }
         // P1-05 / ANN-03: [[align(N)]] 全局变量对齐。
         if (declAlign) {
             global->setAlignment(llvm::Align(declAlign));
