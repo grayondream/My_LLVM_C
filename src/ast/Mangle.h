@@ -10,4 +10,6 @@ std::string mangleFunction(const std::string& name, const std::vector<Type*>& pa
 // Mark a function name as having C linkage (extern "C" / extern declarations):
 // it will be emitted with its plain, unmangled symbol name.
 void markCName(const std::string& name);
+void markNamespaceCName(const std::string& name);
 bool isCName(const std::string& name);
+bool isNamespaceCName(const std::string& name);

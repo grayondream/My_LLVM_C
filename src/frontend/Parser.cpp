@@ -2405,7 +2405,17 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
         advance();
         auto decl = parseDeclaration();
         if (auto* fn = dynamic_cast<FunctionDeclAST*>(decl.get())) {
-            markCName(fn->name);
+            fn->isExtern = true;
+            // F2: an extern declared inside a namespace body (`std::sqrt`) is
+            // reachable via the `ns::f` → bare-`f` fallback; a global-scope
+            // extern (prelude `malloc`/`strlen`) is NOT — namespace isolation
+            // preserved. `m_typeNamespacePrefix` is non-empty in namespace
+            // (and class) bodies.
+            if (m_typeNamespacePrefix.empty()) {
+                markCName(fn->name);
+            } else {
+                markNamespaceCName(fn->name);
+            }
         }
         return decl;
     }

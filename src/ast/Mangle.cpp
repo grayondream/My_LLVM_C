@@ -7,12 +7,30 @@ static std::unordered_set<std::string>& cNames() {
     return names;
 }
 
+// C-linkage externs declared *inside a namespace body* (e.g. `std::sqrt`).
+// Only these participate in the `ns::f` → bare-`f` resolution fallback, so
+// a global-scope extern (prelude `malloc`, `strlen`, ...) is NOT reachable
+// as `std::malloc` / `std::strlen` (F2 — namespace isolation preserved).
+static std::unordered_set<std::string>& namespaceCNames() {
+    static std::unordered_set<std::string> names;
+    return names;
+}
+
 void markCName(const std::string& name) {
     cNames().insert(name);
 }
 
+void markNamespaceCName(const std::string& name) {
+    cNames().insert(name);
+    namespaceCNames().insert(name);
+}
+
 bool isCName(const std::string& name) {
     return cNames().count(name) != 0;
+}
+
+bool isNamespaceCName(const std::string& name) {
+    return namespaceCNames().count(name) != 0;
 }
 
 std::string typeToMangled(Type* type) {

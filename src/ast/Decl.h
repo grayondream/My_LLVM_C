@@ -64,6 +64,10 @@ public:
     // AGG-10: class-body `static` method — no `this` insertion; sema rewrites
     // the name to the desugared `Class_method` global symbol.
     bool isStatic = false;
+    // C linkage: `extern` declaration — symbol name stays the plain C name
+    // (unmangled, no namespace prefix), and the call site resolves through
+    // the bare C name.
+    bool isExtern = false;
 
     FunctionDeclAST(const std::string& n, Type* ret,
                     std::vector<std::unique_ptr<ParamDeclAST>>& parameters,

@@ -145,4 +145,48 @@ TEST_F(StdMathTest, IsNanIsInfIsFinite) {
     )", "math_class.c"), 0);
 }
 
+// F1 (review): a non-extern user function whose name coincides with a libc
+// name must keep its namespace mangling — importing std.math must NOT hijack
+// its symbol into the libm extern declaration.
+TEST_F(StdMathTest, SameNamedUserFunctionKeepsNamespaceSymbol) {
+    EXPECT_EQ(runWithImports(R"(
+        import std.math;
+        namespace geo {
+        float64 cos(float64 x) {
+            return 42.0;
+        }
+        }
+        int32 main() {
+            if (geo::cos(0.0) != 42.0) return 1;
+            if (std::cos(0.0) != 1.0) return 2;
+            return 0;
+        }
+    )", "math_f1.c"), 0);
+}
+
+// F2 (review): a global-scope extern (prelude `malloc`) is NOT reachable as
+// `std::malloc` — namespace isolation preserved (compile-time diagnostic).
+TEST_F(StdMathTest, GlobalExternNotReachableViaNamespace) {
+    auto ast = smc::parseStdCPrelude(R"(
+        import std.math;
+        int32 main() {
+            void* p = std::malloc(100);
+            return p != null ? 0 : 1;
+        }
+    )", "math_f2.c");
+    ASSERT_NE(ast, nullptr);
+
+    smc::ModuleSearchPaths paths{{STD_DIR}};
+    std::set<std::string> loaded;
+    std::vector<std::string> errors;
+    smc::processImports(*ast, ".", paths, loaded, errors);
+    ASSERT_TRUE(errors.empty());
+
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    ASSERT_FALSE(analyzer.getErrors().empty());
+    EXPECT_NE(analyzer.getErrors()[0].message.find("undeclared"),
+              std::string::npos);
+}
+
 }  // namespace

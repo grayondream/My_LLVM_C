@@ -217,10 +217,13 @@ std::vector<std::string> SemanticAnalyzer::namespaceCandidates(const std::string
         // C-linkage extern functions keep their plain symbol name even when
         // spelled `ns::f`; allow a fallback to the bare C name so `std::sqrt`
         // resolves to the extern `sqrt` (registered under the bare key).
+        // F2: only namespace-declared externs (`isNamespaceCName`) participate —
+        // a global-scope extern like prelude `malloc` is NOT reachable as
+        // `std::malloc` (namespace isolation preserved).
         std::string bare = name;
         size_t pos = bare.rfind("::");
         if (pos != std::string::npos) bare = bare.substr(pos + 2);
-        if (isCName(bare)) candidates.push_back(bare);
+        if (isNamespaceCName(bare)) candidates.push_back(bare);
         return candidates;
     }
     std::string prefix = namespacePrefix; // e.g. "A_B_"
@@ -4716,8 +4719,10 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
     }
     // Namespace members are registered/emitted under a mangled key.
     // C-linkage extern functions keep their plain symbol name even inside a
-    // namespace (`std::sqrt` links to libm's `sqrt`): skip the prefix.
-    if (!isCName(node.name)) {
+    // namespace (`std::sqrt` links to libm's `sqrt`): skip the prefix only
+    // for the extern declaration itself (F1 — a same-named non-extern user
+    // function must keep its namespace mangling).
+    if (!node.isExtern) {
         node.name = scopedName(node.name);
     }
     // P1-03 / GEN-03: 返回类型与参数类型中的实例占位先解析。
