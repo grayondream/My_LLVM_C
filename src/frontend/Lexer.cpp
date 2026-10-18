@@ -86,6 +86,8 @@ static const std::unordered_map<std::string, TokenType> keywordMap = {
 
     // ===== 布尔（如果你支持）=====
     {"bool", TokenType::TOKEN_BOOL},
+    // TYP-24: nullptr is a synonym for the null pointer literal.
+    {"nullptr", TokenType::TOKEN_NULL},
 
     // ===== 新增关键字 =====
     {"true", TokenType::TOKEN_TRUE},

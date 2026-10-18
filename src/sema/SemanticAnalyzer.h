@@ -264,6 +264,7 @@ private:
     void visit(MemberAccessExprAST& node);
     void visit(MethodCallExprAST& node);
     void visit(SizeofExprAST& node);
+    void visit(OffsetOfExprAST& node);
     void visit(InitializerListExprAST& node);
     // PAR-11: lambda 表达式与立即调用。
     void visit(LambdaExprAST& node);

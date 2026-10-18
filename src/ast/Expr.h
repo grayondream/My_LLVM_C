@@ -431,9 +431,20 @@ class SizeofExprAST : public ExprAST {
 public:
     Type* sizeofType;
     std::unique_ptr<ExprAST> expr;
+    // PAR-14: `alignof(T)` — codegen returns the ABI alignment, not the size.
+    bool isAlignOf = false;
 
     SizeofExprAST(Type* type, std::unique_ptr<ExprAST> e = nullptr)
         : sizeofType(type), expr(std::move(e)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
+// PAR-14: `offsetof(T, member)` — layout query returning usize.
+class OffsetOfExprAST : public ExprAST {
+public:
+    Type* type;
+    std::string field;
+    OffsetOfExprAST(Type* t, std::string f) : type(t), field(std::move(f)) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 

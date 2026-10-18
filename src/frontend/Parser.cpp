@@ -532,6 +532,54 @@ std::unique_ptr<ExprAST> Parser::parseUnaryImpl() {
         return std::make_unique<SizeofExprAST>(nullptr, std::move(operand));
     }
 
+    // PAR-14: `alignof(T)` — type argument only, alignment query.
+    if (token->type == TokenType::TOKEN_ALIGNOF) {
+        advance(); // consume alignof
+        if (!expect(TokenType::TOKEN_LPAREN, "expected '(' after alignof")) {
+            return nullptr;
+        }
+        if (!isTypeStart() && !check(TokenType::TOKEN_CONST) &&
+            !check(TokenType::TOKEN_VOLATILE)) {
+            errorUnexpected("expected type after 'alignof('");
+            return nullptr;
+        }
+        Type* ty = parseType();
+        if (!ty) return nullptr;
+        if (!expect(TokenType::TOKEN_RPAREN, "expected ')' after alignof type")) {
+            return nullptr;
+        }
+        auto align = std::make_unique<SizeofExprAST>(ty);
+        align->isAlignOf = true;
+        return align;
+    }
+
+    // PAR-14: `offsetof(T, member)`.
+    if (token->type == TokenType::TOKEN_OFFSETOF) {
+        advance(); // consume offsetof
+        if (!expect(TokenType::TOKEN_LPAREN, "expected '(' after offsetof")) {
+            return nullptr;
+        }
+        if (!isTypeStart() && !check(TokenType::TOKEN_CONST) &&
+            !check(TokenType::TOKEN_VOLATILE)) {
+            errorUnexpected("expected type after 'offsetof('");
+            return nullptr;
+        }
+        Type* ty = parseType();
+        if (!ty) return nullptr;
+        if (!expect(TokenType::TOKEN_COMMA, "expected ',' in offsetof")) {
+            return nullptr;
+        }
+        auto nameTok = match(TokenType::TOKEN_IDENTIFIER);
+        if (!nameTok) {
+            errorUnexpected("expected member name in offsetof");
+            return nullptr;
+        }
+        if (!expect(TokenType::TOKEN_RPAREN, "expected ')' after offsetof")) {
+            return nullptr;
+        }
+        return std::make_unique<OffsetOfExprAST>(ty, nameTok->lexeme);
+    }
+
     // Handle prefix unary operators
     if (isUnaryOp(token->type)) {
         auto op = token->type;

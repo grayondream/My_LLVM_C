@@ -3311,7 +3311,14 @@ void SemanticAnalyzer::visit(SizeofExprAST& node) {
             emitError("invalid operand to sizeof", node);
         }
     }
-    node.type = typeCtx->getInt32();
+    node.type = node.isAlignOf ? typeCtx->getUSize() : typeCtx->getInt32();
+    node.isLValue = false;
+}
+
+// PAR-14: `offsetof(T, member)` — resolves to usize; the field name is
+// validated against the aggregate at codegen (layout query).
+void SemanticAnalyzer::visit(OffsetOfExprAST& node) {
+    node.type = typeCtx->getUSize();
     node.isLValue = false;
 }
 
@@ -5507,6 +5514,8 @@ void SemanticAnalyzer::visit(ExprAST& expr) {
     if (auto* e = dynamic_cast<PostfixIncDecExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<ArrayAccessExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<MemberAccessExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<SizeofExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<OffsetOfExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<MethodCallExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<SizeofExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<InitializerListExprAST*>(&expr)) { visit(*e); return; }

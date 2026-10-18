@@ -1,6 +1,7 @@
 #include "Expr.h"
 #include "Type.h"
 #include "Symbol.h"
+#include "LayoutBuilder.h"
 #include "codegen/CodegenContext.h"
 #include "support/Log.h"
 #include "Mangle.h"
@@ -2245,8 +2246,35 @@ llvm::Value* SizeofExprAST::codegen(CodegenContext& ctx) {
     llvm::Type* llvmType = ctx.getLLVMType(operandType);
     if (!llvmType) return nullptr;
 
+    if (isAlignOf) {
+        uint64_t align = ctx.getModule().getDataLayout().getABITypeAlign(llvmType).value();
+        return llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.getContext()), align);
+    }
     uint64_t size = ctx.getModule().getDataLayout().getTypeStoreSize(llvmType);
     return llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.getContext()), size);
+}
+
+// PAR-14: `offsetof(T, member)` — field offset via LayoutBuilder (single source
+// with compile_time.offset_of / codegen layout).
+llvm::Value* OffsetOfExprAST::codegen(CodegenContext& ctx) {
+    Type* t = type;
+    while (t && t->kind == TypeKind::Typedef)
+        t = static_cast<TypedefType*>(t)->aliasedType;
+    if (!t || (t->kind != TypeKind::Struct && t->kind != TypeKind::Class &&
+               t->kind != TypeKind::Union)) {
+        LOGE("offsetof requires an aggregate type");
+        return nullptr;
+    }
+    auto LR = LayoutBuilder::buildAggregate(t, ctx.getContext(),
+        ctx.getModule().getDataLayout(),
+        [&](Type* tt) { return ctx.getLLVMType(tt); },
+        [&](const std::string&) -> Type* { return nullptr; });
+    auto it = LR.fieldOffsets.find(field);
+    if (it == LR.fieldOffsets.end()) {
+        LOGE("unknown field '{}' in offsetof", field);
+        return nullptr;
+    }
+    return llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.getContext()), it->second);
 }
 
 llvm::Value* InitializerListExprAST::codegen(CodegenContext& ctx) {

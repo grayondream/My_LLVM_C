@@ -2382,3 +2382,21 @@ TEST_F(ParserTest, UnknownTypeNotDoubleReported) {
     }
     EXPECT_LE(unknownTypeCount, 1u);
 }
+
+// PAR-14: `alignof(T)` / `offsetof(T, member)` keyword forms parse.
+TEST_F(ParserTest, AlignofKeywordExpr) {
+    auto expr = parseExpr("alignof(int32)");
+    ASSERT_NE(expr, nullptr);
+    auto sized = dynamic_cast<SizeofExprAST*>(expr);
+    ASSERT_NE(sized, nullptr);
+    EXPECT_TRUE(sized->isAlignOf);
+}
+
+TEST_F(ParserTest, OffsetofKeywordExpr) {
+    auto tu = parse("struct S { int32 a; int32 b; };\n"
+                    "int32 f() { return offsetof(S, b); }");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_FALSE(tu->declarations.empty());
+    auto fn = dynamic_cast<FunctionDeclAST*>(tu->declarations[1].get());
+    ASSERT_NE(fn, nullptr);
+}
