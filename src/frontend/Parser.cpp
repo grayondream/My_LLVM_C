@@ -3094,6 +3094,15 @@ std::unique_ptr<ParamDeclAST> Parser::parseParamDecl() {
 
     auto param = std::make_unique<ParamDeclAST>(name, type);
     param->annotations = std::move(anns);
+    // FUN-09: default parameter `T name = const-expr`.
+    if (match(TokenType::TOKEN_ASSIGN)) {
+        param->defaultValue = parseExpr();
+        if (param->defaultValue) {
+            param->hasDefault = true;
+        } else {
+            errorUnexpected("expected constant expression after '=' in default parameter");
+        }
+    }
     return param;
 }
 

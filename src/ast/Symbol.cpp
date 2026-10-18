@@ -1,4 +1,5 @@
 #include "Symbol.h"
+#include "Decl.h"
 
 bool typesEqual(Type* a, Type* b) {
     if (!a || !b) return a == b;
@@ -288,22 +289,28 @@ void OverloadSet::add(Symbol* sym) {
 Symbol* OverloadSet::resolve(const std::vector<Type*>& argTypes) const {
     Symbol* best = nullptr;
     int bestRank = 0;
+    int bestDefaults = 0;
     bool ambiguous = false;
 
     for (auto* sym : candidates) {
         if (sym->type->kind != TypeKind::Function) continue;
         auto* funcType = static_cast<FunctionType*>(sym->type);
         size_t fixedCount = funcType->paramTypes.size();
+        size_t defaultCount = sym->decl ? static_cast<size_t>(sym->decl->defaultArgCount) : 0;
+        size_t minArgs = fixedCount > defaultCount ? fixedCount - defaultCount : 0;
 
+        // FUN-09: a candidate is viable for argCount in [minArgs, paramCount];
+        // varargs accept any count >= minArgs.
         if (funcType->isVarArg) {
-            if (argTypes.size() < fixedCount) continue;
+            if (argTypes.size() < minArgs) continue;
         } else {
-            if (argTypes.size() != fixedCount) continue;
+            if (argTypes.size() < minArgs || argTypes.size() > fixedCount) continue;
         }
 
         int totalRank = 0;
         bool viable = true;
-        for (size_t i = 0; i < fixedCount; ++i) {
+        size_t checked = std::min(argTypes.size(), fixedCount);
+        for (size_t i = 0; i < checked; ++i) {
             int rank = conversionRank(argTypes[i], funcType->paramTypes[i]);
             if (rank < 0) {
                 viable = false;
@@ -316,11 +323,13 @@ Symbol* OverloadSet::resolve(const std::vector<Type*>& argTypes) const {
         // Prefer non-vararg candidates over vararg ones on equal conversions.
         if (funcType->isVarArg) totalRank += 1;
 
-        if (best == nullptr || totalRank < bestRank) {
+        if (best == nullptr || totalRank < bestRank ||
+            (totalRank == bestRank && defaultCount < bestDefaults)) {
             best = sym;
             bestRank = totalRank;
+            bestDefaults = static_cast<int>(defaultCount);
             ambiguous = false;
-        } else if (totalRank == bestRank) {
+        } else if (totalRank == bestRank && defaultCount == bestDefaults) {
             ambiguous = true;
         }
     }

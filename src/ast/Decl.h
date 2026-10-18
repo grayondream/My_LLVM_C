@@ -51,6 +51,9 @@ public:
     Type* type;
     // P1-05 / ANN-01: 参数注解（[[nonnull]] 等）。
     std::vector<Annotation> annotations;
+    // FUN-09: default parameter `T name = const-expr` (trailing params only).
+    bool hasDefault = false;
+    std::unique_ptr<ExprAST> defaultValue;
 
     ParamDeclAST(const std::string& n, Type* t)
         : name(n), type(t) {}
@@ -74,6 +77,9 @@ public:
     // CON-04: `thread_local` storage class is invalid on a function — set by
     // the parser so sema can diagnose SemInvalidThreadLocalOnFunction.
     bool isThreadLocal = false;
+    // FUN-09: number of trailing parameters carrying a default value. Filled by
+    // sema at declaration; overload resolution reads it via Symbol::decl.
+    int defaultArgCount = 0;
 
     FunctionDeclAST(const std::string& n, Type* ret,
                     std::vector<std::unique_ptr<ParamDeclAST>>& parameters,

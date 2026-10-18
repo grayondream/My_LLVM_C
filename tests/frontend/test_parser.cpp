@@ -2332,3 +2332,17 @@ TEST_F(ParserTest, AtomicQualifierClonesType) {
     EXPECT_FALSE(bv->type->isAtomic);
     EXPECT_EQ(bv->type, TypeContext::instance().getInt32());
 }
+
+// FUN-09: default parameter `T name = const-expr` parses; only trailing
+// parameters may carry a default (enforced at sema).
+TEST_F(ParserTest, DefaultArgParses) {
+    auto tu = parse("int32 f(int32 x, int32 y = 5) { return x + y; }");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_FALSE(tu->declarations.empty());
+    auto fn = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(fn, nullptr);
+    ASSERT_EQ(fn->params.size(), 2u);
+    EXPECT_FALSE(fn->params[0]->hasDefault);
+    EXPECT_TRUE(fn->params[1]->hasDefault);
+    EXPECT_NE(fn->params[1]->defaultValue, nullptr);
+}

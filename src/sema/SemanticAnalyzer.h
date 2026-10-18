@@ -29,6 +29,9 @@ public:
     void enterScope();
     void exitScope();
     bool declare(const std::string& name, Type* type);
+    // FUN-09: like declare, but returns the created Symbol (null on failure)
+    // so the caller can attach metadata (e.g. the FunctionDeclAST back-pointer).
+    Symbol* declareSymbol(const std::string& name, Type* type);
     Symbol* lookup(const std::string& name);
 
     Type* checkBinaryTypes(BinaryOp op, Type* left, Type* right, ExprAST& node);
@@ -82,6 +85,11 @@ public:
     std::unordered_map<std::string, std::string> m_deprecatedMsgs;
     // nonnull 形参：函数名 → (参数下标, 参数名)。
     std::unordered_map<std::string, std::vector<std::pair<size_t, std::string>>> m_nonnullParams;
+    // FUN-09: 方法默认参数计数，键 = definingClass 名 + "::" + 方法名
+    // （resolveMethod 区间化用；定义类为沿继承链的实际提供者）。
+    std::unordered_map<std::string, int> m_methodDefaultCounts;
+    // FUN-09: 方法声明回指针（类名::方法名 → decl），调用点折叠默认值用。
+    std::unordered_map<std::string, FunctionDeclAST*> m_methodDecls;
     // 整树交给编译期求值器（含 compile_time 成员值与 constexpr 委托）。
     std::optional<ConstValue> evalCompileTime(ExprAST* expr, ASTNode& at);
     // MethodCall 形态（compile_time.static_assert/size_of/...）钩子：返回 true

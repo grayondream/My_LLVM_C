@@ -5,6 +5,8 @@
 #include "llvm/IR/Value.h"
 #include "ast/Type.h"
 
+class FunctionDeclAST;
+
 class Symbol {
 public:
     Symbol(const std::string& name, Type* type, llvm::Value* value = nullptr)
@@ -21,6 +23,11 @@ public:
     std::string declFile;
     int declLine = 0;
     int declColumn = 0;
+
+    // FUN-09: back-pointer to the declaring FunctionDeclAST, set by sema so
+    // overload resolution can read default-argument counts. Null for
+    // non-function symbols and prelude/declared-only functions.
+    FunctionDeclAST* decl = nullptr;
 };
 
 // Structural type equality (used by conversionRank and overload matching).

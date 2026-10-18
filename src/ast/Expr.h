@@ -13,6 +13,17 @@
 class ParamDeclAST;
 class CompoundStmtAST;
 
+// FUN-09: a folded compile-time default argument value, carried on the call
+// node from sema to codegen (avoids a sema-layer dependency from ast/).
+struct DefaultArgValue {
+    bool isInt = false;
+    long long intVal = 0;
+    bool isDouble = false;
+    double doubleVal = 0;
+    bool isChar = false;
+    char charVal = 0;
+};
+
 #include "llvm/IR/Value.h"
 
 class CodegenContext;
@@ -203,6 +214,9 @@ public:
     // Parameter types of the overload chosen by semantic analysis. Empty when
     // unresolved (e.g. codegen is run without semantic analysis).
     std::vector<Type*> resolvedParamTypes;
+    // FUN-09: folded values for trailing default arguments (position i fills
+    // resolvedParamTypes[args.size()+i]).
+    std::vector<DefaultArgValue> defaultArgValues;
     // Set by semantic analysis for calls through a function-pointer variable.
     bool isIndirect = false;
     // Set by semantic analysis when this is the builtin `print`/`println`.
@@ -391,6 +405,10 @@ public:
     // Declared parameter types (incl. this at index 0) filled by sema so
     // codegen mangles against the definition site. Mirror of CallExprAST.
     std::vector<Type*> resolvedParamTypes;
+
+    // FUN-09: folded values for trailing default arguments (position i fills
+    // resolvedParamTypes[args.size()+1+i] — index 0 is `this`).
+    std::vector<DefaultArgValue> defaultArgValues;
 
     // P1-06: set by sema when this is a builtin str/string method; codegen
     // dispatches on it before the class-method path.

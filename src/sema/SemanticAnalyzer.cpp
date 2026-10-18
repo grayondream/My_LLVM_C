@@ -144,6 +144,10 @@ void SemanticAnalyzer::exitScope() {
 }
 
 bool SemanticAnalyzer::declare(const std::string& name, Type* type) {
+    return declareSymbol(name, type) != nullptr;
+}
+
+Symbol* SemanticAnalyzer::declareSymbol(const std::string& name, Type* type) {
     // An exported declaration of a participating module is also visible to
     // importers, so it is registered in the global scope; everything else at
     // module top level stays in the module's private scope (MOD-05/06).
@@ -154,9 +158,9 @@ bool SemanticAnalyzer::declare(const std::string& name, Type* type) {
     Symbol* sym = new Symbol(name, type);
     if (!target->declare(name, sym)) {
         delete sym;
-        return false;
+        return nullptr;
     }
-    return true;
+    return sym;
 }
 
 Symbol* SemanticAnalyzer::lookup(const std::string& name) {
@@ -729,13 +733,16 @@ Type* SemanticAnalyzer::checkFunctionCall(const std::string& name, const std::ve
             if (sym->type->kind != TypeKind::Function) continue;
             auto* funcType = static_cast<FunctionType*>(sym->type);
             size_t fixedCount = funcType->paramTypes.size();
+            size_t defaultCount = sym->decl ? static_cast<size_t>(sym->decl->defaultArgCount) : 0;
+            size_t minArgs = fixedCount > defaultCount ? fixedCount - defaultCount : 0;
             if (funcType->isVarArg) {
-                if (argTypes.size() < fixedCount) continue;
-            } else if (funcType->paramTypes.size() != argTypes.size()) {
+                if (argTypes.size() < minArgs) continue;
+            } else if (argTypes.size() < minArgs || argTypes.size() > fixedCount) {
                 continue;
             }
             bool viable = true;
-            for (size_t i = 0; i < fixedCount; ++i) {
+            size_t checked = std::min(argTypes.size(), fixedCount);
+            for (size_t i = 0; i < checked; ++i) {
                 if (conversionRank(argTypes[i], funcType->paramTypes[i]) < 0) {
                     viable = false;
                     break;
@@ -760,10 +767,38 @@ Type* SemanticAnalyzer::checkFunctionCall(const std::string& name, const std::ve
     }
 
     FunctionType* funcType = static_cast<FunctionType*>(resolved->type);
-    if (!funcType->isVarArg && args.size() != funcType->paramTypes.size()) {
-        emitError("wrong number of arguments to function '" + name + "': expected " 
-            + std::to_string(funcType->paramTypes.size()) + ", got " + std::to_string(args.size()), node);
+    size_t defaultCount = resolved->decl ? static_cast<size_t>(resolved->decl->defaultArgCount) : 0;
+    size_t minArgs = funcType->paramTypes.size() > defaultCount
+                         ? funcType->paramTypes.size() - defaultCount : 0;
+    if (!funcType->isVarArg &&
+        (args.size() > funcType->paramTypes.size() || args.size() < minArgs)) {
+        emitError("wrong number of arguments to function '" + name + "': expected "
+            + std::to_string(minArgs) + ".." + std::to_string(funcType->paramTypes.size())
+            + ", got " + std::to_string(args.size()), node);
         return nullptr;
+    }
+
+    // FUN-09: stash default-argument values on the call node for codegen.
+    if (args.size() < funcType->paramTypes.size()) {
+        if (auto* call = dynamic_cast<CallExprAST*>(&node)) {
+            if (resolved->decl) {
+                for (size_t i = args.size(); i < funcType->paramTypes.size(); ++i) {
+                    DefaultArgValue dv;
+                    if (auto* def = resolved->decl->params[i]->defaultValue.get()) {
+                        auto v = evaluateConstexpr(def);
+                        if (v) {
+                            switch (v->type) {
+                                case ConstValue::INT:   dv.isInt = true; dv.intVal = v->intVal; break;
+                                case ConstValue::DOUBLE: dv.isDouble = true; dv.doubleVal = v->doubleVal; break;
+                                case ConstValue::CHAR:   dv.isChar = true; dv.charVal = v->charVal; break;
+                                default: break;
+                            }
+                        }
+                    }
+                    call->defaultArgValues.push_back(dv);
+                }
+            }
+        }
     }
 
     if (outFuncType) *outFuncType = funcType;
@@ -3150,6 +3185,28 @@ void SemanticAnalyzer::visit(MethodCallExprAST& node) {
     // Store the declared parameter types (incl. this) so codegen mangles
     // against the definition site — required for decayed arguments.
     node.resolvedParamTypes = funcType->paramTypes;
+    // FUN-09: fold default values for trailing params not supplied.
+    if (node.args.size() + 1 < funcType->paramTypes.size()) {
+        auto dit = m_methodDecls.find(definingClass->name + "::" + node.methodName);
+        if (dit != m_methodDecls.end() && dit->second) {
+            auto* decl = dit->second;
+            for (size_t i = node.args.size() + 1; i < funcType->paramTypes.size(); ++i) {
+                DefaultArgValue dv;
+                if (i < decl->params.size() && decl->params[i]->defaultValue) {
+                    auto v = evaluateConstexpr(decl->params[i]->defaultValue.get());
+                    if (v) {
+                        switch (v->type) {
+                            case ConstValue::INT:   dv.isInt = true; dv.intVal = v->intVal; break;
+                            case ConstValue::DOUBLE: dv.isDouble = true; dv.doubleVal = v->doubleVal; break;
+                            case ConstValue::CHAR:   dv.isChar = true; dv.charVal = v->charVal; break;
+                            default: break;
+                        }
+                    }
+                }
+                node.defaultArgValues.push_back(dv);
+            }
+        }
+    }
     node.type = funcType->returnType;
     node.isLValue = false;
     // P1-05 评审 I3: 弃用方法使用（W3004；键 = 裸成员名，跨类同名误报已挂账）。
@@ -4502,6 +4559,13 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
             } else {
                 auto* thisType = new Type(TypeKind::Pointer, classType);
                 auto thisParam = std::make_unique<ParamDeclAST>("this", thisType);
+                // FUN-09: 登记方法默认参数计数（定义类沿继承链 = classType）。
+                {
+                    int dc = 0;
+                    for (auto& p : method->params) if (p->hasDefault) ++dc;
+                    m_methodDefaultCounts[classType->name + "::" + method->name] = dc;
+                    m_methodDecls[classType->name + "::" + method->name] = method.get();
+                }
                 method->params.insert(method->params.begin(), std::move(thisParam));
                 visit(*method);
             }
@@ -4806,13 +4870,36 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
         constexprFunctions[node.name] = &node;
     }
 
+    // FUN-09: validate default parameters — only trailing params may carry a
+    // default, and each default must be a compile-time constant. Count them for
+    // overload resolution.
+    {
+        bool seenDefault = false;
+        for (auto& param : node.params) {
+            if (param->hasDefault) {
+                seenDefault = true;
+                auto v = evaluateConstexpr(param->defaultValue.get());
+                if (!v) {
+                    emitError("default argument must be a compile-time constant", *param);
+                }
+            } else if (seenDefault) {
+                emitError("default arguments must be trailing (a parameter without a default cannot follow one with a default)", *param);
+            }
+        }
+        node.defaultArgCount = 0;
+        for (auto& param : node.params) {
+            if (param->hasDefault) ++node.defaultArgCount;
+        }
+    }
+
     std::vector<Type*> paramTypes;
     for (auto& param : node.params) {
         paramTypes.push_back(param->type);
     }
     auto* funcType = new FunctionType(node.returnType, std::move(paramTypes), node.isVarArg);
     std::string signature = mangleFunction(node.name, funcType->paramTypes);
-    if (!declare(node.name, funcType)) {
+    Symbol* declaredSym = declareSymbol(node.name, funcType);
+    if (!declaredSym) {
         // A matching declaration already exists. That is legal for repeated
         // prototypes or a prototype followed by its definition; only two
         // definitions of the same signature are an error.
@@ -4821,8 +4908,9 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
         } else if (node.body) {
             definedFunctions.insert(signature);
         }
-    } else if (node.body) {
-        definedFunctions.insert(signature);
+    } else {
+        declaredSym->decl = &node;
+        if (node.body) definedFunctions.insert(signature);
     }
 
     FunctionDeclAST* prevFunc = currentFunction;
@@ -5428,21 +5516,32 @@ bool SemanticAnalyzer::isDerivedFrom(Type* derived, Type* base) const {
 Symbol* SemanticAnalyzer::resolveMethod(ClassType* classType, const std::string& methodName,
                                         const std::vector<Type*>& argTypes,
                                         ClassType** defining, int depth) {
+    auto defaultCountFor = [&](const std::string& name) -> size_t {
+        auto it = m_methodDefaultCounts.find(classType->name + "::" + name);
+        return it != m_methodDefaultCounts.end() ? static_cast<size_t>(it->second) : 0;
+    };
+    // FUN-09: argCount viable in [minArgs, fixed-1(this)].
+    auto viableArity = [](size_t fixed, size_t minArgs, size_t argc) {
+        return argc >= minArgs && argc < fixed;
+    };
+
     for (auto& method : classType->methods) {
         if (method.first == methodName) {
-            if (method.second->paramTypes.size() - 1 == argTypes.size()) {
-                bool match = true;
-                for (size_t i = 0; i < argTypes.size(); ++i) {
-                    if (method.second->paramTypes[i + 1] != argTypes[i]) {
-                        match = false;
-                        break;
-                    }
+            size_t fixed = method.second->paramTypes.size(); // 含 this
+            size_t defaultCount = defaultCountFor(methodName);
+            size_t minArgs = fixed > 1 + defaultCount ? fixed - 1 - defaultCount : 0;
+            if (!viableArity(fixed, minArgs, argTypes.size())) continue;
+            bool match = true;
+            for (size_t i = 0; i < argTypes.size(); ++i) {
+                if (method.second->paramTypes[i + 1] != argTypes[i]) {
+                    match = false;
+                    break;
                 }
-                if (match) {
-                    Symbol* sym = new Symbol(methodName, method.second);
-                    if (defining) *defining = classType;
-                    return sym;
-                }
+            }
+            if (match) {
+                Symbol* sym = new Symbol(methodName, method.second);
+                if (defining) *defining = classType;
+                return sym;
             }
         }
     }
@@ -5454,7 +5553,10 @@ Symbol* SemanticAnalyzer::resolveMethod(ClassType* classType, const std::string&
     for (auto& method : classType->methods) {
         if (method.first != methodName) continue;
         auto* funcType = method.second;
-        if (funcType->paramTypes.size() - 1 != argTypes.size()) continue;
+        size_t fixed = funcType->paramTypes.size(); // 含 this
+        size_t defaultCount = defaultCountFor(methodName);
+        size_t minArgs = fixed > 1 + defaultCount ? fixed - 1 - defaultCount : 0;
+        if (!viableArity(fixed, minArgs, argTypes.size())) continue;
         bool match = true;
         for (size_t i = 0; i < argTypes.size(); ++i) {
             if (!argTypes[i] ||

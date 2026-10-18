@@ -1264,6 +1264,31 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
         argsV.push_back(argVal);
     }
 
+    // FUN-09: append default-argument constants for trailing params not
+    // supplied at the call site.
+    if (!resolvedParamTypes.empty() && args.size() < resolvedParamTypes.size()) {
+        size_t defIdx = 0;
+        for (size_t i = args.size(); i < resolvedParamTypes.size(); ++i, ++defIdx) {
+            llvm::Type* paramLLVM = ctx.getLLVMType(resolvedParamTypes[i]);
+            llvm::Value* defVal = nullptr;
+            if (defIdx < defaultArgValues.size()) {
+                const auto& dv = defaultArgValues[defIdx];
+                if (dv.isInt) {
+                    defVal = llvm::ConstantInt::get(paramLLVM, static_cast<uint64_t>(dv.intVal), /*isSigned=*/true);
+                } else if (dv.isDouble) {
+                    defVal = llvm::ConstantFP::get(paramLLVM, dv.doubleVal);
+                } else if (dv.isChar) {
+                    defVal = llvm::ConstantInt::get(paramLLVM, static_cast<uint64_t>(dv.charVal), /*isSigned=*/true);
+                }
+            }
+            if (!defVal) {
+                LOGE("missing default argument value for param {}", i);
+                return nullptr;
+            }
+            argsV.push_back(defVal);
+        }
+    }
+
     if (calleeFn->isVarArg()) {
         if (argsV.size() < calleeFn->arg_size()) {
             LOGE("function {} expects at least {} args, got {}", callee, calleeFn->arg_size(), argsV.size());
@@ -1381,6 +1406,31 @@ llvm::Value* MethodCallExprAST::codegen(CodegenContext& ctx) {
             argVal = emitStringArgCopy(ctx, argVal, resolvedParamTypes[i + 1]);
         }
         argsV.push_back(argVal);
+    }
+
+    // FUN-09: append default-argument constants for trailing params not
+    // supplied at the call site (index 0 of resolvedParamTypes is `this`).
+    if (!resolvedParamTypes.empty() && args.size() + 1 < resolvedParamTypes.size()) {
+        size_t defIdx = 0;
+        for (size_t i = args.size() + 1; i < resolvedParamTypes.size(); ++i, ++defIdx) {
+            llvm::Type* paramLLVM = ctx.getLLVMType(resolvedParamTypes[i]);
+            llvm::Value* defVal = nullptr;
+            if (defIdx < defaultArgValues.size()) {
+                const auto& dv = defaultArgValues[defIdx];
+                if (dv.isInt) {
+                    defVal = llvm::ConstantInt::get(paramLLVM, static_cast<uint64_t>(dv.intVal), /*isSigned=*/true);
+                } else if (dv.isDouble) {
+                    defVal = llvm::ConstantFP::get(paramLLVM, dv.doubleVal);
+                } else if (dv.isChar) {
+                    defVal = llvm::ConstantInt::get(paramLLVM, static_cast<uint64_t>(dv.charVal), /*isSigned=*/true);
+                }
+            }
+            if (!defVal) {
+                LOGE("missing default argument value for method param {}", i);
+                return nullptr;
+            }
+            argsV.push_back(defVal);
+        }
     }
 
     if (argsV.size() != calleeFn->arg_size()) {
