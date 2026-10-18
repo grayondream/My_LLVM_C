@@ -1,0 +1,74 @@
+// ===== std.math — 基础数学 (P1-09 / STD-13) =====
+// Import with `import std.math;` and use as `std::sqrt(...)` etc.
+// libc 绑定（需要 -lm 链接）+ constexpr 常量 + 位级浮点分类。
+// 浮点分类（isnan/isinf/is_finite）位级纯语言实现（IEEE754），不依赖 libc
+// 分类宏；64 位掩码经 `ul` 字面量 + 移位构造（超 int64 常量折叠受限）。
+module std.math;
+
+export namespace std {
+
+// libc 绑定声明在 namespace 内，经 import 后以 std::sqrt 等限定名访问。
+// 链接需 -lm（JIT 经进程符号解析；CLI 用 cc -lm）。
+extern float64 sqrt(float64 x);
+extern float32 sqrtf(float32 x);
+extern float64 fabs(float64 x);
+extern float32 fabsf(float32 x);
+extern float64 floor(float64 x);
+extern float32 floorf(float32 x);
+extern float64 ceil(float64 x);
+extern float32 ceilf(float32 x);
+extern float64 round(float64 x);
+extern float32 roundf(float32 x);
+extern float64 trunc(float64 x);
+extern float32 truncf(float32 x);
+extern float64 pow(float64 x, float64 y);
+extern float32 powf(float32 x, float32 y);
+extern float64 cos(float64 x);
+extern float32 cosf(float32 x);
+extern float64 sin(float64 x);
+extern float32 sinf(float32 x);
+
+constexpr float64 PI = 3.14159265358979323846;
+constexpr float64 E  = 2.71828182845904523536;
+
+// ----- 位级浮点分类（IEEE754） -----
+
+// float64：指数 11 位（偏移 1023），尾数 52 位。
+bool isnan(float64 x) {
+    uint64 bits = (uint64)reinterpret_cast<int64>(x);
+    // 指数段全 1：0x7FF << 52
+    uint64 exp_all1 = 0x7FFul;
+    exp_all1 = exp_all1 << 52;
+    // 尾数段全 1：0xF..F（52 位）
+    uint64 frac_all1 = 0;
+    uint64 t = 1;
+    t = t << 52;
+    t = t - 1;
+    frac_all1 = t;
+    if ((bits & exp_all1) != exp_all1) return false;   // 指数不全 1 → 非 NaN/Inf
+    if ((bits & frac_all1) == 0) return false;         // 尾数全 0 → ±Inf
+    return true;
+}
+
+bool isinf(float64 x) {
+    uint64 bits = (uint64)reinterpret_cast<int64>(x);
+    uint64 exp_all1 = 0x7FFul;
+    exp_all1 = exp_all1 << 52;
+    uint64 frac_all1 = 0;
+    uint64 t = 1;
+    t = t << 52;
+    t = t - 1;
+    frac_all1 = t;
+    if ((bits & exp_all1) != exp_all1) return false;
+    if ((bits & frac_all1) != 0) return false;         // 尾数非 0 → NaN
+    return true;
+}
+
+bool is_finite(float64 x) {
+    uint64 bits = (uint64)reinterpret_cast<int64>(x);
+    uint64 exp_all1 = 0x7FFul;
+    exp_all1 = exp_all1 << 52;
+    return (bits & exp_all1) != exp_all1;
+}
+
+} // namespace std

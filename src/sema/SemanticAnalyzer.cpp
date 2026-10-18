@@ -214,6 +214,13 @@ std::vector<std::string> SemanticAnalyzer::namespaceCandidates(const std::string
     std::vector<std::string> candidates;
     if (name.find("::") != std::string::npos || name.find('.') != std::string::npos) {
         candidates.push_back(mangleNamespaceName(name));
+        // C-linkage extern functions keep their plain symbol name even when
+        // spelled `ns::f`; allow a fallback to the bare C name so `std::sqrt`
+        // resolves to the extern `sqrt` (registered under the bare key).
+        std::string bare = name;
+        size_t pos = bare.rfind("::");
+        if (pos != std::string::npos) bare = bare.substr(pos + 2);
+        if (isCName(bare)) candidates.push_back(bare);
         return candidates;
     }
     std::string prefix = namespacePrefix; // e.g. "A_B_"
@@ -4708,7 +4715,11 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
         if (!nn.empty()) m_nonnullParams[node.name] = std::move(nn);
     }
     // Namespace members are registered/emitted under a mangled key.
-    node.name = scopedName(node.name);
+    // C-linkage extern functions keep their plain symbol name even inside a
+    // namespace (`std::sqrt` links to libm's `sqrt`): skip the prefix.
+    if (!isCName(node.name)) {
+        node.name = scopedName(node.name);
+    }
     // P1-03 / GEN-03: 返回类型与参数类型中的实例占位先解析。
     node.returnType = resolveTypeInstance(node.returnType, node);
     for (auto& p : node.params) p->type = resolveTypeInstance(p->type, node);

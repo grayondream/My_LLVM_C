@@ -1,0 +1,148 @@
+// P1-09 (STD-13): std.math 基础数学端到端测试（libc 绑定 + 常量 + 位级分类）。
+// fixture 仿 tests/e2e/test_std_string_lib.cpp 的 runWithImports。
+
+#include <gtest/gtest.h>
+
+#include <cstdlib>
+#include <set>
+#include <string>
+
+#include "ast/Decl.h"
+#include "codegen/CodegenContext.h"
+#include "driver/ModuleLoader.h"
+#include "driver/StdPrelude.h"
+#include "frontend/Lexer.h"
+#include "frontend/Parser.h"
+#include "sema/SemanticAnalyzer.h"
+#include "support/Log.h"
+
+#include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
+#include "llvm/ExecutionEngine/Orc/LLJIT.h"
+#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
+#include "llvm/IR/Verifier.h"
+#include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/raw_ostream.h"
+
+#include <spdlog/spdlog.h>
+
+namespace {
+
+class StdMathTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        spdlog::set_level(spdlog::level::off);
+        static bool init = false;
+        if (!init) {
+            llvm::InitializeAllTargetInfos();
+            llvm::InitializeAllTargets();
+            llvm::InitializeAllTargetMCs();
+            llvm::InitializeAllAsmParsers();
+            llvm::InitializeAllAsmPrinters();
+            init = true;
+        }
+    }
+};
+
+static int runWithImports(const std::string& source, const std::string& filename) {
+    auto ast = smc::parseStdCPrelude(source, filename);
+    if (!ast) return -1;
+
+    smc::ModuleSearchPaths paths{{STD_DIR}};
+    std::set<std::string> loaded;
+    std::vector<std::string> errors;
+    smc::processImports(*ast, ".", paths, loaded, errors);
+    if (!errors.empty()) return -1;
+
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    if (!analyzer.getErrors().empty()) return -1;
+
+    CodegenContext ctx;
+    ctx.setSourceFile(filename);
+    ast->codegen(ctx);
+    ctx.finalizeDebugInfo();
+
+    std::string ve;
+    llvm::raw_string_ostream vs(ve);
+    if (llvm::verifyModule(ctx.getModule(), &vs)) return -1;
+
+    auto jtmb = llvm::orc::JITTargetMachineBuilder::detectHost();
+    if (!jtmb) return -1;
+    auto jit = llvm::orc::LLJITBuilder().setJITTargetMachineBuilder(std::move(*jtmb)).create();
+    if (!jit) return -1;
+
+    auto ts = llvm::orc::ThreadSafeModule(ctx.takeModule(), ctx.takeContext());
+    if (auto e = (*jit)->addIRModule(std::move(ts))) return -1;
+
+    auto sym = (*jit)->lookup("main");
+    if (!sym) return -1;
+    return ((int (*)())(intptr_t)sym->getValue())();
+}
+
+TEST_F(StdMathTest, SqrtAndSqrtf) {
+    EXPECT_EQ(runWithImports(R"(
+        import std.math;
+        int32 main() {
+            if (std::sqrt(16.0) != 4.0) return 1;
+            if (std::sqrtf(9.0f) != 3.0f) return 2;
+            if (std::sqrt(2.0) < 1.41 || std::sqrt(2.0) > 1.42) return 3;
+            return 0;
+        }
+    )", "math_sqrt.c"), 0);
+}
+
+TEST_F(StdMathTest, AbsFloorCeilRoundTrunc) {
+    EXPECT_EQ(runWithImports(R"(
+        import std.math;
+        int32 main() {
+            if (std::fabs(-2.5) != 2.5) return 1;
+            if (std::floor(3.7) != 3.0) return 2;
+            if (std::ceil(3.2) != 4.0) return 3;
+            if (std::round(2.5) != 3.0) return 4;
+            if (std::trunc(-2.7) != -2.0) return 5;
+            return 0;
+        }
+    )", "math_floor.c"), 0);
+}
+
+TEST_F(StdMathTest, PowCosSin) {
+    EXPECT_EQ(runWithImports(R"(
+        import std.math;
+        int32 main() {
+            if (std::pow(2.0, 10.0) != 1024.0) return 1;
+            if (std::cos(0.0) != 1.0) return 2;
+            if (std::sin(0.0) != 0.0) return 3;
+            return 0;
+        }
+    )", "math_pow.c"), 0);
+}
+
+TEST_F(StdMathTest, ConstantsPIAndE) {
+    EXPECT_EQ(runWithImports(R"(
+        import std.math;
+        int32 main() {
+            if (std::PI < 3.1415 || std::PI > 3.1416) return 1;
+            if (std::E < 2.7182 || std::E > 2.7183) return 2;
+            return 0;
+        }
+    )", "math_const.c"), 0);
+}
+
+TEST_F(StdMathTest, IsNanIsInfIsFinite) {
+    EXPECT_EQ(runWithImports(R"(
+        import std.math;
+        int32 main() {
+            float64 nan = 0.0 / 0.0;
+            float64 inf = 1.0 / 0.0;
+            if (!std::isnan(nan)) return 1;
+            if (std::isnan(1.5)) return 2;
+            if (!std::isinf(inf)) return 3;
+            if (std::isinf(1.5)) return 4;
+            if (!std::is_finite(1.5)) return 5;
+            if (std::is_finite(inf)) return 6;
+            return 0;
+        }
+    )", "math_class.c"), 0);
+}
+
+}  // namespace
