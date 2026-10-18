@@ -414,6 +414,13 @@ public:
     // dispatches on it before the class-method path.
     BuiltinMethod builtinMethod = BuiltinMethod::None;
 
+    // CT-07: compile_time reflection call (name_of/fields_of/attributes_of).
+    // Sema records data in ReflectionRegistry and sets the kind + target type;
+    // codegen materializes the global array/slice and returns it.
+    enum class ReflectionKind { None, NameOf, FieldsOf, AttributesOf };
+    ReflectionKind reflectKind = ReflectionKind::None;
+    Type* reflectType = nullptr;
+
     MethodCallExprAST(std::unique_ptr<ExprAST> obj, const std::string& method,
                       std::vector<std::unique_ptr<ExprAST>> arguments)
         : object(std::move(obj)), methodName(method), args(std::move(arguments)) {}

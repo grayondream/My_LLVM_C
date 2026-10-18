@@ -1,5 +1,6 @@
 #include "sema/SemanticAnalyzer.h"
 #include "sema/CompileTimeEvaluator.h"
+#include "sema/ReflectionRegistry.h"
 #include "ast/Expr.h"
 #include "ast/Stmt.h"
 #include "ast/Decl.h"
@@ -1156,6 +1157,12 @@ bool SemanticAnalyzer::tryAnalyzeCompileTimeCall(MethodCallExprAST& node) {
         return true;
     }
 
+    // CT-07: compile_time reflection — name_of / fields_of / attributes_of.
+    if (node.methodName == "name_of" || node.methodName == "fields_of" ||
+        node.methodName == "attributes_of") {
+        return analyzeReflectionCall(node);
+    }
+
     auto v = ctEval().eval(&node, node);
     if (v && v->type == ConstValue::INT) {
         node.ctInt = v->intVal;
@@ -1178,9 +1185,79 @@ bool SemanticAnalyzer::tryAnalyzeCompileTimeCall(MethodCallExprAST& node) {
     return true;
 }
 
+// CT-07: compile_time.name_of/fields_of/attributes_of(T).
+bool SemanticAnalyzer::analyzeReflectionCall(MethodCallExprAST& node) {
+    node.ctHandled = true;
+    node.isLValue = false;
 
-// P1-04 评审 I1: 以已折叠实参解释 constexpr 函数体（DEC-05 共享内核；
-// 实参的 CT 折叠由 CompileTimeEvaluator 负责，避免整树委托互递归）。
+    if (node.args.size() != 1) {
+        emitError("compile_time." + node.methodName + " requires exactly one type argument", node);
+        node.type = nullptr;
+        return true;
+    }
+    Type* targetType = nullptr;
+    std::string targetName;
+    if (auto* sized = dynamic_cast<SizeofExprAST*>(node.args[0].get())) {
+        targetType = sized->sizeofType;
+    } else if (auto* name = dynamic_cast<VariableExprAST*>(node.args[0].get())) {
+        targetName = name->name;
+        targetType = resolveTypeByName(name->name);
+    }
+    if (!targetType) {
+        emitError("unknown type '" + (targetName.empty() ? "(unnamed)" : targetName) +
+                      "' in compile_time expression", node);
+        node.type = nullptr;
+        return true;
+    }
+
+    std::string key = typeToMangled(targetType);
+    auto& registry = smc::ReflectionRegistry::instance();
+
+    if (node.methodName == "name_of") {
+        registry.registerName(key, typeToString(targetType));
+        node.reflectKind = MethodCallExprAST::ReflectionKind::NameOf;
+        node.reflectType = targetType;
+        node.type = typeCtx->getStrType();
+        return true;
+    }
+
+    if (node.methodName == "fields_of") {
+        Type* raw = targetType;
+        while (raw && raw->kind == TypeKind::Typedef)
+            raw = static_cast<TypedefType*>(raw)->aliasedType;
+        if (!raw || (raw->kind != TypeKind::Struct && raw->kind != TypeKind::Class &&
+                     raw->kind != TypeKind::Union)) {
+            emitError(DiagnosticCode::SemReflectNonAggregate,
+                      "compile_time.fields_of requires an aggregate type (got '" +
+                          typeToString(targetType) + "')",
+                      node);
+            node.type = nullptr;
+            return true;
+        }
+        auto fields = ctEval().evalReflectFields(targetType, node);
+        std::vector<smc::FieldInfoData> data;
+        for (auto& f : fields) data.push_back({f.name, f.offset, f.size});
+        registry.registerFields(key, std::move(data));
+        node.reflectKind = MethodCallExprAST::ReflectionKind::FieldsOf;
+        node.reflectType = targetType;
+        node.type = typeCtx->getSliceType(typeCtx->getFieldInfoType());
+        return true;
+    }
+
+    if (node.methodName == "attributes_of") {
+        std::vector<smc::AttributeData> attrs;
+        if (targetType->deprecated) attrs.push_back({"deprecated"});
+        registry.registerAttributes(key, std::move(attrs));
+        node.reflectKind = MethodCallExprAST::ReflectionKind::AttributesOf;
+        node.reflectType = targetType;
+        node.type = typeCtx->getSliceType(typeCtx->getAttributeType());
+        return true;
+    }
+
+    emitError("unknown compile_time member '" + node.methodName + "'", node);
+    node.type = nullptr;
+    return true;
+}
 std::optional<SemanticAnalyzer::ConstValue>
 SemanticAnalyzer::evalConstexprCallCT(CallExprAST& call,
                                       const std::vector<ConstValue>& argValues) {

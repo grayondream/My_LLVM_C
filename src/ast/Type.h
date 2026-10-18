@@ -394,6 +394,9 @@ public:
     // P1-06 (FMT-01/02): monomorphic singletons (m_types keyed by TypeKind).
     StrType* getStrType();
     StringType* getStringType();
+    // CT-07: reflection result types — named StructTypes with string_view/offset/size.
+    StructType* getFieldInfoType();
+    StructType* getAttributeType();
 
     // P1-03 / GEN-01: 模板类型参数占位，同名同指针（单射）。
     TypeVarType* getTypeVar(const std::string& name);

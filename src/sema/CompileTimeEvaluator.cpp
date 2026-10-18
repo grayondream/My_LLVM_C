@@ -591,3 +591,69 @@ CompileTimeEvaluator::evalLayoutQuery(MethodCallExprAST& node, ASTNode& at) {
     }
     return cv;
 }
+
+// CT-07: fields_of — named (non-padding) fields with offset/size, from the
+// LayoutBuilder (single source with codegen / offset_of). Padding pseudo-fields
+// (name=="") and the base sub-object (slot 0, no name) are excluded.
+std::vector<CompileTimeEvaluator::ReflectField>
+CompileTimeEvaluator::evalReflectFields(Type* t, ASTNode& at) {
+    std::vector<ReflectField> out;
+    if (!t) return out;
+    Type* raw = t;
+    while (raw && raw->kind == TypeKind::Typedef)
+        raw = static_cast<TypedefType*>(raw)->aliasedType;
+    if (!raw) return out;
+
+    const bool isUnion = raw->kind == TypeKind::Union;
+    if (!isUnion && raw->kind != TypeKind::Struct && raw->kind != TypeKind::Class) {
+        return out; // 非聚合由调用方诊断
+    }
+
+    // 语义字段名列表。
+    std::vector<std::string> names;
+    if (raw->kind == TypeKind::Struct) {
+        for (auto& f : static_cast<StructType*>(raw)->fields)
+            if (!f.name.empty()) names.push_back(f.name);
+    } else if (raw->kind == TypeKind::Class) {
+        for (auto& f : static_cast<ClassType*>(raw)->fields)
+            if (!f.name.empty()) names.push_back(f.name);
+    } else {
+        for (auto& m : static_cast<UnionType*>(raw)->members)
+            if (!m.name.empty()) names.push_back(m.name);
+    }
+
+    // 偏移经 LayoutBuilder（fieldOffsets）；大小经类型宽度的 DataLayout。
+    auto LR = isUnion
+        ? LayoutBuilder::buildUnion(static_cast<UnionType*>(raw), *m_llvmCtx,
+              m_module->getDataLayout(),
+              [this](Type* tt) { return toLLVMType(tt); })
+        : LayoutBuilder::buildAggregate(raw, *m_llvmCtx, m_module->getDataLayout(),
+              [this](Type* tt) { return toLLVMType(tt); },
+              [this](const std::string& n) -> Type* { return m_sema.resolveTypeByName(n); });
+    const llvm::DataLayout& dl = m_module->getDataLayout();
+    for (auto& n : names) {
+        ReflectField f;
+        f.name = n;
+        auto offIt = LR.fieldOffsets.find(n);
+        if (offIt != LR.fieldOffsets.end()) f.offset = offIt->second;
+        // 字段大小：从类型表取字段类型 → DataLayout。
+        Type* ft = nullptr;
+        if (raw->kind == TypeKind::Struct) {
+            for (auto& sf : static_cast<StructType*>(raw)->fields)
+                if (sf.name == n) { ft = sf.type; break; }
+        } else if (raw->kind == TypeKind::Class) {
+            for (auto& sf : static_cast<ClassType*>(raw)->fields)
+                if (sf.name == n) { ft = sf.type; break; }
+        } else {
+            for (auto& m : static_cast<UnionType*>(raw)->members)
+                if (m.name == n) { ft = m.type; break; }
+        }
+        if (ft) {
+            if (llvm::Type* lt = toLLVMType(ft)) {
+                f.size = static_cast<size_t>(dl.getTypeAllocSize(lt));
+            }
+        }
+        out.push_back(std::move(f));
+    }
+    return out;
+}

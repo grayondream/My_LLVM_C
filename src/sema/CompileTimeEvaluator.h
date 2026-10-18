@@ -6,8 +6,10 @@
 // 成员（target/build/size_of 族）由本类求值。ConstValue 权威定义在此，
 // SemanticAnalyzer 以 using 别名引用，既有引用点不改动。
 
+#include <cstddef>
 #include <memory>
 #include <optional>
+#include <vector>
 #include <string>
 #include <unordered_map>
 
@@ -34,6 +36,13 @@ public:
         std::string strVal; // STR 时有效（union 不能放 std::string）
     };
 
+    // CT-07: one named (non-padding) field's layout, for fields_of.
+    struct ReflectField {
+        std::string name;
+        size_t offset = 0;
+        size_t size = 0;
+    };
+
     explicit CompileTimeEvaluator(SemanticAnalyzer& sema);
     ~CompileTimeEvaluator(); // llvm 类型仅前向声明，析构在 .cpp 定义
 
@@ -41,6 +50,10 @@ public:
     // 钉死文案）；compile_time 特有错误（未知成员/未知类型/深度超限）→
     // 诊断 + nullopt。`at` 供诊断定位。
     std::optional<ConstValue> eval(ExprAST* expr, ASTNode& at);
+
+    // CT-07: fields_of 的字段布局（聚合类型：字段名/偏移/大小）。
+    // 供 sema 的 analyzeReflectionCall 调用（LayoutBuilder 单一来源）。
+    std::vector<ReflectField> evalReflectFields(Type* t, ASTNode& at);
 
 private:
     // 递归深度上限（防编译期爆栈）；超限诊断一次（钉死文案，spec §3）。

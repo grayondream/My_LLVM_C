@@ -284,6 +284,28 @@ StringType* TypeContext::getStringType() {
     return static_cast<StringType*>(m_types[TypeKind::String]);
 }
 
+// CT-07: `FieldInfo` — { string_view name; usize offset; usize size; }.
+StructType* TypeContext::getFieldInfoType() {
+    auto& tc = TypeContext::instance();
+    if (StructType* s = tc.getStruct("FieldInfo")) return s;
+    auto* st = new StructType("FieldInfo");
+    st->addField("name", tc.getStrType());
+    st->addField("offset", tc.getUSize());
+    st->addField("size", tc.getUSize());
+    tc.addStruct("FieldInfo", st);
+    return st;
+}
+
+// CT-07: `Attribute` — { string_view name; }.
+StructType* TypeContext::getAttributeType() {
+    auto& tc = TypeContext::instance();
+    if (StructType* s = tc.getStruct("Attribute")) return s;
+    auto* st = new StructType("Attribute");
+    st->addField("name", tc.getStrType());
+    tc.addStruct("Attribute", st);
+    return st;
+}
+
 TypeVarType* TypeContext::getTypeVar(const std::string& name) {
     auto it = m_typeVars.find(name);
     if (it != m_typeVars.end()) return it->second;

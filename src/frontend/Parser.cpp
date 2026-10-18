@@ -987,7 +987,8 @@ std::unique_ptr<ExprAST> Parser::parsePostfix(std::unique_ptr<ExprAST> lhs) {
                 if (auto* memberAccess = dynamic_cast<MemberAccessExprAST*>(lhs.get())) {
                     ctMember = memberAccess->memberName;
                     if (ctMember == "size_of" || ctMember == "align_of"
-                        || ctMember == "offset_of") {
+                        || ctMember == "offset_of" || ctMember == "name_of"
+                        || ctMember == "fields_of" || ctMember == "attributes_of") {
                         const ExprAST* cur = memberAccess->object.get();
                         while (auto* ma = dynamic_cast<const MemberAccessExprAST*>(cur)) {
                             cur = ma->object.get();
@@ -1799,6 +1800,10 @@ bool Parser::isTypeStart() const {
             if (name == "string" || name == "string_view") {
                 return true;
             }
+            // CT-07: reflection result types.
+            if (name == "FieldInfo" || name == "Attribute") {
+                return true;
+            }
             return lookupNamedType(name) != nullptr;
         }
         default:
@@ -2171,6 +2176,13 @@ Type* Parser::parseBaseType() {
             }
             if (name == "string") {
                 return TypeContext::instance().getStringType();
+            }
+            // CT-07: reflection result types (identifier special-cases).
+            if (name == "FieldInfo") {
+                return TypeContext::instance().getFieldInfoType();
+            }
+            if (name == "Attribute") {
+                return TypeContext::instance().getAttributeType();
             }
             // P1-02 (TYP-13/14) / P1-06: builtin polymorphic types
             // `optional<T>` and `result<T,E>` — special-cased here (type

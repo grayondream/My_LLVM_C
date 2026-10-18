@@ -79,6 +79,9 @@ public:
     // P1-07 / SEM-12: 位域字段校验——基础类型（E2025）与宽度范围（E2026）。
     // 位域判定：bitWidth != 0（含负宽）或无名（name == ""，含零宽对齐）。
     void checkBitFieldField(FieldInfo& f, ASTNode& node);
+    // CT-07: compile_time.name_of/fields_of/attributes_of — 解析类型实参、
+    // 登记 ReflectionRegistry、设置 node 的反射字段与类型。
+    bool analyzeReflectionCall(MethodCallExprAST& node);
     // 弃用函数/变量记录（键 = 声明名；msg 供 W3004 文本）。
     std::unordered_set<std::string> m_deprecatedFuncs;
     std::unordered_set<std::string> m_deprecatedVars;

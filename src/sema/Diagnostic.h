@@ -51,6 +51,8 @@ enum class DiagnosticCode {
     SemAtomicBadRMWOp,
     // Unknown type name in a declaration (was silently dropped).
     SemUnknownType,
+    // CT-07: reflection target must be an aggregate (fields_of).
+    SemReflectNonAggregate,
 
     WarnUninitializedVariable,
     WarnUnusedVariable,

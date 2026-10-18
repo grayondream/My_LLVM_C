@@ -41,6 +41,7 @@ const DiagnosticInfo kRegistry[] = {
     {DiagnosticCode::SemAtomicNonScalar, "E2029", "atomic requires an integer scalar type"},
     {DiagnosticCode::SemAtomicBadRMWOp, "E2030", "operator not supported on atomic value (need CAS)"},
     {DiagnosticCode::SemUnknownType, "E2031", "unknown type"},
+    {DiagnosticCode::SemReflectNonAggregate, "E2032", "fields_of requires an aggregate type"},
 
     {DiagnosticCode::WarnUninitializedVariable,  "W3001", "variable may be uninitialized"},
     {DiagnosticCode::WarnUnusedVariable,         "W3002", "unused variable"},

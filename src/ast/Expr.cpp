@@ -6,6 +6,7 @@
 #include "Mangle.h"
 #include "ast/Decl.h"
 #include "ast/Stmt.h"
+#include "sema/ReflectionRegistry.h"
 
 #include "llvm/IR/InlineAsm.h"
 
@@ -13,6 +14,8 @@
 static llvm::Value* codegenBuiltinMethod(CodegenContext& ctx, MethodCallExprAST& node);
 static llvm::Value* codegenStringMethod(CodegenContext& ctx, MethodCallExprAST& node);
 static llvm::Value* codegenStrFromC(CodegenContext& ctx, CallExprAST& node);
+// CT-07: compile_time reflection lowering (defined at file bottom).
+static llvm::Value* codegenReflection(CodegenContext& ctx, MethodCallExprAST& node);
 
 // TYP-12: build the {ptr, len} view over a statically-sized array (zero-copy;
 // the elements are never duplicated). Array operands already yield the
@@ -1306,6 +1309,12 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* MethodCallExprAST::codegen(CodegenContext& ctx) {
+    // CT-07: compile_time reflection — name_of/fields_of/attributes_of.
+    // Must run before ctConstantOrNull (which would fold the ctHandled flag
+    // into a default int constant).
+    if (reflectKind != ReflectionKind::None) {
+        return codegenReflection(ctx, *this);
+    }
     if (auto* ct = ctConstantOrNull(ctx, *this)) return ct;
     // P1-06: builtin str/string methods lower through their own path.
     if (builtinMethod != BuiltinMethod::None) {
@@ -2844,4 +2853,74 @@ static llvm::Value* codegenStrFromC(CodegenContext& ctx, CallExprAST& node) {
     llvm::Value* v = llvm::Constant::getNullValue(ctx.getLLVMType(TypeContext::instance().getStrType()));
     v = builder.CreateInsertValue(v, arg, {0});
     return builder.CreateInsertValue(v, len, {1});
+}
+
+// CT-07: compile_time reflection — name_of/fields_of/attributes_of. Sema has
+// recorded the data in ReflectionRegistry (keyed by the target type's mangled
+// name); this materializes the runtime value: a {ptr,len} string_view for
+// name_of, or a {ptr,len} slice over a global constant array for the others.
+static llvm::Value* codegenReflection(CodegenContext& ctx, MethodCallExprAST& node) {
+    auto& registry = smc::ReflectionRegistry::instance();
+    std::string key = typeToMangled(node.reflectType);
+    llvm::LLVMContext& c = ctx.getContext();
+    auto& builder = ctx.getBuilder();
+    llvm::Type* i64 = llvm::Type::getInt64Ty(c);
+
+    auto strViewType = [&]() -> llvm::StructType* {
+        if (llvm::StructType* t = llvm::StructType::getTypeByName(c, "str")) return t;
+        return llvm::StructType::create(c, {llvm::PointerType::get(c, 0), i64}, "str");
+    };
+    auto buildStrView = [&](const std::string& s) -> llvm::Constant* {
+        llvm::Value* ptr = builder.CreateGlobalString(s, ".rflstr");
+        return llvm::ConstantStruct::get(strViewType(),
+            {llvm::dyn_cast<llvm::Constant>(ptr),
+             llvm::ConstantInt::get(i64, s.size())});
+    };
+
+    if (node.reflectKind == MethodCallExprAST::ReflectionKind::NameOf) {
+        std::string name = registry.getName(key);
+        return buildStrView(name);
+    }
+
+    // fields_of / attributes_of — a global [N x Elem] array + {ptr, len} view.
+    TypeContext& tc = TypeContext::instance();
+    llvm::StructType* elemStruct = nullptr;
+    llvm::Type* elemLLVM = nullptr;
+    std::vector<llvm::Constant*> elems;
+
+    if (node.reflectKind == MethodCallExprAST::ReflectionKind::FieldsOf) {
+        elemLLVM = ctx.getLLVMType(tc.getFieldInfoType());
+        elemStruct = llvm::dyn_cast<llvm::StructType>(elemLLVM);
+        if (const auto* fields = registry.getFields(key)) {
+            for (auto& f : *fields) {
+                elems.push_back(llvm::ConstantStruct::get(elemStruct,
+                    {buildStrView(f.name),
+                     llvm::ConstantInt::get(i64, static_cast<uint64_t>(f.offset)),
+                     llvm::ConstantInt::get(i64, static_cast<uint64_t>(f.size))}));
+            }
+        }
+    } else { // AttributesOf
+        elemLLVM = ctx.getLLVMType(tc.getAttributeType());
+        elemStruct = llvm::dyn_cast<llvm::StructType>(elemLLVM);
+        if (const auto* attrs = registry.getAttributes(key)) {
+            for (auto& a : *attrs) {
+                elems.push_back(llvm::ConstantStruct::get(elemStruct, {buildStrView(a.name)}));
+            }
+        }
+    }
+
+    llvm::ArrayType* arrTy = llvm::ArrayType::get(elemLLVM, elems.empty() ? 0 : elems.size());
+    auto* garr = new llvm::GlobalVariable(ctx.getModule(), arrTy, /*isConstant=*/true,
+        llvm::GlobalVariable::InternalLinkage,
+        elems.empty() ? llvm::ConstantAggregateZero::get(arrTy)
+                      : llvm::ConstantArray::get(arrTy, elems),
+        ".rflarr");
+
+    Type* sliceT = node.reflectKind == MethodCallExprAST::ReflectionKind::FieldsOf
+                       ? tc.getSliceType(tc.getFieldInfoType())
+                       : tc.getSliceType(tc.getAttributeType());
+    llvm::Type* sliceLLVM = ctx.getLLVMType(sliceT);
+    llvm::Value* v = llvm::Constant::getNullValue(sliceLLVM);
+    v = builder.CreateInsertValue(v, garr, {0});
+    return builder.CreateInsertValue(v, llvm::ConstantInt::get(i64, elems.size()), {1});
 }
