@@ -38,6 +38,8 @@ const DiagnosticInfo kRegistry[] = {
     {DiagnosticCode::SemBitFieldWidthOutOfRange,  "E2026", "bit-field width out of range"},
     {DiagnosticCode::SemBitFieldNotAddressable,   "E2027", "bit-field is not addressable"},
     {DiagnosticCode::SemInvalidThreadLocalOnFunction, "E2028", "thread_local cannot be applied to a function"},
+    {DiagnosticCode::SemAtomicNonScalar, "E2029", "atomic requires an integer scalar type"},
+    {DiagnosticCode::SemAtomicBadRMWOp, "E2030", "operator not supported on atomic value (need CAS)"},
 
     {DiagnosticCode::WarnUninitializedVariable,  "W3001", "variable may be uninitialized"},
     {DiagnosticCode::WarnUnusedVariable,         "W3002", "unused variable"},

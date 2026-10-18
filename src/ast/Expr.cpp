@@ -688,6 +688,18 @@ llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
                 ctx.storeBitFieldValue(v, ma->bitOffset, ma->bitWidth, ft, newVal, ma->unitBits);
                 return newVal;
             }
+            // CON-01: atomic operand — atomicrmw add/sub 1 (seq_cst).
+            if (operand->type && stripTypedefsT12(operand->type)->isAtomic) {
+                llvm::Value* one = llvm::ConstantInt::get(
+                    ctx.getLLVMType(operand->type), 1);
+                llvm::Value* rmw = builder.CreateAtomicRMW(
+                    op == UnaryOp::PreInc ? llvm::AtomicRMWInst::Add
+                                          : llvm::AtomicRMWInst::Sub,
+                    v, one, llvm::MaybeAlign(),
+                    llvm::AtomicOrdering::SequentiallyConsistent);
+                return op == UnaryOp::PreInc ? builder.CreateAdd(rmw, one, "preinc")
+                                             : builder.CreateSub(rmw, one, "predec");
+            }
             // The operand is an lvalue; update it in place and yield the new
             // value.
             llvm::Type* loadType = operand->type
@@ -1439,6 +1451,22 @@ llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
     }
 
     if (op != AssignOp::Assign) {
+        // CON-01: atomic LHS compound assignment → atomicrmw (seq_cst).
+        if (lhs->type && stripTypedefsT12(lhs->type)->isAtomic) {
+            llvm::AtomicRMWInst::BinOp rmwOp;
+            switch (op) {
+                case AssignOp::AddAssign:    rmwOp = llvm::AtomicRMWInst::Add; break;
+                case AssignOp::SubAssign:    rmwOp = llvm::AtomicRMWInst::Sub; break;
+                case AssignOp::BitAndAssign: rmwOp = llvm::AtomicRMWInst::And; break;
+                case AssignOp::BitOrAssign:  rmwOp = llvm::AtomicRMWInst::Or; break;
+                case AssignOp::BitXorAssign: rmwOp = llvm::AtomicRMWInst::Xor; break;
+                default: rmwOp = llvm::AtomicRMWInst::Xchg; break; // unreachable (sema rejects)
+            }
+            llvm::Value* rmw = builder.CreateAtomicRMW(
+                rmwOp, lhsVal, result,
+                llvm::MaybeAlign(), llvm::AtomicOrdering::SequentiallyConsistent);
+            return rmw;
+        }
         // 复合赋值 lhs 必为可写左值（位域 lhs 已在函数顶部早退）；无条件取值
         // 保持既有行为（测试手工构造 AST 时 isLValue 可能未置位）。
         llvm::Value* loadedLhs = ctx.loadValue(lhsVal, lhs->type);
@@ -1527,7 +1555,11 @@ llvm::Value* AssignmentExprAST::codegen(CodegenContext& ctx) {
         }
     }
 
-    builder.CreateStore(result, lhsVal);
+    llvm::StoreInst* store = builder.CreateStore(result, lhsVal);
+    // CON-01: atomic-typed lvalues store with seq_cst ordering.
+    if (lhs->type && stripTypedefsT12(lhs->type)->isAtomic) {
+        store->setAtomic(llvm::AtomicOrdering::SequentiallyConsistent);
+    }
     return result;
 }
 
@@ -1771,6 +1803,15 @@ llvm::Value* PostfixIncDecExprAST::codegen(CodegenContext& ctx) {
                                           : builder.CreateSub(oldVal, one, "postdec");
         ctx.storeBitFieldValue(addr, ma->bitOffset, ma->bitWidth, ft, newVal, ma->unitBits);
         return oldVal;
+    }
+    // CON-01: atomic operand — atomicrmw add/sub 1; yield the OLD value.
+    if (operand->type && stripTypedefsT12(operand->type)->isAtomic) {
+        llvm::Value* one = llvm::ConstantInt::get(
+            ctx.getLLVMType(operand->type), 1);
+        return builder.CreateAtomicRMW(
+            isIncrement ? llvm::AtomicRMWInst::Add : llvm::AtomicRMWInst::Sub,
+            addr, one, llvm::MaybeAlign(),
+            llvm::AtomicOrdering::SequentiallyConsistent);
     }
     llvm::Type* loadType = operand->type ? ctx.getLLVMType(operand->type) : llvm::Type::getInt32Ty(ctx.getContext());
     llvm::Value* oldVal = builder.CreateLoad(loadType, addr, "postold");

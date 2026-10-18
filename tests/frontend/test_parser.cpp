@@ -2316,3 +2316,19 @@ TEST_F(ParserTest, Char32DeclaresUInt32) {
     ASSERT_NE(var, nullptr);
     EXPECT_EQ(var->type, TypeContext::instance().getUInt32());
 }
+
+// CON-01: `atomic T` produces a distinct qualified type (clone), and does NOT
+// poison the shared scalar singleton — a later plain `int32` is unaffected.
+TEST_F(ParserTest, AtomicQualifierClonesType) {
+    auto tu = parse("atomic int32 a; int32 b;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_GE(tu->declarations.size(), 2u);
+    auto av = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    auto bv = dynamic_cast<VarDeclAST*>(tu->declarations[1].get());
+    ASSERT_NE(av, nullptr);
+    ASSERT_NE(bv, nullptr);
+    EXPECT_TRUE(av->type->isAtomic);
+    EXPECT_NE(av->type, TypeContext::instance().getInt32());
+    EXPECT_FALSE(bv->type->isAtomic);
+    EXPECT_EQ(bv->type, TypeContext::instance().getInt32());
+}

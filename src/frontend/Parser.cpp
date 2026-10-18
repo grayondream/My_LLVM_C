@@ -2280,6 +2280,7 @@ Type* Parser::parseBaseType() {
 Type* Parser::parseType() {
     bool isConst = false;
     bool isVolatile = false;
+    bool isAtomic = false;
 
     // Handle qualifiers before base type
     while (!eof()) {
@@ -2289,6 +2290,9 @@ Type* Parser::parseType() {
         } else if (check(TokenType::TOKEN_VOLATILE)) {
             advance();
             isVolatile = true;
+        } else if (check(TokenType::TOKEN_ATOMIC)) {
+            advance();
+            isAtomic = true;
         } else {
             break;
         }
@@ -2299,6 +2303,18 @@ Type* Parser::parseType() {
 
     baseType->isConst = isConst;
     baseType->isVolatile = isVolatile;
+    // CON-01: `atomic T` must NOT mutate the shared scalar singletons
+    // (getInt32() etc. are process-wide) — clone the type instead.
+    if (isAtomic) {
+        auto* copy = new Type(baseType->kind, baseType->base);
+        copy->isConst = isConst;
+        copy->isVolatile = isVolatile;
+        copy->isAtomic = true;
+        copy->ctDeadBranch = baseType->ctDeadBranch;
+        copy->deprecated = baseType->deprecated;
+        copy->deprecatedMsg = baseType->deprecatedMsg;
+        baseType = copy;
+    }
 
     // Check for pointer types with qualifiers
     while (check(TokenType::TOKEN_STAR)) {

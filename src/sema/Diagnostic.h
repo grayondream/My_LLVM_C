@@ -46,6 +46,9 @@ enum class DiagnosticCode {
     SemBitFieldNotAddressable,
     // CON-04: thread_local applied to a non-variable (function) declaration.
     SemInvalidThreadLocalOnFunction,
+    // CON-01: atomic qualifier constraints.
+    SemAtomicNonScalar,
+    SemAtomicBadRMWOp,
 
     WarnUninitializedVariable,
     WarnUnusedVariable,

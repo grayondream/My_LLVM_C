@@ -2615,6 +2615,22 @@ void SemanticAnalyzer::visit(AssignmentExprAST& node) {
         emitError("cannot assign to const variable", node);
         return;
     }
+    // CON-01: atomic LHS supports only `= += -= &= |= ^=` — the atomicrmw
+    // subset. `*= /= %= <<= >>=` need a cmpxchg loop (CON-02, not built).
+    if (lhsType && lhsType->isAtomic && node.op != AssignOp::Assign) {
+        bool supported = node.op == AssignOp::AddAssign ||
+                         node.op == AssignOp::SubAssign ||
+                         node.op == AssignOp::BitAndAssign ||
+                         node.op == AssignOp::BitOrAssign ||
+                         node.op == AssignOp::BitXorAssign;
+        if (!supported) {
+            emitError(DiagnosticCode::SemAtomicBadRMWOp,
+                      "operator not supported on atomic value (need CAS)", node);
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
+        }
+    }
     // 评审 I5: general assignability gate — an rvalue LHS (e.g. a call
     // result's pseudo-field) must not reach codegen as a store destination.
     // Skip when lhsType is null: resolution already diagnosed (e.g. E2009).
@@ -3857,6 +3873,36 @@ void SemanticAnalyzer::visit(ContinueStmtAST& node) {}
 void SemanticAnalyzer::visit(NullStmtAST& node) {}
 
 void SemanticAnalyzer::visit(VarDeclAST& node) {
+    // CON-01: `atomic` is allowed only directly on an integer scalar type.
+    // `atomic int32 x` is valid; `atomic int32* p` (atomic wrapped under a
+    // pointer/array/slice) and `atomic float64 f` are rejected.
+    if (node.type) {
+        auto isCompositeLayer = [](Type* t) {
+            return t->kind == TypeKind::Pointer || t->kind == TypeKind::Array ||
+                   t->kind == TypeKind::Slice;
+        };
+        Type* outer = node.type;
+        while (outer && outer->kind == TypeKind::Typedef)
+            outer = static_cast<TypedefType*>(outer)->aliasedType;
+        bool atomicUnderComposite = false;
+        if (outer && isCompositeLayer(outer)) {
+            // Dig through pointer/array/slice layers to find an atomic base.
+            Type* inner = outer;
+            while (inner && isCompositeLayer(inner)) {
+                if (inner->kind == TypeKind::Pointer) inner = inner->base;
+                else if (inner->kind == TypeKind::Array) inner = static_cast<ArrayType*>(inner)->elementType;
+                else inner = static_cast<SliceType*>(inner)->elementType;
+            }
+            atomicUnderComposite = inner && inner->isAtomic;
+        }
+        if (atomicUnderComposite ||
+            (outer && outer->isAtomic && !isIntegerType(outer))) {
+            emitError(DiagnosticCode::SemAtomicNonScalar,
+                      "atomic requires an integer scalar type (got '" +
+                          typeToString(node.type) + "')",
+                      node);
+        }
+    }
     // P1-05 / ANN-06: 变量注解验证。
     validateAnnotations(node.annotations, node, "variable");
     // P1-05 / ANN-05: 弃用类型使用（W3004）与弃用变量记录。

@@ -35,9 +35,12 @@ bool isNamespaceCName(const std::string& name) {
 
 std::string typeToMangled(Type* type) {
     if (!type) return "unknown";
+    // CON-01: atomic-qualified types get a distinct mangling so overloads and
+    // symbols stay isolated from the plain type.
+    const std::string atomicTag = type->isAtomic ? "atomic" : "";
     switch (type->kind) {
-        case TypeKind::Void: return "void";
-        case TypeKind::Char: return "char";
+        case TypeKind::Void: return atomicTag + "void";
+        case TypeKind::Char: return atomicTag + "char";
         case TypeKind::Pointer: {
             std::string base = typeToMangled(type->base);
             return base + "ptr";
@@ -65,19 +68,19 @@ std::string typeToMangled(Type* type) {
             auto* et = static_cast<EnumType*>(type);
             return et->name.empty() ? std::string("int32") : et->name;
         }
-        case TypeKind::Bool: return "bool";
-        case TypeKind::Int8: return "int8";
-        case TypeKind::Int16: return "int16";
-        case TypeKind::Int32: return "int32";
-        case TypeKind::Int64: return "int64";
-        case TypeKind::Int128: return "int128";
-        case TypeKind::UInt8: return "uint8";
-        case TypeKind::UInt16: return "uint16";
-        case TypeKind::UInt32: return "uint32";
-        case TypeKind::UInt64: return "uint64";
-        case TypeKind::UInt128: return "uint128";
-        case TypeKind::ISize: return "isize";
-        case TypeKind::USize: return "usize";
+        case TypeKind::Bool: return atomicTag + "bool";
+        case TypeKind::Int8: return atomicTag + "int8";
+        case TypeKind::Int16: return atomicTag + "int16";
+        case TypeKind::Int32: return atomicTag + "int32";
+        case TypeKind::Int64: return atomicTag + "int64";
+        case TypeKind::Int128: return atomicTag + "int128";
+        case TypeKind::UInt8: return atomicTag + "uint8";
+        case TypeKind::UInt16: return atomicTag + "uint16";
+        case TypeKind::UInt32: return atomicTag + "uint32";
+        case TypeKind::UInt64: return atomicTag + "uint64";
+        case TypeKind::UInt128: return atomicTag + "uint128";
+        case TypeKind::ISize: return atomicTag + "isize";
+        case TypeKind::USize: return atomicTag + "usize";
         case TypeKind::Float32: return "float32";
         case TypeKind::Float64: return "float64";
         case TypeKind::Slice: {

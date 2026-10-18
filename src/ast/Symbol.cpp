@@ -3,6 +3,8 @@
 bool typesEqual(Type* a, Type* b) {
     if (!a || !b) return a == b;
     if (a->kind != b->kind) return false;
+    // CON-01: atomic-ness is part of the type identity (`atomic int32` != `int32`).
+    if (a->isAtomic != b->isAtomic) return false;
     switch (a->kind) {
         case TypeKind::Pointer:
             return typesEqual(a->base, b->base);

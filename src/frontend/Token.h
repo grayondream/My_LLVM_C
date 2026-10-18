@@ -83,6 +83,8 @@ enum class TokenType : int32_t {
     TOKEN_CHAR32,
     // CON-04: thread_local storage class.
     TOKEN_THREAD_LOCAL,
+    // CON-01: atomic type qualifier.
+    TOKEN_ATOMIC,
 
     // 运算符
     TOKEN_PLUS,         // +

@@ -537,3 +537,13 @@ TEST(LexerNewKeywordsTest, Char8Char16Char32ThreadLocalKeywords) {
     EXPECT_EQ(tokens[9].type, TokenType::TOKEN_THREAD_LOCAL);
     EXPECT_TRUE(lexer.getDiagnostics().empty());
 }
+
+// CON-01: `atomic` type qualifier keyword.
+TEST(LexerNewKeywordsTest, AtomicKeyword) {
+    spdlog::set_level(spdlog::level::off);
+    Lexer lexer("at.c", "atomic int32 x;");
+    auto tokens = lexer.tokenize();
+    ASSERT_GE(tokens.size(), 3u);
+    EXPECT_EQ(tokens[0].type, TokenType::TOKEN_ATOMIC);
+    EXPECT_TRUE(lexer.getDiagnostics().empty());
+}

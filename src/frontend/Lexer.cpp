@@ -81,6 +81,8 @@ static const std::unordered_map<std::string, TokenType> keywordMap = {
     {"char32", TokenType::TOKEN_CHAR32},
     // CON-04: thread_local storage class.
     {"thread_local", TokenType::TOKEN_THREAD_LOCAL},
+    // CON-01: atomic type qualifier.
+    {"atomic", TokenType::TOKEN_ATOMIC},
 
     // ===== 布尔（如果你支持）=====
     {"bool", TokenType::TOKEN_BOOL},
