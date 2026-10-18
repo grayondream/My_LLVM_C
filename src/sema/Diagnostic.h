@@ -49,6 +49,8 @@ enum class DiagnosticCode {
     // CON-01: atomic qualifier constraints.
     SemAtomicNonScalar,
     SemAtomicBadRMWOp,
+    // Unknown type name in a declaration (was silently dropped).
+    SemUnknownType,
 
     WarnUninitializedVariable,
     WarnUnusedVariable,

@@ -169,6 +169,10 @@ void Parser::error(const std::string& msg, const Token& token) {
     m_errors.emplace_back(Diagnostic::Level::Error, msg, token.filename, token.line, token.column);
 }
 
+void Parser::error(DiagnosticCode code, const std::string& msg, const Token& token) {
+    m_errors.emplace_back(Diagnostic::Level::Error, code, msg, token.filename, token.line, token.column);
+}
+
 void Parser::errorUnexpected(const std::string& expected) {
     auto token = peek();
     if (token) {
@@ -2736,8 +2740,21 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationAsType() {
         isConstexpr = true;
     }
 
+    // 双报防护（Task 5）：记录本次尝试前的诊断数——若 parseType 已诊断（如
+    // 模板实参失败），不补报 unknown type。
+    size_t errorsBefore = m_errors.size();
+    std::optional<Token> startTok = peek();
     Type* type = parseType();
-    if (!type) return nullptr;
+    if (!type) {
+        // 未知类型名声明不再静默丢弃：起始 token 为标识符（或类型起始关键字）
+        // 且本次尝试未新增诊断时，报 unknown type。
+        if (startTok && startTok->type == TokenType::TOKEN_IDENTIFIER &&
+            m_errors.size() == errorsBefore) {
+            error(DiagnosticCode::SemUnknownType,
+                  "unknown type '" + startTok->lexeme + "'", *startTok);
+        }
+        return nullptr;
+    }
 
     // Check for operator keyword (operator overloading)
     if (check(TokenType::TOKEN_OPERATOR)) {

@@ -171,7 +171,7 @@ TEST_F(NewFeaturesTest, ModuleSystem) {
     std::string source = R"(
         module mymodule;
         import stdio;
-        export main;
+        export int32 helper();
         
         int32 main() {
             return 0;

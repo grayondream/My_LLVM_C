@@ -2346,3 +2346,39 @@ TEST_F(ParserTest, DefaultArgParses) {
     EXPECT_TRUE(fn->params[1]->hasDefault);
     EXPECT_NE(fn->params[1]->defaultValue, nullptr);
 }
+
+// Unknown-type declarations must be diagnosed, not silently dropped (a
+// `nosuchtype int32 y;` currently compiles with zero diagnostics and no `y`).
+TEST_F(ParserTest, UnknownTypeDeclDiagnosed) {
+    auto tokens = lex("nosuchtype int32 y = 5;");
+    Parser parser(tokens);
+    parser.parse();
+    ASSERT_FALSE(parser.getErrors().empty());
+    bool hasUnknown = false;
+    for (auto& e : parser.getErrors()) {
+        if (e.message.find("unknown type") != std::string::npos &&
+            e.message.find("nosuchtype") != std::string::npos) {
+            hasUnknown = true;
+        }
+    }
+    EXPECT_TRUE(hasUnknown);
+}
+
+// Template-argument parse failure must not double-report: `Box<int32, nosuch>`
+// already diagnosed the bad template argument; no extra "unknown type 'nosuch'".
+TEST_F(ParserTest, UnknownTypeNotDoubleReported) {
+    auto tokens = lex(
+        "template<typename T> struct Box { T v; };\n"
+        "Box<int32, nosuchtype> b;\n");
+    Parser parser(tokens);
+    parser.parse();
+    // The template-argument failure produces at least one error; counting
+    // "unknown type 'nosuchtype'" occurrences must be at most one overall.
+    size_t unknownTypeCount = 0;
+    for (auto& e : parser.getErrors()) {
+        if (e.message.find("unknown type 'nosuchtype'") != std::string::npos) {
+            ++unknownTypeCount;
+        }
+    }
+    EXPECT_LE(unknownTypeCount, 1u);
+}

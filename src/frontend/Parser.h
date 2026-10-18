@@ -17,6 +17,7 @@ public:
 
 private:
     void error(const std::string& msg, const Token& token);
+    void error(DiagnosticCode code, const std::string& msg, const Token& token);
     void errorUnexpected(const std::string& expected);
     void errorUnexpectedEOF(const std::string& expected);
     bool expect(TokenType type, const std::string& msg);
