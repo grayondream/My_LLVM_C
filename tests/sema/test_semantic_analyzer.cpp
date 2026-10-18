@@ -1669,12 +1669,15 @@ TEST(SliceSemTest, INHPrivateBaseMethodRejected) {
 }
 
 TEST(SliceSemTest, INHBaseStaticProtectedPin) {
-    // AGG-10 挂账现状 pin：Base::ps 从派生访问维持拒绝（DS4 不放宽）。
-    // 今天即拒绝 → 预期 Task 2 期 PASS（防将来误放宽）。
-    EXPECT_FALSE(analyzeOk(
+    // INH-06: 派生类方法内经 this->/Base:: 访问基类 protected static 成员
+    // 现放行（2026-10-18 放宽）；类外对象访问仍拒。
+    EXPECT_TRUE(analyzeOk(
         "class Base9 { protected: static int32 ps = 7; }; "
         "class D9 : public Base9 { public: int32 get() { return Base9::ps; } }; "
         "int32 main() { D9 d; return d.get(); }"));
+    EXPECT_FALSE(analyzeOk(
+        "class Base9b { protected: static int32 ps = 7; }; "
+        "int32 main() { return Base9b::ps; }"));
 }
 
 TEST(SliceSemTest, INHStructFieldChainSema) {
@@ -2648,4 +2651,33 @@ TEST(SemaFlexArrayTest, RejectsInitOfFlexArray) {
         "struct S { int32 n; int32 data[]; };\n"
         "int32 main() { S s = { 1, 2, 3 }; return 0; }");
     EXPECT_TRUE(hasMsg(errs, "flexible array member cannot be initialized"));
+}
+
+// INH-06: protected base members are reachable from a DERIVED class's methods
+// (via this->), while class-external access stays denied.
+TEST(SemanticAnalyzerAccessTest, ProtectedBaseFieldAccessibleFromDerivedMethod) {
+    EXPECT_TRUE(analyzeOk(
+        "class PB { protected: int32 x; };\n"
+        "class PD : public PB { int32 get() { return this->x; } };\n"
+        "int32 main() { PD d; return 0; }"));
+}
+
+TEST(SemanticAnalyzerAccessTest, ProtectedBaseMethodAccessibleFromDerivedMethod) {
+    EXPECT_TRUE(analyzeOk(
+        "class PM { protected: int32 f() { return 1; } };\n"
+        "class PDM : public PM { int32 g() { return this->f(); } };\n"
+        "int32 main() { PDM d; return 0; }"));
+}
+
+TEST(SemanticAnalyzerAccessTest, ProtectedStillDeniedOutside) {
+    EXPECT_FALSE(analyzeOk(
+        "class PO { protected: int32 x; };\n"
+        "int32 main() { PO o; o.x = 1; return 0; }"));
+}
+
+TEST(SemanticAnalyzerAccessTest, PrivateBaseMemberStillRejectedFromDerived) {
+    EXPECT_FALSE(analyzeOk(
+        "class PV { private: int32 x; };\n"
+        "class PVD : public PV { int32 get() { return this->x; } };\n"
+        "int32 main() { PVD d; return 0; }"));
 }

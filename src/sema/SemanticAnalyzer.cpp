@@ -204,7 +204,7 @@ void SemanticAnalyzer::checkStaticMemberAccess(const std::string& originalName, 
     // I1: static members are keyed "static:<name>" so a same-name instance
     // member's access level is never consulted (independent keys).
     AccessLevel level = definingClass->memberAccessLevel("static:" + it->second.second);
-    if (level != AccessLevel::Public && currentClass != definingClass) {
+    if (!canAccessMember(definingClass, level)) {
         emitError(DiagnosticCode::SemPrivateMemberAccess,
                   "cannot access " +
                       std::string(level == AccessLevel::Private ? "private" : "protected") +
@@ -3146,7 +3146,7 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
         // the defining class (protected ≡ private until INH lands).
         if (definingClass) {
             AccessLevel level = definingClass->memberAccessLevel(node.memberName);
-            if (level != AccessLevel::Public && currentClass != definingClass) {
+            if (!canAccessMember(definingClass, level)) {
                 emitError(DiagnosticCode::SemPrivateMemberAccess,
                           "cannot access " +
                               std::string(level == AccessLevel::Private ? "private" : "protected") +
@@ -3244,7 +3244,7 @@ void SemanticAnalyzer::visit(MethodCallExprAST& node) {
     // level comes from the defining class's own member-access map.
     {
         AccessLevel level = definingClass->memberAccessLevel(node.methodName);
-        if (level != AccessLevel::Public && currentClass != definingClass) {
+        if (!canAccessMember(definingClass, level)) {
             emitError(DiagnosticCode::SemPrivateMemberAccess,
                       "cannot call " +
                           std::string(level == AccessLevel::Private ? "private" : "protected") +
@@ -3747,7 +3747,7 @@ void SemanticAnalyzer::resolveDesignators(InitializerListExprAST& node, Type* ag
                                     if (walk->kind == TypeKind::Class) {
                                         auto* ct = static_cast<ClassType*>(walk);
                                         AccessLevel lvl = ct->memberAccessLevel(des.field);
-                                        if (lvl != AccessLevel::Public && currentClass != ct) {
+                                        if (!canAccessMember(ct, lvl)) {
                                             emitError(DiagnosticCode::SemPrivateMemberAccess,
                                                       "cannot access " +
                                                           std::string(lvl == AccessLevel::Private ? "private" : "protected") +
@@ -5588,6 +5588,17 @@ bool SemanticAnalyzer::isDerivedFrom(Type* derived, Type* base) const {
         current = next;
     }
     return false;
+}
+
+// INH-06: 派生类方法内经 this-> 访问基类 protected 成员放行——当前类与
+// 定义类相同，或（level 为 protected 且）当前类是定义类的派生类。
+// private 仅定义类内可访问（派生类不放开）。
+bool SemanticAnalyzer::canAccessMember(ClassType* definingClass, AccessLevel level) const {
+    if (!definingClass) return false;
+    if (level == AccessLevel::Public) return true;
+    if (currentClass == definingClass) return true;
+    if (!currentClass || level != AccessLevel::Protected) return false;
+    return isDerivedFrom(currentClass, definingClass);
 }
 
 Symbol* SemanticAnalyzer::resolveMethod(ClassType* classType, const std::string& methodName,

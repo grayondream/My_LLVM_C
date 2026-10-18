@@ -82,6 +82,9 @@ public:
     // CT-07: compile_time.name_of/fields_of/attributes_of — 解析类型实参、
     // 登记 ReflectionRegistry、设置 node 的反射字段与类型。
     bool analyzeReflectionCall(MethodCallExprAST& node);
+    // INH-06: 派生类方法内经 this-> 访问基类 protected 成员放行
+    // （currentClass == definingClass，或沿基类链派生且 level == protected）。
+    bool canAccessMember(ClassType* definingClass, AccessLevel level) const;
     // 弃用函数/变量记录（键 = 声明名；msg 供 W3004 文本）。
     std::unordered_set<std::string> m_deprecatedFuncs;
     std::unordered_set<std::string> m_deprecatedVars;
