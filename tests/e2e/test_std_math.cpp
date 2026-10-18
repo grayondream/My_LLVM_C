@@ -189,4 +189,28 @@ TEST_F(StdMathTest, GlobalExternNotReachableViaNamespace) {
               std::string::npos);
 }
 
+// M2 (review): exercise the float32 math family and the f32 bitcast
+// round-trip — the *f bindings were otherwise dead code in the suite.
+TEST_F(StdMathTest, Float32FamilyAndF32Bitcast) {
+    EXPECT_EQ(runWithImports(R"(
+        import std.math;
+        import std.bit;
+        int32 main() {
+            if (std::fabsf(-2.5f) != 2.5f) return 1;
+            if (std::floorf(3.7f) != 3.0f) return 2;
+            if (std::ceilf(3.2f) != 4.0f) return 3;
+            if (std::roundf(2.5f) != 3.0f) return 4;
+            if (std::truncf(-2.7f) != -2.0f) return 5;
+            if (std::powf(2.0f, 10.0f) != 1024.0f) return 6;
+            if (std::cosf(0.0f) != 1.0f) return 7;
+            if (std::sinf(0.0f) != 0.0f) return 8;
+            float32 f = 1.5f;
+            uint32 bits = std::f32_to_bits(f);
+            float32 back = std::bits_to_f32(bits);
+            if (back != 1.5f) return 9;
+            return 0;
+        }
+    )", "math_f32.c"), 0);
+}
+
 }  // namespace
