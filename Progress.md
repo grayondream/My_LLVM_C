@@ -820,3 +820,18 @@
 - 文档：stdlib.md §11 std.mem 函数表 + §11.1 Allocator/Arena/Pool 接口草案（含 `struct Allocator`/`Arena`/`Pool` 蓝本，标注阻塞原因）；TODO STD-05 `[x]`、MEM-06 `[~]`（包装已落 std.mem）、MEM-07 草案挂账、P1-09 快照 1358。
 - 验证：每任务 TDD RED→GREEN；最终全量 ctest **1358/1358** 绿（2 个既有 GTEST_SKIP 不变）。工作区 clean。
 - 遗留/P1-09 剩余：**std.math/std.bit（STD-13/14）**（纯函数，不受模块导出类型阻塞，可本轮）；**std.collections（STD-06~08）**（泛型容器，阻塞于「模块导出类型」语言缺口）；std.mem 的 Allocator/Arena/Pool（随语言层缺口一并）。
+
+## 2026-10-17 — P1-09 std.bit + std.math 完成（STD-14/13）
+
+- 流程：brainstorming → spec（docs/superpowers/specs/2026-10-17-stdmath-bit-design.md）→ plan（docs/superpowers/plans/2026-10-17-stdmath-bit.md，3 任务 TDD）→ executing-plans Native 内联（master 直接提交）。
+- 提交线：`df03a73`（Task 1 std.bit）→ `f6dd3be`（Task 2 std.math + C 符号修复）→ 文档轮（本次）。
+- **Task 1（std.bit）**：`libs/std/bit.smc` 纯语言位工具——SWAR popcount8/16/32/64（64 位掩码用 `ul` 字面量 + 移位构造，**无 `ull` 后缀**）；二分 clz32/64、循环 ctz32/64（**对 0 返回位宽，冻结**）；rotl32/64、rotr32/64（n 按位宽取模）；bitcast 包装（f32/f64 ↔ u32/u64/i32/i64，reinterpret_cast）。7 e2e（tests/e2e/test_std_bit.cpp）。
+- **Task 2（std.math）**：`libs/std/math.smc`——18 个 libc 绑定（sqrt/sqrtf/fabs/fabsf/floor/floorf/ceil/ceilf/round/roundf/trunc/truncf/pow/powf/cos/cosf/sin/sinf，**`-lm` 链接**）+ `constexpr float64 PI/E` + 位级 isnan/isinf/is_finite（IEEE754：指数段全 1 判断，运行时构造掩码绕开超 int64 常量折叠限制）。5 e2e（tests/e2e/test_std_math.cpp）。
+- **根因修复（sema，配套编译器改动）**：namespace 内 C-linkage extern 函数被 `scopedName` 前缀化为 `std_sqrt`，`mangleFunction` 因前缀不再命中 `isCName`（`markCName` 注册裸名 `sqrt`）→ 生成 `std_sqrt_float64`，JIT 找不到 libm 符号（`ConstantsPIAndE`/`IsNanIsInfIsFinite` 通过、3 个调 extern 的测试失败，精确命中）。修复（SemanticAnalyzer.cpp）：
+  - `visit(FunctionDeclAST)`：`isCName(node.name)` 时跳过 `scopedName`（保持 C 裸符号名）；
+  - `namespaceCandidates`：`ns::f` 限定名在限定键后追加裸 C 名回退候选（仅当裸名为 C 名）。
+  - 验证：`my_llvm_c -c` + `cc -lm` 编译链接运行 exit=0；5 e2e JIT 全过。
+- **Ruling（namespace 内 C 名函数语义）**：namespace 内的 extern C 函数符号名保持 C 裸名（链接 libc/libm），namespace 前缀仅作访问语法——若错，`ns::f` 限定名会意外落到全局裸名 f（仅在裸名为 C 名时回退，风险面小）。
+- 文档：stdlib.md §12 std.bit / §13 std.math 函数表 + C 符号名说明 + 前置约束；TODO STD-13/14 `[x]`、P1-09 收口、进度快照 1370。
+- 验证：每任务 TDD RED→GREEN（Task 2 RED：临时移走 math.smc 全 5 FAIL；GREEN 后全绿）；最终全量 ctest **1370/1370** 绿（1365 + 5；2 个既有 GTEST_SKIP 不变）。
+- 遗留/P1-09 剩余：**仅 std.collections（STD-06~08）**，阻塞于「模块导出类型」语言缺口；std.mem 的 Allocator/Arena/Pool 同因挂账。

@@ -240,10 +240,48 @@ struct Pool {
 // pool_init(&pool, block_size) / pool_alloc / pool_free / pool_destroy
 ```
 
-## 12. 待办 `[plan]`
+## 12. `std.bit`（P1-09 / STD-14）`[impl]`
+
+`import std.bit;` 后用 `std::popcount32(...)` 等。**纯语言实现**（无编译器
+内建/asm）：SWAR popcount、二分 clz、循环 ctz、移位+或 rotl/rotr、
+`reinterpret_cast` bitcast 包装。LLVM 优化可折叠 SWAR 为单条 `popcnt`。
+
+| 函数 | 语义 |
+|---|---|
+| `int32 popcount8/16/32/64(...)` | 置位个数（SWAR） |
+| `int32 clz32(uint32)` / `int32 clz64(uint64)` | 前导零；**对 0 返回位宽**（冻结） |
+| `int32 ctz32(uint32)` / `int32 ctz64(uint64)` | 尾随零；**对 0 返回位宽**（冻结） |
+| `uint32 rotl32(uint32,int32)` / `uint64 rotl64(...)` | 左循环移位，n 按位宽取模 |
+| `uint32 rotr32(uint32,int32)` / `uint64 rotr64(...)` | 右循环移位，n 按位宽取模 |
+| `uint32 f32_to_bits(float32)` / `uint64 f64_to_bits(float64)` | 位重解释为无符号整型 |
+| `float32 bits_to_f32(uint32)` / `float64 bits_to_f64(uint64)` | 位重解释回浮点 |
+| `uint32 i32_to_u32(int32)` / `int32 u32_to_i32(uint32)` | 整型位宽内重解释 |
+
+**前置约束**：语言无 `ull` 后缀（Lexer 只认 `u`/`l`/`ul`/`lu`）；超 int64 范围
+的字面量在常量折叠受限，库内 64 位高位掩码经 `ul` 字面量 + 运行时移位构造。
+
+## 13. `std.math`（P1-09 / STD-13）`[impl]`
+
+`import std.math;` 后用 `std::sqrt(...)` 等。libc 绑定（**链接需 `-lm`**；
+JIT 经进程符号解析，CLI 用 `cc -lm`）+ `constexpr` 常量 + 位级浮点分类。
+
+| 函数/常量 | 语义 |
+|---|---|
+| `float64 sqrt(float64)` / `float32 sqrtf(float32)` | 平方根 |
+| `float64 fabs(float64)` / `float32 fabsf(float32)` | 绝对值 |
+| `float64 floor/ceil/round/trunc(float64)`（`float32` 对应 `floorf/ceilf/roundf/truncf`） | 取整族 |
+| `float64 pow(float64,float64)` / `float32 powf(float32,float32)` | 幂 |
+| `float64 cos/cosf`、`sin/sinf` | 三角函数 |
+| `constexpr float64 PI` / `constexpr float64 E` | 圆周率 / 自然常数 |
+| `bool isnan(float64)` / `bool isinf(float64)` / `bool is_finite(float64)` | IEEE754 位级分类（纯语言，不依赖 libc 分类宏） |
+
+**C 符号名说明**：namespace 内 extern C 函数保持 C 裸符号名（`std::sqrt` 链接
+到 libm 的 `sqrt`，非 `std_sqrt_float64`）——namespace 前缀仅作访问语法。
+
+## 14. 待办 `[plan]`
 
 - `std.mem` 的 Allocator/Arena/Pool（STD-05，随语言层「模块导出类型」）、
   `std.collections`（STD-06~08）、`std.string`（STD-10）、
-  `std.format`（STD-11）、`std.math`/`std.bit`（STD-13/14）、`std.fs`（STD-19）等。
+  `std.format`（STD-11）、`std.fs`（STD-19）等。
 - `assert` 的释放模式（Release 关闭）若需要，将随 DEC-06/07（边界/溢出检查策略）
   一并裁决；当前**始终启用**。
