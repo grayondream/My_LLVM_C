@@ -102,6 +102,16 @@ std::string decodeEscapes(const std::string& s) {
     return out;
 }
 
+// LEX-16: strip the string literal's enclosing quotes before escape decoding.
+// A multiline token (`"""..."""`) carries three quotes per side; a regular or
+// raw string carries one. Raw strings (`r"..."`) are handled by their own
+// branch and never reach here with the multiline flag set.
+std::string stripStringQuotes(const std::string& s, bool multiline) {
+    size_t n = multiline ? 3 : 1;
+    if (s.size() < 2 * n) return s;
+    return s.substr(n, s.size() - 2 * n);
+}
+
 // Evaluate an integer constant expression used for enumerator values and
 // similar compile-time integers. Supports literals, unary +/-/~ and the usual
 // binary operators (TYP-25). Returns false for non-constant expressions.
@@ -742,7 +752,7 @@ std::unique_ptr<ExprAST> Parser::parsePrimaryImpl() {
             // Raw string: r"..." — no escape processing.
             if (lex.size() >= 3) val = lex.substr(2, lex.size() - 3);
         } else if (lex.size() >= 2 && lex.front() == '"' && lex.back() == '"') {
-            val = decodeEscapes(lex.substr(1, lex.size() - 2));
+            val = decodeEscapes(stripStringQuotes(lex, token->isMultilineString));
         }
         return std::make_unique<StringExprAST>(val);
     }

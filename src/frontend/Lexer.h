@@ -24,6 +24,7 @@ private:
     bool isEof() const;
     char peek() const;
     char peekNext() const;
+    char peekNext2() const;
     char advance();
     char advanceNextLine();
     std::string lexeme();
@@ -45,6 +46,7 @@ private:
     Token scanIdentifier();
     Token scanNumber();
     Token scanString();
+    Token scanMultilineString();
     Token scanChar();
 
     // LEX-15 / LEX-17 numeric-literal helpers.

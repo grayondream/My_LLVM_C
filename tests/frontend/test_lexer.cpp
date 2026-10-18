@@ -478,3 +478,47 @@ TEST(AsmKeyword, LexesAsmVolatileTemplate) {
     EXPECT_EQ(tokens[5].type, TokenType::TOKEN_SEMICOLON);
     EXPECT_TRUE(lexer.getDiagnostics().empty());
 }
+
+// LEX-16: multiline strings `"""..."""` — content spans lines, lexes as a
+// single TOKEN_STRING, marked isMultilineString so the parser strips three
+// quotes per side.
+TEST(LexerMultilineStringTest, MultilineStringLexesSingleToken) {
+    spdlog::set_level(spdlog::level::off);
+    Lexer lexer("ml.c", "string_view s = \"\"\"a\nb\"\"\";");
+    auto tokens = lexer.tokenize();
+    // tokens: string_view, s, =, STRING, ;
+    ASSERT_GE(tokens.size(), 4u);
+    EXPECT_EQ(tokens[3].type, TokenType::TOKEN_STRING);
+    EXPECT_EQ(tokens[3].lexeme, "\"\"\"a\nb\"\"\"");
+    EXPECT_TRUE(tokens[3].isMultilineString);
+    EXPECT_TRUE(lexer.getDiagnostics().empty());
+}
+
+TEST(LexerMultilineStringTest, MultilineStringUnterminatedReportsE0002) {
+    spdlog::set_level(spdlog::level::off);
+    Lexer lexer("ml.c", "string_view s = \"\"\"abc");
+    lexer.tokenize();
+    EXPECT_NE(findDiag(lexer.getDiagnostics(), DiagnosticCode::LexUnterminatedLiteral),
+              nullptr);
+}
+
+TEST(LexerMultilineStringTest, RegularStringNotMarkedMultiline) {
+    spdlog::set_level(spdlog::level::off);
+    Lexer lexer("s.c", "\"hello\"");
+    auto tokens = lexer.tokenize();
+    ASSERT_GE(tokens.size(), 1u);
+    EXPECT_EQ(tokens[0].type, TokenType::TOKEN_STRING);
+    EXPECT_FALSE(tokens[0].isMultilineString);
+}
+
+// LEX-18: Unicode identifiers — non-ASCII (UTF-8) bytes are valid identifier
+// characters; keyword collision is impossible (keywords are all ASCII).
+TEST(LexerUnicodeTest, UnicodeIdentifierAccepted) {
+    spdlog::set_level(spdlog::level::off);
+    Lexer lexer("uni.c", "int32 变量 = 42;");
+    auto tokens = lexer.tokenize();
+    ASSERT_GE(tokens.size(), 3u);
+    EXPECT_EQ(tokens[1].type, TokenType::TOKEN_IDENTIFIER);
+    EXPECT_EQ(tokens[1].lexeme, "变量");
+    EXPECT_TRUE(lexer.getDiagnostics().empty());
+}

@@ -136,6 +136,10 @@ char Lexer::peekNext() const {
     return isEof() ? '\0' : m_source[m_currentPos + 1];
 }
 
+char Lexer::peekNext2() const {
+    return (isEof() || m_currentPos + 2 >= m_source.size()) ? '\0' : m_source[m_currentPos + 2];
+}
+
 char Lexer::advance() {
     const char ch = peek();
     if(ch == '\n') {
@@ -298,7 +302,9 @@ std::string Lexer::lexeme() {
 Token Lexer::scanIdentifier() {
     while(true){
         const char ch = peek();
-        if(std::isalnum(ch) or ch == '_') {
+        // LEX-18: UTF-8 multibyte bytes (high bit set) continue an identifier;
+        // no codepoint/NFC validation (documented decision).
+        if(std::isalnum(ch) or ch == '_' or (ch & 0x80) != 0) {
             advance();
         } else {
             break;
@@ -525,6 +531,33 @@ Token Lexer::scanNumber(){
     return token;
 }
 
+// LEX-16: multiline string `"""..."""`. Content spans lines verbatim; escape
+// sequences are decoded later by the parser (shared decodeEscapes). Unterminated
+// at EOF reports E0002 (same recovery as plain strings).
+Token Lexer::scanMultilineString() {
+    advance(); // consume first '"'
+    advance(); // consume second '"'
+    advance(); // consume third '"'
+    while (true) {
+        if (isEof()) {
+            report(DiagnosticCode::LexUnterminatedLiteral,
+                   "unterminated multiline string literal",
+                   m_tokenStartLine, m_tokenStartCol);
+            break;
+        }
+        if (peek() == '"' && peekNext() == '"' && peekNext2() == '"') {
+            advance(); // consume closing quote
+            advance();
+            advance();
+            break;
+        }
+        advance();
+    }
+    Token token = makeToken(TokenType::TOKEN_STRING, lexeme());
+    token.isMultilineString = true;
+    return token;
+}
+
 Token Lexer::scanString() {
     // 检查是否是原始字符串 r"..."
     if(peek() == 'r' && peekNext() == '"') {
@@ -652,7 +685,12 @@ Token Lexer::scanToken() {
     if(ch == 'r' && peekNext() == '"') {
         return scanString();
     }
-    if(std::isalpha(ch) or ch == '_') {
+    // LEX-16: multiline string `"""..."""` — detect before the plain `"` branch.
+    if(ch == '"' && peekNext() == '"' && peekNext2() == '"') {
+        return scanMultilineString();
+    }
+    // LEX-18: a UTF-8 multibyte sequence (high bit set) may start an identifier.
+    if(std::isalpha(ch) or ch == '_' or (ch & 0x80) != 0) {
         return scanIdentifier();
     }else if(std::isdigit(ch)) {
         return scanNumber();
