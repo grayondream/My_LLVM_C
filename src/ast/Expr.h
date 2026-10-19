@@ -442,9 +442,12 @@ public:
 // PAR-14: `offsetof(T, member)` — layout query returning usize.
 class OffsetOfExprAST : public ExprAST {
 public:
-    Type* type;
+    // NOTE: named `aggregateType` (NOT `type`) — `type` would shadow the
+    // inherited ExprAST::type (result type) and sema's `node.type = usize`
+    // would clobber the aggregate operand (C3 review fix).
+    Type* aggregateType;
     std::string field;
-    OffsetOfExprAST(Type* t, std::string f) : type(t), field(std::move(f)) {}
+    OffsetOfExprAST(Type* t, std::string f) : aggregateType(t), field(std::move(f)) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 

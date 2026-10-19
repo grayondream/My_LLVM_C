@@ -1277,10 +1277,21 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
             llvm::Value* defVal = nullptr;
             if (defIdx < defaultArgValues.size()) {
                 const auto& dv = defaultArgValues[defIdx];
-                if (dv.isInt) {
+                // C4 review fix: the folded default may be an integer while the
+                // parameter is floating (e.g. `float64 x = 5`) — build the
+                // constant with the parameter's LLVM type (ConstantInt for
+                // integer params, ConstantFP for float params, converting
+                // int/char defaults to a float value when the param is FP).
+                if (paramLLVM->isFloatingPointTy()) {
+                    double v = dv.isInt ? static_cast<double>(dv.intVal)
+                             : dv.isChar ? static_cast<double>(dv.charVal)
+                             : dv.isDouble ? dv.doubleVal : 0.0;
+                    defVal = llvm::ConstantFP::get(paramLLVM, v);
+                } else if (dv.isInt) {
                     defVal = llvm::ConstantInt::get(paramLLVM, static_cast<uint64_t>(dv.intVal), /*isSigned=*/true);
                 } else if (dv.isDouble) {
-                    defVal = llvm::ConstantFP::get(paramLLVM, dv.doubleVal);
+                    // Integer param with a double default — truncate.
+                    defVal = llvm::ConstantInt::get(paramLLVM, static_cast<uint64_t>(dv.doubleVal), /*isSigned=*/true);
                 } else if (dv.isChar) {
                     defVal = llvm::ConstantInt::get(paramLLVM, static_cast<uint64_t>(dv.charVal), /*isSigned=*/true);
                 }
@@ -1427,10 +1438,17 @@ llvm::Value* MethodCallExprAST::codegen(CodegenContext& ctx) {
             llvm::Value* defVal = nullptr;
             if (defIdx < defaultArgValues.size()) {
                 const auto& dv = defaultArgValues[defIdx];
-                if (dv.isInt) {
+                // C4 review fix (mirror of CallExprAST): FP param with an int/
+                // char default must produce a float constant.
+                if (paramLLVM->isFloatingPointTy()) {
+                    double v = dv.isInt ? static_cast<double>(dv.intVal)
+                             : dv.isChar ? static_cast<double>(dv.charVal)
+                             : dv.isDouble ? dv.doubleVal : 0.0;
+                    defVal = llvm::ConstantFP::get(paramLLVM, v);
+                } else if (dv.isInt) {
                     defVal = llvm::ConstantInt::get(paramLLVM, static_cast<uint64_t>(dv.intVal), /*isSigned=*/true);
                 } else if (dv.isDouble) {
-                    defVal = llvm::ConstantFP::get(paramLLVM, dv.doubleVal);
+                    defVal = llvm::ConstantInt::get(paramLLVM, static_cast<uint64_t>(dv.doubleVal), /*isSigned=*/true);
                 } else if (dv.isChar) {
                     defVal = llvm::ConstantInt::get(paramLLVM, static_cast<uint64_t>(dv.charVal), /*isSigned=*/true);
                 }
@@ -2257,7 +2275,7 @@ llvm::Value* SizeofExprAST::codegen(CodegenContext& ctx) {
 // PAR-14: `offsetof(T, member)` — field offset via LayoutBuilder (single source
 // with compile_time.offset_of / codegen layout).
 llvm::Value* OffsetOfExprAST::codegen(CodegenContext& ctx) {
-    Type* t = type;
+    Type* t = aggregateType;
     while (t && t->kind == TypeKind::Typedef)
         t = static_cast<TypedefType*>(t)->aliasedType;
     if (!t || (t->kind != TypeKind::Struct && t->kind != TypeKind::Class &&

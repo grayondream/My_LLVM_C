@@ -179,6 +179,32 @@ TEST_F(DefaultArgsE2E, MiddleDefaultRejected) {
     EXPECT_TRUE(parserError || semaError);
 }
 
+TEST_F(DefaultArgsE2E, FloatDefaultValueIsFloat) {
+    // C4 (review): `float64 x = 5` must pass double 5.0, not int 0/5.
+    EXPECT_EQ(runSource(R"(
+        float64 f(float64 x = 5) { return x; }
+        int32 main() {
+            if (f() != 5.0) return 1;
+            if (f(2.5) != 2.5) return 2;
+            return 0;
+        }
+    )", "def_float.c"), 0);
+}
+
+TEST_F(DefaultArgsE2E, RedeclarationCarriesDefaults) {
+    // I4 (review): prototype without defaults, then definition with defaults —
+    // the redeclared defaults must be honored at call sites.
+    EXPECT_EQ(runSource(R"(
+        int32 f(int32 x, int32 y);
+        int32 f(int32 x, int32 y = 5) { return x + y; }
+        int32 main() {
+            if (f(1) != 6) return 1;
+            if (f(1, 2) != 3) return 2;
+            return 0;
+        }
+    )", "def_redecl.c"), 0);
+}
+
 TEST_F(DefaultArgsE2E, MethodDefaultArgs) {
     EXPECT_EQ(runSource(R"(
         class C {

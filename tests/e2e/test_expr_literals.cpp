@@ -114,6 +114,20 @@ TEST_F(ExprLiteralsE2E, OffsetofSecondField) {
     )", "offsetof.c"), 0);
 }
 
+TEST_F(ExprLiteralsE2E, OffsetofValueUsedInComputation) {
+    // C3 (review): offsetof must return a real value used in computation —
+    // not silently drop the expression (the old e2e was false-green because
+    // the failed codegen produced a skipped `if`).
+    EXPECT_EQ(runSource(R"(
+        struct S { int32 a; int32 b; float64 c; };
+        int32 main() {
+            // a@0, b@4, c@8
+            usize total = offsetof(S, a) + offsetof(S, b) + offsetof(S, c);
+            return total == 12 ? 0 : 1;
+        }
+    )", "offsetof_use.c"), 0);
+}
+
 TEST_F(ExprLiteralsE2E, NullptrIsNullPointerConstant) {
     EXPECT_EQ(runSource(R"(
         int32 main() {

@@ -475,7 +475,7 @@ std::unique_ptr<ExprAST> Parser::parseUnaryImpl() {
         // pointers, qualifiers, and named types: (int*)p, (struct S*)p, (void*)
         // handles, etc. (MEM-10 / P0-02).
         if (isTypeStart() || check(TokenType::TOKEN_CONST) ||
-            check(TokenType::TOKEN_VOLATILE)) {
+            check(TokenType::TOKEN_VOLATILE) || check(TokenType::TOKEN_ATOMIC)) {
             size_t saved = m_currentTokenPos;
             Type* castType = parseType();
             if (castType && match(TokenType::TOKEN_RPAREN)) {
@@ -504,7 +504,7 @@ std::unique_ptr<ExprAST> Parser::parseUnaryImpl() {
         if (match(TokenType::TOKEN_LPAREN)) {
             // Try `sizeof(type)` first, then fall back to `sizeof(expr)`.
             if (isTypeStart() || check(TokenType::TOKEN_CONST) ||
-                check(TokenType::TOKEN_VOLATILE)) {
+                check(TokenType::TOKEN_VOLATILE) || check(TokenType::TOKEN_ATOMIC)) {
                 size_t savedPos = m_currentTokenPos;
                 Type* sizeofType = parseType();
                 if (sizeofType && check(TokenType::TOKEN_RPAREN)) {
@@ -1276,7 +1276,8 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
     if (isAnnotationStart()) {
         stmtAnns = parseAnnotations();
         if (!(isTypeStart() || check(TokenType::TOKEN_CONST) ||
-              check(TokenType::TOKEN_VOLATILE) || check(TokenType::TOKEN_CONSTEXPR))) {
+              check(TokenType::TOKEN_VOLATILE) || check(TokenType::TOKEN_CONSTEXPR) ||
+              check(TokenType::TOKEN_ATOMIC))) {
             errorUnexpected("annotations are only allowed on declarations");
             return nullptr;
         }
@@ -1389,7 +1390,8 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
     }
 
     // local declaration (type keyword or typedef name)
-    if (isTypeStart() || check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE)) {
+    if (isTypeStart() || check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE) ||
+        check(TokenType::TOKEN_ATOMIC)) {
         size_t savedPos = m_currentTokenPos;
         Type* type = parseType();
         // A function-pointer declarator starts with '(' after the type
@@ -2368,15 +2370,27 @@ Type* Parser::parseType() {
     baseType->isConst = isConst;
     baseType->isVolatile = isVolatile;
     // CON-01: `atomic T` must NOT mutate the shared scalar singletons
-    // (getInt32() etc. are process-wide) — clone the type instead.
+    // (getInt32() etc. are process-wide) — clone the type instead. A plain
+    // `new Type(kind, base)` clone only preserves scalar kinds; aggregating
+    // subclasses (Struct/Class/Union fields, Enum values) would be corrupted
+    // and later crash LayoutBuilder. So: strip typedefs to the innermost type;
+    // clone only scalar kinds; reject atomic-on-aggregate here (C1/C2 fix).
     if (isAtomic) {
-        auto* copy = new Type(baseType->kind, baseType->base);
+        Type* inner = baseType;
+        while (inner && inner->kind == TypeKind::Typedef)
+            inner = static_cast<TypedefType*>(inner)->aliasedType;
+        if (!inner || inner->kind == TypeKind::Struct || inner->kind == TypeKind::Class ||
+            inner->kind == TypeKind::Union || inner->kind == TypeKind::Enum) {
+            error("atomic requires an integer scalar type", *peek());
+            return nullptr;
+        }
+        auto* copy = new Type(inner->kind, inner->base);
         copy->isConst = isConst;
         copy->isVolatile = isVolatile;
         copy->isAtomic = true;
-        copy->ctDeadBranch = baseType->ctDeadBranch;
-        copy->deprecated = baseType->deprecated;
-        copy->deprecatedMsg = baseType->deprecatedMsg;
+        copy->ctDeadBranch = inner->ctDeadBranch;
+        copy->deprecated = inner->deprecated;
+        copy->deprecatedMsg = inner->deprecatedMsg;
         baseType = copy;
     }
 

@@ -170,3 +170,49 @@ TEST_F(AtomicE2E, AtomicMultiplyRejected) {
     EXPECT_NE(analyzer.getErrors()[0].message.find("atomic"),
               std::string::npos);
 }
+
+// C1 (review): `atomic` on a typedef base strips to the underlying scalar and
+// works (must not be silently dropped nor crash).
+TEST_F(AtomicE2E, AtomicTypedefBaseWorks) {
+    EXPECT_EQ(runSource(R"(
+        typedef int32 myint;
+        atomic myint x = 5;
+        int32 main() {
+            x = x + 1;
+            return x == 6 ? 0 : 1;
+        }
+    )", "at_typedef.c"), 0);
+}
+
+// I2 (review): `atomic` works in a function-local declaration too (was
+// silently dropped because isTypeStart didn't recognize the qualifier).
+TEST_F(AtomicE2E, AtomicLocalDeclarationWorks) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            atomic int32 a = 1;
+            a = a + 1;
+            return a == 2 ? 0 : 1;
+        }
+    )", "at_local.c"), 0);
+}
+
+// C2 (review): `atomic` on an aggregate is rejected cleanly (parse-time), not
+// a crash.
+TEST_F(AtomicE2E, AtomicAggregateRejectedCleanly) {
+    auto tokens = [&]() {
+        Lexer lexer("at_agg.c", R"(
+            struct S { int32 a; };
+            atomic struct S f;
+            int32 main() { return 0; }
+        )");
+        return lexer.tokenize();
+    }();
+    Parser parser(tokens);
+    parser.parse();
+    bool parserError = !parser.getErrors().empty();
+    EXPECT_TRUE(parserError);
+    if (parserError) {
+        EXPECT_NE(parser.getErrors()[0].message.find("atomic"),
+                  std::string::npos);
+    }
+}

@@ -4992,6 +4992,30 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
         } else if (node.body) {
             definedFunctions.insert(signature);
         }
+        // I4 (review): a redeclaration may carry default arguments the earlier
+        // prototype lacked (prototype then definition-with-defaults). Refresh
+        // the existing Symbol's decl back-pointer so OverloadSet reads the
+        // newer defaultArgCount instead of the default-less first declaration.
+        if (node.defaultArgCount > 0 || node.body) {
+            if (OverloadSet* os = currentScope->lookupOverload(node.name)) {
+                for (Symbol* cand : os->getCandidates()) {
+                    if (cand->type->kind != TypeKind::Function) continue;
+                    auto* ft = static_cast<FunctionType*>(cand->type);
+                    if (ft->paramTypes.size() != funcType->paramTypes.size()) continue;
+                    bool same = true;
+                    for (size_t i = 0; i < ft->paramTypes.size(); ++i) {
+                        if (!typesEqual(ft->paramTypes[i], funcType->paramTypes[i])) {
+                            same = false;
+                            break;
+                        }
+                    }
+                    if (same && cand->decl != &node) {
+                        cand->decl = &node;
+                        break;
+                    }
+                }
+            }
+        }
     } else {
         declaredSym->decl = &node;
         if (node.body) definedFunctions.insert(signature);

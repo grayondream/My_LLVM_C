@@ -195,7 +195,12 @@ llvm::Value* CodegenContext::loadValue(llvm::Value* ptr, Type* type) {
 
     llvm::Type* loadType = t ? getLLVMType(t) : llvm::Type::getInt32Ty(*context);
     if (!loadType) return ptr;
-    return builder.CreateLoad(loadType, ptr, "loadtmp");
+    llvm::LoadInst* load = builder.CreateLoad(loadType, ptr, "loadtmp");
+    // CON-01: atomic-typed lvalues load with seq_cst ordering.
+    if (t && t->isAtomic) {
+        load->setAtomic(llvm::AtomicOrdering::SequentiallyConsistent);
+    }
+    return load;
 }
 
 llvm::Value* CodegenContext::loadBitFieldValue(llvm::Value* unitAddr,
