@@ -835,3 +835,20 @@
 - 文档：stdlib.md §12 std.bit / §13 std.math 函数表 + C 符号名说明 + 前置约束；TODO STD-13/14 `[x]`、P1-09 收口、进度快照 1370。
 - 验证：每任务 TDD RED→GREEN（Task 2 RED：临时移走 math.smc 全 5 FAIL；GREEN 后全绿）；最终全量 ctest **1370/1370** 绿（1365 + 5；2 个既有 GTEST_SKIP 不变）。
 - 遗留/P1-09 剩余：**仅 std.collections（STD-06~08）**，阻塞于「模块导出类型」语言缺口；std.mem 的 Allocator/Arena/Pool 同因挂账。
+
+## 2026-10-19 — 语法遗漏收口完成（LEX-16/18、PAR-14、TYP-05/24、CON-01/04、FUN-09、CT-07/13、INH-06）
+
+- 流程：用户暂停标准库（std.collections 不做）→ 语法层面审计（实测确认 11 项遗漏 + 1 项静默丢弃缺陷 + 多文档滞后）→ brainstorm → spec（docs/superpowers/specs/2026-10-18-syntax-gaps-design.md，builder-check 8 项裁定）→ plan（docs/superpowers/plans/2026-10-18-syntax-gaps.md，9 任务 TDD）→ executing-plans Native 内联（master 直接提交）。
+- 提交线：Task1 `feat(LEX-16/18)` → Task2 `feat(TYP-05/CON-04)` → Task3 `feat(CON-01)` → Task4 `feat(FUN-09)` → Task5 `fix E2031` → Task6 `feat(CT-07/13)` → Task7 `feat(INH-06)` → Task8 `feat(PAR-14/TYP-24)` → Task9 `docs`。
+- **Task 1（LEX-16/18）**：多行字符串 `"""..."""`（scanMultilineString + Token::isMultilineString + parser 3 引号剥离）+ Unicode 标识符（高位字节放宽 scanToken/scanIdentifier）。转义全集本已实现（decodeEscapes）。
+- **Task 2（TYP-05/CON-04）**：char8/16/32 → uint8/16/32 别名（parseBaseType + isTypeStart）；thread_local 存储类（VarDeclAST::isThreadLocal + codegen setThreadLocal + 函数拒绝 E2028）。IR 实证 `@x = thread_local global i32 5`。
+- **Task 3（CON-01）**：atomic 限定符——**克隆类型不污染共享单例**（`atomic int32` ≠ `int32`，typesEqual/mangle 纳入 isAtomic）；原子 load/store（seq_cst）+ 复合赋值/`++`/`--` 经 atomicrmw（add/sub/and/or/xor）；`* / % << >>` 与浮点/指针拒绝（E2029/E2030，cmpxchg 属 CON-02 边界）。IR 实证 `atomicrmw add ... seq_cst`。
+- **Task 4（FUN-09）**：默认参数 `T name = const-expr`（仅尾随、须常量）——ParamDeclAST::hasDefault/defaultValue + Symbol::decl 回指针 + FunctionDeclAST::defaultArgCount；**OverloadSet::resolve 区间化**（[minArgs,paramCount]）+ 并列偏好少默认；checkFunctionCall/resolveMethod 同区间化；调用点折叠暂存（DefaultArgValue）+ codegen 补参（CallExprAST/MethodCallExprAST）。
+- **Task 5（缺陷修复）**：未知类型名声明静默丢弃——`f16 x;`/`char8 c;` 零诊断消失；parseDeclarationAsType 报 E2031 unknown type + 双报防护（模板实参失败不补报）。
+- **Task 6（CT-07/13）**：compile_time 反射——ReflectionRegistry（sema→codegen 交接）+ FieldInfo/Attribute 内建类型 + parser ctMember 白名单扩展 + CompileTimeEvaluator::evalReflectFields（LayoutBuilder 偏移/大小）+ codegenReflection（全局常量数组 + slice 视图）。`name_of→string_view`、`fields_of→Slice<FieldInfo>`、`attributes_of→Slice<Attribute>`。
+- **Task 7（INH-06）**：protected 派生访问放宽——canAccessMember(definingClass, level)：Public 放行、定义类放行、protected+派生类放行、**private 仅定义类**。4 检查点（static 成员/字段/方法/指定初始化器）。
+- **Task 8（PAR-14/TYP-24）**：`alignof(T)`/`offsetof(T, member)` 独立关键字（SizeofExprAST::isAlignOf + OffsetOfExprAST，LayoutBuilder 偏移）+ `nullptr`（词法映射 TOKEN_NULL，≡ null）。
+- **Task 9（文档）**：grammar.ebnf/keywords.md/conversions.md/compile_time.md/semantics.md/abi.md 同步（`str`→`string_view`、裸 return、原始字符串、转义全集、反射签名等滞后修正）；TODO 勾记 9 条目 + 进度快照 1418；Progress 本记录。
+- **关键 Ruling**：①atomic 克隆类型（共享单例污染隐患——builder-check #3）；②默认参数少默认优先（C++ 语义，builder-check #2）；③`f(int,int)` 与 `f(int,int=5)` 是 C++ 非法重载（测试用例修正）；④name_of 返回 typeToString（`struct S` 非 `S`）；⑤反射 ctHandled 先于 ctConstantOrNull 判断；⑥E2031 双报防护（诊断计数）。
+- 验证：每任务 TDD RED→GREEN（编译错误/断言失败/CLI 复现三种 RED 形态）；最终全量 ctest **1418/1418** 绿（2 个既有 GTEST_SKIP 不变）。工作区 clean。
+- 遗留/P1-09 剩余：**仅 std.collections（STD-06~08）**，阻塞于「模块导出类型」语言缺口（parse 期类型名注册先于 import）；std.mem 的 Allocator/Arena/Pool 同因挂账。CON-02/03/09/10（atomic 完整并发模型）、LEX-16 多行字符串缩进策略等另轮。

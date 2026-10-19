@@ -33,6 +33,8 @@
 
 > **进度快照（2026-10-17，P1-09 std.math/std.bit 完成）**：**std.math + std.bit 完成**（STD-13/14 `[x]`，spec/plan `docs/superpowers/specs|plans/2026-10-17-stdmath-bit*`）。`libs/std/bit.smc` 纯语言位工具：SWAR popcount（LLVM 可折叠单条 popcnt）、二分 clz/循环 ctz（对 0 返回位宽冻结）、rotl/rotr（n 按位宽取模）、reinterpret_cast bitcast 包装（7 e2e）。`libs/std/math.smc`：18 个 libc 绑定（sqrt…sinf，`-lm` 链接）+ `constexpr PI/E` + 位级 isnan/isinf/is_finite（IEEE754 纯语言，运行时构造掩码绕开超 int64 常量折叠限制）（5 e2e）。**顺带修复语言层缺口**：namespace 内 C-linkage extern 函数被 scopedName 前缀化 → 符号 `std_sqrt_float64` 而非 libm 裸名 `sqrt`（JIT 解析失败）；修复——`visit(FunctionDeclAST)` 对 C 名跳过前缀、`namespaceCandidates` 限定名回退裸 C 名（SemanticAnalyzer.cpp）。当前全量 **1370** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。P1-09 剩余：仅 std.collections（STD-06~08，阻塞于模块导出类型）。
 
+> **进度快照（2026-10-19，语法遗漏收口完成）**：**语法层面审计 + 11 项特性/缺陷收口**（spec/plan `docs/superpowers/specs|plans/2026-10-18-syntax-gaps*`）。多行字符串 `"""..."""` 与 Unicode 标识符（LEX-16/18）；`char8/16/32` 类型（uint 别名）与 `thread_local`（TYP-05/CON-04）；`atomic` 限定符（整型标量，原子 load/store + atomicrmw 子集，CON-01）；默认参数（区间重载 + 少默认优先，FUN-09）；**未知类型名声明静默丢弃修复**（E2031，此前 `f16 x;` 零诊断消失）；compile_time 反射 `name_of/fields_of/attributes_of`（ReflectionRegistry 交接，CT-07/13）；protected 派生访问放宽（INH-06）；`alignof/offsetof` 独立关键字与 `nullptr`（PAR-14/TYP-24）。当前全量 **1418** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。P1-09 剩余：仅 std.collections（STD-06~08，阻塞于「模块导出类型」语言缺口）。
+
 ---
 
 ## 0. 现状基线（已完成，勿重复实现）
@@ -85,9 +87,9 @@
 - `[x]` **LEX-13** 错误恢复与词法诊断（非法字符、未闭合字面量、整型溢出）。已实现：`Lexer::getDiagnostics()` 产出 E0001（非法字符，跳过并继续）、E0002（未闭合字符串/字符/块注释，含原始字符串）、E0003（整型字面量超过 128 位，累加器 `unsigned __int128`，LEX-17）；`skipTrivia` 统一跳过空白与注释（修复行注释后空行被误判）；诊断在 `CompilerDriver`/`ModuleLoader`/`StdPrelude` 中上报并使编译失败（`tests/frontend/test_lexer.cpp`、`tests/driver/test_compiler_driver.cpp`、`tests/diagnostics/snapshots/lexical_invalid_character.txt`）。
 - `[x]` **LEX-14** `(新)` **关键字/保留字总表落地**（配合 INF-11）：`register`/`cast`/`typeof` 已按 DEC-18 移除 token；`namespace` 关键字与 `::` token 已新增；`template`/`typename` 已注册（LEX-02），`this` 走上下文标识符（PAR-17）。
 - `[x]` **LEX-15** `(新)` **字面量默认类型与后缀映射**：无后缀整型/浮点的默认类型，`u`/`l`/`f16`…后缀 → 底层类型表。**词法层已完成**：`Token::literalKind`（`Int/UInt/Long/ULong/Float16/Float32/Float64/Float128`）+ `literalKindName` 映射表；识别 `u`/`l`/`ul`/`lu`（各进制通用）与 `f`/`f16`/`f32`/`f64`/`f128`（兼容 `l`/`L`）；无后缀默认 `int32`/`float64`；规范见 `docs/spec/grammar.ebnf`、`conversions.md §7`（`tests/frontend/test_lexer.cpp`）。**消费端已完成**（2026-09-29）：AST 节点携带 `literalKind`，sema 按 kind 赋定宽类型（无后缀默认 `int32`/`float64`），codegen 按宽度/符号（含无符号）与 APFloat 语义（half/single/double/quad）生成常量，大整数不再截断。**128 位字面量已支持**（2026-10-16）：TokenValue 整数值统一 `unsigned __int128`，lexer 累加至 128 位（E0003 移到超 2^128-1），sema 映射 int128/uint128，codegen APInt 两字构造。
-- `[ ]` **LEX-16** `(新)` **转义字符全集、原始字符串与多行字符串**的精确词法规则（细化 LEX-06）。
+- `[x]` **LEX-16** `(新)` **转义字符全集、原始字符串与多行字符串**的精确词法规则（细化 LEX-06）。**完成**（2026-10-19）：转义全集（`\a\b\f\v\?` + `\u{...}`）与原始字符串 `r"..."` 已在 `decodeEscapes`/`scanString`；**多行字符串 `"""..."""`** 新增 `scanMultilineString`（`Token::isMultilineString`，parser 3 引号剥离）。
 - `[x]` **LEX-17** `(新)` **数字分隔符位置规则、进制前缀、整型字面量溢出诊断**（细化 LEX-04/13）。二/八/十六/十进制均按 64 位无符号累加并检测溢出，超 64 位报 **E0003**；分隔符 `_` 仅可位于两个数字之间，前导/结尾/连续/紧邻进制前缀或小数点均报 **E0004**（`src/frontend/Lexer.cpp`；`docs/spec/grammar.ebnf`）。
-- `[ ]` **LEX-18** `(新)` **标识符 UTF-8/Unicode 规则**：允许范围、NFC 规范化、与关键字冲突处理。
+- `[x]` **LEX-18** `(新)` **标识符 UTF-8/Unicode 规则**：允许范围、NFC 规范化、与关键字冲突处理。**完成**（2026-10-19）：UTF-8 多字节序列（高位字节）计入标识符首/续字符；不做 NFC 规范化（YAGNI）；关键字冲突天然不存在（全 ASCII）。
 
 ---
 
@@ -106,7 +108,7 @@
 - `[x]` **PAR-11** `(新)` 简单 lambda：语法（建议 C++ 风格 `[capture](params) -> T { ... }` 或最简 `[](p){...}`）、捕获列表。**完成**（2026-10-17，随 P1-07）：`[captures](params) -> Ret { body }`；`[]`/`[=]`/`[a,&b]` 捕获列表；返回类型显式或推断；表达式起始 `[` 识别（下标是后缀无歧义）；立即调用 `[...](...)(args)`。plan `docs/superpowers/plans/2026-10-17-lambda.md`。
 - `[x]` **PAR-12** `(新)` 匿名 class/struct/union：匿名类型定义、匿名成员提升。**完成**（2026-10-17）：每个匿名定义获得唯一合成名 `__anon_N`（`TypeContext::nextAnonId`，C 语义独立类型）；`struct/union/class { ... } v, v2;` 全局/局部/嵌套（字段类型）/数组/指针全通路；匿名 class 字段/方法/访问段正确注册（`attachedVars` 挂载聚合 AST）；**名义身份强制**——两次独立匿名定义赋值/初始化/实参/返回/比较互斥（`checkAssignmentTypes`/`typesCompatible` 同 kind 收紧，保留派生→基 INH-04 切片）；匿名成员提升 AGG-03 不回退（`__anon_` 前缀判定）。plan `docs/superpowers/plans/2026-10-17-anonymous-types.md`。
 - `[x]` **PAR-13** `(新)` 指定初始化器 `{.field = v}`、柔性数组 `T a[]`。**完成**（2026-10-16）：`.name`/`.a.b`/`[i]` 设计符链（AST `Designator`/`designators`，parser 解析）；sema `resolveDesignators` 展开语义目标链（`resolvedTargets`，继承链 + E2009、union 槽 0、位域、Optional/Result 伪字段拒绝）、数组大小推断 = C99 `max(位置式, 最大下标+1)`（含多链 `[1][2]=5` 外层维）；局部 codegen 整块补零 + 按链写槽（含 typedef 数组）；全局常量递归累积（后写覆盖/位域掩码 OR/基类下降）；乱序/重复/混排均 C99 语义。plan `docs/superpowers/plans/2026-10-16-designated-init-flexarray.md`。
-- `[~]` **PAR-14** `(已实现)` `sizeof`；`(新)` `alignof`、`offsetof`。（`compile_time.size_of/align_of/offset_of` 已实现，CT-06/P1-04；独立 `alignof`/`offsetof` 关键字形式未做，见 CT-07/13 反射收口）
+- `[x]` **PAR-14** `(已实现)` `sizeof`；`(新)` `alignof`、`offsetof`。**完成**（2026-10-19）：独立关键字形式 `alignof(T)`/`offsetof(T, member)` 已实现（SizeofExprAST::isAlignOf + OffsetOfExprAST，LayoutBuilder 偏移），与 `compile_time.align_of/offset_of` 一致。
 - `[x]` **PAR-15** `(新)` `compile_time` 表达式：`static_assert`、`if`、目标/构建查询完成（2026-10-06）；反射部分未含（另轮）。
 - `[x]` **PAR-16** `(新)` 内联汇编 `asm` 语句/表达式。**完成**（2026-10-11，P1-08）：`AsmOperand`/`AsmExprAST` 节点 + `parseAsmExpr()`（至多三段操作数、模板/约束须字符串字面量、`decodeEscapes` 去引号），见 plan `2026-10-10-p108-inline-asm`。
 - `[x]` **PAR-17** `(新)` `this` 表达式（2026-10-06）。方法体内 `this` 走隐式 this 参数按普通变量解析；`this.field` 点号对指针自动解引用；static 方法内 this 钉死诊断。
@@ -146,7 +148,7 @@
 - `[ ]` **TYP-02** 整数类型：`i8..i128`、`u8..u128`。
 - `[ ]` **TYP-03** 平台整数：`isize/usize` 与目标指针宽度绑定。
 - `[~]` **TYP-04** 浮点类型：`f16/f32/f64/f128` 的 LLVM 映射与软件兜底。**已完成**：LLVM 类型映射（常量按 APFloat 语义生成，LEX-15）；x86-64 上 f16/f128 的算术/比较/混合运算/转换、形参/返回、全局变量、struct 字段均可用（LLVM 原生/内部提升承担兜底）；`print`/`println` 全格式说明符支持 f16（无损提升）/f128（截断为 double，精度损失见 `conversions.md` §9.1）；varargs 默认实参提升对齐 C23（`float16→float64`，`float128` 原样传递）。**延后**：非 x86-64 目标（无 half 硬件、需 compiler_rt 的 quad）的验证挂靠 INF-05/TST-08；f128 的 113 位精确十进制输出挂靠 FMT-13。
-- `[ ]` **TYP-05** `bool/char/char8/char16/char32/void`。
+- `[~]` **TYP-05** `bool/char/char8/char16/char32/void`。`char8/16/32` 类型关键字完成（2026-10-19，uint8/16/32 别名）；UTF 字面量类型族（u8/u16/u32 前缀字面量）未做。
 - `[ ]` **TYP-06** 类型别名 `type Handle = u64;`：展开、循环检测。
 - `[ ]` **TYP-07** `struct`：字段、布局、默认公开、C ABI 兼容。
 - `[ ]` **TYP-08** `class`：布局等价 struct，成员函数不占空间。
@@ -166,7 +168,7 @@
 - `[ ]` **TYP-21** ABI 类型检查：`[[repr(C)]]` 下布局可预测；位域布局规则（见 DEC-08）。
 - `[x]` **TYP-22** `(新)` **整数提升与常规算术转换**：转换等级、signed×unsigned 混合规则（细化 TYP-19）。已实现于 `usualArithmeticType`/`promoteArithmeticType`/`isUnsignedArithmeticType`（`src/ast/Symbol.cpp`）：sema 按提升+常规算术转换取公共类型，codegen 按有/无符号选 `udiv`/`urem`、无符号比较、`lshr`/`ashr`，并按源符号选 `zext`/`sext`、`uitofp`/`sitofp`（规范见 `docs/spec/conversions.md` §3/§5）。
 - `[~]` **TYP-23** `(新)` **隐式/显式转换矩阵**：标量、指针、数组、struct/class、enum、Optional/Result 的完整转换表。（规范矩阵见 `docs/spec/conversions.md` §4；`enum` 强类型 TYP-20 与常规算术转换 TYP-22 已落地；隐式**窄化**仍按兼容处理，其余 `[plan]` 项待实现）
-- `[~]` **TYP-24** `(新)` **空指针常量语义**：`nullptr`/`NULL`/`0` 与指针/bool 的转换规则。（草案见 `docs/spec/conversions.md`；`null`/`0` 的 int↔ptr 转换、指针比较、指针真值判断已实现；`nullptr` token 待补）
+- `[~]` **TYP-24** `(新)` **空指针常量语义**：`nullptr`/`NULL`/`0` 与指针/bool 的转换规则。（草案见 `docs/spec/conversions.md`；`nullptr` 已实现（2026-10-19，词法映射同一 token，≡ `null`）；`NULL` 宏不提供（无预处理器））
 - `[x]` **TYP-25** `(新)` enum 默认底层类型、枚举常量作用域与限定访问（细化 TYP-09）。枚举常量可作值/常量表达式（含 `= -1`、`= 1+2+4`），支持限定访问 `A::Red` 与限定类型名 `cfg::Mode`（无需 `enum` 关键字）；显式底层类型 `enum E : uint8`（含 `typedef enum : uint16 {...}`）已实现。
 - `[x]` **TYP-26** `(新)` 字符串字面量类型、`str`/`String` 生命周期与所有权（细化 FMT-01/02）。2026-10-08 完成（随 P1-06）：字面量类型 = `str`；所有权/边界见 DEC-20。
 - `[~]` **TYP-27** `(新)` 聚合类型 ABI：按值传参/返回（byval/sret）、端序、默认对齐与成员内边距（细化 MEM-09）。（草案见 `docs/spec/abi.md`）
@@ -227,7 +229,7 @@
 - `[ ]` **AGG-07** `class` 声明与 `public/private/protected` 段。**部分完成**：访问段 + 默认 private（DEC-01）+ E2009 访问诊断已实现；`static` 成员/嵌套类型已完成（AGG-10/11，2026-10-05）。
 - `[ ]` **AGG-08** 成员变量、成员函数声明/实现、隐式 `self`。
 - `[ ]` **AGG-09** 成员函数编译为 `Vector_length(Vector* self)`；方法调用 `v.length()`。
-- `[x]` **AGG-10** `static` 成员函数（无 `self`）与 `static` 成员变量。**完成**（2026-10-05，spec `docs/superpowers/specs/2026-10-05-static-members-design.md`）：方案 A 类前缀全局符号去糖（`Class::member` → `Class_member`，与 namespace 拍平同构）；仅类名限定访问（实例路径拒绝）；类内初始化器=全局定义（零初始化默认），不占对象布局；无 `this`；访问控制复用 DEC-01（E2009）；abi.md §4 补编码规范。struct 支持 static 变量（无方法通路；评审 C2 修复：仅含 static 成员的 struct 定义不再落入前向声明回退分支）。评审 I1 修复：static 成员访问级别独立键（`static:<name>`），同名实例成员级别不受覆盖。评审 I2 修复：static 方法先注册后分析体，可后向引用同类 static 方法。已知限制（INH-06 已落地 2026-10-05，复查结论）：protected static 经 `Base::p` 从派生类访问仍被拒（比 C++ 严格；放宽另立项，检查点 `checkStaticMemberAccess`）。
+- `[x]` **AGG-10** `static` 成员函数（无 `self`）与 `static` 成员变量。**完成**（2026-10-05，spec `docs/superpowers/specs/2026-10-05-static-members-design.md`）：方案 A 类前缀全局符号去糖（`Class::member` → `Class_member`，与 namespace 拍平同构）；仅类名限定访问（实例路径拒绝）；类内初始化器=全局定义（零初始化默认），不占对象布局；无 `this`；访问控制复用 DEC-01（E2009）；abi.md §4 补编码规范。struct 支持 static 变量（无方法通路；评审 C2 修复：仅含 static 成员的 struct 定义不再落入前向声明回退分支）。评审 I1 修复：static 成员访问级别独立键（`static:<name>`），同名实例成员级别不受覆盖。评审 I2 修复：static 方法先注册后分析体，可后向引用同类 static 方法。已知限制（INH-06 已落地 2026-10-05，protected 派生访问 2026-10-19 已放宽）：protected static 经 `Base::p` 从派生类访问已放行（`canAccessMember`）。
 - `[x]` **AGG-11** 嵌套类型、前向声明。**完成**（2026-10-05，spec `docs/superpowers/specs/2026-10-05-nested-types-design.md`）：方案 A 解析期类前缀复用（类/struct/union 体解析压 `m_typeNamespacePrefix += 裸类名_`，与 namespace 同构）；DS1 全种类（enum/struct/class/union）任意深度嵌套，解析期扁平键注册（`Outer::Inner` → `Outer_Inner`）；DS2 成员循环三路判定（keyword+IDENT+`{` → 嵌套声明，平衡括号前瞻排除内联定义+声明符的 C 风格 idiom；keyword+`{` → 匿名内联字段 AGG-03；其余 → 字段）；DS3 引用侧零改动（`mangleQualifiedTypeName` 拍平命中）；DS4 sema `classPathPrefix` 推广 static 去糖公式（`ns::Outer::Inner::v` → `ns_Outer_Inner_v` 双侧严格一致），类嵌套枚举常量注册外层类作用域（`Outer::Red`，不注册裸键防全局泄漏）；DS5 private 嵌套类型访问控制（E2009，检查点 var decl + cast 目标）；DS6 前向声明+定义、自引用指针以测试钉住（codegen 既有类型提前 return 分支同样执行 nestedTypes 遍历）。评审修复：parseDeclaration 空定义回退分支纳入 nestedTypes 判定（防吞后续顶层声明）。已知限制：类体内裸自引用类型（self-type）解析期未注册（顶层类同样存在，含限定名变体）；类体内 unqualified 表达式引用须全限定（单一规则）。
 - `[ ]` **AGG-12** 不生成 vtable/构造/析构/GC；生命周期由用户控制（栈/`malloc`/`free`）。
 - `[ ]` **AGG-13** 布局等价 struct；`[[repr(C)]]` 下 ABI 稳定。
@@ -249,7 +251,7 @@
 - `[x]` **INH-03** 继承布局：基类子对象为派生类第一个字段（偏移 0）。**完成**（2026-10-05）：ClassType 路径既有实现 pin 测试钉住；StructType 路径本轮补齐（getLLVMType Struct case + StructDeclAST::codegen isClass 路径）；`[[repr(C)]]` 稳定性待 ANN（P1-05）落地后复查。
 - `[x]` **INH-04** 转换：派生→基隐式；基→派生需 `static_cast`。**完成**（2026-10-05）：指针隐式上行、值赋值切片语义、`static_cast<Derived*>` 下行转换均以 e2e pin（此前已可用）。
 - `[x]` **INH-05** **CRTP 必需项**。**完成**（2026-10-06，随 P1-03）：`this` 表达式（PAR-17，隐式 this 参数 + `this.field` 点号自动解引用）；基类支持模板实例 `: Shape<Circle>`（parse 捕获源拼写，sema 经 Registry 实例化，派生类前向占位可作实参）；基类实例方法体**惰性**（登记签名 + 首次调用 visit——派生类方法表未就绪时不检查）；`static_cast<Derived*>(this)` 向下转换（PAR-18 既有）。
-- `[x]` **INH-06** 成员/方法沿单继承链查找；重写（非虚，静默遮蔽规则）。**完成**（2026-10-05，方案乙）：删除 sema 基类方法表复制循环，`resolveMethod` 沿 `base` 链查找并经 out-param 返回 definingClass——继承方法保留定义类的访问级别与 E2009 归属；私有基方法经派生实例从类外调用的洞闭合（行为收紧，pin）；派生同名重载不再被复制去重吞掉；字段访问沿链 walk 泛化至 StructType（sema + GEP 两路）。**protected 放宽维持未做**（判定式保持 `currentClass == definingClass`，比 C++ 严格——派生类方法内经 `this->` 访问基类 protected 成员仍拒绝；如需放宽另立项，检查点已收敛于三处）。
+- `[x]` **INH-06** 成员/方法沿单继承链查找；重写（非虚，静默遮蔽规则）。**完成**（2026-10-05，方案乙）：删除 sema 基类方法表复制循环，`resolveMethod` 沿 `base` 链查找并经 out-param 返回 definingClass——继承方法保留定义类的访问级别与 E2009 归属；私有基方法经派生实例从类外调用的洞闭合（行为收紧，pin）；派生同名重载不再被复制去重吞掉；字段访问沿链 walk 泛化至 StructType（sema + GEP 两路）。**protected 派生访问放宽完成**（2026-10-19）：`canAccessMember(definingClass, level)`——定义类内或（protected 且）派生类内经 `this->` 访问放行；private 仍仅定义类；类外仍 E2009。四检查点（static 成员/字段/方法/指定初始化器）。
 - `[ ]` **INH-07** **不做**（Non-goals）：多继承、虚继承、菱形继承、虚函数/vtable/RTTI。
 
 ---
@@ -264,7 +266,7 @@
 - `[ ]` **FUN-06** 可变参数：与 C varargs 兼容。
 - `[ ]` **FUN-07** `(已实现)` 函数重载；补文档与测试。
 - `[ ]` **FUN-08** `(已实现)` 运算符重载 `operator`；补文档与测试。
-- `[ ]` **FUN-09** `(新)` 默认参数（**不做**命名参数，见 DEC-04）。
+- `[x]` **FUN-09** `(新)` 默认参数（**不做**命名参数，见 DEC-04）。**完成**（2026-10-19）：`T name = const-expr` 仅尾随参数、值须编译期常量；`OverloadSet::resolve` 区间化（`[minArgs, paramCount]`）+ 并列偏好少默认；调用点折叠暂存 + codegen 补参（CallExprAST/MethodCallExprAST）。
 - `[ ]` **FUN-10** `(已实现)` `defer`；补测试与文档。
 - `[x]` **FUN-11** `(已实现)` `constexpr` 函数/常量；与 `compile_time` 关系已定（DEC-05：并存 + 共享内核，2026-10-06）。
 - `[ ]` **FUN-12** `(新)` 程序入口约定：`main` 签名/参数/返回值，JIT 与原生一致（见 DEC-19）。
@@ -303,13 +305,13 @@
 - `[x]` **CT-04** 目标查询 `compile_time.target.os/arch/cpu`——host triple 映射（2026-10-06）。
 - `[x]` **CT-05** 构建查询 `compile_time.build.debug/optimize/version`——`setBuildConfig` 注入（driver 按 optLevel 接线），无 CLI flag（2026-10-06）。
 - `[x]` **CT-06** 编译期求值器 `CompileTimeEvaluator`——ConstValue 迁入 + STR；字面量/算术/位/比较/逻辑/三元/字符串 `==`/`!=`/`+`；size_of/align_of/offset_of 布局查询；constexpr 函数委托（DEC-05）（2026-10-06）。
-- `[ ]` **CT-07** 反射 API（取代 `type_info`）：类型名、大小、对齐、字段、偏移、属性——另轮（依赖 str/Slice，与 P1-06 排序协调）。
+- `[x]` **CT-07** 反射 API（取代 `type_info`）：类型名、大小、对齐、字段、偏移、属性。**完成**（2026-10-19）：`name_of`/`fields_of`/`attributes_of` 全做——`ReflectionRegistry`（sema→codegen 交接）+ `FieldInfo`/`Attribute` 内建类型 + 全局常量数组/slice 物化。
 - `[ ]` **CT-08** 类型作为值：编译期与类型系统交互——另轮；本轮仅落地最小切片（size_of 族类型实参按名解析）。
 - `[ ]` **CT-09** 编译期缓存：求值结果缓存、增量编译——另轮（随 MOD-10 协调）。
 - `[~]` **CT-10** 编译期错误诊断——本轮仅完成「诊断带源码位置」；求值栈/原因链未做。
 - `[~]` **CT-11** 编译期沙箱——YAGNI：求值器无 IO 能力即天然沙箱（2026-10-06 裁决）。
 - `[x]` **CT-12** 与 LLVM 常量集成——表达式节点 `ctInt/ctFloat/ctHandled`，codegen 直接出 `llvm::Constant`，零运行时指令（2026-10-06）。
-- `[ ]` **CT-13** `(新)` `compile_time` 反射 API 的精确签名与返回类型——另轮（随 CT-07）。
+- `[x]` **CT-13** `(新)` `compile_time` 反射 API 的精确签名与返回类型。**完成**（2026-10-19）：`name_of(T)→string_view`、`fields_of(T)→Slice<FieldInfo>`、`attributes_of(T)→Slice<Attribute>`（见 `docs/spec/compile_time.md` §7）。
 - `[x]` **CT-14** `(新)` `constexpr` 与 `compile_time` 边界与互操作——并存 + 共享内核（DEC-05 裁决，2026-10-06）。
 
 ---
@@ -353,10 +355,10 @@
 
 ## 15. 并发（CON）
 
-- `[ ]` **CON-01** `atomic` 类型限定符：`atomic i32 count;`（见 DEC-11）。
+- `[x]` **CON-01** `atomic` 类型限定符：`atomic i32 count;`（见 DEC-11）。**完成**（2026-10-19，最小范围）：整型标量限定符（克隆类型不污染单例）+ 原子 load/store（seq_cst）+ 复合赋值/`++`/`--` 经 `atomicrmw`（add/sub/and/or/xor）；`* / % << >>` 与浮点/指针拒绝（需 cmpxchg，属 CON-02 边界）。
 - `[ ]` **CON-02** 原子 load/store、CAS、fence。
 - `[ ]` **CON-03** 内存序：relaxed/acquire/release/acq_rel/seq_cst。
-- `[ ]` **CON-04** `thread_local`：存储类语法（见 DEC-12）。
+- `[x]` **CON-04** `thread_local`：存储类语法（见 DEC-12）。**完成**（2026-10-19）：`thread_local T name;` 语法 + 存储（LLVM thread-local 全局，每线程副本）；函数上 thread_local 拒绝（E2028）；完整初始化/销毁模型属 CON-10。
 - `[ ]` **CON-05** `std.thread`：线程创建/join/分离（C 语义，显式管理）。
 - `[ ]` **CON-06** 线程局部存储 ABI；与 LLVM atomic 指令映射。
 - `[ ]` **CON-07** 与 C11 atomics 互操作。

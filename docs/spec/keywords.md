@@ -23,7 +23,8 @@
 | `isize` / `usize` | `[impl]` | 平台指针宽度（TYP-03） |
 | `float16` / `float32` / `float64` / `float128` | `[impl]` | 定宽浮点 |
 | `f16` / `f32` / `f64` / `f128` | `[plan]` | 目标浮点类型，见 TYP-04；作为字面量后缀的**词法识别已实现**（LEX-15，`f`/`l` 为兼容写法） |
-| `str` / `String` | 非关键字 | 标准库类型（FMT-01/02），不在词法层保留 |
+| `char8` / `char16` / `char32` | `[impl]` | TYP-05：uint8/16/32 别名（非独立名义类型） |
+| `str` / `String` | 非关键字 | `str` 已硬改名 `string_view`（DEC-18）；标准库类型不在词法层保留 |
 
 ## 2. 存储类 / 限定符
 
@@ -37,8 +38,8 @@
 | `restrict` | `[impl]` | 语义见 MEM-04 |
 | `inline` | `[impl]` | |
 | `register` | `[remove]` | 无实际语义；DEC-18 已裁决移除 token |
-| `thread_local` | `[plan]` | 存储类，见 CON-04 / DEC-12 |
-| `atomic` | `[decide]` | 限定符还是类型构造器见 DEC-11 |
+| `thread_local` | `[impl]` | 存储类（变量），CON-04；完整存储模型见 CON-10 |
+| `atomic` | `[impl]` | 类型限定符（整型标量），CON-01；完整并发模型见 CON-02/09 |
 
 ## 3. 控制流
 
@@ -48,7 +49,7 @@
 | `for` `while` `do` | `[impl]` | |
 | `switch` `case` `default` | `[impl]` | 允许贯穿 |
 | `break` `continue` | `[impl]` | |
-| `return` | `[impl]` | 目标允许 `return;`（当前要求表达式） |
+| `return` | `[impl]` | `return;` 与 `return expr;` 均支持 |
 | `defer` | `[impl]` | 语义待冻结，见 SEM-18 / FUN-10 |
 | `goto` | `[removed]` | 已连同标签语句移除（NG-01/P0-01）：不再有 token、AST、解析或代码生成 |
 
@@ -59,9 +60,9 @@
 | `struct` `union` `enum` `class` | `[impl]` | |
 | `typedef` | `[impl]` | 别名规范形式见 DEC-16 |
 | `operator` | `[impl]` | 可重载集合见 SEM-17 |
-| `template` | `[plan]` | GEN-01 / PAR-21 |
-| `typename` | `[plan]` | GEN-01 |
-| `this` | `[plan]` | CRTP 必需，PAR-17 / INH-05 |
+| `template` | `[impl]` | GEN-01 / PAR-21（函数/class/别名模板） |
+| `typename` | `[impl]` | GEN-01 |
+| `this` | `[impl]` | CRTP 必需，PAR-17 / INH-05 |
 | `using` | `[impl]` 上下文 | 类型别名 `using X = T;` |
 | `type` | `[impl]` 上下文 | distinct 别名 `type X = T;` |
 | `generic` | `[remove]` | 未使用的旧泛型关键字；token 已移除（LEX-02 / DEC-18） |
@@ -75,8 +76,8 @@
 | `export` | `[impl]` | |
 | `public` | `[impl]` | |
 | `private` | `[impl]` | |
-| `protected` | `[plan]` | 目前为上下文关键字；继承访问控制 INH-01 / PAR-04 |
-| `namespace` | `[impl]` | 已实现（函数/变量；限定类型名待补）；见 PAR-22 / MOD-12 |
+| `protected` | `[impl]` | 上下文关键字；派生类内经 `this->` 访问基类 protected 成员放行（INH-06） |
+| `namespace` | `[impl]` | 已实现（函数/变量/限定类型名）；见 PAR-22 / MOD-12 |
 
 ## 6. 编译期 / 反射
 
@@ -84,12 +85,12 @@
 |---|---|---|
 | `constexpr` | `[impl]` | 见 §2 |
 | `true` / `false` | `[impl]` | 布尔字面量 |
-| `null` | `[impl]` | 空字面量 |
+| `null` / `nullptr` | `[impl]` | 空字面量（nullptr ≡ null，TYP-24） |
 | `comptime` | `[remove]` | 统一并入 `compile_time`；token 已移除（CT-01 / NG-12 / DEC-18） |
-| `compile_time` | `[plan]` | 编译期命名空间（非保留字，按标识符处理即可） |
-| `static_assert` | `[plan]` | 作为 `compile_time.static_assert`，**不设独立关键字**（NG-12） |
+| `compile_time` | `[impl]` | 编译期命名空间（非保留字，按标识符处理即可） |
+| `static_assert` | `[impl]` | 作为 `compile_time.static_assert`，**不设独立关键字**（NG-12） |
 | `sizeof` | `[impl]` | 一元运算符 |
-| `alignof` / `offsetof` | `[impl]` token | 语义/语法完善见 PAR-14 |
+| `alignof` / `offsetof` | `[impl]` | 独立关键字形式已实现（PAR-14） |
 | `typeof` | `[remove]` | DEC-18 裁决移除；类型查询改由 `compile_time` 反射（CT-07）承担 |
 | `cast` | `[remove]` | DEC-18 裁决移除；显式转换用 `static_cast`/`reinterpret_cast`（LEX-11） |
 | `type_info` | `[remove]` | 由 `compile_time` 反射取代（NG-12） |
@@ -98,8 +99,8 @@
 
 | 关键字 | 状态 | 说明 |
 |---|---|---|
-| `static_cast` | `[plan]` | LEX-11 / PAR-18 |
-| `reinterpret_cast` | `[plan]` | LEX-11 / PAR-18 |
+| `static_cast` | `[impl]` | LEX-11 / PAR-18 |
+| `reinterpret_cast` | `[impl]` | LEX-11 / PAR-18 |
 | `asm` | `[impl]` | P1-08（PAR-16 / CG-10 / DEC-09）；模板/约束透传 LLVM，方言 AD_ATT |
 
 ## 8. 运算符与标点（token）

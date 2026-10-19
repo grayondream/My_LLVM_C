@@ -32,9 +32,9 @@ block-comment       = '/*' , { any-char } , '*/' ;                  (* 不嵌套
 
 (* --- 标识符 --- *)
 identifier          = identifier-start , { identifier-continue } ;
-identifier-start    = letter | '_' ;
-identifier-continue = letter | digit | '_' ;
-(* [plan] LEX-18: 允许的 Unicode 范围、NFC 规范化、与关键字冲突处理 *)
+identifier-start    = letter | '_' | unicode-letter ;
+identifier-continue = letter | digit | '_' | unicode-letter | unicode-digit ;
+(* [impl] LEX-18: UTF-8 多字节序列（高位字节）计入标识符；不做 NFC 规范化 *)
 
 (* --- 整型字面量 LEX-04 / LEX-15 / LEX-17 --- *)
 (* 分隔符 '_' 只能出现在两个数字之间；前导、结尾、连续、紧邻进制前缀均非法（E0004）。*)
@@ -67,17 +67,17 @@ float-suffix        = 'f' | 'f16' | 'f32' | 'f64' | 'f128' | 'l' ;
 char-literal        = "'" , ( char-char | escape-sequence ) , "'" ;
 string-literal      = '"' , { string-char | escape-sequence } , '"'
                     | 'r"' , { any-char - '"' } , '"'               (* [impl] 原始字符串 *)
-                    | multiline-string ;                            (* [plan] 多行字符串 LEX-16 *)
+                    | '"""' , { any-char } , '"""'                  (* [impl] 多行字符串 LEX-16 *)
+                    | multiline-string ;
 escape-sequence     = '\' , ( "'" | '"' | '\' | 'n' | 't' | 'r' | '0'
+                            | 'a' | 'b' | 'f' | 'v' | '?'
                             | 'x' , hex-digit , hex-digit
-                            | 'u' , hex-digit , hex-digit , hex-digit , hex-digit
-                            | 'U' , hex-digit , hex-digit , hex-digit , hex-digit
-                                  , hex-digit , hex-digit , hex-digit , hex-digit ) ;
-(* [plan] 转义字符全集在 LEX-16 冻结 *)
+                            | 'u' , '{' , hex-digit , { hex-digit } , '}' ) ;
+(* [impl] LEX-16: 转义全集已实现（含 \a\b\f\v\? 与 \u{...}） *)
 
 (* --- 布尔/空字面量 --- *)
 boolean-literal     = 'true' | 'false' ;
-null-literal        = 'null' ;                                      (* 目标: nullptr 决策见 DEC/DEC-16 邻近项 *)
+null-literal        = 'null' | 'nullptr' ;                          (* [impl] nullptr ≡ null，TYP-24 *)
 
 
 (* =========================================================================
@@ -104,7 +104,7 @@ qualified-name      = identifier , { '::' , identifier } ;          (* [impl] ':
    ========================================================================= *)
 
 declaration         = [ storage-class ] , decl-core ;
-storage-class       = 'extern' | 'static' | 'inline' | 'thread_local' ;   (* [plan] thread_local CON-04 *)
+storage-class       = 'extern' | 'static' | 'inline' | 'thread_local' ;   (* [impl] thread_local CON-04 *)
 
 decl-core           = type-alias
                     | record-decl
@@ -162,7 +162,7 @@ template-argument   = type | const-expr ;
 (* --- 函数 --- *)
 function-decl       = type , identifier , '(' , [ parameter-list ] , ')' , ( block | ';' ) ;
 parameter-list      = parameter , { ',' , parameter } , [ ',' , '...' ] ;
-parameter           = type , [ identifier ] ;
+parameter           = type , [ identifier ] , [ '=' , const-expr ] ;   (* [impl] 默认参数 FUN-09，仅尾随 *)
 
 (* --- 变量 --- *)
 variable-decl-list  = variable-decl , { ',' , variable-decl } , ';' ;
@@ -177,24 +177,25 @@ function-pointer-type = type , '(' , '*' , identifier , ')'
    §4 类型（TYP / PAR-05 / PAR-06 / MEM-04/09）
    ========================================================================= *)
 
-type                = [ 'const' | 'volatile' | 'restrict' | 'atomic' ] , base-type
+type                = [ 'const' | 'volatile' | 'atomic' | 'restrict' ] , base-type
                       , { pointer-suffix }
                       , [ slice-suffix | optional-suffix ] ;
-pointer-suffix      = '*' , { 'const' | 'volatile' | 'restrict' } ;
+pointer-suffix      = '*' , { 'const' | 'volatile' | 'atomic' | 'restrict' } ;
 slice-suffix        = '[' , ']' ;                                   (* [impl] SliceType; 可叠加: T[][] = slice of slice *)
 optional-suffix     = '?' ;                                         (* [impl] OptionalType *)
 
 base-type           = primitive-type | named-type | record-body | enum-body
                     | template-instance ;
-(* [plan] restrict/atomic 语义见 MEM-04 / CON-01 / DEC-11 *)
+(* [impl] atomic 限定符 CON-01：仅整型标量；restrict/atomic 完整语义见 MEM-04 / CON-01 / DEC-11 *)
 
 primitive-type      = 'void' | 'bool' | 'char'
+                    | 'char8' | 'char16' | 'char32'                 (* [impl] TYP-05：uint8/16/32 别名 *)
                     | 'int8' | 'int16' | 'int32' | 'int64' | 'int128'
                     | 'uint8' | 'uint16' | 'uint32' | 'uint64' | 'uint128'
                     | 'isize' | 'usize'
                     | 'float16' | 'float32' | 'float64' | 'float128'
                     | 'f16' | 'f32' | 'f64' | 'f128'               (* [plan] f16/f128 TYP-04 *)
-                    | 'str' | 'string' ;                           (* [impl] P1-06 FMT-01/02: identifier 特判，非关键字 *)
+                    | 'string_view' | 'string' ;                   (* [impl] P1-06: identifier 特判，非关键字 *)
 
 named-type          = qualified-name ;
 record-body         = struct-decl | union-decl ;                    (* 内联定义 *)
@@ -279,7 +280,8 @@ unary-expr          = prefix-expr
 prefix-expr         = prefix-op , unary-expr
                     | 'sizeof' , unary-expr
                     | 'sizeof' , '(' , type , ')'
-                    | 'alignof' , '(' , type , ')'                 (* [plan] PAR-14 *)
+                    | 'alignof' , '(' , type , ')'                 (* [impl] PAR-14 *)
+                    | 'offsetof' , '(' , type , ',' , identifier , ')'  (* [impl] PAR-14 *)
                     | cast-expr ;
 prefix-op           = '+' | '-' | '!' | '~' | '*' | '&' | '++' | '--' ;
 
@@ -296,9 +298,8 @@ postfix-op          = '[' , expr , ']'
 argument-list       = expr , { ',' , expr } ;
 
 primary-expr        = literal
-                    | 'this'                                        (* [plan] PAR-17 *)
-                    | 'offsetof' , '(' , type , ',' , identifier , ')'  (* [plan] PAR-14 *)
-                    | 'compile_time' , '.' , compile-time-member    (* [plan] CT-01/06/07 *)
+                    | 'this'                                        (* [impl] PAR-17 *)
+                    | 'compile_time' , '.' , compile-time-member    (* [impl] CT-01/06/07/13 *)
                     | qualified-name
                     | '(' , expr , ')'
                     | initializer-list
@@ -342,8 +343,8 @@ annotation-arg      = const-expr | type | identifier | string-literal ;
 static-assert       = 'compile_time' , '.' , 'static_assert'
                       '(' , const-expr , [ ',' , string-literal ] , ')' , ';' ;   (* [plan] CT-02 *)
 
-compile-time-member = 'target' | 'build'                          (* [plan] CT-04/CT-05 *)
-                    | reflection-function ;                       (* [plan] CT-07 *)
+compile-time-member = 'target' | 'build'                          (* [impl] CT-04/CT-05 *)
+                    | reflection-function ;                       (* [impl] CT-06/07/13 *)
 reflection-function = 'name_of' | 'size_of' | 'align_of'
                     | 'fields_of' | 'offset_of' | 'attributes_of' ;
 

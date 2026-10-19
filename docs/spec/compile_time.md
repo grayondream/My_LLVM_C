@@ -60,18 +60,20 @@ compile_time.if (compile_time.target.os == "linux") {
 
 ## 7. 反射 API（CT-07 / CT-13）
 
-提案签名（待 **CT-13** 冻结精确返回类型）：
+已实现（2026-10-19）：
 
 | API | 返回 | 说明 |
 |---|---|---|
-| `compile_time.name_of(T)` | `str` | 类型名 |
+| `compile_time.name_of(T)` | `string_view` | 类型名（`typeToString`） |
 | `compile_time.size_of(T)` | `usize` | 分配大小 |
 | `compile_time.align_of(T)` | `usize` | ABI 对齐 |
-| `compile_time.fields_of(T)` | `Slice<FieldInfo>` | 字段列表 |
+| `compile_time.fields_of(T)` | `Slice<FieldInfo>` | 字段列表（仅聚合类型） |
 | `compile_time.offset_of(T, "f")` | `usize` | 字段偏移 |
-| `compile_time.attributes_of(T)` | `Slice<Annotation>` | 注解列表（ANN-07） |
+| `compile_time.attributes_of(T)` | `Slice<Attribute>` | 注解列表（当前含 deprecated 标记） |
 
-- `FieldInfo` 至少含：`name: str`、`type: Type`(类型值)、`offset: usize`、`size: usize`。
+- `FieldInfo` 内建类型：`{ string_view name; usize offset; usize size; }`。
+- `Attribute` 内建类型：`{ string_view name; }`（`args` 反射另轮）。
+- 反射结果经 sema→codegen 注册表物化为全局常量数组 + slice 视图（运行时生命周期 = 程序全程）。
 - 取代 `type_info(T)`（NG-12）；类型/ABI 细节见 [`abi.md`](./abi.md)。
 
 ## 8. 类型作为值（CT-08）

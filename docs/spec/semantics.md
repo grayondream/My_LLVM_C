@@ -29,10 +29,12 @@
 
 `OverloadSet::resolve`（`src/ast/Symbol.cpp`）：
 
-1. 逐个候选：参数个数必须匹配（可变参数允许实参 ≥ 固定参数数）。
-2. 逐位计算 `conversionRank`，任一位 `< 0` 则该候选不可行。
+1. 逐个候选：参数个数在 `[minArgs, paramCount]` 区间内（`minArgs = paramCount - defaultArgCount`，可变参数允许实参 ≥ minArgs）。
+2. 逐位计算 `conversionRank`（只对**已提供**的实参；任一位 `< 0` 则该候选不可行）。
 3. 累加 rank 取得分；可变参数候选额外 `+1`（非变参优先）。
-4. 取最低分候选；若最低分并列 → **歧义**，报错（返回 `nullptr`）。
+4. 取最低分候选；并列时**偏好少用默认参数的候选**（`defaultArgCount` 更小）；仍并列 → **歧义**，报错（返回 `nullptr`）。
+
+> 默认参数（FUN-09）：`T name = const-expr` 仅尾随参数；默认值须编译期常量；调用点缺位时由 sema 折叠并暂存，codegen 补参。方法（含 `this`）同样区间判定。
 
 **目标**：将以下规则写清并测试（SEM-16）：
 - 精确匹配 > 提升 > 转换的偏序；
@@ -57,7 +59,7 @@
 |---|---|---|
 | SEM-01/02 | 变量/指针未初始化 | `[impl]` W3001 definite-assignment（见下） |
 | SEM-03 | `[[nonnull]]` 空指针 | `[plan]` |
-| SEM-04 | `public/private/protected` 访问控制 | `[plan]` |
+| SEM-04 | `public/private/protected` 访问控制 | `[impl]` class 默认 private / struct 默认 public；private 仅定义类内；**protected 定义类与派生类内可访问**（INH-06，2026-10-19 放宽），类外 E2009 |
 | SEM-05 | 表达式/赋值/调用/返回/字段类型检查 | `[impl]` 基础版 |
 | SEM-06 | 泛型实例化检查 | `[plan]` |
 | SEM-07 | `compile_time` 条件与死代码 | `[plan]` |

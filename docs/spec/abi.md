@@ -14,6 +14,7 @@
 | `int32` | `i32` | 32 | 4 | `[impl]` | 平台默认 |
 | `int8/16/32/64/128` | `i8/i16/i32/i64/i128` | 8…128 | 1…16 | `[impl]` | |
 | `uint8…uint128` | `i8…i128` | 同上 | 同上 | `[impl]` | 无符号仅为语义 |
+| `char8/16/32` | `i8/i16/i32` | 8/16/32 | 1/2/4 | `[impl]` | TYP-05：uint8/16/32 别名，布局等同 |
 | `isize` | `i64` | 64 | 8 | `[impl]` | **目标**：绑定目标指针宽度（TYP-03） |
 | `usize` | `i64` | 64 | 8 | `[impl]` | 同上；Slice 长度也用 `i64` |
 | `float32` | `float` | 32 | 4 | `[impl]` | |
@@ -26,8 +27,13 @@
 | `T[]` (Slice) | `{ ptr, i64 }` | 16(64 位) | 8 | `[impl]` | **目标** `{ptr, usize}`，TYP-12 |
 | `T?` (optional) | `{ i1, T }` | — | — | `[impl]` | `{ bool valid; T value; }`（TYP-13，2026-10-06 落地：判别标志在前） |
 | `result<T,E>` | `{ i1, T, E }` | — | — | `[impl]` | `{ bool ok; T value; E error; }`（DEC-03 裁决，2026-10-06：加判别标志） |
-| `str` | `{ ptr, i64 }` | 16(64 位) | 8 | `[impl]` | 字节视图 `{ptr, len}`（P1-06）；零拷贝语义 |
+| `string_view`（原 `str`） | `{ ptr, i64 }` | 16(64 位) | 8 | `[impl]` | 字节视图 `{ptr, len}`（P1-06）；零拷贝语义 |
 | `string` | `{ ptr, i64, i64 }` | 24(64 位) | 8 | `[impl]` | 动态字符串 `{ptr, len, cap}`（P1-06；P1-09 补记 ABI 行，终审 M5） |
+| `atomic T` | 同 `T` | 同 `T` | 同 `T` | `[impl]` | CON-01：限定符不改布局（仅整型标量）；访问经 LLVM atomic load/store/atomicrmw |
+| `FieldInfo` | `{ {ptr,i64}, i64, i64 }` | 32(64 位) | 8 | `[impl]` | CT-07 反射内建类型 |
+| `Attribute` | `{ {ptr,i64} }` | 16(64 位) | 8 | `[impl]` | CT-07 反射内建类型 |
+
+> `thread_local`（CON-04）：变量存储为 LLVM thread-local 全局（每线程副本）；布局/大小与普通全局一致。
 
 ## 2. 聚合布局
 
