@@ -1169,6 +1169,26 @@ TEST_F(ParserDeclTest, PointerPostfixRestrict) {
     EXPECT_TRUE(q->type->isConst);
 }
 
+TEST_F(ParserDeclTest, CompoundLiteralExpression) {
+    auto tu = parse("int32 main() { int32* p = (int32[2]){1,2}; return p[0]; }");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto fn = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(fn, nullptr);
+    // The initializer expression for `p` should be a compound literal.
+    ASSERT_NE(fn->body, nullptr);
+    ASSERT_EQ(fn->body->stmts.size(), 2u);
+    auto declStmt = dynamic_cast<DeclStmtAST*>(fn->body->stmts[0].get());
+    ASSERT_NE(declStmt, nullptr);
+    auto decl = dynamic_cast<VarDeclAST*>(declStmt->decl.get());
+    ASSERT_NE(decl, nullptr);
+    auto cl = dynamic_cast<CompoundLiteralExprAST*>(decl->initExpr.get());
+    ASSERT_NE(cl, nullptr);
+    ASSERT_EQ(cl->literalType->kind, TypeKind::Array);
+    ASSERT_NE(cl->initList, nullptr);
+    ASSERT_EQ(cl->initList->initializers.size(), 2u);
+}
+
 TEST_F(ParserDeclTest, CharVarDecl) {
     auto tu = parse("char c;");
     ASSERT_NE(tu, nullptr);

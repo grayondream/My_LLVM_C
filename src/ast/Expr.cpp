@@ -2329,6 +2329,68 @@ llvm::Value* InitializerListExprAST::codegen(CodegenContext& ctx) {
     return initializers.back()->codegen(ctx);
 }
 
+// PAR-08: compound literal `(T){...}`. Block scope → stack temp object
+// (alloca + zero + aggregate init); file scope → static constant global.
+// Array target yields the decayed pointer (lvalue→loadValue); struct yields
+// the by-value aggregate (lvalue→readLValue loads it); scalar yields the value.
+llvm::Value* CompoundLiteralExprAST::codegen(CodegenContext& ctx) {
+    if (!literalType || !initList) return nullptr;
+    Type* lt = literalType;
+    while (lt && lt->kind == TypeKind::Typedef)
+        lt = static_cast<TypedefType*>(lt)->aliasedType;
+    llvm::LLVMContext& c = ctx.getContext();
+    llvm::Type* llvmType = ctx.getLLVMType(literalType);
+    if (!llvmType) return nullptr;
+
+    // Scalar target: value of the single initializer.
+    if (lt && lt->kind != TypeKind::Array && lt->kind != TypeKind::Struct &&
+        lt->kind != TypeKind::Class && lt->kind != TypeKind::Union &&
+        lt->kind != TypeKind::Slice && lt->kind != TypeKind::Optional &&
+        lt->kind != TypeKind::Result) {
+        if (initList->initializers.empty()) {
+            return llvm::Constant::getNullValue(llvmType);
+        }
+        llvm::Value* v = initList->initializers[0]->codegen(ctx);
+        if (!v) return nullptr;
+        if (initList->initializers[0]->isLValue) v = readLValue(ctx, *initList->initializers[0], v);
+        return ctx.castValue(v, initList->initializers[0]->type, llvmType);
+    }
+
+    // File scope: static constant global.
+    if (ctx.isGlobalScope()) {
+        llvm::Constant* initConst = buildAggregateConstant(ctx, literalType, initList.get());
+        if (!initConst) initConst = llvm::Constant::getNullValue(llvmType);
+        auto* gv = new llvm::GlobalVariable(ctx.getModule(), llvmType, /*isConstant=*/true,
+            llvm::GlobalValue::PrivateLinkage, initConst, ".compound");
+        if (lt && lt->kind == TypeKind::Array) {
+            // Array target in global scope: decayed pointer to element 0.
+            return ctx.getBuilder().CreateConstInBoundsGEP2_32(llvmType, gv, 0, 0, "compound.ptr");
+        }
+        // Struct/union: return the value (loaded from the constant global).
+        return ctx.getBuilder().CreateLoad(llvmType, gv, "compound.val");
+    }
+
+    // Block scope: stack temp.
+    llvm::AllocaInst* alloca = ctx.getBuilder().CreateAlloca(llvmType, nullptr, "compound.tmp");
+    // Zero the whole object first so unspecified fields stay zero.
+    ctx.getBuilder().CreateStore(llvm::Constant::getNullValue(llvmType), alloca);
+    if (initList) {
+        if (lt && lt->kind == TypeKind::Slice) {
+            // Slice form deferred to Task 5: for now, fall through to the
+            // aggregate emitter which diagnoses the unsupported shape.
+            emitAggregateInitializer(ctx, alloca, literalType, initList.get());
+        } else {
+            emitAggregateInitializer(ctx, alloca, literalType, initList.get());
+        }
+    }
+    if (lt && lt->kind == TypeKind::Array) {
+        // Array target: decayed pointer (C semantics — the temporary's address).
+        return alloca;
+    }
+    // Struct/union: return the loaded value (by-value).
+    return ctx.getBuilder().CreateLoad(llvmType, alloca, "compound.val");
+}
+
 // PAR-11/CG-11: lambda codegen。
 // 无捕获 → 生成静态函数并返回函数指针。
 // 有捕获 → 生成闭包调用函数 `__lambda_<N>__call(Closure*, params...)`，

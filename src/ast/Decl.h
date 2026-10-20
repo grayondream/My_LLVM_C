@@ -7,6 +7,19 @@
 #include "Stmt.h"
 #include "Annotation.h"
 
+// PAR-08: aggregate initializer emitters shared with compound-literal codegen
+// (Expr.cpp). Definitions live in Decl.cpp (see the forward decls there).
+class CodegenContext;
+class InitializerListExprAST;
+namespace llvm {
+class Value;
+class Constant;
+}
+void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
+                              Type* type, InitializerListExprAST* init);
+llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
+                                       InitializerListExprAST* init);
+
 struct FoldedValue {
     enum Type { INT, DOUBLE, CHAR } type;
     union { int intVal; double doubleVal; char charVal; };

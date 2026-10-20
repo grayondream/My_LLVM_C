@@ -1913,6 +1913,13 @@ void SemanticAnalyzer::visit(UnaryExprAST& node) {
                     break;
                 }
             }
+            // PAR-08: taking the address of a compound literal is a dangling
+            // escape (the temporary dies at the end of the full-expression).
+            if (auto* cl = dynamic_cast<CompoundLiteralExprAST*>(node.operand.get())) {
+                emitError("cannot take the address of a compound literal (temporary object)", node);
+                node.type = nullptr;
+                break;
+            }
             // 函数设计符 `&fn`：函数名在值位置已 decay 为 Pointer(Function)
             // 且非 lvalue；C 语义下 &fn 与 fn 同为函数指针，取址是无操作。
             {
@@ -3353,6 +3360,62 @@ void SemanticAnalyzer::visit(InitializerListExprAST& node) {
     node.isLValue = false;
 }
 
+// PAR-08: C99 compound literal `(T){...}` — analyze the initializer list
+// against the target type (mirror VarDeclAST init-list analysis), then treat
+// the node as an object of that type.
+void SemanticAnalyzer::visit(CompoundLiteralExprAST& node) {
+    if (!node.literalType || !node.initList) {
+        node.type = nullptr;
+        node.isLValue = false;
+        return;
+    }
+    Type* lt = node.literalType;
+    while (lt && lt->kind == TypeKind::Typedef)
+        lt = static_cast<TypedefType*>(lt)->aliasedType;
+
+    // Scalar target: `(int32){5}` is equivalent to `(int32)5` (design §2.4).
+    // Only the first initializer is meaningful; extra elements are diagnosed
+    // as too many (C semantics).
+    if (lt && (lt->kind == TypeKind::Int8 || lt->kind == TypeKind::Int16 ||
+               lt->kind == TypeKind::Int32 || lt->kind == TypeKind::Int64 ||
+               lt->kind == TypeKind::Int128 || lt->kind == TypeKind::UInt8 ||
+               lt->kind == TypeKind::UInt16 || lt->kind == TypeKind::UInt32 ||
+               lt->kind == TypeKind::UInt64 || lt->kind == TypeKind::UInt128 ||
+               lt->kind == TypeKind::Char || lt->kind == TypeKind::Bool ||
+               lt->kind == TypeKind::Float16 || lt->kind == TypeKind::Float32 ||
+               lt->kind == TypeKind::Float64 || lt->kind == TypeKind::Float128 ||
+               lt->kind == TypeKind::ISize || lt->kind == TypeKind::USize)) {
+        if (node.initList->initializers.size() > 1) {
+            emitError("too many initializers for scalar compound literal", node);
+        }
+        if (!node.initList->initializers.empty()) {
+            getExprType(*node.initList->initializers[0]);
+        }
+        node.type = node.literalType;
+        node.isLValue = false;
+        return;
+    }
+
+    // Aggregate target: analyze the init list exactly like a variable init.
+    node.initList->type = node.literalType;
+    node.initList->isLValue = false;
+    for (auto& e : node.initList->initializers) getExprType(*e);
+    resolveDesignators(*node.initList, node.literalType, "<compound literal>");
+
+    // Slice target: `(int32[]){1,2,3}` — deferred element/len handling lives
+    // with slice-literal init (Task 5); sema here only types it as the slice.
+    if (lt && lt->kind == TypeKind::Slice) {
+        node.type = node.literalType;
+        node.isLValue = false;
+        return;
+    }
+
+    node.type = node.literalType;
+    // An aggregate compound literal is a temporary object (addressable for
+    // array decay / struct value copy).
+    node.isLValue = true;
+}
+
 // PAR-11: `[=]` 全部按值捕获——收集 body 表达式引用的变量名。
 void SemanticAnalyzer::collectUsedNames(ExprAST* expr, std::unordered_set<std::string>& out) {
     if (!expr) return;
@@ -3944,6 +4007,17 @@ void SemanticAnalyzer::visit(ReturnStmtAST& node) {
     if (node.value) {
         Type* retValType = getExprType(*node.value);
         if (currentFunction && retValType) {
+            // PAR-08: returning an array/slice compound literal escapes the
+            // temporary — dangling view/pointer. Reject (design §2.4).
+            if (auto* cl = dynamic_cast<CompoundLiteralExprAST*>(node.value.get())) {
+                Type* lt = cl->literalType;
+                while (lt && lt->kind == TypeKind::Typedef)
+                    lt = static_cast<TypedefType*>(lt)->aliasedType;
+                if (lt && (lt->kind == TypeKind::Array || lt->kind == TypeKind::Slice)) {
+                    emitError("cannot return a compound literal with local storage (dangling)", node);
+                    return;
+                }
+            }
             // TYP-11 D4: 返回局部数组的 slice 视图是悬垂 UB（栈帧随 return
             // 消亡）。当前所有 ArrayType 值均为局部变量，保守拒绝。
             Type* fnRet = currentFunction->returnType;
@@ -5557,6 +5631,7 @@ void SemanticAnalyzer::visit(ExprAST& expr) {
     if (auto* e = dynamic_cast<MethodCallExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<SizeofExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<InitializerListExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<CompoundLiteralExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<LambdaExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<LambdaCallExprAST*>(&expr)) { visit(*e); return; }
 }

@@ -479,6 +479,19 @@ public:
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
+// PAR-08: C99 compound literal `(type-name){ init-list }`. Block scope = stack
+// object (automatic storage); file scope = static constant. Direct escape
+// (& / return / store-to-global of array|slice forms) is rejected by sema.
+class CompoundLiteralExprAST : public ExprAST {
+public:
+    Type* literalType = nullptr;           // the target type (sema-validated)
+    std::unique_ptr<InitializerListExprAST> initList;
+
+    CompoundLiteralExprAST(Type* type, std::unique_ptr<InitializerListExprAST> inits)
+        : literalType(type), initList(std::move(inits)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
 // PAR-11/CG-11/DEC-10: lambda 表达式 `[captures](params) -> Ret { body }`。
 // 无捕获 → 函数指针（零开销）；有捕获 → 匿名闭包 struct + 生成调用函数。
 class LambdaExprAST : public ExprAST {

@@ -479,6 +479,72 @@ std::unique_ptr<ExprAST> Parser::parseUnaryImpl() {
             size_t saved = m_currentTokenPos;
             Type* castType = parseType();
             if (castType && match(TokenType::TOKEN_RPAREN)) {
+                // PAR-08: C99 compound literal — `(type){ init-list }`.
+                if (check(TokenType::TOKEN_LBRACE)) {
+                    advance(); // consume '{'
+                    std::vector<std::unique_ptr<ExprAST>> initList;
+                    std::vector<std::vector<Designator>> designatorList;
+                    if (!check(TokenType::TOKEN_RBRACE)) {
+                        while (true) {
+                            // C99 designated initializers inside compound
+                            // literals: same syntax as variable init lists.
+                            std::vector<Designator> designators;
+                            while (check(TokenType::TOKEN_DOT) ||
+                                   check(TokenType::TOKEN_LBRACKET)) {
+                                Designator d;
+                                if (match(TokenType::TOKEN_DOT)) {
+                                    d.kind = Designator::Kind::Field;
+                                    auto id = match(TokenType::TOKEN_IDENTIFIER);
+                                    if (!id) {
+                                        errorUnexpected("expected field name after '.' in designated initializer");
+                                        m_currentTokenPos = saved;
+                                        return nullptr;
+                                    }
+                                    d.field = id->lexeme;
+                                } else {
+                                    advance(); // '['
+                                    d.kind = Designator::Kind::Index;
+                                    d.indexExpr = parseExpr();
+                                    if (!d.indexExpr) {
+                                        m_currentTokenPos = saved;
+                                        return nullptr;
+                                    }
+                                    if (!expect(TokenType::TOKEN_RBRACKET,
+                                                "expected ']' after designator index")) {
+                                        m_currentTokenPos = saved;
+                                        return nullptr;
+                                    }
+                                }
+                                designators.push_back(std::move(d));
+                            }
+                            if (!designators.empty()) {
+                                if (!match(TokenType::TOKEN_ASSIGN)) {
+                                    errorUnexpected("expected '=' after designator");
+                                    m_currentTokenPos = saved;
+                                    return nullptr;
+                                }
+                            }
+                            auto elem = parseExpr(2); // minPrec=2: ',' separates
+                            if (!elem) {
+                                m_currentTokenPos = saved;
+                                return nullptr;
+                            }
+                            initList.push_back(std::move(elem));
+                            designatorList.push_back(std::move(designators));
+                            if (!match(TokenType::TOKEN_COMMA)) break;
+                        }
+                    }
+                    if (!expect(TokenType::TOKEN_RBRACE,
+                                "expected '}' to end compound literal")) {
+                        m_currentTokenPos = saved;
+                        return nullptr;
+                    }
+                    auto il = std::make_unique<InitializerListExprAST>(
+                        std::move(initList));
+                    il->designators = std::move(designatorList);
+                    return std::make_unique<CompoundLiteralExprAST>(
+                        castType, std::move(il));
+                }
                 auto operand = parseUnary();
                 if (!operand) {
                     return nullptr;
@@ -2440,8 +2506,23 @@ Type* Parser::parseType() {
         if (check(TokenType::TOKEN_RBRACKET)) {
             advance(); // 消耗 ']'
             baseType = TypeContext::instance().getSliceType(baseType);
+        } else if (check(TokenType::TOKEN_NUMBER)) {
+            // PAR-08: abstract array dimension `(T[N])` in a type-name —
+            // builds a fixed ArrayType (right-to-left like parseVariableDecl).
+            auto numTok = advance();
+            int64_t dim = static_cast<int64_t>(
+                std::get<unsigned __int128>(numTok->value));
+            if (dim < 0 || dim > INT32_MAX) {
+                error("array dimension out of range", *numTok);
+                return nullptr;
+            }
+            if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after array dimension")) {
+                m_currentTokenPos = save;
+                return nullptr;
+            }
+            baseType = new ArrayType(baseType, static_cast<int>(dim));
         } else {
-            m_currentTokenPos = save; // restore: not a slice suffix
+            m_currentTokenPos = save; // restore: not a slice/dimension suffix
             break;
         }
     }
@@ -3148,6 +3229,19 @@ std::unique_ptr<ParamDeclAST> Parser::parseParamDecl() {
         auto fpParam = std::make_unique<ParamDeclAST>(name, ptrType);
         fpParam->annotations = std::move(anns);
         return fpParam;
+    }
+
+    // PAR-08: parseType now accepts abstract `T[N]` (needed for compound
+    // literals `(int32[3]){...}`). An unnamed array parameter `int32[2]`
+    // must stay rejected (TYP-11 pin) — named array params desugar below.
+    {
+        Type* t = type;
+        while (t && t->kind == TypeKind::Typedef)
+            t = static_cast<TypedefType*>(t)->aliasedType;
+        if (t && t->kind == TypeKind::Array && !check(TokenType::TOKEN_IDENTIFIER)) {
+            errorUnexpected("array parameter requires a name");
+            return nullptr;
+        }
     }
 
     if (check(TokenType::TOKEN_IDENTIFIER)) {

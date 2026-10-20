@@ -85,8 +85,8 @@ static void storeScalarInitializer(CodegenContext& ctx, llvm::Value* dest,
 }
 
 // Emit stores for `{a, b, ...}` into an already allocated aggregate `dest`.
-static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
-                                     Type* type, InitializerListExprAST* init);
+void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
+                              Type* type, InitializerListExprAST* init);
 
 // PAR-13: 按 sema 解析的语义目标链写槽位（设计符 + 展开的位置式）。
 static void emitDesignatedInitializer(CodegenContext& ctx, llvm::Value* dest,
@@ -119,8 +119,8 @@ static void emitFieldItemImpl(CodegenContext& ctx, ExprAST& item, Type* ftype,
     }
 }
 
-static void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
-                                     Type* type, InitializerListExprAST* init) {
+void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
+                              Type* type, InitializerListExprAST* init) {
     type = stripTypedefs(type);
     if (!type || !init) return;
 
@@ -470,8 +470,8 @@ static void emitDesignatedInitializer(CodegenContext& ctx, llvm::Value* dest,
 // PAR-13: 全局常量初始化的设计符版本——按 resolvedTargets 语义目标链把常量
 // 放到指定槽位（数组下标 / struct-class 字段含基类下降 / 位域 OR 进存储单元）。
 // 未指定槽位由调用方预置 getNullValue 补零。
-static llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
-                                              InitializerListExprAST* init);
+llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
+                                       InitializerListExprAST* init);
 
 // PAR-13: 递归把设计符链 chain[linkIdx..] 应用到聚合类型 aggType 的累积常量
 // acc（null = 全零）上，返回更新后的常量。acc 跨设计符元素持久化 → 同槽位
@@ -668,8 +668,8 @@ static llvm::Constant* buildDesignatedConstant(CodegenContext& ctx, Type* type,
 
 // Build a constant for a global brace initializer, or nullptr if it is not a
 // constant expression (the caller then falls back to zero initialization).
-static llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
-                                              InitializerListExprAST* init) {
+llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
+                                       InitializerListExprAST* init) {
     type = stripTypedefs(type);
     if (!type || !init) return nullptr;
 
