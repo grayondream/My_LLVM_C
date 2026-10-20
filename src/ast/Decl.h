@@ -83,6 +83,10 @@ public:
     // AGG-10: class-body `static` method — no `this` insertion; sema rewrites
     // the name to the desugared `Class_method` global symbol.
     bool isStatic = false;
+    // PAR-03: out-of-class method definition `RetType Class::method(...) {...}`.
+    // Non-empty = the qualifying class name; sema binds the body to the method
+    // declared in that class (inserting `this` like an in-class definition).
+    std::string className;
     // C linkage: `extern` declaration — symbol name stays the plain C name
     // (unmangled, no namespace prefix), and the call site resolves through
     // the bare C name.

@@ -2982,6 +2982,26 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationAsType() {
         }
     }
 
+    // PAR-03: out-of-class method definition `RetType Class::method(params)`.
+    // The class body precedes it in the TU (C++-style declaration/definition
+    // split); sema binds the body to the method declared in that class.
+    if (check(TokenType::TOKEN_IDENTIFIER)) {
+        size_t saved = m_currentTokenPos;
+        auto classTok = advance();
+        if (check(TokenType::TOKEN_COLON_COLON)) {
+            advance(); // '::'
+            if (check(TokenType::TOKEN_IDENTIFIER)) {
+                auto methodTok = advance();
+                if (check(TokenType::TOKEN_LPAREN)) {
+                    auto fn = parseFunctionDecl(type, methodTok->lexeme, isConstexpr);
+                    if (fn) fn->className = classTok->lexeme;
+                    return fn;
+                }
+            }
+        }
+        m_currentTokenPos = saved;
+    }
+
     if (!check(TokenType::TOKEN_IDENTIFIER)) return nullptr;
     auto nameTok = advance();
 
