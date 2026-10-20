@@ -102,6 +102,14 @@ std::unique_ptr<ExprAST> TemplateInstantiator::cloneExpr(const ExprAST* e) {
     } else if (auto* s = dynamic_cast<const StringExprAST*>(e)) {
         out = std::make_unique<StringExprAST>(s->value);
     } else if (auto* v = dynamic_cast<const VariableExprAST*>(e)) {
+        // GEN-02: a non-type template parameter used as a value — substitute
+        // the instantiated integer constant.
+        auto vit = m_valueArgs.find(v->name);
+        if (vit != m_valueArgs.end()) {
+            out = std::make_unique<NumberExprAST>(vit->second);
+            copyLoc(out.get(), *v);
+            return out;
+        }
         auto cloned = std::make_unique<VariableExprAST>(v->name);
         cloned->isFunctionRef = v->isFunctionRef;
         cloned->resolvedFunctionName = v->resolvedFunctionName;
@@ -240,14 +248,22 @@ std::unique_ptr<StmtAST> TemplateInstantiator::cloneStmt(const StmtAST* s) {
 
 std::unique_ptr<DeclAST> TemplateInstantiator::cloneDeclInternal(const DeclAST& decl) {
     if (auto* fn = dynamic_cast<const FunctionDeclAST*>(&decl)) {
+        size_t baseShadow = m_shadowedValueParams.size();
         std::vector<std::unique_ptr<ParamDeclAST>> params;
-        for (auto& p : fn->params)
+        for (auto& p : fn->params) {
+            // GEN-02: a parameter shadowing a value parameter is rejected.
+            if (m_valueArgs.count(p->name))
+                m_shadowedValueParams.push_back(p->name);
             params.push_back(std::make_unique<ParamDeclAST>(p->name, rewrite(p->type)));
+        }
         std::unique_ptr<CompoundStmtAST> body(
             dynamic_cast<CompoundStmtAST*>(cloneStmt(fn->body.get()).release()));
         auto* cloned = new FunctionDeclAST(fn->name, rewrite(fn->returnType), params,
                                            body, fn->isConstexpr, fn->isVarArg);
         cloned->isStatic = fn->isStatic;
+        cloned->shadowedValueParams.assign(
+            m_shadowedValueParams.begin() + baseShadow, m_shadowedValueParams.end());
+        m_shadowedValueParams.resize(baseShadow);
         copyLoc(cloned, *fn);
         return std::unique_ptr<DeclAST>(cloned);
     }
@@ -274,6 +290,9 @@ std::unique_ptr<DeclAST> TemplateInstantiator::cloneDeclInternal(const DeclAST& 
         return std::unique_ptr<DeclAST>(cloned);
     }
     if (auto* vd = dynamic_cast<const VarDeclAST*>(&decl)) {
+        // GEN-02: a local variable shadowing a value parameter is rejected.
+        if (m_valueArgs.count(vd->name))
+            m_shadowedValueParams.push_back(vd->name);
         auto* cloned = new VarDeclAST(vd->name, rewrite(vd->type),
                                       cloneExpr(vd->initExpr.get()), vd->isConstexpr);
         copyLoc(cloned, *vd);

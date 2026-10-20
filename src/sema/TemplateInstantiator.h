@@ -34,4 +34,9 @@ private:
 
     const std::unordered_map<std::string, Type*>& m_typeArgs;
     const std::unordered_map<std::string, long long>& m_valueArgs;
+    // GEN-02: local declarations that shadow a non-type template parameter,
+    // collected during cloning and attached to the cloned function decl so
+    // sema can reject them (name-only value substitution would otherwise
+    // silently capture the wrong `N`).
+    std::vector<std::string> m_shadowedValueParams;
 };

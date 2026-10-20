@@ -87,6 +87,9 @@ public:
     // Non-empty = the qualifying class name; sema binds the body to the method
     // declared in that class (inserting `this` like an in-class definition).
     std::string className;
+    // GEN-02: local declarations that shadow a non-type template parameter
+    // (filled by template instantiation; sema rejects them).
+    std::vector<std::string> shadowedValueParams;
     // C linkage: `extern` declaration — symbol name stays the plain C name
     // (unmangled, no namespace prefix), and the call site resolves through
     // the bare C name.

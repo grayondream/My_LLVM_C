@@ -5154,6 +5154,13 @@ void SemanticAnalyzer::visit(DeclStmtAST& node) {
 }
 
 void SemanticAnalyzer::visit(FunctionDeclAST& node) {
+    // GEN-02: a local declaration or parameter shadowing a non-type template
+    // parameter is rejected — value substitution is name-only and would
+    // otherwise silently capture the template argument.
+    for (const auto& shadowed : node.shadowedValueParams) {
+        emitError("shadowing of template value parameter '" + shadowed +
+                      "' is not allowed", node);
+    }
     // CON-04: `thread_local` is a variable storage class — invalid on a function.
     if (node.isThreadLocal) {
         emitError(DiagnosticCode::SemInvalidThreadLocalOnFunction,
