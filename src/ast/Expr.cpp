@@ -810,6 +810,25 @@ static std::string nodeSourcePrefix(const ASTNode& node) {
 }
 
 llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
+    // SEM-17: `obj(args)` through an overloaded `operator()` — call with the
+    // object as the first argument.
+    if (calleeExpr) {
+        llvm::Function* calleeFn = ctx.getModule().getFunction(mangledCallee);
+        if (!calleeFn) {
+            LOGE("unknown operator() function: {}", mangledCallee);
+            return nullptr;
+        }
+        std::vector<llvm::Value*> callArgs;
+        llvm::Value* obj = calleeExpr->codegen(ctx);
+        if (!obj) return nullptr;
+        callArgs.push_back(emitRValue(ctx, *calleeExpr, obj));
+        for (auto& arg : args) {
+            llvm::Value* v = arg->codegen(ctx);
+            if (!v) return nullptr;
+            callArgs.push_back(emitRValue(ctx, *arg, v));
+        }
+        return ctx.getBuilder().CreateCall(calleeFn, callArgs, "opcalltmp");
+    }
     // P1-06 (FMT-04): builtin str_from_c — strlen + {ptr, len} assembly.
     if (isStrFromC) {
         return codegenStrFromC(ctx, *this);
@@ -1969,6 +1988,20 @@ llvm::Value* PostfixIncDecExprAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* ArrayAccessExprAST::codegen(CodegenContext& ctx) {
+    // SEM-17: overloaded `operator[]` — call with (object, index).
+    if (!mangledCallee.empty()) {
+        llvm::Function* calleeFn = ctx.getModule().getFunction(mangledCallee);
+        if (!calleeFn) {
+            LOGE("unknown operator[] function: {}", mangledCallee);
+            return nullptr;
+        }
+        llvm::Value* obj = array->codegen(ctx);
+        llvm::Value* idx = index->codegen(ctx);
+        if (!obj || !idx) return nullptr;
+        obj = emitRValue(ctx, *array, obj);
+        idx = emitRValue(ctx, *index, idx);
+        return ctx.getBuilder().CreateCall(calleeFn, {obj, idx}, "idxcalltmp");
+    }
     llvm::Value* arrVal = array->codegen(ctx);
     llvm::Value* idxVal = index->codegen(ctx);
     if (!arrVal || !idxVal) return nullptr;

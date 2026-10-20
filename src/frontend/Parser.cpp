@@ -2938,6 +2938,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationAsType() {
         }
         // Map token type to operator string (token lexemes may be empty for single-char tokens)
         std::string opSym;
+        bool symbolConsumed = false;
         switch (opToken->type) {
             case TokenType::TOKEN_PLUS:      opSym = "+"; break;
             case TokenType::TOKEN_MINUS:     opSym = "-"; break;
@@ -2961,12 +2962,33 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationAsType() {
             case TokenType::TOKEN_NOT:       opSym = "!"; break;
             case TokenType::TOKEN_PLUS_PLUS: opSym = "++"; break;
             case TokenType::TOKEN_MINUS_MINUS: opSym = "--"; break;
+            // SEM-17: `operator[]` / `operator()` — the symbol is a bracket
+            // pair; consume it here, then parseFunctionDecl reads the real
+            // parameter list.
+            case TokenType::TOKEN_LBRACKET:
+                advance(); // '['
+                if (!match(TokenType::TOKEN_RBRACKET)) {
+                    errorUnexpected("expected ']' after 'operator['");
+                    return nullptr;
+                }
+                opSym = "[]";
+                symbolConsumed = true;
+                break;
+            case TokenType::TOKEN_LPAREN:
+                advance(); // '('
+                if (!match(TokenType::TOKEN_RPAREN)) {
+                    errorUnexpected("expected ')' after 'operator('");
+                    return nullptr;
+                }
+                opSym = "()";
+                symbolConsumed = true;
+                break;
             default:
                 errorUnexpected("expected operator symbol after 'operator'");
                 return nullptr;
         }
         std::string opName = "operator" + opSym;
-        advance(); // consume operator symbol
+        if (!symbolConsumed) advance(); // consume the single-token operator symbol
         
         if (!check(TokenType::TOKEN_LPAREN)) {
             errorUnexpected("expected '(' after operator name");
@@ -4188,8 +4210,32 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                 advance(); // consume 'operator'
                 auto opToken = peek();
                 if (opToken) {
-                    std::string opName = "operator" + opToken->lexeme;
-                    advance(); // consume operator symbol
+                    std::string opSym;
+                    bool symbolConsumed = false;
+                    // SEM-17: `operator[]` / `operator()` — bracket pair.
+                    if (opToken->type == TokenType::TOKEN_LBRACKET) {
+                        advance(); // '['
+                        if (!match(TokenType::TOKEN_RBRACKET)) {
+                            errorUnexpected("expected ']' after 'operator['");
+                            m_typeNamespacePrefix = savedPrefix;
+                            return nullptr;
+                        }
+                        opSym = "[]";
+                        symbolConsumed = true;
+                    } else if (opToken->type == TokenType::TOKEN_LPAREN) {
+                        advance(); // '('
+                        if (!match(TokenType::TOKEN_RPAREN)) {
+                            errorUnexpected("expected ')' after 'operator('");
+                            m_typeNamespacePrefix = savedPrefix;
+                            return nullptr;
+                        }
+                        opSym = "()";
+                        symbolConsumed = true;
+                    } else {
+                        opSym = opToken->lexeme;
+                    }
+                    std::string opName = "operator" + opSym;
+                    if (!symbolConsumed) advance(); // consume operator symbol
                     auto func = parseFunctionDecl(declType, opName);
                     if (func) {
                         func->annotations = std::move(memberAnns);

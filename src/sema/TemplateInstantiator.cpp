@@ -119,6 +119,8 @@ std::unique_ptr<ExprAST> TemplateInstantiator::cloneExpr(const ExprAST* e) {
         std::vector<std::unique_ptr<ExprAST>> args;
         for (auto& a : call->args) args.push_back(cloneExpr(a.get()));
         auto cloned = std::make_unique<CallExprAST>(call->callee, std::move(args));
+        cloned->calleeExpr = cloneExpr(call->calleeExpr.get());
+        cloned->mangledCallee = call->mangledCallee;
         cloned->isIndirect = call->isIndirect;
         cloned->isPrint = call->isPrint;
         cloned->printNewline = call->printNewline;
@@ -149,6 +151,7 @@ std::unique_ptr<ExprAST> TemplateInstantiator::cloneExpr(const ExprAST* e) {
     } else if (auto* aa = dynamic_cast<const ArrayAccessExprAST*>(e)) {
         out = std::make_unique<ArrayAccessExprAST>(cloneExpr(aa->array.get()),
                                                    cloneExpr(aa->index.get()));
+        static_cast<ArrayAccessExprAST*>(out.get())->mangledCallee = aa->mangledCallee;
     } else if (auto* ma = dynamic_cast<const MemberAccessExprAST*>(e)) {
         out = std::make_unique<MemberAccessExprAST>(ma->accessKind,
                                                     cloneExpr(ma->object.get()),

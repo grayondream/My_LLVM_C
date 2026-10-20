@@ -215,6 +215,11 @@ public:
 class CallExprAST : public ExprAST {
 public:
     std::string callee;
+    // SEM-17: `obj(args)` where `obj` is an aggregate object — sema moves the
+    // object reference here and resolves `operator()`. When set, codegen calls
+    // mangledCallee with the object as the first argument.
+    std::unique_ptr<ExprAST> calleeExpr;
+    std::string mangledCallee;
     std::vector<std::unique_ptr<ExprAST>> args;
     // P1-03 / GEN-03: 显式模板实参 `max<int32>(3, 4)`——类型与整型值按
     // 出现顺序分组；空且 hasTemplateArgs 时走纯推导。
@@ -358,6 +363,9 @@ class ArrayAccessExprAST : public ExprAST {
 public:
     std::unique_ptr<ExprAST> array;
     std::unique_ptr<ExprAST> index;
+    // SEM-17: `v[i]` on an aggregate object resolves to `operator[]`; sema
+    // sets the mangled callee and codegen emits a call instead of a GEP.
+    std::string mangledCallee;
 
     ArrayAccessExprAST(std::unique_ptr<ExprAST> arr, std::unique_ptr<ExprAST> idx)
         : array(std::move(arr)), index(std::move(idx)) {}

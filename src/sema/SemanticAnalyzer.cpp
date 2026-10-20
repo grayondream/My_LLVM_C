@@ -2647,6 +2647,35 @@ void SemanticAnalyzer::visit(CallExprAST& node) {
         }
     }
 
+    // SEM-17: `obj(args)` where `obj` is an aggregate variable — call
+    // operator() on the object.
+    if (Symbol* sym = lookup(node.callee)) {
+        Type* st = sym->type;
+        while (st && st->kind == TypeKind::Typedef)
+            st = static_cast<TypedefType*>(st)->aliasedType;
+        if (isOperatorOverloadOperand(st)) {
+            node.calleeExpr = std::make_unique<VariableExprAST>(node.callee);
+            getExprType(*node.calleeExpr);
+            std::vector<Type*> params{st};
+            for (auto& arg : node.args) params.push_back(getExprType(*arg));
+            OverloadSet* overloadSet = currentScope->lookupOverload("operator()");
+            if (overloadSet && !overloadSet->empty()) {
+                Symbol* resolved = overloadSet->resolve(params);
+                if (resolved && resolved->type &&
+                    resolved->type->kind == TypeKind::Function) {
+                    node.mangledCallee = mangleFunction("operator()", params);
+                    node.type = static_cast<FunctionType*>(resolved->type)->returnType;
+                    node.isLValue = false;
+                    return;
+                }
+            }
+            emitError("no matching operator() for type '" + typeToString(st) + "'", node);
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
+        }
+    }
+
     FunctionType* funcType = nullptr;
     node.type = checkFunctionCall(node.callee, node.args, node, &funcType);
     if (funcType) {
@@ -3014,6 +3043,27 @@ void SemanticAnalyzer::visit(PostfixIncDecExprAST& node) {
 void SemanticAnalyzer::visit(ArrayAccessExprAST& node) {
     Type* arrayType = getExprType(*node.array);
     Type* indexType = getExprType(*node.index);
+
+    // SEM-17: `v[i]` on an aggregate object → `operator[]` free function.
+    if (isOperatorOverloadOperand(stripTypedef(arrayType))) {
+        OverloadSet* overloadSet = currentScope->lookupOverload("operator[]");
+        if (overloadSet && !overloadSet->empty()) {
+            std::vector<Type*> params{arrayType, indexType};
+            Symbol* resolved = overloadSet->resolve(params);
+            if (resolved && resolved->type &&
+                resolved->type->kind == TypeKind::Function) {
+                node.mangledCallee = mangleFunction("operator[]", params);
+                node.type = static_cast<FunctionType*>(resolved->type)->returnType;
+                node.isLValue = false;
+                return;
+            }
+        }
+        emitError("no matching operator[] for types '" + typeToString(arrayType) +
+                      "' and '" + typeToString(indexType) + "'", node);
+        node.type = nullptr;
+        node.isLValue = false;
+        return;
+    }
 
     if (!isIntegerType(indexType)) {
         emitError("array subscript must be integer, but got '" + typeToString(indexType) + "'", node);

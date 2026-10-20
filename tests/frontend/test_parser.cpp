@@ -1169,6 +1169,19 @@ TEST_F(ParserDeclTest, PointerPostfixRestrict) {
     EXPECT_TRUE(q->type->isConst);
 }
 
+TEST_F(ParserDeclTest, OperatorSubscriptAndCallDeclarations) {
+    auto tu = parse("int32 operator[](int32 a, int32 i) { return 0; } "
+                    "int32 operator()(int32 a) { return 0; }");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 2u);
+    auto sub = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
+    auto call = dynamic_cast<FunctionDeclAST*>(tu->declarations[1].get());
+    ASSERT_NE(sub, nullptr);
+    ASSERT_NE(call, nullptr);
+    EXPECT_EQ(sub->name, "operator[]");
+    EXPECT_EQ(call->name, "operator()");
+}
+
 TEST_F(ParserDeclTest, CompoundLiteralExpression) {
     auto tu = parse("int32 main() { int32* p = (int32[2]){1,2}; return p[0]; }");
     ASSERT_NE(tu, nullptr);

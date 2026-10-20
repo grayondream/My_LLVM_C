@@ -190,3 +190,38 @@ TEST_F(OperatorExtendedE2E, BuiltinBinaryStillWorks) {
         }
     )", "op_builtin_binary.c"), 0);
 }
+
+TEST_F(OperatorExtendedE2E, OperatorSubscript) {
+    EXPECT_EQ(runSource(R"(
+        struct V { int32 data[4]; };
+        int32 operator[](struct V v, int32 i) { return v.data[i]; }
+        int32 main() {
+            struct V v;
+            v.data[2] = 42;
+            return v[2] - 42;
+        }
+    )", "op_subscript.c"), 0);
+}
+
+TEST_F(OperatorExtendedE2E, OperatorCall) {
+    EXPECT_EQ(runSource(R"(
+        struct V { int32 x; };
+        int32 operator()(struct V v, int32 a, int32 b) { return v.x + a + b; }
+        int32 main() {
+            struct V v;
+            v.x = 1;
+            return v(2, 3) - 6;
+        }
+    )", "op_call.c"), 0);
+}
+
+TEST_F(OperatorExtendedE2E, BuiltinArraySubscriptStillWorks) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            int32 a[3];
+            a[0] = 1;
+            a[2] = 5;
+            return a[0] + a[2] - 6;
+        }
+    )", "op_builtin_subscript.c"), 0);
+}
