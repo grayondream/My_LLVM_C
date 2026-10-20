@@ -503,12 +503,21 @@ std::string SemanticAnalyzer::getOperatorMangledName(BinaryOp op, Type* left, Ty
         case BinaryOp::Sub: opName = "operator-"; break;
         case BinaryOp::Mul: opName = "operator*"; break;
         case BinaryOp::Div: opName = "operator/"; break;
+        // SEM-17: converge the call-site set with the declaration-side set.
+        case BinaryOp::Mod: opName = "operator%"; break;
         case BinaryOp::Eq: opName = "operator=="; break;
         case BinaryOp::NotEq: opName = "operator!="; break;
         case BinaryOp::Lt: opName = "operator<"; break;
         case BinaryOp::Gt: opName = "operator>"; break;
         case BinaryOp::Le: opName = "operator<="; break;
         case BinaryOp::Ge: opName = "operator>="; break;
+        case BinaryOp::And: opName = "operator&&"; break;
+        case BinaryOp::Or: opName = "operator||"; break;
+        case BinaryOp::BitAnd: opName = "operator&"; break;
+        case BinaryOp::BitOr: opName = "operator|"; break;
+        case BinaryOp::BitXor: opName = "operator^"; break;
+        case BinaryOp::LShift: opName = "operator<<"; break;
+        case BinaryOp::RShift: opName = "operator>>"; break;
         default: return "";
     }
     return mangleFunction(opName, {left, right});
@@ -1809,12 +1818,21 @@ void SemanticAnalyzer::visit(BinaryExprAST& node) {
                 case BinaryOp::Sub: opName = "operator-"; break;
                 case BinaryOp::Mul: opName = "operator*"; break;
                 case BinaryOp::Div: opName = "operator/"; break;
+                // SEM-17: converge the call-site set with the declaration side.
+                case BinaryOp::Mod: opName = "operator%"; break;
                 case BinaryOp::Eq: opName = "operator=="; break;
                 case BinaryOp::NotEq: opName = "operator!="; break;
                 case BinaryOp::Lt: opName = "operator<"; break;
                 case BinaryOp::Gt: opName = "operator>"; break;
                 case BinaryOp::Le: opName = "operator<="; break;
                 case BinaryOp::Ge: opName = "operator>="; break;
+                case BinaryOp::And: opName = "operator&&"; break;
+                case BinaryOp::Or: opName = "operator||"; break;
+                case BinaryOp::BitAnd: opName = "operator&"; break;
+                case BinaryOp::BitOr: opName = "operator|"; break;
+                case BinaryOp::BitXor: opName = "operator^"; break;
+                case BinaryOp::LShift: opName = "operator<<"; break;
+                case BinaryOp::RShift: opName = "operator>>"; break;
                 default: opName = ""; break;
             }
             OverloadSet* overloadSet = currentScope->lookupOverload(opName);
