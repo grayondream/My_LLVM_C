@@ -71,6 +71,9 @@ public:
     // the shared singletons). Only direct load/store and the atomicrmw subset
     // are supported (see spec §2.6).
     bool isAtomic{};
+    // PAR-06: `restrict` — pointer-postfix qualifier, syntactic only (no
+    // alias analysis; semantics deferred to MEM-04).
+    bool isRestrict{};
     // P1-04 / CT-03: 该类型仅在 compile_time.if 未选中分支被声明（parse 期
     // 占位毒化）。类型引用在 parse 期绑定指针，仅靠 TypeContext 注销无法
     // 阻断使用；sema 在变量声明处拒绝毒化类型（活分支的 sema 注册创建新

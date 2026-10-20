@@ -2407,6 +2407,9 @@ Type* Parser::parseType() {
             } else if (check(TokenType::TOKEN_VOLATILE)) {
                 advance();
                 ptrType->isVolatile = true;
+            } else if (check(TokenType::TOKEN_RESTRICT)) {
+                advance();
+                ptrType->isRestrict = true;
             } else {
                 break;
             }

@@ -28,6 +28,7 @@ Type* TemplateInstantiator::rewrite(Type* t) {
             auto* p = new Type(TypeKind::Pointer, base);
             p->isConst = t->isConst;
             p->isVolatile = t->isVolatile;
+            p->isRestrict = t->isRestrict;
             return p;
         }
         case TypeKind::Array: {

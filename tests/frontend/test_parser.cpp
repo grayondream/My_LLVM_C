@@ -1153,6 +1153,22 @@ TEST_F(ParserDeclTest, ShortFloatTypeKeywords) {
     EXPECT_EQ(d->type->kind, TypeKind::Float128);
 }
 
+TEST_F(ParserDeclTest, PointerPostfixRestrict) {
+    auto tu = parse("int32* restrict p; int32* const restrict q;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 2u);
+    auto p = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    auto q = dynamic_cast<VarDeclAST*>(tu->declarations[1].get());
+    ASSERT_NE(p, nullptr);
+    ASSERT_NE(q, nullptr);
+    ASSERT_EQ(p->type->kind, TypeKind::Pointer);
+    EXPECT_TRUE(p->type->isRestrict);
+    EXPECT_FALSE(p->type->isConst);
+    ASSERT_EQ(q->type->kind, TypeKind::Pointer);
+    EXPECT_TRUE(q->type->isRestrict);
+    EXPECT_TRUE(q->type->isConst);
+}
+
 TEST_F(ParserDeclTest, CharVarDecl) {
     auto tu = parse("char c;");
     ASSERT_NE(tu, nullptr);

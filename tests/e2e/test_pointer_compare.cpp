@@ -100,3 +100,7 @@ TEST_F(PointerCompareE2E, LogicalNotOnIntegerIsNotBitwise) {
     // `!5` must be 0 (not ~5). `!0` must be 1.
     EXPECT_EQ(runSource("int32 main() { if (!5) return 1; if (!0) return 0; return 2; }"), 0);
 }
+
+TEST_F(PointerCompareE2E, RestrictQualifiedParamAccepted) {
+    EXPECT_EQ(runSource("int32 f(int32* restrict p) { return *p; } int32 main() { int32 x = 5; return f(&x) - 5; }"), 0);
+}
