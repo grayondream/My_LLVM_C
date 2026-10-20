@@ -672,6 +672,18 @@ llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
 
 llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
     if (auto* ct = ctConstantOrNull(ctx, *this)) return ct;
+    // SEM-17: overloaded unary operator — emit a call to the resolved function.
+    if (!mangledCallee.empty()) {
+        llvm::Function* calleeFn = ctx.getModule().getFunction(mangledCallee);
+        if (!calleeFn) {
+            LOGE("unknown unary operator function: {}", mangledCallee);
+            return nullptr;
+        }
+        llvm::Value* arg = operand->codegen(ctx);
+        if (!arg) return nullptr;
+        arg = emitRValue(ctx, *operand, arg);
+        return ctx.getBuilder().CreateCall(calleeFn, {arg}, "uopcalltmp");
+    }
     llvm::Value* v = operand->codegen(ctx);
     if (!v) return nullptr;
 
@@ -1896,6 +1908,20 @@ llvm::Value* CommaExprAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* PostfixIncDecExprAST::codegen(CodegenContext& ctx) {
+    // SEM-17: overloaded postfix operator — call with (object, int32 dummy).
+    if (!mangledCallee.empty()) {
+        llvm::Function* calleeFn = ctx.getModule().getFunction(mangledCallee);
+        if (!calleeFn) {
+            LOGE("unknown postfix operator function: {}", mangledCallee);
+            return nullptr;
+        }
+        llvm::Value* obj = operand->codegen(ctx);
+        if (!obj) return nullptr;
+        obj = emitRValue(ctx, *operand, obj);
+        llvm::Value* dummy = llvm::ConstantInt::get(
+            llvm::Type::getInt32Ty(ctx.getContext()), 0);
+        return ctx.getBuilder().CreateCall(calleeFn, {obj, dummy}, "popcalltmp");
+    }
     llvm::Value* addr = operand->codegen(ctx);
     if (!addr) return nullptr;
 

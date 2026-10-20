@@ -200,6 +200,11 @@ class UnaryExprAST : public ExprAST {
 public:
     UnaryOp op;
     std::unique_ptr<ExprAST> operand;
+    // SEM-17: unary operator overloading — set by sema when an aggregate
+    // operand resolves to an `operator-`/`operator~`/`operator!`/`operator++`
+    // (prefix) free function. codegen then emits a call instead of the
+    // built-in instruction.
+    std::string mangledCallee;
 
 
     UnaryExprAST(UnaryOp oper, std::unique_ptr<ExprAST> expr)
@@ -340,6 +345,9 @@ class PostfixIncDecExprAST : public ExprAST {
 public:
     std::unique_ptr<ExprAST> operand;
     bool isIncrement;
+    // SEM-17: postfix operator overloading — set by sema when an aggregate
+    // operand resolves to `operator++(V, int32)` / `operator--(V, int32)`.
+    std::string mangledCallee;
 
     PostfixIncDecExprAST(std::unique_ptr<ExprAST> expr, bool inc)
         : operand(std::move(expr)), isIncrement(inc) {}

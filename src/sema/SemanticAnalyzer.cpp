@@ -1724,6 +1724,24 @@ void SemanticAnalyzer::visit(VariableExprAST& node) {
     node.isLValue = true;
 }
 
+// SEM-17: operand kinds that may carry user-defined operator overloads
+// (mirrors the aggregate check used by the binary-operator call site).
+static bool isOperatorOverloadOperand(Type* t) {
+    while (t && t->kind == TypeKind::Typedef)
+        t = static_cast<TypedefType*>(t)->aliasedType;
+    if (!t) return false;
+    switch (t->kind) {
+        case TypeKind::Struct:
+        case TypeKind::Class:
+        case TypeKind::Union:
+        case TypeKind::Optional:
+        case TypeKind::Result:
+            return true;
+        default:
+            return false;
+    }
+}
+
 void SemanticAnalyzer::visit(BinaryExprAST& node) {
     // P1-04 / CT-12: 表达式树含 compile_time 根 → 优先整树编译期折叠。
     if (containsCompileTimeRoot(&node)) {
@@ -1873,6 +1891,43 @@ void SemanticAnalyzer::visit(UnaryExprAST& node) {
     }
 
     Type* operandType = getExprType(*node.operand);
+
+    // SEM-17: unary operator overloading on aggregate operands. Resolve the
+    // operator as a free function; when none exists, fall through to the
+    // built-in checks (which diagnose aggregate operands as before).
+    if (isOperatorOverloadOperand(operandType)) {
+        std::string opName;
+        switch (node.op) {
+            case UnaryOp::Plus:   opName = "operator+"; break;
+            case UnaryOp::Minus:  opName = "operator-"; break;
+            case UnaryOp::BitNot: opName = "operator~"; break;
+            case UnaryOp::Not:    opName = "operator!"; break;
+            case UnaryOp::PreInc: opName = "operator++"; break;
+            case UnaryOp::PreDec: opName = "operator--"; break;
+            default: break;
+        }
+        if (!opName.empty()) {
+            OverloadSet* overloadSet = currentScope->lookupOverload(opName);
+            if (overloadSet && !overloadSet->empty()) {
+                Symbol* resolved = overloadSet->resolve({operandType});
+                if (resolved && resolved->type &&
+                    resolved->type->kind == TypeKind::Function) {
+                    node.mangledCallee = mangleFunction(opName, {operandType});
+                    node.type = static_cast<FunctionType*>(resolved->type)->returnType;
+                    node.isLValue = false;
+                    return;
+                }
+            }
+            // No overload: `!aggregate` has no built-in meaning (coerceToBool
+            // cannot lower an aggregate) — diagnose instead of emitting bad IR.
+            if (node.op == UnaryOp::Not) {
+                emitError("invalid operand to unary '!': '" + typeToString(operandType) + "'", node);
+                node.type = nullptr;
+                node.isLValue = false;
+                return;
+            }
+        }
+    }
 
     switch (node.op) {
         case UnaryOp::Plus:
@@ -2912,6 +2967,23 @@ void SemanticAnalyzer::visit(CommaExprAST& node) {
 
 void SemanticAnalyzer::visit(PostfixIncDecExprAST& node) {
     Type* operandType = getExprType(*node.operand);
+    // SEM-17: postfix `x++`/`x--` on an aggregate → `operator++(V, int32)` /
+    // `operator--(V, int32)` free function (C++ dummy-int convention).
+    if (isOperatorOverloadOperand(operandType)) {
+        std::string opName = node.isIncrement ? "operator++" : "operator--";
+        OverloadSet* overloadSet = currentScope->lookupOverload(opName);
+        if (overloadSet && !overloadSet->empty()) {
+            Type* dummy = typeCtx->getInt32();
+            Symbol* resolved = overloadSet->resolve({operandType, dummy});
+            if (resolved && resolved->type &&
+                resolved->type->kind == TypeKind::Function) {
+                node.mangledCallee = mangleFunction(opName, {operandType, dummy});
+                node.type = static_cast<FunctionType*>(resolved->type)->returnType;
+                node.isLValue = false;
+                return;
+            }
+        }
+    }
     if (!isArithmeticType(operandType) && !isPointerOrArray(operandType)) {
         emitError("invalid operand to postfix '" + std::string(node.isIncrement ? "++" : "--") + "': '" + typeToString(operandType) + "'", node);
         node.type = nullptr;

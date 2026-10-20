@@ -114,6 +114,7 @@ std::unique_ptr<ExprAST> TemplateInstantiator::cloneExpr(const ExprAST* e) {
         static_cast<BinaryExprAST*>(out.get())->mangledCallee = b->mangledCallee;
     } else if (auto* u = dynamic_cast<const UnaryExprAST*>(e)) {
         out = std::make_unique<UnaryExprAST>(u->op, cloneExpr(u->operand.get()));
+        static_cast<UnaryExprAST*>(out.get())->mangledCallee = u->mangledCallee;
     } else if (auto* call = dynamic_cast<const CallExprAST*>(e)) {
         std::vector<std::unique_ptr<ExprAST>> args;
         for (auto& a : call->args) args.push_back(cloneExpr(a.get()));
@@ -144,6 +145,7 @@ std::unique_ptr<ExprAST> TemplateInstantiator::cloneExpr(const ExprAST* e) {
     } else if (auto* inc = dynamic_cast<const PostfixIncDecExprAST*>(e)) {
         out = std::make_unique<PostfixIncDecExprAST>(cloneExpr(inc->operand.get()),
                                                      inc->isIncrement);
+        static_cast<PostfixIncDecExprAST*>(out.get())->mangledCallee = inc->mangledCallee;
     } else if (auto* aa = dynamic_cast<const ArrayAccessExprAST*>(e)) {
         out = std::make_unique<ArrayAccessExprAST>(cloneExpr(aa->array.get()),
                                                    cloneExpr(aa->index.get()));

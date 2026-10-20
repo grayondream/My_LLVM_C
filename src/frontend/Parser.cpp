@@ -2958,6 +2958,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationAsType() {
             case TokenType::TOKEN_LSHIFT:    opSym = "<<"; break;
             case TokenType::TOKEN_RSHIFT:    opSym = ">>"; break;
             case TokenType::TOKEN_TILDE:     opSym = "~"; break;
+            case TokenType::TOKEN_NOT:       opSym = "!"; break;
             case TokenType::TOKEN_PLUS_PLUS: opSym = "++"; break;
             case TokenType::TOKEN_MINUS_MINUS: opSym = "--"; break;
             default:
