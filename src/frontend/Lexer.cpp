@@ -122,7 +122,12 @@ static const std::unordered_map<std::string, TokenType> keywordMap = {
     {"float32", TokenType::TOKEN_FLOAT32},
     {"float64", TokenType::TOKEN_FLOAT64},
     {"float16", TokenType::TOKEN_FLOAT16},
-    {"float128", TokenType::TOKEN_FLOAT128}
+    {"float128", TokenType::TOKEN_FLOAT128},
+    // TYP-04: short spellings as type keywords (lexed suffixes stay in scanNumber).
+    {"f16", TokenType::TOKEN_FLOAT16},
+    {"f32", TokenType::TOKEN_FLOAT32},
+    {"f64", TokenType::TOKEN_FLOAT64},
+    {"f128", TokenType::TOKEN_FLOAT128}
 };
 
 Lexer::Lexer(const std::string& filename, const std::string& source)

@@ -1135,6 +1135,24 @@ TEST_F(ParserDeclTest, Float16AndFloat128Types) {
     EXPECT_EQ(q->type->kind, TypeKind::Float128);
 }
 
+TEST_F(ParserDeclTest, ShortFloatTypeKeywords) {
+    auto tu = parse("f16 a; f32 b; f64 c; f128 d;");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 4u);
+    auto a = dynamic_cast<VarDeclAST*>(tu->declarations[0].get());
+    auto b = dynamic_cast<VarDeclAST*>(tu->declarations[1].get());
+    auto c = dynamic_cast<VarDeclAST*>(tu->declarations[2].get());
+    auto d = dynamic_cast<VarDeclAST*>(tu->declarations[3].get());
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    ASSERT_NE(c, nullptr);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(a->type->kind, TypeKind::Float16);
+    EXPECT_EQ(b->type->kind, TypeKind::Float32);
+    EXPECT_EQ(c->type->kind, TypeKind::Float64);
+    EXPECT_EQ(d->type->kind, TypeKind::Float128);
+}
+
 TEST_F(ParserDeclTest, CharVarDecl) {
     auto tu = parse("char c;");
     ASSERT_NE(tu, nullptr);

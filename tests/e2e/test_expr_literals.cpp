@@ -148,3 +148,15 @@ TEST_F(ExprLiteralsE2E, NullptrInBoolContext) {
         }
     )", "nullptr_bool.c"), 0);
 }
+
+TEST_F(ExprLiteralsE2E, ShortFloatTypeKeywords) {
+    EXPECT_EQ(runSource(R"(
+        f16 a = 1.0f16;
+        f32 b = 2.5f32;
+        f64 c = 3.0;
+        f128 d = 1.0f128;
+        int32 main() {
+            return (int32)a + (int32)b + (int32)c + (int32)d - 7;
+        }
+    )", "f16_keywords.c"), 0);
+}
