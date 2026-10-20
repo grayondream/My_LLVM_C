@@ -3739,6 +3739,27 @@ void SemanticAnalyzer::resolveDesignators(InitializerListExprAST& node, Type* ag
         return;
     }
 
+    // PAR-08 (Task 5): Slice literal init `T[] s = {a,b,c}` — every positional
+    // element must be assignable to the slice element type; length = list size
+    // (codegen allocates a stack array of that length). Designators are not
+    // supported on a slice literal.
+    if (aggType->kind == TypeKind::Slice) {
+        auto* st = static_cast<SliceType*>(aggType);
+        Type* elemType = st->elementType;
+        for (size_t i = 0; i < node.initializers.size(); ++i) {
+            if (i < node.designators.size() && !node.designators[i].empty()) {
+                emitError("designator cannot target a slice element; use a positional initializer",
+                          node);
+            }
+            Type* it = getExprType(*node.initializers[i]);
+            if (it && !typesCompatible(elemType, it)) {
+                emitError("slice element type mismatch: expected '" + typeToString(elemType) +
+                          "', got '" + typeToString(it) + "'", node);
+            }
+        }
+        return;
+    }
+
     size_t structCursor = 0; // struct/class 语义字段游标（跳过 name==""）
     size_t arrayCursor = 0;  // 数组下标游标
 
@@ -4018,6 +4039,14 @@ void SemanticAnalyzer::visit(ReturnStmtAST& node) {
                     return;
                 }
             }
+            // PAR-08 (Task 5): returning a slice whose storage is a stack
+            // anonymous array is a dangling escape (design §2.5).
+            if (auto* ve = dynamic_cast<VariableExprAST*>(node.value.get())) {
+                if (m_sliceLiteralVars.count(ve->name)) {
+                    emitError("cannot return a slice backed by a stack literal (dangling)", node);
+                    return;
+                }
+            }
             // TYP-11 D4: 返回局部数组的 slice 视图是悬垂 UB（栈帧随 return
             // 消亡）。当前所有 ArrayType 值均为局部变量，保守拒绝。
             Type* fnRet = currentFunction->returnType;
@@ -4208,6 +4237,17 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
             initList->type = node.type;
             initList->isLValue = false;
             for (auto& e : initList->initializers) getExprType(*e);
+            // PAR-08 (Task 5): a slice initialized from a brace literal is
+            // backed by a stack anonymous array — track it for the dangling
+            // return check (design §2.5).
+            {
+                Type* vt = node.type;
+                while (vt && vt->kind == TypeKind::Typedef)
+                    vt = static_cast<TypedefType*>(vt)->aliasedType;
+                if (vt && vt->kind == TypeKind::Slice) {
+                    m_sliceLiteralVars.insert(node.name);
+                }
+            }
             // PAR-13: 设计符解析（struct/class/union/数组/嵌套；Optional/Result
             // 仅拒绝伪字段设计符）。结构变量在 codegen 前由 emitAggregateInitializer
             // 消费 resolvedTargets。
