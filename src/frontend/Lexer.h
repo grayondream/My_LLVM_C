@@ -25,6 +25,7 @@ private:
     char peek() const;
     char peekNext() const;
     char peekNext2() const;
+    char peekNext3() const;
     char advance();
     char advanceNextLine();
     std::string lexeme();
@@ -46,6 +47,7 @@ private:
     Token scanIdentifier();
     Token scanNumber();
     Token scanString();
+    Token scanPrefixedString(StringLiteralPrefix prefix);
     Token scanMultilineString();
     Token scanChar();
 

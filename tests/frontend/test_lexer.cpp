@@ -511,6 +511,28 @@ TEST(LexerMultilineStringTest, RegularStringNotMarkedMultiline) {
     EXPECT_FALSE(tokens[0].isMultilineString);
 }
 
+// TYP-05: u8/u16/u32-prefixed string literals — one TOKEN_STRING each, with
+// the prefix recorded on the token.
+TEST(LexerPrefixStringTest, PrefixedStringLexesWithPrefix) {
+    spdlog::set_level(spdlog::level::off);
+    Lexer lexer("p.c", "u8\"hi\" u16\"hi\" u32\"hi\" \"hi\"");
+    auto tokens = lexer.tokenize();
+    ASSERT_GE(tokens.size(), 4u);
+    EXPECT_EQ(tokens[0].type, TokenType::TOKEN_STRING);
+    EXPECT_EQ(tokens[0].stringPrefix, StringLiteralPrefix::U8);
+    EXPECT_EQ(tokens[0].lexeme, "u8\"hi\"");
+    EXPECT_EQ(tokens[1].type, TokenType::TOKEN_STRING);
+    EXPECT_EQ(tokens[1].stringPrefix, StringLiteralPrefix::U16);
+    EXPECT_EQ(tokens[1].lexeme, "u16\"hi\"");
+    EXPECT_EQ(tokens[2].type, TokenType::TOKEN_STRING);
+    EXPECT_EQ(tokens[2].stringPrefix, StringLiteralPrefix::U32);
+    EXPECT_EQ(tokens[2].lexeme, "u32\"hi\"");
+    EXPECT_EQ(tokens[3].type, TokenType::TOKEN_STRING);
+    EXPECT_EQ(tokens[3].stringPrefix, StringLiteralPrefix::None);
+    EXPECT_EQ(tokens[3].lexeme, "\"hi\"");
+    EXPECT_TRUE(lexer.getDiagnostics().empty());
+}
+
 // LEX-18: Unicode identifiers — non-ASCII (UTF-8) bytes are valid identifier
 // characters; keyword collision is impossible (keywords are all ASCII).
 TEST(LexerUnicodeTest, UnicodeIdentifierAccepted) {

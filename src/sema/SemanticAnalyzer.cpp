@@ -1638,6 +1638,20 @@ void SemanticAnalyzer::visit(StringExprAST& node) {
         emitError(DiagnosticCode::SemInvalidUtf8,
                   "invalid UTF-8 sequence in string literal", node);
     }
+    // TYP-05: u8/u16/u32-prefixed literals are fixed-width arrays (decay to
+    // char8*/char16*/char32*); the plain form stays `str` (string_view).
+    if (node.prefix != StringLiteralPrefix::None) {
+        Type* elem = nullptr;
+        switch (node.prefix) {
+            case StringLiteralPrefix::U8: elem = typeCtx->getUInt8(); break;
+            case StringLiteralPrefix::U16: elem = typeCtx->getUInt16(); break;
+            case StringLiteralPrefix::U32: elem = typeCtx->getUInt32(); break;
+            default: break;
+        }
+        node.type = new ArrayType(elem, static_cast<int>(node.value.size()));
+        node.isLValue = false;
+        return;
+    }
     // P1-06 (FMT-03): string literals are `str` (non-owning UTF-8 view).
     node.type = typeCtx->getStrType();
     node.isLValue = false;

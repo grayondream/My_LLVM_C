@@ -801,13 +801,27 @@ std::unique_ptr<ExprAST> Parser::parsePrimaryImpl() {
         advance();
         std::string lex = token->lexeme;
         std::string val;
+        StringLiteralPrefix prefix = token->stringPrefix;
         if (lex.size() >= 2 && lex[0] == 'r' && lex[1] == '"') {
             // Raw string: r"..." — no escape processing.
             if (lex.size() >= 3) val = lex.substr(2, lex.size() - 3);
-        } else if (lex.size() >= 2 && lex.front() == '"' && lex.back() == '"') {
+            prefix = StringLiteralPrefix::None;
+        } else if (prefix == StringLiteralPrefix::None &&
+                   lex.size() >= 2 && lex.front() == '"' && lex.back() == '"') {
             val = decodeEscapes(stripStringQuotes(lex, token->isMultilineString));
+        } else if (prefix != StringLiteralPrefix::None) {
+            // u8/u16/u32 prefix: lexeme is `u8"hi"` — strip prefix + quotes.
+            size_t q = lex.find('"');
+            if (q != std::string::npos && lex.size() >= q + 2 &&
+                lex.back() == '"') {
+                std::string body = lex.substr(q + 1, lex.size() - q - 2);
+                val = decodeEscapes(body);
+            }
         }
-        return std::make_unique<StringExprAST>(val);
+        if (prefix == StringLiteralPrefix::None) {
+            return std::make_unique<StringExprAST>(val);
+        }
+        return std::make_unique<StringExprAST>(val, prefix);
     }
 
     // Boolean literals (found issue: 布尔字面量，非 int 字面量——bool 类型)。

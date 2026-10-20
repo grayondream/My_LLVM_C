@@ -22,3 +22,13 @@ enum class LiteralKind : int32_t {
 
 // Base language type name for a literal kind (LEX-15 mapping table).
 const char* literalKindName(LiteralKind kind);
+
+// TYP-05: string-literal prefix. u8"..." is char8[], u16"..." is char16[],
+// u32"..." is char32[]; the plain form is string_view. Same layering rationale
+// as LiteralKind (shared by frontend/ and ast/ without a dependency).
+enum class StringLiteralPrefix : int32_t {
+    None,  // `"..."`
+    U8,    // `u8"..."`
+    U16,   // `u16"..."`
+    U32,   // `u32"..."`
+};

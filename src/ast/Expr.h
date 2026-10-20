@@ -159,7 +159,12 @@ public:
 class StringExprAST : public ExprAST {
 public:
     std::string value;
+    // TYP-05: literal prefix — None = plain `"..."` (string_view); U8/U16/U32
+    // map to char8[]/char16[]/char32[].
+    StringLiteralPrefix prefix{StringLiteralPrefix::None};
     explicit StringExprAST(const std::string& val) : value(val) {}
+    explicit StringExprAST(const std::string& val, StringLiteralPrefix p)
+        : value(val), prefix(p) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 

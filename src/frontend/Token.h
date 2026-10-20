@@ -154,6 +154,8 @@ public:
     int line{};                // 行号
     int column{};              // 列号
     LiteralKind literalKind{LiteralKind::None}; // LEX-15: numeric literal kind
+    // TYP-05: u8/u16/u32 string-literal prefix (None = plain `"..."`).
+    StringLiteralPrefix stringPrefix{StringLiteralPrefix::None};
     // LEX-16: multiline string `"""..."""` — lexeme keeps all three quotes per
     // side; the parser strips three when this flag is set (vs one for a
     // regular string).

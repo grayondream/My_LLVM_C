@@ -344,6 +344,35 @@ llvm::Value* CharExprAST::codegen(CodegenContext& ctx) {
 }
 
 llvm::Value* StringExprAST::codegen(CodegenContext& ctx) {
+    // TYP-05: u8/u16/u32-prefixed literals are fixed-width arrays — build a
+    // static global `[N x elemTy]` and return the decayed pointer (element 0).
+    if (prefix != StringLiteralPrefix::None) {
+        llvm::LLVMContext& c = ctx.getContext();
+        llvm::Type* elemTy = nullptr;
+        switch (prefix) {
+            case StringLiteralPrefix::U8:
+                elemTy = llvm::Type::getInt8Ty(c);
+                break;
+            case StringLiteralPrefix::U16:
+                elemTy = llvm::Type::getInt16Ty(c);
+                break;
+            case StringLiteralPrefix::U32:
+                elemTy = llvm::Type::getInt32Ty(c);
+                break;
+            default:
+                break;
+        }
+        auto* arrTy = llvm::ArrayType::get(elemTy, value.size());
+        std::vector<llvm::Constant*> elems;
+        elems.reserve(value.size());
+        for (unsigned char ch : value) {
+            elems.push_back(llvm::ConstantInt::get(elemTy, ch));
+        }
+        auto* arrConst = llvm::ConstantArray::get(arrTy, elems);
+        auto* gv = new llvm::GlobalVariable(ctx.getModule(), arrTy, /*isConstant=*/true,
+            llvm::GlobalValue::PrivateLinkage, arrConst, ".u8str");
+        return ctx.getBuilder().CreateConstInBoundsGEP2_32(arrTy, gv, 0, 0, "u8str.ptr");
+    }
     // P1-06 (FMT-03): literal is a `str` — {ptr, len} of a static global
     // (CreateGlobalString product); non-owning, globally alive (DEC-20).
     llvm::LLVMContext& c = ctx.getContext();

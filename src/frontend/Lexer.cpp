@@ -155,6 +155,10 @@ char Lexer::peekNext2() const {
     return (isEof() || m_currentPos + 2 >= m_source.size()) ? '\0' : m_source[m_currentPos + 2];
 }
 
+char Lexer::peekNext3() const {
+    return (isEof() || m_currentPos + 3 >= m_source.size()) ? '\0' : m_source[m_currentPos + 3];
+}
+
 char Lexer::advance() {
     const char ch = peek();
     if(ch == '\n') {
@@ -644,6 +648,51 @@ Token Lexer::scanString() {
     return makeToken(TokenType::TOKEN_STRING, lexeme());
 }
 
+// TYP-05: scan a u8/u16/u32-prefixed string. The prefix characters were
+// already consumed by scanToken; this scans the quoted body exactly like a
+// plain string and records the prefix on the token. lexeme() keeps the whole
+// `u8"..."` span (prefix + quotes) for the parser to strip.
+Token Lexer::scanPrefixedString(StringLiteralPrefix prefix) {
+    advance(); // consume opening '"'
+    while (true) {
+        if (isEof()) {
+            report(DiagnosticCode::LexUnterminatedLiteral,
+                   "unterminated string literal",
+                   m_tokenStartLine, m_tokenStartCol);
+            break;
+        }
+        const char c = peek();
+        if (c == '"') {
+            advance();
+            break;
+        } else if (c == '\\') {
+            advance();
+            if (isEof()) {
+                report(DiagnosticCode::LexUnterminatedLiteral,
+                       "unterminated string literal",
+                       m_tokenStartLine, m_tokenStartCol);
+                break;
+            }
+            char escapeChar = peek();
+            if (escapeChar == 'u') {
+                advance();
+                if (peek() == '{') {
+                    advance();
+                    while (!isEof() && peek() != '}') advance();
+                    if (peek() == '}') advance();
+                }
+            } else {
+                advance();
+            }
+        } else {
+            advance();
+        }
+    }
+    Token token = makeToken(TokenType::TOKEN_STRING, lexeme());
+    token.stringPrefix = prefix;
+    return token;
+}
+
 Token Lexer::scanChar() {
     advance(); // 消耗开始的引号
     while(true){
@@ -699,6 +748,25 @@ Token Lexer::scanToken() {
     const char ch = peek();
     if(ch == 'r' && peekNext() == '"') {
         return scanString();
+    }
+    // TYP-05: u8"/u16"/u32" prefixed strings — detect before the identifier
+    // branch so `u8"..."` is one STRING token, not `u8` IDENT + `"..."` STRING.
+    if (ch == 'u' && peekNext() == '8' && peekNext2() == '"') {
+        advance(); // 'u'
+        advance(); // '8'
+        return scanPrefixedString(StringLiteralPrefix::U8);
+    }
+    if (ch == 'u' && peekNext() == '1' && peekNext2() == '6' && peekNext3() == '"') {
+        advance(); // 'u'
+        advance(); // '1'
+        advance(); // '6'
+        return scanPrefixedString(StringLiteralPrefix::U16);
+    }
+    if (ch == 'u' && peekNext() == '3' && peekNext2() == '2' && peekNext3() == '"') {
+        advance(); // 'u'
+        advance(); // '3'
+        advance(); // '2'
+        return scanPrefixedString(StringLiteralPrefix::U32);
     }
     // LEX-16: multiline string `"""..."""` — detect before the plain `"` branch.
     if(ch == '"' && peekNext() == '"' && peekNext2() == '"') {
