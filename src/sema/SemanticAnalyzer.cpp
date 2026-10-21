@@ -1741,6 +1741,19 @@ static std::string sliceLiteralKey(const FunctionDeclAST* fn,
     return fn ? fn->name + "::" + name : name;
 }
 
+// PAR-08: true when an lvalue roots at a global variable (bare name or a
+// subobject path: field / subscript), used for dangling-escape checks.
+static bool rootsAtGlobalVariable(
+    const ExprAST* e, const std::unordered_set<std::string>& globals) {
+    if (auto* v = dynamic_cast<const VariableExprAST*>(e))
+        return globals.count(v->name) > 0;
+    if (auto* m = dynamic_cast<const MemberAccessExprAST*>(e))
+        return rootsAtGlobalVariable(m->object.get(), globals);
+    if (auto* a = dynamic_cast<const ArrayAccessExprAST*>(e))
+        return rootsAtGlobalVariable(a->array.get(), globals);
+    return false;
+}
+
 // SEM-17: operand kinds that may carry user-defined operator overloads
 // (mirrors the aggregate check used by the binary-operator call site).
 static bool isOperatorOverloadOperand(Type* t) {    while (t && t->kind == TypeKind::Typedef)
@@ -2861,27 +2874,24 @@ void SemanticAnalyzer::visit(AssignmentExprAST& node) {
     // variable) to a global stores a pointer to stack storage — dangling.
     // By-value scalar/struct copies remain allowed (design §2.4).
     if (node.op == AssignOp::Assign) {
-        if (auto* lhsVar = dynamic_cast<VariableExprAST*>(node.lhs.get())) {
-            if (m_globalVarNames.count(lhsVar->name) ||
-                m_globalVarNames.count(scopedName(lhsVar->name))) {
-                bool escape = false;
-                if (auto* cl = dynamic_cast<CompoundLiteralExprAST*>(node.rhs.get())) {
-                    Type* lt = cl->literalType;
-                    while (lt && lt->kind == TypeKind::Typedef)
-                        lt = static_cast<TypedefType*>(lt)->aliasedType;
-                    escape = lt && (lt->kind == TypeKind::Array ||
-                                    lt->kind == TypeKind::Slice);
+        if (rootsAtGlobalVariable(node.lhs.get(), m_globalVarNames)) {
+            bool escape = false;
+            if (auto* cl = dynamic_cast<CompoundLiteralExprAST*>(node.rhs.get())) {
+                Type* lt = cl->literalType;
+                while (lt && lt->kind == TypeKind::Typedef)
+                    lt = static_cast<TypedefType*>(lt)->aliasedType;
+                escape = lt && (lt->kind == TypeKind::Array ||
+                                lt->kind == TypeKind::Slice);
+            }
+            if (!escape) {
+                if (auto* rv = dynamic_cast<VariableExprAST*>(node.rhs.get())) {
+                    escape = m_sliceLiteralVars.count(
+                                 sliceLiteralKey(currentFunction, rv->name)) > 0;
                 }
-                if (!escape) {
-                    if (auto* rv = dynamic_cast<VariableExprAST*>(node.rhs.get())) {
-                        escape = m_sliceLiteralVars.count(
-                                     sliceLiteralKey(currentFunction, rv->name)) > 0;
-                    }
-                }
-                if (escape) {
-                    emitError("cannot store a stack-backed array/slice literal in a global (dangling)", node);
-                    return;
-                }
+            }
+            if (escape) {
+                emitError("cannot store a stack-backed array/slice literal in a global (dangling)", node);
+                return;
             }
         }
     }
@@ -4386,11 +4396,13 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
     checkNestedTypeAccess(node.type, node);
     // P1-04 / CT-03 / 评审 I3: 毒化类型（含 typedef/指针/数组包装层）拒绝。
     checkCtDeadBranchUse(node.type, node);
+    std::string sourceVarName = node.name;
     node.name = scopedName(node.name);
     // PAR-08: remember global variables so assignment of an array/slice
-    // literal to one can be rejected as a dangling escape.
+    // literal to one (or to a subobject of one) can be rejected as dangling.
     if (atGlobalLevel()) {
         m_globalVarNames.insert(node.name);
+        m_globalVarNames.insert(sourceVarName);
     }
     if (node.isConstexpr) {
         if (!node.initExpr) {
@@ -4552,7 +4564,13 @@ void SemanticAnalyzer::visit(ArrayDeclAST& node) {
     checkNestedTypeAccess(node.elementType, node);
     // P1-04 评审 I3: 元素类型不得来自 compile_time.if 死分支。
     checkCtDeadBranchUse(node.elementType, node);
+    std::string sourceArrayName = node.name;
     node.name = scopedName(node.name);
+    // PAR-08: record global array variables for dangling-escape checks.
+    if (atGlobalLevel()) {
+        m_globalVarNames.insert(node.name);
+        m_globalVarNames.insert(sourceArrayName);
+    }
     if (auto* initList = dynamic_cast<InitializerListExprAST*>(node.initExpr.get())) {
         if (node.size == 0) {
             // PAR-13: 含设计符时按 C99 最大下标+1 推断（含设计符后位置式续位）；

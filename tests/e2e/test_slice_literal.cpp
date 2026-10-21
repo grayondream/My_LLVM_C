@@ -158,15 +158,42 @@ TEST_F(SliceLiteralE2E, EmptySliceLiteralIsNullView) {
 }
 
 TEST_F(SliceLiteralE2E, SliceLiteralNameInAnotherFunctionDoesNotCollide) {
+    // `leftover` registers `s` as a stack-backed slice literal; `pass` returns
+    // a same-named parameter that is NOT stack-backed. A file-wide name set
+    // would falsely reject `pass`.
     EXPECT_EQ(runSource(R"(
         int32 g[2];
         int32[] pass(int32[] s) { return s; }
+        int32 leftover() { int32[] s = {1,2}; return s[0]; }
         int32 main() {
             g[0] = 4;
             int32[] r = pass(g);
-            return r[0] - 4;
+            if (r[0] != 4) { return 1; }
+            if (leftover() != 1) { return 2; }
+            return 0;
         }
     )", "sl_no_collision.c"), 0);
+}
+
+TEST_F(SliceLiteralE2E, StoreSliceLiteralIntoGlobalSubobjectRejected) {
+    EXPECT_TRUE(semaRejects(R"(
+        struct Holder { int32[] s; };
+        struct Holder g;
+        int32 main() {
+            g.s = (int32[]){1,2};
+            return 0;
+        }
+    )", "sl_global_field.c"));
+}
+
+TEST_F(SliceLiteralE2E, StoreSliceLiteralIntoGlobalArrayElementRejected) {
+    EXPECT_TRUE(semaRejects(R"(
+        int32[] g[2];
+        int32 main() {
+            g[0] = (int32[]){1,2};
+            return 0;
+        }
+    )", "sl_global_elem.c"));
 }
 
 TEST_F(SliceLiteralE2E, StoreSliceLiteralToGlobalRejected) {
@@ -177,4 +204,16 @@ TEST_F(SliceLiteralE2E, StoreSliceLiteralToGlobalRejected) {
             return 0;
         }
     )", "sl_global_store.c"));
+}
+
+TEST_F(SliceLiteralE2E, StringElementDeepCopyWithString) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            string a = string.new("hi");
+            string[] s = {a};
+            if (s.len != 1) { return 1; }
+            if (s[0].len() != 2) { return 2; }
+            return 0;
+        }
+    )", "sl_string_elem.c"), 0);
 }

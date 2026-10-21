@@ -185,3 +185,12 @@ TEST_F(CompoundLiteralE2E, FileScopeStructCompoundLiteral) {
         }
     )", "cl_file_scope.c"), 0);
 }
+
+TEST_F(CompoundLiteralE2E, FileScopeArrayCompoundLiteral) {
+    EXPECT_EQ(runSource(R"(
+        int32* p = (int32[2]){1,2};
+        int32 main() {
+            return p[0] + p[1] - 3;
+        }
+    )", "cl_file_array.c"), 0);
+}

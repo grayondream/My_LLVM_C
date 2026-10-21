@@ -2448,12 +2448,15 @@ llvm::Value* CompoundLiteralExprAST::codegen(CodegenContext& ctx) {
         llvm::Constant* initConst = buildAggregateConstant(ctx, literalType, initList.get());
         if (!initConst) initConst = llvm::Constant::getNullValue(llvmType);
         if (lt && lt->kind == TypeKind::Array) {
-            // Array target in global scope: decayed pointer to element 0.
+            // Array target in global scope: materialize a private constant
+            // array first, then decay to a pointer to its element 0.
+            auto* gv = new llvm::GlobalVariable(ctx.getModule(), llvmType, /*isConstant=*/true,
+                llvm::GlobalValue::PrivateLinkage, initConst, ".compound");
             auto* i64 = llvm::Type::getInt64Ty(c);
-            llvm::Constant* zero = llvm::ConstantInt::get(i64, 0);
-            llvm::Constant* idxs[] = {zero, zero};
+            llvm::Constant* idx0 = llvm::ConstantInt::get(i64, 0);
+            llvm::Constant* idxs[] = {idx0, idx0};
             return llvm::ConstantExpr::getInBoundsGetElementPtr(
-                llvmType, initConst, llvm::ArrayRef<llvm::Constant*>(idxs, 2));
+                llvmType, gv, llvm::ArrayRef<llvm::Constant*>(idxs, 2));
         }
         // Struct/union: the constant value itself.
         return initConst;
