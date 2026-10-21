@@ -33,6 +33,8 @@
 
 > **进度快照（2026-10-17，P1-09 std.math/std.bit 完成）**：**std.math + std.bit 完成**（STD-13/14 `[x]`，spec/plan `docs/superpowers/specs|plans/2026-10-17-stdmath-bit*`）。`libs/std/bit.smc` 纯语言位工具：SWAR popcount（LLVM 可折叠单条 popcnt）、二分 clz/循环 ctz（对 0 返回位宽冻结）、rotl/rotr（n 按位宽取模）、reinterpret_cast bitcast 包装（7 e2e）。`libs/std/math.smc`：18 个 libc 绑定（sqrt…sinf，`-lm` 链接）+ `constexpr PI/E` + 位级 isnan/isinf/is_finite（IEEE754 纯语言，运行时构造掩码绕开超 int64 常量折叠限制）（5 e2e）。**顺带修复语言层缺口**：namespace 内 C-linkage extern 函数被 scopedName 前缀化 → 符号 `std_sqrt_float64` 而非 libm 裸名 `sqrt`（JIT 解析失败）；修复——`visit(FunctionDeclAST)` 对 C 名跳过前缀、`namespaceCandidates` 限定名回退裸 C 名（SemanticAnalyzer.cpp）。当前全量 **1370** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。P1-09 剩余：仅 std.collections（STD-06~08，阻塞于模块导出类型）。
 
+> **进度快照（2026-10-20，语法缺口第二轮收口）**：**10 项语法特性完成**（spec/plan `docs/superpowers/{specs,plans}/2026-10-20-syntax-gaps-r2*`）：`f16/f32/f64/f128` 类型关键字（TYP-04）、指针后缀 `restrict`（PAR-06）、`u8/u16/u32` 前缀字面量（TYP-05）、C99 复合字面量与 slice 字面量（PAR-08）、类外方法定义（PAR-03）、一元/二元/`[]`/`()` 运算符重载调用点收敛（SEM-17）、非类型模板参数作值（GEN-02）。虚函数（INH-07）与可变参数模板（GEN-10）经用户确认维持 Non-goal。当前全量 **1470** 测试 0 失败。
+
 > **进度快照（2026-10-19，语法遗漏收口完成）**：**语法层面审计 + 11 项特性/缺陷收口**（spec/plan `docs/superpowers/specs|plans/2026-10-18-syntax-gaps*`）。多行字符串 `"""..."""` 与 Unicode 标识符（LEX-16/18）；`char8/16/32` 类型（uint 别名）与 `thread_local`（TYP-05/CON-04）；`atomic` 限定符（整型标量，原子 load/store + atomicrmw 子集，CON-01）；默认参数（区间重载 + 少默认优先，FUN-09）；**未知类型名声明静默丢弃修复**（E2031，此前 `f16 x;` 零诊断消失）；compile_time 反射 `name_of/fields_of/attributes_of`（ReflectionRegistry 交接，CT-07/13）；protected 派生访问放宽（INH-06）；`alignof/offsetof` 独立关键字与 `nullptr`（PAR-14/TYP-24）。当前全量 **1418** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。P1-09 剩余：仅 std.collections（STD-06~08，阻塞于「模块导出类型」语言缺口）。
 
 ---
@@ -97,12 +99,12 @@
 
 - `[ ]` **PAR-01** `(已实现)` 顶层声明：变量/函数/struct/class/enum/union/`typedef`/`using`/`type`。
 - `[ ]` **PAR-02** `(改)` 函数声明与定义：**C 风格**，不使用 `fn`；覆盖 `extern/static/inline`、成员函数。
-- `[ ]` **PAR-03** `(已实现)` 方法定义语法 `Vector::length()`；补嵌套/`static` 成员。（嵌套 AGG-11、static AGG-10 均已落地，2026-10-05。）
+- `[x]` **PAR-03** 方法定义语法 `Vector::length()`；嵌套/`static` 成员（AGG-11 / AGG-10，2026-10-05）。**类外定义完成**（2026-10-20）：`RetType Class::method(params) { ... }`——声明在类体内、定义在类外；sema 校验类/方法/签名、插入隐式 `this`，签名不符或类内未声明均诊断。
 - `[x]` **PAR-04** class 成员：`public/private/protected` 段、成员变量/函数、`static` 成员、嵌套类型。**完成**（2026-10-05）：访问段解析与访问级别记录（DEC-01）、static 成员（AGG-10）、嵌套类型（AGG-11）全部落地。
 - `[ ]` **PAR-05** 类型语法：基础类型、指针 `T*`、数组 `T[N]`、Slice `T[]`、模板实例 `Box<i32>`。
-- `[ ]` **PAR-06** `(新)` 指针限定符：`const/volatile/restrict/atomic`。
+- `[x]` **PAR-06** 指针限定符：`const/volatile/restrict/atomic`。**完成**（2026-10-20）：指针后缀 `restrict` 语法接受并记录 `Type::isRestrict`；别名/优化语义仍挂 MEM-04。
 - `[x]` **PAR-07** `(新)` 注解挂载点：六处全落地（模块仅解析记录）（2026-10-07）。
-- `[ ]` **PAR-08** `(已实现)` 表达式：字面量/标识符/调用/成员访问/下标/一元/二元/三元/强转；补切片表达式。
+- `[x]` **PAR-08** 表达式：字面量/标识符/调用/成员访问/下标/一元/二元/三元/强转。**切片/复合字面量完成**（2026-10-20）：C99 复合字面量 `(T[N]){...}` / `(T[]){...}`（块内栈对象、文件级静态常量，直接转义拒绝）；slice 字面量初始化 `T[] s = {1,2,3}`（栈匿名数组 + 视图，返回即悬垂拒绝）。
 - `[x]` **PAR-09** `(改)` 语句：块、if/else、while、do-while、for、switch/case、return、break、continue、声明。（**不含 goto/label**，见 Non-goals；已移除 goto/标签解析）
 - `[x]` **PAR-10** `(新)` 位域声明：`T name : N;`（struct/union 成员），含零宽位域。**完成**（2026-10-15，P1-07）：struct/class/union/匿名内联成员四处循环解析 `: N`（parseBitFieldWidth，常量表达式求值）；命名零宽位域 parse 期拒绝（FieldInfo 编码无法区分，Ruling）；超 int32 范围位宽 parse 期拒绝（防回绕绕过 E2026）。
 - `[x]` **PAR-11** `(新)` 简单 lambda：语法（建议 C++ 风格 `[capture](params) -> T { ... }` 或最简 `[](p){...}`）、捕获列表。**完成**（2026-10-17，随 P1-07）：`[captures](params) -> Ret { body }`；`[]`/`[=]`/`[a,&b]` 捕获列表；返回类型显式或推断；表达式起始 `[` 识别（下标是后缀无歧义）；立即调用 `[...](...)(args)`。plan `docs/superpowers/plans/2026-10-17-lambda.md`。
@@ -147,8 +149,8 @@
 - `[ ]` **TYP-01** 基础类型大小/对齐表：按目标平台生成。
 - `[ ]` **TYP-02** 整数类型：`i8..i128`、`u8..u128`。
 - `[ ]` **TYP-03** 平台整数：`isize/usize` 与目标指针宽度绑定。
-- `[~]` **TYP-04** 浮点类型：`f16/f32/f64/f128` 的 LLVM 映射与软件兜底。**已完成**：LLVM 类型映射（常量按 APFloat 语义生成，LEX-15）；x86-64 上 f16/f128 的算术/比较/混合运算/转换、形参/返回、全局变量、struct 字段均可用（LLVM 原生/内部提升承担兜底）；`print`/`println` 全格式说明符支持 f16（无损提升）/f128（截断为 double，精度损失见 `conversions.md` §9.1）；varargs 默认实参提升对齐 C23（`float16→float64`，`float128` 原样传递）。**延后**：非 x86-64 目标（无 half 硬件、需 compiler_rt 的 quad）的验证挂靠 INF-05/TST-08；f128 的 113 位精确十进制输出挂靠 FMT-13。
-- `[~]` **TYP-05** `bool/char/char8/char16/char32/void`。`char8/16/32` 类型关键字完成（2026-10-19，uint8/16/32 别名）；UTF 字面量类型族（u8/u16/u32 前缀字面量）未做。
+- `[x]` **TYP-04** 浮点类型：`f16/f32/f64/f128` 的 LLVM 映射与软件兜底（**短拼写类型关键字完成** 2026-10-20：`f16/f32/f64/f128` ≡ `float16/32/64/128`；字面量后缀不受影响）。**已完成**：LLVM 类型映射（常量按 APFloat 语义生成，LEX-15）；x86-64 上 f16/f128 的算术/比较/混合运算/转换、形参/返回、全局变量、struct 字段均可用（LLVM 原生/内部提升承担兜底）；`print`/`println` 全格式说明符支持 f16（无损提升）/f128（截断为 double，精度损失见 `conversions.md` §9.1）；varargs 默认实参提升对齐 C23（`float16→float64`，`float128` 原样传递）。**延后**：非 x86-64 目标（无 half 硬件、需 compiler_rt 的 quad）的验证挂靠 INF-05/TST-08；f128 的 113 位精确十进制输出挂靠 FMT-13。
+- `[x]` **TYP-05** `bool/char/char8/char16/char32/void`。`char8/16/32` 类型关键字（2026-10-19，uint8/16/32 别名）；**u8/u16/u32 前缀字面量完成**（2026-10-20）：类型为 `char8/16/32[]`（逐字节存储、不转码），可退化为对应指针。
 - `[ ]` **TYP-06** 类型别名 `type Handle = u64;`：展开、循环检测。
 - `[ ]` **TYP-07** `struct`：字段、布局、默认公开、C ABI 兼容。
 - `[ ]` **TYP-08** `class`：布局等价 struct，成员函数不占空间。
@@ -180,7 +182,7 @@
 > 语法**对齐 C++ 简单泛型**；支持函数模板、类模板、非类型参数、CRTP；单态化展开，零运行时开销。
 
 - `[x]` **GEN-01** 声明语法（2026-10-06）。`template`/`typename` 关键字；TemplateDeclAST；TypeVarType 占位（同名同指针）。
-- `[x]` **GEN-02** 非类型（常量）模板参数（2026-10-06）。仅整数；字段数组长度占位（ArrayType::sizeParam）实例化时具体化；`compile_time` 语境后续轮。
+- `[x]` **GEN-02** 非类型（常量）模板参数（2026-10-06）。仅整数；字段数组长度占位（ArrayType::sizeParam）实例化时具体化。**值位置完成**（2026-10-20）：模板体内参数名可作为值表达式使用（`return N`、算术、数组维度）；局部变量/形参遮蔽值参数拒绝；参数作显式模板实参（`f<N>()`）延后。
 - `[x]` **GEN-03** 实例化（2026-10-06）。显式 + 推导（形参 T 取实参类型、T* 取去指针类型；冲突/无法推导诊断）；类模板不推导。
 - `[x]` **GEN-04** 解析歧义（2026-10-06）。见 LEX-08。
 - `[x]` **GEN-05** 单态化（2026-10-06）。AST 克隆替换器（全节点族）+ Registry 状态机去重 + 深度上限 64；未使用模板零符号；调用点按需前向声明。
@@ -188,7 +190,7 @@
 - `[x]` **GEN-07** 符号修饰与 ABI（2026-10-06）。实例名 `名$实参拼写`（typeToMangled 复用，指针 …ptr 后缀）；函数实例符号沿用 mangleFunction 追加参数。
 - `[x]` **GEN-08** 模板成员方法解析与 `this` 传递（2026-10-06）。实例即普通类声明，隐式 this 参数为实例类型；基类实例方法体惰性（首次调用 visit）。
 - `[x]` **GEN-09** CRTP 支撑（2026-10-06）：见 INH-05（`this`、模板基类、延迟实例化、`static_cast`）。
-- `[ ]` **GEN-10** **不做**（Non-goals）：特化/偏特化、SFINAE、可变参数模板、模板模板参数、concepts、默认模板实参。
+- `[ ]` **GEN-10** **不做**（Non-goals）：特化/偏特化、SFINAE、可变参数模板、模板模板参数、concepts、默认模板实参。**（2026-10-20 用户确认：可变参数模板维持不做。）**
 
 ---
 
@@ -210,7 +212,7 @@
 - `[~]` **SEM-14** 静态分析诊断：错误码、源码位置、修复建议。主要检查点已带错误码与 fix 字段（见 `src/sema/Diagnostic.*`）。
 - `[~]` **SEM-15** `(新)` **求值顺序与序列点**：表达式/函数实参求值顺序，对齐 C 标准（细化 SEM-13）。（草案见 `docs/spec/semantics.md`）
 - `[~]` **SEM-16** `(新)` **重载解析规则**：可行候选、最佳匹配、歧义诊断、模板实例参与（细化 FUN-07/GEN-06）。（现状+目标见 `docs/spec/semantics.md`）
-- `[~]` **SEM-17** `(新)` **可重载运算符集合与签名约定**：允许重载的运算符、参数/返回约束。（草案见 `docs/spec/semantics.md`）
+- `[x]` **SEM-17** 可重载运算符集合与签名约定。**完成**（2026-10-20）：声明侧与调用侧集合收敛为 `+ - * / % == != < > <= >= && || & | ^ << >> ~ ! ++ -- [] ()`；一元/前后缀、二元补齐、下标与调用重载调用点全部生效；重载 `&&`/`||` 不短路。见 `docs/spec/semantics.md` §4。
 - `[~]` **SEM-18** `(新)` **`defer` 语义**：注册顺序、作用域退出执行顺序、与 `return`/`break`/`continue` 的交互（细化 FUN-10）。（现状+待冻结见 `docs/spec/semantics.md`）
 
 ---
@@ -252,7 +254,7 @@
 - `[x]` **INH-04** 转换：派生→基隐式；基→派生需 `static_cast`。**完成**（2026-10-05）：指针隐式上行、值赋值切片语义、`static_cast<Derived*>` 下行转换均以 e2e pin（此前已可用）。
 - `[x]` **INH-05** **CRTP 必需项**。**完成**（2026-10-06，随 P1-03）：`this` 表达式（PAR-17，隐式 this 参数 + `this.field` 点号自动解引用）；基类支持模板实例 `: Shape<Circle>`（parse 捕获源拼写，sema 经 Registry 实例化，派生类前向占位可作实参）；基类实例方法体**惰性**（登记签名 + 首次调用 visit——派生类方法表未就绪时不检查）；`static_cast<Derived*>(this)` 向下转换（PAR-18 既有）。
 - `[x]` **INH-06** 成员/方法沿单继承链查找；重写（非虚，静默遮蔽规则）。**完成**（2026-10-05，方案乙）：删除 sema 基类方法表复制循环，`resolveMethod` 沿 `base` 链查找并经 out-param 返回 definingClass——继承方法保留定义类的访问级别与 E2009 归属；私有基方法经派生实例从类外调用的洞闭合（行为收紧，pin）；派生同名重载不再被复制去重吞掉；字段访问沿链 walk 泛化至 StructType（sema + GEP 两路）。**protected 派生访问放宽完成**（2026-10-19）：`canAccessMember(definingClass, level)`——定义类内或（protected 且）派生类内经 `this->` 访问放行；private 仍仅定义类；类外仍 E2009。四检查点（static 成员/字段/方法/指定初始化器）。
-- `[ ]` **INH-07** **不做**（Non-goals）：多继承、虚继承、菱形继承、虚函数/vtable/RTTI。
+- `[ ]` **INH-07** **不做**（Non-goals）：多继承、虚继承、菱形继承、虚函数/vtable/RTTI。**（2026-10-20 用户确认：虚函数/vtable 维持 Non-goal，理由：语言无隐藏控制流。）**
 
 ---
 

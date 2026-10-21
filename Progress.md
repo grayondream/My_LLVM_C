@@ -852,3 +852,22 @@
 - **关键 Ruling**：①atomic 克隆类型（共享单例污染隐患——builder-check #3）；②默认参数少默认优先（C++ 语义，builder-check #2）；③`f(int,int)` 与 `f(int,int=5)` 是 C++ 非法重载（测试用例修正）；④name_of 返回 typeToString（`struct S` 非 `S`）；⑤反射 ctHandled 先于 ctConstantOrNull 判断；⑥E2031 双报防护（诊断计数）。
 - 验证：每任务 TDD RED→GREEN（编译错误/断言失败/CLI 复现三种 RED 形态）；最终全量 ctest **1418/1418** 绿（2 个既有 GTEST_SKIP 不变）。工作区 clean。
 - 遗留/P1-09 剩余：**仅 std.collections（STD-06~08）**，阻塞于「模块导出类型」语言缺口（parse 期类型名注册先于 import）；std.mem 的 Allocator/Arena/Pool 同因挂账。CON-02/03/09/10（atomic 完整并发模型）、LEX-16 多行字符串缩进策略等另轮。
+
+## 2026-10-20 — 语法缺口第二轮收口（TYP-04、PAR-06、TYP-05、PAR-08、PAR-03、SEM-17、GEN-02）
+
+- 流程：用户「补全语法层面仍缺失的部分」→ brainstorm 范围裁定（虚函数标 Non-goal；可变参数模板维持 GEN-10 Non-goal；其余全做）→ spec `docs/superpowers/specs/2026-10-20-syntax-gaps-r2-design.md`（builder-check 6 项裁定）→ plan `docs/superpowers/plans/2026-10-20-syntax-gaps-r2.md`（11 任务）→ executing-plans Native 内联（master 直接提交）。
+- 提交线：Task1 `feat(TYP-04)` → Task2 `feat(PAR-06)` → Task3 `feat(TYP-05)` → Task4 `feat(PAR-08)` → Task5 `feat(PAR-08)` → Task6 `feat(PAR-03)` → Task7 `feat(SEM-17)` → Task8 `feat(SEM-17)` → Task9 `feat(SEM-17)` → Task10 `feat(GEN-02)` → Task11 `docs`。
+- **Task 1（TYP-04）**：`f16/f32/f64/f128` 注册为类型关键字（keywordMap 4 别名）；字面量后缀在 scanNumber 内最大匹配，不受影响。
+- **Task 2（PAR-06）**：`Type::isRestrict` + parseType 指针后缀循环接受 `restrict`（`T* const restrict` 组合可用）；TemplateInstantiator Pointer rewrite 同步拷贝；语义（别名分析）仍挂 MEM-04。
+- **Task 3（TYP-05）**：`u8/u16/u32"..."` 前缀字面量——`StringLiteralPrefix`（support 层）+ token 字段 + scanPrefixedString + parser 剥离 + sema `ArrayType(char8/16/32, n)` + codegen 定宽全局数组（逐字节存储，不转码）。
+- **Task 4（PAR-08）**：C99 复合字面量 `(T){...}`——`CompoundLiteralExprAST`（内嵌 InitializerListExprAST，复用设计符解析）；parseType 增抽象 `[N]` 维（未命名数组形参显式拒绝，保住 TYP-11 pin）；块内 alloca/文件级常量；直接转义（取址/返回数组或 slice）拒绝，by-value 到全局允许；聚合初始化 helper 经 Decl.h 暴露。
+- **Task 5（PAR-08）**：slice 字面量 `T[] s = {1,2,3}`——sema 元素类型校验 + codegen 栈匿名数组 + `emitArrayToSliceDecay`；`m_sliceLiteralVars` 跟踪并拒绝返回悬垂视图。
+- **Task 6（PAR-03）**：类外方法定义 `RetType Class::method(...) {...}`——`FunctionDeclAST::className` + parser `IDENTIFIER :: IDENTIFIER (` 形态 + sema 校验类/方法/签名、插入隐式 `this`、`currentClass` 作用域（private 可访问）。
+- **Task 7（SEM-17）**：一元重载调用点——`UnaryExprAST/PostfixIncDecExprAST::mangledCallee` + sema 查找 + codegen CreateCall；前缀 `operator++(V)`、后缀 `operator++(V, int32)`；补 `operator!` 声明（parser 缺 `!` 映射）；`!aggregate` 无重载改为诊断（原为 codegen 崩溃）。
+- **Task 8（SEM-17）**：二元集合收敛——补 `% && || & | ^ << >>` 到 `getOperatorMangledName` 与调用点 switch；重载 `&&`/`||` 不短路（mangledCallee 分支先于短路 lowering）。
+- **Task 9（SEM-17）**：`operator[]` / `operator()`——parser 括号对符号 + `ArrayAccessExprAST::mangledCallee` / `CallExprAST::calleeExpr`；sema 聚合对象改写为 operator 调用；普通字符串 callee 路径不动。
+- **Task 10（GEN-02）**：非类型模板参数作值——TemplateInstantiator cloneExpr 把值参数名替换为 `NumberExprAST`；局部变量/形参遮蔽值参数在克隆期记录、sema 诊断。
+- **Task 11（文档）**：grammar.ebnf（f16 关键字、前缀字面量、类外方法、运算符声明、复合字面量、slice 初始化）/ keywords.md（f16 系列、restrict、字面量前缀）/ semantics.md（§4 运算符集合 + §7.6 字面量与模板值存储语义）/ TODO（7 条目勾记 + INH-07/GEN-10 Non-goal 注记 + 进度快照 1470）/ 本记录。
+- **关键 Ruling**：①`(T[]){...}` 是 slice 复合字面量、`(T[N]){...}` 是定长数组（本语言 `T[]` = slice）；②禁转义只查直接转义、不追踪副本、by-value 拷贝到全局允许；③`foo<N>()`（值参数作模板实参）延后；④operator 沿用 raw-type mangle、`operator()` 窄路径；⑤一元/`[]`/`()` 触发类型含 Optional/Result；⑥本语言 struct 无方法（方法须用 class）；⑦`int32[] s = {1.0, 2}` 合法（窄化兼容，TYP-23），不匹配测试改用 struct 元素；⑧`restrict` 仅语法接受。
+- 验证：每任务 TDD RED→GREEN；最终全量 ctest **1470/1470** 绿（2 个既有 GTEST_SKIP 不变）。工作区 clean。
+- 遗留/P1-09 剩余：**仅 std.collections（STD-06~08）**，仍阻塞于「模块导出类型」语言缺口；MEM-04 的 restrict 完整语义、`foo<N>()` 显式模板实参折叠另轮。

@@ -22,12 +22,18 @@
 | `uint8` `uint16` `uint32` `uint64` `uint128` | `[impl]` | 无符号定宽 |
 | `isize` / `usize` | `[impl]` | 平台指针宽度（TYP-03） |
 | `float16` / `float32` / `float64` / `float128` | `[impl]` | 定宽浮点 |
-| `f16` / `f32` / `f64` / `f128` | `[plan]` | 目标浮点类型，见 TYP-04；作为字面量后缀的**词法识别已实现**（LEX-15，`f`/`l` 为兼容写法） |
+| `f16` / `f32` / `f64` / `f128` | `[impl]` | TYP-04：与 `float16`/`float32`/`float64`/`float128` 等价的类型关键字；同时是字面量后缀（LEX-15） |
 | `char8` / `char16` / `char32` | `[impl]` | TYP-05：uint8/16/32 别名（非独立名义类型） |
 | `str` / `String` | 非关键字 | `str` 已硬改名 `string_view`（DEC-18）；标准库类型不在词法层保留 |
 
-## 2. 存储类 / 限定符
+### 1a. 字面量前缀
 
+| 前缀 | 状态 | 说明 |
+|---|---|---|
+| `u8` / `u16` / `u32` | `[impl]` | TYP-05：字符串字面量前缀，类型分别为 `char8[]` / `char16[]` / `char32[]`（逐字节存储，不转码）；无前缀 `"..."` 仍为 `string_view` |
+| `r` / `"""` | `[impl]` | 原始字符串 / 多行字符串（LEX-06 / LEX-16） |
+
+## 2. 存储类 / 限定符
 | 关键字 | 状态 | 说明 |
 |---|---|---|
 | `const` | `[impl]` | |
@@ -35,7 +41,7 @@
 | `static` | `[impl]` | |
 | `extern` | `[impl]` | C 链接（MOD-09） |
 | `volatile` | `[impl]` | |
-| `restrict` | `[impl]` | 语义见 MEM-04 |
+| `restrict` | `[impl]` | 指针后缀限定符（`T* restrict`，PAR-06）；仅语法接受，别名/优化语义见 MEM-04 |
 | `inline` | `[impl]` | |
 | `register` | `[remove]` | 无实际语义；DEC-18 已裁决移除 token |
 | `thread_local` | `[impl]` | 存储类（变量），CON-04；完整存储模型见 CON-10 |

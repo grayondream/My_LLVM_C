@@ -68,6 +68,8 @@ char-literal        = "'" , ( char-char | escape-sequence ) , "'" ;
 string-literal      = '"' , { string-char | escape-sequence } , '"'
                     | 'r"' , { any-char - '"' } , '"'               (* [impl] 原始字符串 *)
                     | '"""' , { any-char } , '"""'                  (* [impl] 多行字符串 LEX-16 *)
+                    | ( 'u8' | 'u16' | 'u32' ) , '"' , { string-char | escape-sequence } , '"'
+                                                                    (* [impl] TYP-05 前缀字面量 → char8/16/32[] *)
                     | multiline-string ;
 escape-sequence     = '\' , ( "'" | '"' | '\' | 'n' | 't' | 'r' | '0'
                             | 'a' | 'b' | 'f' | 'v' | '?'
@@ -161,6 +163,17 @@ template-argument   = type | const-expr ;
 
 (* --- 函数 --- *)
 function-decl       = type , identifier , '(' , [ parameter-list ] , ')' , ( block | ';' ) ;
+(* [impl] PAR-03：类外方法定义 `type Class::method(params) { ... }`——声明在
+   类体内、定义在类外；签名须与类内声明一致。 *)
+method-definition   = type , identifier , '::' , identifier , '(' , [ parameter-list ] , ')'
+                    , ( block | ';' ) ;
+(* [impl] SEM-17：运算符重载（自由函数形式）
+   `type operator OP (params) { ... }`；OP ∈ + - * / % == != < > <= >= && || & | ^ << >> ~ ! ++ --
+                                             | '[]' | '()' *)
+operator-decl       = type , 'operator' , operator-symbol , '(' , [ parameter-list ] , ')' , block ;
+operator-symbol     = '+' | '-' | '*' | '/' | '%' | '==' | '!=' | '<' | '>' | '<=' | '>='
+                    | '&&' | '||' | '&' | '|' | '^' | '<<' | '>>' | '~' | '!' | '++' | '--'
+                    | '[' , ']' | '(' , ')' ;
 parameter-list      = parameter , { ',' , parameter } , [ ',' , '...' ] ;
 parameter           = type , [ identifier ] , [ '=' , const-expr ] ;   (* [impl] 默认参数 FUN-09，仅尾随 *)
 
@@ -194,7 +207,7 @@ primitive-type      = 'void' | 'bool' | 'char'
                     | 'uint8' | 'uint16' | 'uint32' | 'uint64' | 'uint128'
                     | 'isize' | 'usize'
                     | 'float16' | 'float32' | 'float64' | 'float128'
-                    | 'f16' | 'f32' | 'f64' | 'f128'               (* [plan] f16/f128 TYP-04 *)
+                    | 'f16' | 'f32' | 'f64' | 'f128'               (* [impl] TYP-04：短拼写 ≡ float16/32/64/128 类型关键字 *)
                     | 'string_view' | 'string' ;                   (* [impl] P1-06: identifier 特判，非关键字 *)
 
 named-type          = qualified-name ;
@@ -302,6 +315,7 @@ primary-expr        = literal
                     | 'compile_time' , '.' , compile-time-member    (* [impl] CT-01/06/07/13 *)
                     | qualified-name
                     | '(' , expr , ')'
+                    | '(' , type , ')' , initializer-list           (* [impl] PAR-08 复合字面量：块内栈对象，禁直接转义 *)
                     | initializer-list
                     | lambda-expr ;                                 (* [impl] PAR-11, 2026-10-17 *)
 
@@ -310,8 +324,10 @@ literal             = integer-literal | float-literal | char-literal
 
 initializer-list    = '{' , [ initializer , { ',' , initializer } , [ ',' ] ] , '}' ;
 initializer          = expr
-                    | designated-initializer                        (* [plan] PAR-13 *)
+                    | designated-initializer                        (* [impl] PAR-13 *)
                     | initializer-list ;
+(* [impl] PAR-08：slice 变量可由初始化列表构造（`int32[] s = {1,2,3};`）——
+   底层为栈上匿名数组 + {ptr,len} 视图；返回该 slice 属悬垂转义，sema 拒绝。 *)
 designated-initializer = '.' , identifier , '=' , initializer ;
 
 lambda-expr         = '[' , [ lambda-capture ] , ']'
