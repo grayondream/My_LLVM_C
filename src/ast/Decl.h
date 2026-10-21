@@ -17,6 +17,10 @@ class Constant;
 }
 void emitAggregateInitializer(CodegenContext& ctx, llvm::Value* dest,
                               Type* type, InitializerListExprAST* init);
+// PAR-08: slice value backed by a fresh stack anonymous array (shared by slice
+// variable declarations and slice compound literals).
+llvm::Value* emitSliceLiteral(CodegenContext& ctx, Type* sliceType,
+                              InitializerListExprAST* init);
 llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
                                        InitializerListExprAST* init);
 

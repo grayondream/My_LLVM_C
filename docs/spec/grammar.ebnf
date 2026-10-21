@@ -190,10 +190,12 @@ function-pointer-type = type , '(' , '*' , identifier , ')'
    §4 类型（TYP / PAR-05 / PAR-06 / MEM-04/09）
    ========================================================================= *)
 
-type                = [ 'const' | 'volatile' | 'atomic' | 'restrict' ] , base-type
+type                = [ 'const' | 'volatile' | 'atomic' ] , base-type
                       , { pointer-suffix }
                       , [ slice-suffix | optional-suffix ] ;
 pointer-suffix      = '*' , { 'const' | 'volatile' | 'atomic' | 'restrict' } ;
+(* [impl] PAR-06：`restrict` 只作为指针后缀限定符接受（`T* restrict`）；
+   前导位置不作限定符解析。语义见 MEM-04。 *)
 slice-suffix        = '[' , ']' ;                                   (* [impl] SliceType; 可叠加: T[][] = slice of slice *)
 optional-suffix     = '?' ;                                         (* [impl] OptionalType *)
 

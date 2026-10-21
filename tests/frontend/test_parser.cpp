@@ -1182,6 +1182,25 @@ TEST_F(ParserDeclTest, OperatorSubscriptAndCallDeclarations) {
     EXPECT_EQ(call->name, "operator()");
 }
 
+TEST_F(ParserDeclTest, CompoundLiteralMultiDimShape) {
+    auto tu = parse("int32 main() { int32* p = (int32[2][3]){{1,2,3},{4,5,6}}; return 0; }");
+    ASSERT_NE(tu, nullptr);
+    auto fn = dynamic_cast<FunctionDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(fn, nullptr);
+    auto declStmt = dynamic_cast<DeclStmtAST*>(fn->body->stmts[0].get());
+    ASSERT_NE(declStmt, nullptr);
+    auto decl = dynamic_cast<VarDeclAST*>(declStmt->decl.get());
+    ASSERT_NE(decl, nullptr);
+    auto cl = dynamic_cast<CompoundLiteralExprAST*>(decl->initExpr.get());
+    ASSERT_NE(cl, nullptr);
+    ASSERT_EQ(cl->literalType->kind, TypeKind::Array);
+    auto* outer = static_cast<ArrayType*>(cl->literalType);
+    // `int32[2][3]` = array[2] of array[3] (C declarator order).
+    EXPECT_EQ(outer->size, 2);
+    ASSERT_EQ(outer->elementType->kind, TypeKind::Array);
+    EXPECT_EQ(static_cast<ArrayType*>(outer->elementType)->size, 3);
+}
+
 TEST_F(ParserDeclTest, CompoundLiteralExpression) {
     auto tu = parse("int32 main() { int32* p = (int32[2]){1,2}; return p[0]; }");
     ASSERT_NE(tu, nullptr);

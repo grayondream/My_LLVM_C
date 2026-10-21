@@ -467,6 +467,39 @@ static void emitDesignatedInitializer(CodegenContext& ctx, llvm::Value* dest,
     }
 }
 
+// PAR-08: build a slice value backed by a fresh stack anonymous array filled
+// from `init` (shared by slice variable declarations and slice compound
+// literals). Empty list → null slice {nullptr, 0}. Element initialization
+// goes through emitFieldItemImpl so `string` elements are deep-copied.
+llvm::Value* emitSliceLiteral(CodegenContext& ctx, Type* sliceType,
+                              InitializerListExprAST* init) {
+    Type* st = stripTypedefs(sliceType);
+    if (!st || st->kind != TypeKind::Slice) return nullptr;
+    llvm::Type* sliceLLVM = ctx.getLLVMType(sliceType);
+    if (!sliceLLVM) return nullptr;
+    auto* sl = static_cast<SliceType*>(st);
+    const size_t n = init ? init->initializers.size() : 0;
+    llvm::Type* elemTy = ctx.getLLVMType(sl->elementType);
+    if (n == 0 || !elemTy) return llvm::Constant::getNullValue(sliceLLVM);
+
+    llvm::LLVMContext& c = ctx.getContext();
+    auto& builder = ctx.getBuilder();
+    auto* anonArrTy = llvm::ArrayType::get(elemTy, n);
+    llvm::AllocaInst* anon = builder.CreateAlloca(anonArrTy, nullptr, "slice.lit");
+    builder.CreateStore(llvm::Constant::getNullValue(anonArrTy), anon);
+    auto* i64 = llvm::Type::getInt64Ty(c);
+    for (size_t i = 0; i < n; ++i) {
+        auto& item = *init->initializers[i];
+        llvm::Value* elemPtr = builder.CreateInBoundsGEP(
+            anonArrTy, anon,
+            {llvm::ConstantInt::get(i64, 0), llvm::ConstantInt::get(i64, (int)i)},
+            "sl.elem");
+        emitFieldItemImpl(ctx, item, sl->elementType, elemPtr);
+    }
+    auto* anonArrType = new ArrayType(sl->elementType, (int)n);
+    return ctx.emitArrayToSliceDecay(anonArrType, anon);
+}
+
 // PAR-13: 全局常量初始化的设计符版本——按 resolvedTargets 语义目标链把常量
 // 放到指定槽位（数组下标 / struct-class 字段含基类下降 / 位域 OR 进存储单元）。
 // 未指定槽位由调用方预置 getNullValue 补零。
@@ -981,41 +1014,14 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
         // PAR-08 (Task 5): slice literal init `T[] s = {a,b,c}` — back the
         // slice with a stack anonymous array: alloca [len x elem], fill, then
         // decay to a {ptr,len} view. The variable itself stays a Slice.
+        // Empty list initializes to the null slice {nullptr, 0}.
         bool sliceLiteralInit = false;
         if (auto* initList = dynamic_cast<InitializerListExprAST*>(initExpr.get())) {
             Type* st = stripTypedefs(type);
             if (st && st->kind == TypeKind::Slice) {
-                auto* sl = static_cast<SliceType*>(st);
-                llvm::LLVMContext& c = ctx.getContext();
-                llvm::Type* elemTy = ctx.getLLVMType(sl->elementType);
-                if (elemTy && !initList->initializers.empty()) {
-                    auto* anonArrTy = llvm::ArrayType::get(elemTy, initList->initializers.size());
-                    llvm::AllocaInst* anon = ctx.getBuilder().CreateAlloca(anonArrTy, nullptr, "slice.lit");
-                    ctx.getBuilder().CreateStore(llvm::Constant::getNullValue(anonArrTy), anon);
-                    auto* i64 = llvm::Type::getInt64Ty(c);
-                    for (size_t i = 0; i < initList->initializers.size(); ++i) {
-                        auto& item = *initList->initializers[i];
-                        llvm::Value* elemPtr = ctx.getBuilder().CreateInBoundsGEP(
-                            anonArrTy, anon,
-                            {llvm::ConstantInt::get(i64, 0), llvm::ConstantInt::get(i64, (int)i)},
-                            "sl.elem");
-                        if (auto* nested = dynamic_cast<InitializerListExprAST*>(&item)) {
-                            emitAggregateInitializer(ctx, elemPtr, sl->elementType, nested);
-                        } else {
-                            llvm::Value* v = item.codegen(ctx);
-                            if (v) {
-                                if (item.isLValue) v = readLValue(ctx, item, v);
-                                v = ctx.castValue(v, item.type, elemTy);
-                                ctx.getBuilder().CreateStore(v, elemPtr);
-                            }
-                        }
-                    }
-                    // Decay the anonymous array into a {ptr,len} slice.
-                    auto* anonArrType = new ArrayType(sl->elementType, (int)initList->initializers.size());
-                    llvm::Value* slVal = ctx.emitArrayToSliceDecay(anonArrType, anon);
-                    ctx.getBuilder().CreateStore(slVal, alloca);
-                    sliceLiteralInit = true;
-                }
+                llvm::Value* slVal = emitSliceLiteral(ctx, type, initList);
+                if (slVal) ctx.getBuilder().CreateStore(slVal, alloca);
+                sliceLiteralInit = true;
             }
         }
         if (!sliceLiteralInit) {

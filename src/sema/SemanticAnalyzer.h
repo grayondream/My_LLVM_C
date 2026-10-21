@@ -90,8 +90,11 @@ public:
     std::unordered_set<std::string> m_deprecatedVars;
     std::unordered_map<std::string, std::string> m_deprecatedMsgs;
     // PAR-08 (Task 5): 以初始化列表字面量初始化的 slice 变量——其底层存储是
-    // 栈上匿名数组，返回该 slice 是悬垂（sema 拒绝）。
+    // 栈上匿名数组，返回该 slice 是悬垂（sema 拒绝）。键含所属函数名，
+    // 避免不同函数中的同名变量互相误判。
     std::unordered_set<std::string> m_sliceLiteralVars;
+    // PAR-08: 全局变量名——把数组/slice 字面量直接赋给全局是悬垂转义。
+    std::unordered_set<std::string> m_globalVarNames;
     // nonnull 形参：函数名 → (参数下标, 参数名)。
     std::unordered_map<std::string, std::vector<std::pair<size_t, std::string>>> m_nonnullParams;
     // FUN-09: 方法默认参数计数，键 = definingClass 名 + "::" + 方法名

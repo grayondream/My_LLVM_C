@@ -478,6 +478,34 @@ std::unique_ptr<ExprAST> Parser::parseUnaryImpl() {
             check(TokenType::TOKEN_VOLATILE) || check(TokenType::TOKEN_ATOMIC)) {
             size_t saved = m_currentTokenPos;
             Type* castType = parseType();
+            // PAR-08: fixed array dimensions are accepted only in this
+            // type-name position: `(int32[3]){...}`. Scoping them here keeps
+            // `[N]` out of declarations and parameter types. C declarator
+            // order: `T[2][3]` = array[2] of array[3] (wrap right-to-left).
+            if (castType && check(TokenType::TOKEN_LBRACKET)) {
+                size_t dimSaved = m_currentTokenPos;
+                std::vector<int> dims;
+                bool ok = true;
+                while (check(TokenType::TOKEN_LBRACKET)) {
+                    advance(); // '['
+                    if (!check(TokenType::TOKEN_NUMBER)) { ok = false; break; }
+                    auto numTok = advance();
+                    int64_t dim = static_cast<int64_t>(
+                        std::get<unsigned __int128>(numTok->value));
+                    if (dim < 0 || dim > INT32_MAX ||
+                        !match(TokenType::TOKEN_RBRACKET)) {
+                        ok = false;
+                        break;
+                    }
+                    dims.push_back(static_cast<int>(dim));
+                }
+                if (ok && !dims.empty()) {
+                    for (auto it = dims.rbegin(); it != dims.rend(); ++it)
+                        castType = new ArrayType(castType, *it);
+                } else {
+                    m_currentTokenPos = dimSaved;
+                }
+            }
             if (castType && match(TokenType::TOKEN_RPAREN)) {
                 // PAR-08: C99 compound literal — `(type){ init-list }`.
                 if (check(TokenType::TOKEN_LBRACE)) {
@@ -2499,30 +2527,16 @@ Type* Parser::parseType() {
     }
 
     // 新增：支持切片类型 T[]（可叠加：T[][] = slice of slice，TYP-12）。
-    // 非 `[]` 后缀（如声明符侧的 `T[3]`）不在此消耗。
+    // 非 `[]` 后缀（如声明符侧的 `T[3]`）不在此消耗——固定数组维度只在
+    // 复合字面量的 type-name 位置按需解析（见 parseUnaryImpl，PAR-08）。
     while (check(TokenType::TOKEN_LBRACKET)) {
         size_t save = m_currentTokenPos;
         advance(); // 消耗 '['
         if (check(TokenType::TOKEN_RBRACKET)) {
             advance(); // 消耗 ']'
             baseType = TypeContext::instance().getSliceType(baseType);
-        } else if (check(TokenType::TOKEN_NUMBER)) {
-            // PAR-08: abstract array dimension `(T[N])` in a type-name —
-            // builds a fixed ArrayType (right-to-left like parseVariableDecl).
-            auto numTok = advance();
-            int64_t dim = static_cast<int64_t>(
-                std::get<unsigned __int128>(numTok->value));
-            if (dim < 0 || dim > INT32_MAX) {
-                error("array dimension out of range", *numTok);
-                return nullptr;
-            }
-            if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after array dimension")) {
-                m_currentTokenPos = save;
-                return nullptr;
-            }
-            baseType = new ArrayType(baseType, static_cast<int>(dim));
         } else {
-            m_currentTokenPos = save; // restore: not a slice/dimension suffix
+            m_currentTokenPos = save; // restore: not a slice suffix
             break;
         }
     }
@@ -3281,8 +3295,8 @@ std::unique_ptr<ParamDeclAST> Parser::parseParamDecl() {
         Type* t = type;
         while (t && t->kind == TypeKind::Typedef)
             t = static_cast<TypedefType*>(t)->aliasedType;
-        if (t && t->kind == TypeKind::Array && !check(TokenType::TOKEN_IDENTIFIER)) {
-            errorUnexpected("array parameter requires a name");
+        if (t && t->kind == TypeKind::Array) {
+            errorUnexpected("array parameter requires the `T name[N]` form");
             return nullptr;
         }
     }

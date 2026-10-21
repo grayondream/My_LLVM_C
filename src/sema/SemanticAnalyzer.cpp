@@ -1642,8 +1642,9 @@ void SemanticAnalyzer::visit(CharExprAST& node) {
 void SemanticAnalyzer::visit(StringExprAST& node) {
     // P1-06 (FMT-04): literals are validated at their single point of
     // creation — invalid sequences are a compile error (E2015), never a
-    // runtime surprise.
-    if (!smc_utf8::valid(node.value)) {
+    // runtime surprise. TYP-05: prefixed literals store raw bytes (no
+    // transcoding), so they are exempt from the UTF-8 check.
+    if (node.prefix == StringLiteralPrefix::None && !smc_utf8::valid(node.value)) {
         emitError(DiagnosticCode::SemInvalidUtf8,
                   "invalid UTF-8 sequence in string literal", node);
     }
@@ -1733,10 +1734,16 @@ void SemanticAnalyzer::visit(VariableExprAST& node) {
     node.isLValue = true;
 }
 
+// PAR-08: key for stack-backed slice-literal tracking — scoped by the owning
+// function so same-named locals in different functions do not collide.
+static std::string sliceLiteralKey(const FunctionDeclAST* fn,
+                                   const std::string& name) {
+    return fn ? fn->name + "::" + name : name;
+}
+
 // SEM-17: operand kinds that may carry user-defined operator overloads
 // (mirrors the aggregate check used by the binary-operator call site).
-static bool isOperatorOverloadOperand(Type* t) {
-    while (t && t->kind == TypeKind::Typedef)
+static bool isOperatorOverloadOperand(Type* t) {    while (t && t->kind == TypeKind::Typedef)
         t = static_cast<TypedefType*>(t)->aliasedType;
     if (!t) return false;
     switch (t->kind) {
@@ -2849,6 +2856,34 @@ void SemanticAnalyzer::visit(AssignmentExprAST& node) {
     if (lhsType && lhsType->isConst) {
         emitError("cannot assign to const variable", node);
         return;
+    }
+    // PAR-08: assigning an array/slice literal (or a stack-backed slice
+    // variable) to a global stores a pointer to stack storage — dangling.
+    // By-value scalar/struct copies remain allowed (design §2.4).
+    if (node.op == AssignOp::Assign) {
+        if (auto* lhsVar = dynamic_cast<VariableExprAST*>(node.lhs.get())) {
+            if (m_globalVarNames.count(lhsVar->name) ||
+                m_globalVarNames.count(scopedName(lhsVar->name))) {
+                bool escape = false;
+                if (auto* cl = dynamic_cast<CompoundLiteralExprAST*>(node.rhs.get())) {
+                    Type* lt = cl->literalType;
+                    while (lt && lt->kind == TypeKind::Typedef)
+                        lt = static_cast<TypedefType*>(lt)->aliasedType;
+                    escape = lt && (lt->kind == TypeKind::Array ||
+                                    lt->kind == TypeKind::Slice);
+                }
+                if (!escape) {
+                    if (auto* rv = dynamic_cast<VariableExprAST*>(node.rhs.get())) {
+                        escape = m_sliceLiteralVars.count(
+                                     sliceLiteralKey(currentFunction, rv->name)) > 0;
+                    }
+                }
+                if (escape) {
+                    emitError("cannot store a stack-backed array/slice literal in a global (dangling)", node);
+                    return;
+                }
+            }
+        }
     }
     // CON-01: atomic LHS supports only `= += -= &= |= ^=` — the atomicrmw
     // subset. `*= /= %= <<= >>=` need a cmpxchg loop (CON-02, not built).
@@ -4182,7 +4217,8 @@ void SemanticAnalyzer::visit(ReturnStmtAST& node) {
             // PAR-08 (Task 5): returning a slice whose storage is a stack
             // anonymous array is a dangling escape (design §2.5).
             if (auto* ve = dynamic_cast<VariableExprAST*>(node.value.get())) {
-                if (m_sliceLiteralVars.count(ve->name)) {
+                if (m_sliceLiteralVars.count(
+                        sliceLiteralKey(currentFunction, ve->name))) {
                     emitError("cannot return a slice backed by a stack literal (dangling)", node);
                     return;
                 }
@@ -4351,6 +4387,11 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
     // P1-04 / CT-03 / 评审 I3: 毒化类型（含 typedef/指针/数组包装层）拒绝。
     checkCtDeadBranchUse(node.type, node);
     node.name = scopedName(node.name);
+    // PAR-08: remember global variables so assignment of an array/slice
+    // literal to one can be rejected as a dangling escape.
+    if (atGlobalLevel()) {
+        m_globalVarNames.insert(node.name);
+    }
     if (node.isConstexpr) {
         if (!node.initExpr) {
             emitError("constexpr variable '" + node.name + "' must have initializer", node);
@@ -4385,7 +4426,8 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
                 while (vt && vt->kind == TypeKind::Typedef)
                     vt = static_cast<TypedefType*>(vt)->aliasedType;
                 if (vt && vt->kind == TypeKind::Slice) {
-                    m_sliceLiteralVars.insert(node.name);
+                    m_sliceLiteralVars.insert(
+                        sliceLiteralKey(currentFunction, node.name));
                 }
             }
             // PAR-13: 设计符解析（struct/class/union/数组/嵌套；Optional/Result

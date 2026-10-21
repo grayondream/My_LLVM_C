@@ -146,3 +146,35 @@ TEST_F(SliceLiteralE2E, ElementTypeMismatchRejected) {
         }
     )", "sl_mismatch.c"));
 }
+
+TEST_F(SliceLiteralE2E, EmptySliceLiteralIsNullView) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            int32[] s = {};
+            if (s.len != 0) { return 1; }
+            return 0;
+        }
+    )", "sl_empty.c"), 0);
+}
+
+TEST_F(SliceLiteralE2E, SliceLiteralNameInAnotherFunctionDoesNotCollide) {
+    EXPECT_EQ(runSource(R"(
+        int32 g[2];
+        int32[] pass(int32[] s) { return s; }
+        int32 main() {
+            g[0] = 4;
+            int32[] r = pass(g);
+            return r[0] - 4;
+        }
+    )", "sl_no_collision.c"), 0);
+}
+
+TEST_F(SliceLiteralE2E, StoreSliceLiteralToGlobalRejected) {
+    EXPECT_TRUE(semaRejects(R"(
+        int32[] gs;
+        int32 main() {
+            gs = (int32[]){1,2};
+            return 0;
+        }
+    )", "sl_global_store.c"));
+}

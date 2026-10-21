@@ -120,3 +120,26 @@ TEST_F(NonTypeParamE2E, LocalShadowingValueParamRejected) {
         int32 main() { return e<1>(); }
     )", "ntp_shadow.c"));
 }
+
+TEST_F(NonTypeParamE2E, CompoundLiteralInsideTemplateBody) {
+    EXPECT_EQ(runSource(R"(
+        template<int32 N>
+        int32 sum2() {
+            int32* p = (int32[2]){N, N};
+            return p[0] + p[1];
+        }
+        int32 main() { return sum2<3>() - 6; }
+    )", "ntp_compound.c"), 0);
+}
+
+TEST_F(NonTypeParamE2E, PrefixedStringInsideTemplateBody) {
+    EXPECT_EQ(runSource(R"(
+        template<int32 N>
+        int32 firstByte() {
+            char8* p = u8"ab";
+            if (p[0] == 'a') { return N; }
+            return 0;
+        }
+        int32 main() { return firstByte<1>() - 1; }
+    )", "ntp_prefix.c"), 0);
+}

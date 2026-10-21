@@ -2401,10 +2401,37 @@ llvm::Value* CompoundLiteralExprAST::codegen(CodegenContext& ctx) {
     llvm::Type* llvmType = ctx.getLLVMType(literalType);
     if (!llvmType) return nullptr;
 
+    // Slice target `(T[]){...}`: value view over a stack anonymous array
+    // (shared with slice variable literals). At file scope the backing array
+    // is a static constant and the view is a constant struct.
+    if (lt && lt->kind == TypeKind::Slice) {
+        auto* sl = static_cast<SliceType*>(lt);
+        const size_t n = initList->initializers.size();
+        if (n == 0) return llvm::Constant::getNullValue(llvmType);
+        if (ctx.isGlobalScope()) {
+            auto* arrType = new ArrayType(sl->elementType, (int)n);
+            llvm::Type* arrLLVM = ctx.getLLVMType(arrType);
+            if (!arrLLVM) return llvm::Constant::getNullValue(llvmType);
+            llvm::Constant* arrConst = buildAggregateConstant(ctx, arrType, initList.get());
+            if (!arrConst) arrConst = llvm::Constant::getNullValue(arrLLVM);
+            auto* gv = new llvm::GlobalVariable(ctx.getModule(), arrLLVM, /*isConstant=*/true,
+                llvm::GlobalValue::PrivateLinkage, arrConst, ".compound.slice");
+            auto* i64 = llvm::Type::getInt64Ty(c);
+            llvm::Constant* zero = llvm::ConstantInt::get(i64, 0);
+            llvm::Constant* idxs[] = {zero, zero};
+            llvm::Constant* ptr = llvm::ConstantExpr::getInBoundsGetElementPtr(
+                arrLLVM, gv, llvm::ArrayRef<llvm::Constant*>(idxs, 2));
+            return llvm::ConstantStruct::get(
+                llvm::cast<llvm::StructType>(llvmType),
+                {ptr, llvm::ConstantInt::get(i64, (uint64_t)n)});
+        }
+        return emitSliceLiteral(ctx, literalType, initList.get());
+    }
+
     // Scalar target: value of the single initializer.
     if (lt && lt->kind != TypeKind::Array && lt->kind != TypeKind::Struct &&
         lt->kind != TypeKind::Class && lt->kind != TypeKind::Union &&
-        lt->kind != TypeKind::Slice && lt->kind != TypeKind::Optional &&
+        lt->kind != TypeKind::Optional &&
         lt->kind != TypeKind::Result) {
         if (initList->initializers.empty()) {
             return llvm::Constant::getNullValue(llvmType);
@@ -2415,33 +2442,28 @@ llvm::Value* CompoundLiteralExprAST::codegen(CodegenContext& ctx) {
         return ctx.castValue(v, initList->initializers[0]->type, llvmType);
     }
 
-    // File scope: static constant global.
+    // File scope: the literal IS a static constant (no builder insertion point
+    // exists in a global initializer — never emit loads here).
     if (ctx.isGlobalScope()) {
         llvm::Constant* initConst = buildAggregateConstant(ctx, literalType, initList.get());
         if (!initConst) initConst = llvm::Constant::getNullValue(llvmType);
-        auto* gv = new llvm::GlobalVariable(ctx.getModule(), llvmType, /*isConstant=*/true,
-            llvm::GlobalValue::PrivateLinkage, initConst, ".compound");
         if (lt && lt->kind == TypeKind::Array) {
             // Array target in global scope: decayed pointer to element 0.
-            return ctx.getBuilder().CreateConstInBoundsGEP2_32(llvmType, gv, 0, 0, "compound.ptr");
+            auto* i64 = llvm::Type::getInt64Ty(c);
+            llvm::Constant* zero = llvm::ConstantInt::get(i64, 0);
+            llvm::Constant* idxs[] = {zero, zero};
+            return llvm::ConstantExpr::getInBoundsGetElementPtr(
+                llvmType, initConst, llvm::ArrayRef<llvm::Constant*>(idxs, 2));
         }
-        // Struct/union: return the value (loaded from the constant global).
-        return ctx.getBuilder().CreateLoad(llvmType, gv, "compound.val");
+        // Struct/union: the constant value itself.
+        return initConst;
     }
 
     // Block scope: stack temp.
     llvm::AllocaInst* alloca = ctx.getBuilder().CreateAlloca(llvmType, nullptr, "compound.tmp");
     // Zero the whole object first so unspecified fields stay zero.
     ctx.getBuilder().CreateStore(llvm::Constant::getNullValue(llvmType), alloca);
-    if (initList) {
-        if (lt && lt->kind == TypeKind::Slice) {
-            // Slice form deferred to Task 5: for now, fall through to the
-            // aggregate emitter which diagnoses the unsupported shape.
-            emitAggregateInitializer(ctx, alloca, literalType, initList.get());
-        } else {
-            emitAggregateInitializer(ctx, alloca, literalType, initList.get());
-        }
-    }
+    emitAggregateInitializer(ctx, alloca, literalType, initList.get());
     if (lt && lt->kind == TypeKind::Array) {
         // Array target: decayed pointer (C semantics — the temporary's address).
         return alloca;

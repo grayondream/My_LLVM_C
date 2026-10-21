@@ -92,6 +92,26 @@ Type* TemplateInstantiator::rewrite(Type* t) {
 std::unique_ptr<ExprAST> TemplateInstantiator::cloneExpr(const ExprAST* e) {
     if (!e) return nullptr;
 
+    // PAR-13: deep-copy designated-initializer chains (Designator owns a
+    // unique_ptr index expression).
+    auto cloneDesignatorChains =
+        [this](const std::vector<std::vector<Designator>>& src) {
+            std::vector<std::vector<Designator>> dst;
+            for (auto& chain : src) {
+                std::vector<Designator> nc;
+                for (auto& d : chain) {
+                    Designator nd;
+                    nd.kind = d.kind;
+                    nd.field = d.field;
+                    nd.index = d.index;
+                    nd.indexExpr = cloneExpr(d.indexExpr.get());
+                    nc.push_back(std::move(nd));
+                }
+                dst.push_back(std::move(nc));
+            }
+            return dst;
+        };
+
     std::unique_ptr<ExprAST> out;
     if (auto* n = dynamic_cast<const NumberExprAST*>(e)) {
         out = std::make_unique<NumberExprAST>(n->value, n->literalKind);
@@ -100,7 +120,7 @@ std::unique_ptr<ExprAST> TemplateInstantiator::cloneExpr(const ExprAST* e) {
     } else if (auto* c = dynamic_cast<const CharExprAST*>(e)) {
         out = std::make_unique<CharExprAST>(c->value);
     } else if (auto* s = dynamic_cast<const StringExprAST*>(e)) {
-        out = std::make_unique<StringExprAST>(s->value);
+        out = std::make_unique<StringExprAST>(s->value, s->prefix);
     } else if (auto* v = dynamic_cast<const VariableExprAST*>(e)) {
         // GEN-02: a non-type template parameter used as a value — substitute
         // the instantiated integer constant.
@@ -178,7 +198,19 @@ std::unique_ptr<ExprAST> TemplateInstantiator::cloneExpr(const ExprAST* e) {
     } else if (auto* il = dynamic_cast<const InitializerListExprAST*>(e)) {
         std::vector<std::unique_ptr<ExprAST>> inits;
         for (auto& i : il->initializers) inits.push_back(cloneExpr(i.get()));
-        out = std::make_unique<InitializerListExprAST>(std::move(inits));
+        auto cloned = std::make_unique<InitializerListExprAST>(std::move(inits));
+        cloned->designators = cloneDesignatorChains(il->designators);
+        out = std::move(cloned);
+    } else if (auto* cl = dynamic_cast<const CompoundLiteralExprAST*>(e)) {
+        // PAR-08: compound literals inside template bodies — rewrite the
+        // target type and deep-clone the initializer list.
+        std::vector<std::unique_ptr<ExprAST>> inits;
+        for (auto& i : cl->initList->initializers)
+            inits.push_back(cloneExpr(i.get()));
+        auto list = std::make_unique<InitializerListExprAST>(std::move(inits));
+        list->designators = cloneDesignatorChains(cl->initList->designators);
+        out = std::make_unique<CompoundLiteralExprAST>(rewrite(cl->literalType),
+                                                       std::move(list));
     } else {
         // 未知节点：返回空——调用方判空并在 sema 报内部错误。
         return nullptr;
@@ -261,6 +293,7 @@ std::unique_ptr<DeclAST> TemplateInstantiator::cloneDeclInternal(const DeclAST& 
         auto* cloned = new FunctionDeclAST(fn->name, rewrite(fn->returnType), params,
                                            body, fn->isConstexpr, fn->isVarArg);
         cloned->isStatic = fn->isStatic;
+        cloned->className = fn->className;
         cloned->shadowedValueParams.assign(
             m_shadowedValueParams.begin() + baseShadow, m_shadowedValueParams.end());
         m_shadowedValueParams.resize(baseShadow);
@@ -299,6 +332,9 @@ std::unique_ptr<DeclAST> TemplateInstantiator::cloneDeclInternal(const DeclAST& 
         return std::unique_ptr<DeclAST>(cloned);
     }
     if (auto* ad = dynamic_cast<const ArrayDeclAST*>(&decl)) {
+        // GEN-02: an array local shadowing a value parameter is rejected.
+        if (m_valueArgs.count(ad->name))
+            m_shadowedValueParams.push_back(ad->name);
         auto* cloned = new ArrayDeclAST(ad->name, rewrite(ad->elementType), ad->size,
                                         cloneExpr(ad->initExpr.get()));
         copyLoc(cloned, *ad);

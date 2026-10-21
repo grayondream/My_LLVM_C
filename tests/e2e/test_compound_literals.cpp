@@ -165,3 +165,23 @@ TEST_F(CompoundLiteralE2E, AddressOfCompoundLiteralRejected) {
         }
     )", "cl_addr.c"));
 }
+
+TEST_F(CompoundLiteralE2E, SliceFormCompoundLiteral) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            int32[] s = (int32[]){1,2,3};
+            if (s.len != 3) { return 1; }
+            return s[0] + s[2] - 4;
+        }
+    )", "cl_slice.c"), 0);
+}
+
+TEST_F(CompoundLiteralE2E, FileScopeStructCompoundLiteral) {
+    EXPECT_EQ(runSource(R"(
+        struct P { int32 x; int32 y; };
+        struct P g = (struct P){1,2};
+        int32 main() {
+            return g.x + g.y - 3;
+        }
+    )", "cl_file_scope.c"), 0);
+}
