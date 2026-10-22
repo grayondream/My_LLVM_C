@@ -871,3 +871,12 @@
 - **关键 Ruling**：①`(T[]){...}` 是 slice 复合字面量、`(T[N]){...}` 是定长数组（本语言 `T[]` = slice）；②禁转义只查直接转义、不追踪副本、by-value 拷贝到全局允许；③`foo<N>()`（值参数作模板实参）延后；④operator 沿用 raw-type mangle、`operator()` 窄路径；⑤一元/`[]`/`()` 触发类型含 Optional/Result；⑥本语言 struct 无方法（方法须用 class）；⑦`int32[] s = {1.0, 2}` 合法（窄化兼容，TYP-23），不匹配测试改用 struct 元素；⑧`restrict` 仅语法接受。
 - 验证：每任务 TDD RED→GREEN；最终全量 ctest **1470/1470** 绿（2 个既有 GTEST_SKIP 不变）。工作区 clean。
 - 遗留/P1-09 剩余：**仅 std.collections（STD-06~08）**，仍阻塞于「模块导出类型」语言缺口；MEM-04 的 restrict 完整语义、`foo<N>()` 显式模板实参折叠另轮。
+
+## 2026-10-22 — 顶层用户类型声明修复（PAR-05 补丁；typedef 暂保留）
+
+- 背景：语法审计发现「文件作用域识别不出用户定义类型」——`struct S {...}; S g;`、`S* p;`、`V f()`、`class C f()`、`B<int32> g;`、`using W = S;` 全部被误解析为变量声明。用户裁定：先修此问题，`typedef` 暂不删除。
+- 根因：`parseStructDecl` / `parseClassDecl` / `parseUnionDecl` 在无 attached declarator 时会消费声明末尾的 `;`，但 `parseDeclarationImpl` 随后仍无条件检查「下一个 token 是否 IDENTIFIER」并当作 attached declarator——于是下一条声明开头的类型名被吞掉。
+- 修复（`src/frontend/Parser.cpp` 四个 record 分支）：按记录声明的三种形态分派——`;`=完整声明（无声明符）、`}`=定义 + attached declarator、无 body=前向声明（下一个 `;`）或声明符内的类型引用（回退 `parseDeclarationAsType`）。前向 struct/union 显式注册占位类型；enum 分支补消费自己的 `;`。
+- 测试：新增 `tests/e2e/test_toplevel_user_types.cpp` 11 个 e2e（struct/union/class 变量与指针、裸 tag 返回、`struct V f()`、模板实例变量/返回、`using` 别名、`V operator+`、attached 变量回归），RED（8 失败）→ GREEN；全量 ctest **1493/1493** 通过（+11）。
+- 顺带确认的既有缺口（未在本轮修复，已记 TODO）：①`f().field`（struct/class 返回值的成员访问）对 call 结果直接 GEP → 非法 IR；②struct/union 前向声明的占位类型与后续定义不合并（`struct S; S* p; struct S {...}; p->x` 报无成员）。
+- 用户裁定：`typedef` 删除延后；`using` 的完整替代能力（函数指针别名、前向别名、块/类体内使用）另行评估。

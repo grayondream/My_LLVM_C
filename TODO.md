@@ -35,6 +35,8 @@
 
 > **进度快照（2026-10-20，语法缺口第二轮收口）**：**10 项语法特性完成**（spec/plan `docs/superpowers/{specs,plans}/2026-10-20-syntax-gaps-r2*`）：`f16/f32/f64/f128` 类型关键字（TYP-04）、指针后缀 `restrict`（PAR-06）、`u8/u16/u32` 前缀字面量（TYP-05）、C99 复合字面量与 slice 字面量（PAR-08）、类外方法定义（PAR-03）、一元/二元/`[]`/`()` 运算符重载调用点收敛（SEM-17）、非类型模板参数作值（GEN-02）。虚函数（INH-07）与可变参数模板（GEN-10）经用户确认维持 Non-goal。当前全量 **1470** 测试 0 失败。
 
+> **进度快照（2026-10-22，顶层用户类型声明修复）**：**顶层声明识别用户定义类型**（PAR-05 补丁）。根因：struct/class/union 解析器会消费声明末尾的 `;`，而调用方仍把下一个 token 当作本声明的 attached declarator——`struct S { ... }; S g;` 把下一条声明的 `S` 当成变量名。修复：按记录声明的三种形态分派（`;`=完整声明 / `}`=定义+声明符 / 无 body=前向声明或类型引用），仅 `}` 形态允许 attached declarator；前向声明显式注册占位类型。现在 `S g;`、`S* p;`、`V f()`、`struct V f()`、`class C f()`、`B<int32> g;`、`using W = S;`、`V operator+(...)` 均可用（11 个新 e2e）。当前全量 **1493** 测试 0 失败。新增已知缺口：①`f().field`（struct 返回值成员访问）生成非法 GEP（需 rvalue 临时对象）；②`struct S; S* p; struct S { ... }; p->x` 因前向占位与定义未合并而报无成员。`typedef` 暂保留（用户裁定先不删）。
+
 > **进度快照（2026-10-19，语法遗漏收口完成）**：**语法层面审计 + 11 项特性/缺陷收口**（spec/plan `docs/superpowers/specs|plans/2026-10-18-syntax-gaps*`）。多行字符串 `"""..."""` 与 Unicode 标识符（LEX-16/18）；`char8/16/32` 类型（uint 别名）与 `thread_local`（TYP-05/CON-04）；`atomic` 限定符（整型标量，原子 load/store + atomicrmw 子集，CON-01）；默认参数（区间重载 + 少默认优先，FUN-09）；**未知类型名声明静默丢弃修复**（E2031，此前 `f16 x;` 零诊断消失）；compile_time 反射 `name_of/fields_of/attributes_of`（ReflectionRegistry 交接，CT-07/13）；protected 派生访问放宽（INH-06）；`alignof/offsetof` 独立关键字与 `nullptr`（PAR-14/TYP-24）。当前全量 **1418** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。P1-09 剩余：仅 std.collections（STD-06~08，阻塞于「模块导出类型」语言缺口）。
 
 ---
@@ -101,7 +103,7 @@
 - `[ ]` **PAR-02** `(改)` 函数声明与定义：**C 风格**，不使用 `fn`；覆盖 `extern/static/inline`、成员函数。
 - `[x]` **PAR-03** 方法定义语法 `Vector::length()`；嵌套/`static` 成员（AGG-11 / AGG-10，2026-10-05）。**类外定义完成**（2026-10-20）：`RetType Class::method(params) { ... }`——声明在类体内、定义在类外；sema 校验类/方法/签名、插入隐式 `this`，签名不符或类内未声明均诊断。
 - `[x]` **PAR-04** class 成员：`public/private/protected` 段、成员变量/函数、`static` 成员、嵌套类型。**完成**（2026-10-05）：访问段解析与访问级别记录（DEC-01）、static 成员（AGG-10）、嵌套类型（AGG-11）全部落地。
-- `[ ]` **PAR-05** 类型语法：基础类型、指针 `T*`、数组 `T[N]`、Slice `T[]`、模板实例 `Box<i32>`。
+- `[ ]` **PAR-05** 类型语法：基础类型、指针 `T*`、数组 `T[N]`、Slice `T[]`、模板实例 `Box<i32>`。**顶层用户类型声明已修正**（2026-10-22）：`S g;` / `S* p;` / `V f()` / `struct V f()` / `class C f()` / `B<int32> g;` / `using W = S;` 不再被前一条聚合声明的 attached-declarator 前瞻吞掉；前向声明显式注册占位类型。
 - `[x]` **PAR-06** 指针限定符：`const/volatile/restrict/atomic`。**完成**（2026-10-20）：指针后缀 `restrict` 语法接受并记录 `Type::isRestrict`；别名/优化语义仍挂 MEM-04。
 - `[x]` **PAR-07** `(新)` 注解挂载点：六处全落地（模块仅解析记录）（2026-10-07）。
 - `[x]` **PAR-08** 表达式：字面量/标识符/调用/成员访问/下标/一元/二元/三元/强转。**切片/复合字面量完成**（2026-10-20）：C99 复合字面量 `(T[N]){...}` / `(T[]){...}`（块内栈对象、文件级静态常量，直接转义拒绝）；slice 字面量初始化 `T[] s = {1,2,3}`（栈匿名数组 + 视图，返回即悬垂拒绝）。
@@ -128,7 +130,7 @@
 
 - `[ ]` **MOD-01** 符号表：全局/模块/类型/函数/变量/字段/方法。
 - `[ ]` **MOD-02** 作用域规则：块/函数/类型/模块。
-- `[ ]` **MOD-03** 前向声明：函数/struct/class/enum/union/类型别名。
+- `[ ]` **MOD-03** 前向声明：函数/struct/class/enum/union/类型别名。**已知缺口**（2026-10-22）：struct/union 前向声明的占位类型与后续定义不合并——`struct S; S* p; struct S { ... }; p->x` 报「no member」；class/enum 因 eager 注册不受影响。
 - `[x]` **MOD-04** `module` 声明与文件映射。点分/`::` 模块名 → `TranslationUnitAST::moduleName`；`import` 点分名解析 + 文件↔模块名校验（MOD-13）。
 - `[x]` **MOD-05** `export` 导出规则；`import` 导入规则与访问语法（DEC-02 已冻结：直接非限定访问）。参与模块默认私有，`export`/`public` 后可见。
 - `[x]` **MOD-06** 模块可见性与 `public/private`。每模块私有作用域 + `export` 提升到全局；顶层 `public` 与 `export` 同义（类成员访问级别仍待 PAR-04）。类型名可见性见 `docs/spec/modules.md` §11 限制。
@@ -427,7 +429,7 @@
 - `[ ]` **CG-02** `(已实现)` 全局变量/常量/字符串字面量；补测试。
 - `[ ]` **CG-03** `(已实现)` 函数定义与调用；补测试。
 - `[ ]` **CG-04** `(已实现)` 控制流：if/while/do-while/for/switch/break/continue；补测试。
-- `[ ]` **CG-05** `(已实现)` 表达式 codegen（含指针 GEP、fneg、前缀/后缀 `++/--`）；补测试。
+- `[ ]` **CG-05** `(已实现)` 表达式 codegen（含指针 GEP、fneg、前缀/后缀 `++/--`）；补测试。**已知缺陷**（2026-10-22）：`f().field`（struct/class 返回值的成员访问）对 call 结果直接生成 GEP → 非法 IR（`base of getelementptr must be a pointer`）；需先物化 rvalue 临时对象。
 - `[ ]` **CG-06** class 方法降级 `Vector_length(Vector* self)`、`static` 成员变量降级。
 - `[x]` **CG-07** **模板单态化代码生成**（GEN-05）、实例去重缓存。已实现（2026-10-06）：实例即普通声明走既有 codegen；TU 预扫（实例布局先行 + 函数签名）+ 调用点按需前向声明。
 - `[x]` **CG-08** **继承布局与 `this`/`static_cast` codegen**（INH）。**已完成**（2026-10-05，随 INH-01~05/P1-03）：基类子对象槽 0、`this` 隐式参数、`static_cast<Derived*>` 下行、模板基类实例化（CG-07 同轮）。

@@ -2754,35 +2754,45 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
             TypeContext::instance().addStruct(structDecl->name, structType);
         }
 
-        // Check if there's a variable name after struct declaration
-        if (check(TokenType::TOKEN_IDENTIFIER)) {
+        // A record parser stops in one of three places:
+        //  - at ';'          → complete definition, no attached declarator
+        //  - at '}'          → definition followed by an attached declarator
+        //  - without a body  → forward declaration (`struct S;`) or a record
+        //                      type inside a declarator (`struct S f()`,
+        //                      `struct S* p`, `struct S operator+(...)`).
+        // Only the '}' shape may own an attached declarator; in the other two
+        // shapes an identifier starts the *next* declaration.
+        const bool hasBody = !structDecl->isForwardDecl;
+        const bool consumedSemicolon = m_currentTokenPos > 0 &&
+            m_tokens[m_currentTokenPos - 1].type == TokenType::TOKEN_SEMICOLON;
+        if (!hasBody) {
+            if (match(TokenType::TOKEN_SEMICOLON)) {
+                // Forward declaration: register a placeholder so a later bare
+                // use (`S* p;`) resolves before the definition appears.
+                if (!TypeContext::instance().getStruct(structDecl->name))
+                    TypeContext::instance().addStruct(
+                        structDecl->name, new StructType(structDecl->name));
+                return structDecl;
+            }
+            m_currentTokenPos = savedPos;
+            return parseDeclarationAsType();
+        }
+
+        if (!consumedSemicolon && check(TokenType::TOKEN_IDENTIFIER)) {
             auto nameTok = advance();
             auto type = TypeContext::instance().getStruct(structDecl->name);
             if (!type) {
-                // Create a placeholder struct type for forward-declared structs
                 type = new StructType(structDecl->name);
                 TypeContext::instance().addStruct(structDecl->name, static_cast<StructType*>(type));
             }
             return parseVariableDeclList(type, nameTok->lexeme);
         }
 
-        // If this is a forward declaration (empty fields) and not followed by ';',
-        // it might be a type reference (e.g., "struct Point operator+(...)")
-        // Fall through to normal type parsing. AGG-10: a definition whose
-        // members are all static has empty fields too — it must NOT fall
-        // into this fallback (the definition would be dropped and reparsed,
-        // silently leaking the static members as bare globals).
-        if (structDecl->fields.empty() && structDecl->staticMembers.empty() &&
-            structDecl->methods.empty() && structDecl->nestedTypes.empty() &&
-            !check(TokenType::TOKEN_SEMICOLON)) {
-            m_currentTokenPos = savedPos;
-            return parseDeclarationAsType();
-        }
-
         return structDecl;
     }
 
     if (check(TokenType::TOKEN_CLASS)) {
+        size_t savedPos = m_currentTokenPos;
         auto classDecl = parseClassDecl();
         if (!classDecl) return nullptr;
 
@@ -2798,8 +2808,20 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
             TypeContext::instance().addClass(classDecl->name, classType);
         }
 
-        // Check if there's a variable name after class declaration
-        if (check(TokenType::TOKEN_IDENTIFIER)) {
+        // See the struct branch: only a body followed by a declarator owns the
+        // next identifier. A bodiless `class C` is either a forward
+        // declaration or a type inside a declarator (`class C f()`,
+        // `class C* p`).
+        const bool hasBody = !classDecl->isForwardDecl;
+        const bool consumedSemicolon = m_currentTokenPos > 0 &&
+            m_tokens[m_currentTokenPos - 1].type == TokenType::TOKEN_SEMICOLON;
+        if (!hasBody) {
+            if (match(TokenType::TOKEN_SEMICOLON)) return classDecl;
+            m_currentTokenPos = savedPos;
+            return parseDeclarationAsType();
+        }
+
+        if (!consumedSemicolon && check(TokenType::TOKEN_IDENTIFIER)) {
             auto nameTok = advance();
             auto type = TypeContext::instance().getClass(classDecl->name);
             if (!type) {
@@ -2833,7 +2855,22 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
             TypeContext::instance().addUnion(unionDecl->name, unionType);
         }
 
-        if (check(TokenType::TOKEN_IDENTIFIER)) {
+        const bool hasBody = !unionDecl->isForwardDecl;
+        const bool consumedSemicolon = m_currentTokenPos > 0 &&
+            m_tokens[m_currentTokenPos - 1].type == TokenType::TOKEN_SEMICOLON;
+        if (!hasBody) {
+            if (match(TokenType::TOKEN_SEMICOLON)) {
+                // Forward declaration: register a placeholder (mirrors struct).
+                if (!TypeContext::instance().getUnion(unionDecl->name))
+                    TypeContext::instance().addUnion(
+                        unionDecl->name, new UnionType(unionDecl->name));
+                return unionDecl;
+            }
+            m_currentTokenPos = savedPos;
+            return parseDeclarationAsType();
+        }
+
+        if (!consumedSemicolon && check(TokenType::TOKEN_IDENTIFIER)) {
             auto nameTok = advance();
             auto type = TypeContext::instance().getUnion(unionDecl->name);
             if (!type) {
@@ -2841,16 +2878,6 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
                 TypeContext::instance().addUnion(unionDecl->name, static_cast<UnionType*>(type));
             }
             return parseVariableDeclList(type, nameTok->lexeme);
-        }
-
-        // If this is a forward declaration (empty members) and not followed by ';',
-        // it might be a type reference (e.g., "union U operator+(...)")
-        // Fall through to normal type parsing. AGG-11: a declaration with
-        // nested types is a definition, never a forward reference.
-        if (unionDecl->members.empty() && unionDecl->nestedTypes.empty() &&
-            !check(TokenType::TOKEN_SEMICOLON)) {
-            m_currentTokenPos = savedPos;
-            return parseDeclarationAsType();
         }
 
         return unionDecl;
@@ -2870,6 +2897,16 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
             TypeContext::instance().addEnum(enumDecl->name, enumType);
         }
 
+        // An enum parser never consumes the declaration's ';'. A bodiless
+        // `enum E` is a forward declaration when followed by ';', otherwise a
+        // type inside a declarator (`enum E f()`).
+        const bool hasBody = !enumDecl->isForwardDecl;
+        if (!hasBody) {
+            if (match(TokenType::TOKEN_SEMICOLON)) return enumDecl;
+            m_currentTokenPos = savedPos;
+            return parseDeclarationAsType();
+        }
+
         if (check(TokenType::TOKEN_IDENTIFIER)) {
             auto nameTok = advance();
             auto type = TypeContext::instance().getEnum(enumDecl->name);
@@ -2880,14 +2917,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
             return parseVariableDecl(type, nameTok->lexeme);
         }
 
-        // If this is a forward declaration (empty values) and not followed by ';',
-        // it might be a type reference (e.g., "enum E operator+(...)")
-        // Fall through to normal type parsing
-        if (enumDecl->values.empty() && !check(TokenType::TOKEN_SEMICOLON)) {
-            m_currentTokenPos = savedPos;
-            return parseDeclarationAsType();
-        }
-
+        match(TokenType::TOKEN_SEMICOLON); // definition terminator
         return enumDecl;
     }
 
