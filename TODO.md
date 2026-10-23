@@ -37,6 +37,8 @@
 
 > **进度快照（2026-10-22，顶层用户类型声明修复）**：**顶层声明识别用户定义类型**（PAR-05 补丁）。根因：struct/class/union 解析器会消费声明末尾的 `;`，而调用方仍把下一个 token 当作本声明的 attached declarator——`struct S { ... }; S g;` 把下一条声明的 `S` 当成变量名。修复：按记录声明的三种形态分派（`;`=完整声明 / `}`=定义+声明符 / 无 body=前向声明或类型引用），仅 `}` 形态允许 attached declarator；前向声明显式注册占位类型。现在 `S g;`、`S* p;`、`V f()`、`struct V f()`、`class C f()`、`B<int32> g;`、`using W = S;`、`V operator+(...)` 均可用（11 个新 e2e）。当前全量 **1493** 测试 0 失败。新增已知缺口：①`f().field`（struct 返回值成员访问）生成非法 GEP（需 rvalue 临时对象）；②`struct S; S* p; struct S { ... }; p->x` 因前向占位与定义未合并而报无成员。`typedef` 暂保留（用户裁定先不删）。
 
+> **进度快照（2026-10-23，using 别名收口 / PAR-24）**：**删除 `typedef` 与 `type`，`using` 成为唯一类型别名形式**（spec/plan `docs/superpowers/specs|plans/2026-10-23-using-alias*`）。`using` RHS 升级为完整 type-id：固定数组（多维）、抽象函数指针、切片/optional/模板实例、内联/命名聚合；内联 enum 枚举量在别名作用域可见；`deprecated`/`repr` 注解语义对齐。`typedef`/`type` 在顶层、namespace、块、聚合成员体统一硬错误并提示改写；删除 `TypedefDeclAST`/`TypeDeclAST`，保留内部 `TypedefType`。迁移 16 个测试文件与 `examples/all_features.c`。当前全量 **1512** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。DEC-16/PAR-24 关闭；块内/类内 `using`、前向别名身份、`*p` 解引用既有缺陷仍挂账。
+
 > **进度快照（2026-10-19，语法遗漏收口完成）**：**语法层面审计 + 11 项特性/缺陷收口**（spec/plan `docs/superpowers/specs|plans/2026-10-18-syntax-gaps*`）。多行字符串 `"""..."""` 与 Unicode 标识符（LEX-16/18）；`char8/16/32` 类型（uint 别名）与 `thread_local`（TYP-05/CON-04）；`atomic` 限定符（整型标量，原子 load/store + atomicrmw 子集，CON-01）；默认参数（区间重载 + 少默认优先，FUN-09）；**未知类型名声明静默丢弃修复**（E2031，此前 `f16 x;` 零诊断消失）；compile_time 反射 `name_of/fields_of/attributes_of`（ReflectionRegistry 交接，CT-07/13）；protected 派生访问放宽（INH-06）；`alignof/offsetof` 独立关键字与 `nullptr`（PAR-14/TYP-24）。当前全量 **1418** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。P1-09 剩余：仅 std.collections（STD-06~08，阻塞于「模块导出类型」语言缺口）。
 
 ---
@@ -122,7 +124,7 @@
 - `[x]` **PAR-21** `(新)` 模板声明语法（2026-10-06）。函数/struct/class/别名模板；union/enum 拒绝；`class T` 参数诊断提示 typename；非类型参数仅整数。
 - `[x]` **PAR-22** `(新)` `namespace` 声明与限定名 `ns::name` 语法（现缺失；`src/libsafec` 已使用 `namespace safec`）。函数/变量成员、嵌套命名空间、限定类型名（struct/class/union/enum/typedef）均已实现。
 - `[x]` **PAR-23** `(新)` 运算符优先级/结合性在解析器中的显式实现与表驱动测试（配合 INF-10）。`smc::getOperatorInfo` 表驱动 + `test_operator_precedence` + `test_spec_conformance`。
-- `[ ]` **PAR-24** `(新)` 别名声明规范形式收敛：`typedef`/`using`/`type` 的取舍与统一 AST（见 DEC-16）。
+- `[x]` **PAR-24** `(新)` 别名声明规范形式收敛：**已收口（2026-10-23）**——删除 `typedef`/`type`，只留 `using`；`using` RHS = 完整 type-id（固定数组、函数指针、内联 enum、聚合定义）；删除 `TypedefDeclAST`/`TypeDeclAST`，保留内部 `TypedefType`。
 
 ---
 
@@ -494,7 +496,7 @@
 - `[ ]` **DEC-13** enum 穷尽检查是警告还是错误。
 - `[ ]` **DEC-14** 模块缓存格式与稳定性。
 - `[ ]` **DEC-15** 是否默认链接 libc（当前 `print` 依赖系统 `printf`）。
-- `[ ]` **DEC-16** `(新)` 类型别名规范形式：`typedef`/`using`/`type` 何者为准、是否全部保留。
+- `[x]` **DEC-16** `(新)` 类型别名规范形式：**裁决（2026-10-23）**——`using` 为唯一形式；`typedef`/`type` 均移除（硬错误 + 改写提示）。
 - `[x]` **DEC-17** `(新)` `namespace` 与模块（`module`/`import`）的关系与共存方式：**模块=物理边界，namespace=逻辑边界，二者正交**；同一模块可含多个 namespace，同一 namespace 可跨模块。
 - `[x]` **DEC-18** `(新)` `register`/`cast`/`typeof` 等既有 token 的废弃或保留。→ **决定移除**（一并移除 `comptime`/`generic`）；显式转换改用 `static_cast`/`reinterpret_cast`（LEX-11），类型查询改用 `compile_time` 反射（CT-07）。已同步 `Token.h`/`Lexer.cpp`/`Utils.cpp`/`keywords.md`。
 - `[ ]` **DEC-19** `(新)` `main` 入口签名与返回值约定。

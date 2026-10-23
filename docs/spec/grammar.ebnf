@@ -96,7 +96,7 @@ import-decl         = 'import' , ( qualified-name | string-literal ) , ';' ;  (*
 export-decl         = 'export' , ( declaration | namespace-decl ) ; (* [impl] MOD-05/06：导出声明/整个 namespace *)
 namespace-decl      = 'namespace' , qualified-name , '{' , { top-level-declaration } , '}' ;
 (* [impl] PAR-22 / MOD-12 / P0-08：函数/变量成员、嵌套、限定访问与限定类型名
-   （struct/class/union/enum/typedef/using/type）均已实现 *)
+   （struct/class/union/enum/using）均已实现 *)
 
 qualified-name      = identifier , { '::' , identifier } ;          (* [impl] '::' token = TOKEN_COLON_COLON *)
 
@@ -115,10 +115,10 @@ decl-core           = type-alias
                     | function-decl
                     | variable-decl-list ;
 
-(* --- 类型别名（DEC-16：typedef/using/type 规范形式待定） --- *)
-type-alias          = 'typedef' , type , identifier , ';'
-                    | 'using' , identifier , '=' , type , ';'      (* [impl] 上下文关键字 *)
-                    | 'type' , identifier , '=' , type , ';' ;     (* [impl] 上下文关键字 *)
+(* --- 类型别名（PAR-24：using 是唯一形式；typedef/type 已移除） --- *)
+type-alias          = 'using' , identifier , '=' , type-id , ';' ;  (* [impl] 上下文关键字，仅顶层/namespace *)
+type-id             = type , { '[' , integer-literal , ']' }
+                    , [ '(' , '*' , ')' , '(' , [ parameter-list ] , ')' ] ;
 
 (* --- 记录类型 --- *)
 record-decl         = struct-decl | class-decl | union-decl ;

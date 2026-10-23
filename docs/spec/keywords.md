@@ -7,7 +7,7 @@
 ## 0. 现状说明
 
 - 关键字目前通过 `src/frontend/Lexer.cpp` 中的静态 map 识别；`src/frontend/Token.h` 定义 token 枚举。
-- `using`、`type`、`protected` 当前**不是**关键字，而是把标识符文本当作上下文关键字处理（见 `Parser::parseDeclaration`）——本表统一登记为“上下文关键字”。
+- `using`、`protected` 当前**不是**关键字，而是把标识符文本当作上下文关键字处理（见 `Parser::parseDeclaration`）——本表统一登记为“上下文关键字”。
 - `namespace`、`template`、`typename`、`this`、`thread_local`、`static_cast`、`reinterpret_cast` **尚无**对应 token，属规划项。
 
 ## 1. 数据类型关键字
@@ -64,13 +64,13 @@
 | 关键字 | 状态 | 说明 |
 |---|---|---|
 | `struct` `union` `enum` `class` | `[impl]` | |
-| `typedef` | `[impl]` | 别名规范形式见 DEC-16 |
+| `typedef` | `[removed]` | PAR-24：由 `using` 取代；出现即报错并提示改写 |
 | `operator` | `[impl]` | 可重载集合见 SEM-17 |
 | `template` | `[impl]` | GEN-01 / PAR-21（函数/class/别名模板） |
 | `typename` | `[impl]` | GEN-01 |
 | `this` | `[impl]` | CRTP 必需，PAR-17 / INH-05 |
-| `using` | `[impl]` 上下文 | 类型别名 `using X = T;` |
-| `type` | `[impl]` 上下文 | distinct 别名 `type X = T;` |
+| `using` | `[impl]` 上下文 | 唯一类型别名形式 `using X = type-id;`；仅顶层/namespace |
+| `type` | `[removed]` | PAR-24：distinct 别名方案取消，由 `using` 取代 |
 | `generic` | `[remove]` | 未使用的旧泛型关键字；token 已移除（LEX-02 / DEC-18） |
 
 ## 5. 模块 / 可见性

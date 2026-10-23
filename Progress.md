@@ -880,3 +880,16 @@
 - 测试：新增 `tests/e2e/test_toplevel_user_types.cpp` 11 个 e2e（struct/union/class 变量与指针、裸 tag 返回、`struct V f()`、模板实例变量/返回、`using` 别名、`V operator+`、attached 变量回归），RED（8 失败）→ GREEN；全量 ctest **1493/1493** 通过（+11）。
 - 顺带确认的既有缺口（未在本轮修复，已记 TODO）：①`f().field`（struct/class 返回值的成员访问）对 call 结果直接 GEP → 非法 IR；②struct/union 前向声明的占位类型与后续定义不合并（`struct S; S* p; struct S {...}; p->x` 报无成员）。
 - 用户裁定：`typedef` 删除延后；`using` 的完整替代能力（函数指针别名、前向别名、块/类体内使用）另行评估。
+
+## 2026-10-23 — using 别名收口（删除 typedef / type，PAR-24 / DEC-16）
+
+- 流程：用户裁定「删除 typedef、只留 using」→ 追问确认 typedef 硬错误、type 一并删除 → spec `docs/superpowers/specs/2026-10-23-using-alias-design.md`（builder-check 5 项决议）→ plan `docs/superpowers/plans/2026-10-23-using-alias.md`（6 任务 TDD）→ executing-plans Native 内联（master 直接提交）。
+- 提交线：Task1 `88e6e4a`（数组 type-id）→ Task2 `2a5632d`（函数指针 type-id）→ Task3 `6e0aea3`（内联 enum/注解）→ Task4 `f7332d7`（迁移测试/示例）→ Task5 `141b590`（硬错误 + 删 AST 节点）→ Task6 本文档提交。
+- **Task 1**：`Parser::parseTypeId()`——`parseType()` 之后补固定数组后缀（`T[2][3]`，从右到左建 `ArrayType`，维度限整数字面量）。`using A = int32[4];` 现在下标/`sizeof`/slice 退化/设计符补零全通；slice 别名 `using Sl = int32[]` 加回归守卫。
+- **Task 2**：复用 `parseFunctionPointerDeclarator(..., requireName=false)` 解析抽象函数指针；`using Fn = int32 (*)(int32,int32);` 可赋值/调用/作形参/作返回值，不再静默截断成 `int32`。TDD 修正：Task1 曾提前写入该分支，已移除并重看 3 个测试失败后恢复。
+- **Task 3**：`visit(UsingDeclAST)` 对齐 typedef 语义——`validateAnnotations(..., "using")`（`repr` 报 “not valid on using”）、`deprecated` 折叠、内联 enum 枚举量写入 `enumConstants`。Ruling：弃用标志同时落到解析期与 sema 期两份 `TypedefType` 包装（已解析声明持有解析期包装）。
+- **Task 4**：迁移 9 个 e2e + 6 个单元测试文件 + `examples/all_features.c`；`using S = struct { ... };` / `using E = enum : uint16 { ... };` / 数组/函数指针别名逐一替换。移除 `ReprCOnTypedefE2011`（由 `ReprCOnUsingE2011` 覆盖），全量 1504。示例编译运行输出 `ALL FEATURES OK`。
+- **Task 5**：`typedef`/`type` 在顶层、namespace、块、struct/class/union 成员体统一硬错误（`'typedef' has been removed; use 'using Name = Type;' instead`），块/成员体 `using` 报 “only allowed at namespace scope”；删除 `parseTypedefDecl`、`TypedefDeclAST`、`TypeDeclAST` 及 sema/codegen/TemplateInstantiator 分支，保留内部 `TypedefType`。8 个错误诊断测试。
+- **Task 6**：`grammar.ebnf`（唯一 `type-alias` + `type-id` 产生式）、`keywords.md`（typedef/type 标 `[removed]`，using 为唯一形式）、`semantics.md` §5.5、`abi.md`/`conversions.md`/`fixed-width-types.md` 措辞；TODO PAR-24/DEC-16 `[x]` + 进度快照 1512；本记录。
+- 验证：每任务 TDD RED→GREEN；最终全量 ctest **1512/1512** 通过（2 个既有 `GTEST_SKIP` 不变）；语言源 `typedef`/`type` 扫描与 `TypedefDeclAST`/`TypeDeclAST` 扫描均为空；工作区 clean。
+- 遗留：块/类/结构体内 `using`（需局部类型作用域）、前向别名身份（`using N = struct Node;` 后定义仍无成员）、`*p` 对指针别名不解引用（typedef/using 既有）、`resources/main.c` 非构建源未迁移。

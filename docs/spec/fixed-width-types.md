@@ -44,7 +44,7 @@
 
 - 整数：`int8/16/32/64/128`、`uint8/16/32/64/128`、`isize`、`usize`
 - 浮点：`float16/32/64/128`
-- 其它保留：`char`(8bit)、`bool`(1bit)、`void`、指针、数组、`Slice`、`Optional`、`Result`、`struct`、`class`、`union`、`enum`、`typedef`/`TypeKind::Typedef`
+- 其它保留：`char`(8bit)、`bool`(1bit)、`void`、指针、数组、`Slice`、`Optional`、`Result`、`struct`、`class`、`union`、`enum`、`using` 别名/`TypeKind::Typedef`（内部表示）
 - 删除：`TypeKind::Int`、`TypeKind::Float`、`TypeKind::Double`、`getInt()`、`getFloat()`、`getDouble()`、关键字 `int`/`float`/`double`
 
 ## 4. 迁移映射

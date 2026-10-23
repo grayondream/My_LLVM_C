@@ -104,7 +104,7 @@
 | `A[N]` | `<A>arr` | `T[]` | `<T>slice` |
 | `T?` | `<T>opt` | `result<T,E>` | `<T>res<E>` |
 | struct/class/union | 类型名 | enum | `int32` |
-| typedef | 展开到底层 | | |
+| using 别名 | 展开到底层 | | |
 
 **目标（MOD-15）**：需补充 namespace（部分已落地：`scopedName` 前缀 + `mangleNamespaceName` 拍平）、模板单态化符号的规范编码，并保证与 C ABI / FFI 的边界清晰（MEM-12/ACC-05）。static 成员编码已完成（§4 第 4 条）。命名必须稳定、可复现（INF-07）。
 

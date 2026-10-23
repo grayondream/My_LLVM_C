@@ -66,6 +66,15 @@
 - 现状 `[impl]`：`to_string` 支持成员方法与自由函数两条路径，通过 `OverloadSet` 解析（见 `SemanticAnalyzer.cpp:665`）。
 - 目标 `[plan]`：冻结精确签名（如 `str to_string(T)` / `u64 to_hash(T)` / `bool equals(T,T)`）、查找顺序与命名空间规则；供容器与格式化统一使用（STD-07/09/26）。
 
+## 5.5 类型别名（PAR-24）`[impl]`
+
+- 唯一形式：`using Name = type-id;`。
+- `type-id` 支持基础类型与限定符、指针 `T*`、切片 `T[]`、optional `T?`、固定数组 `T[N]`（可多维，维度须整数字面量）、抽象函数指针 `Ret (*)(params)`、模板实例，以及内联/命名 struct/union/enum 定义。
+- 别名在顶层与 namespace 作用域可用；块内、class/struct/union 成员体内的别名声明被拒绝（报 “only allowed at namespace scope”）。
+- `using E = enum { A, B };` 的枚举量在别名所在作用域可见。
+- `[[deprecated]]` 折叠到别名，使用点告警；`[[repr(C)]]` 等非别名目标注解报错。
+- `typedef` 与 `type` 已移除：出现即报硬错误并提示改用 `using`，无兼容模式。内部 `TypeKind::Typedef` 仍是别名的实现表示。
+
 ## 6. 静态检查清单（SEM-01 ~ SEM-14）
 
 | 编号 | 检查 | 状态 |
