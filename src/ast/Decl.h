@@ -236,16 +236,6 @@ public:
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
-class TypedefDeclAST : public DeclAST {
-public:
-    std::string name;
-    Type* aliasedType;
-
-    TypedefDeclAST(const std::string& n, Type* aliased)
-        : name(n), aliasedType(aliased) {}
-    llvm::Value* codegen(CodegenContext& ctx) override;
-};
-
 class ForwardDeclAST : public DeclAST {
 public:
     std::string name;
@@ -279,16 +269,6 @@ public:
     Type* aliasedType;
 
     UsingDeclAST(const std::string& n, Type* aliased)
-        : name(n), aliasedType(aliased) {}
-    llvm::Value* codegen(CodegenContext& ctx) override;
-};
-
-class TypeDeclAST : public DeclAST {
-public:
-    std::string name;
-    Type* aliasedType;
-
-    TypeDeclAST(const std::string& n, Type* aliased)
         : name(n), aliasedType(aliased) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };

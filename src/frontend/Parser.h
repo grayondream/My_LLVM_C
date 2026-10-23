@@ -42,6 +42,13 @@ private:
     Type* parseType();
     Type* parseTypeId();
 
+    // PAR-24: legacy alias forms (typedef/type) and block/member-scope using.
+    bool isRemovedTypeAliasStart() const;
+    bool isLocalUsingStart() const;
+    void rejectRemovedTypeAlias();
+    void rejectLocalUsing();
+    void skipPastSemicolon();
+
     Type* parseBaseType();
 
     // P1-03 / GEN-01 / PAR-21: `template<...>` 声明（函数/struct/class/别名）。
@@ -125,7 +132,6 @@ private:
 
     std::unique_ptr<EnumDeclAST> parseEnumDecl();
 
-    std::unique_ptr<TypedefDeclAST> parseTypedefDecl();
 
     std::unique_ptr<DeclAST> parseNamespaceDecl();
 

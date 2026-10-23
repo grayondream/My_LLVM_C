@@ -5160,32 +5160,6 @@ void SemanticAnalyzer::visit(EnumDeclAST& node) {
     }
 }
 
-void SemanticAnalyzer::visit(TypedefDeclAST& node) {
-    // P1-05 / ANN-06: typedef 注解验证。
-    validateAnnotations(node.annotations, node, "typedef");
-    // P1-05 / ANN-05: typedef 弃用折叠。
-    for (const auto& ann : node.annotations) {
-        if (ann.name == "deprecated") {
-            if (Type* td = typeCtx->getTypedef(node.name)) {
-                td->deprecated = true;
-                if (ann.args.size() == 1
-                    && ann.args[0].kind == AnnotationArg::Kind::String) {
-                    td->deprecatedMsg = ann.args[0].text;
-                }
-            }
-        }
-    }
-    typeCtx->addTypedef(node.name, node.aliasedType);
-    // A typedef of an inline enum (`typedef enum { A, B } E;`) exposes its
-    // enumerators in the enclosing scope (TYP-25).
-    if (Type* t = stripTypedef(node.aliasedType); t && t->kind == TypeKind::Enum) {
-        auto* enumType = static_cast<EnumType*>(t);
-        for (auto& val : enumType->values) {
-            enumConstants[scopedName(val.first)] = {enumType, val.second};
-        }
-    }
-}
-
 void SemanticAnalyzer::visit(ForwardDeclAST& node) {}
 
 void SemanticAnalyzer::visit(DeclStmtAST& node) {
@@ -5200,8 +5174,6 @@ void SemanticAnalyzer::visit(DeclStmtAST& node) {
             visit(*unionDecl);
         } else if (auto* enumDecl = dynamic_cast<EnumDeclAST*>(node.decl.get())) {
             visit(*enumDecl);
-        } else if (auto* typedefDecl = dynamic_cast<TypedefDeclAST*>(node.decl.get())) {
-            visit(*typedefDecl);
         } else if (auto* fwdDecl = dynamic_cast<ForwardDeclAST*>(node.decl.get())) {
             visit(*fwdDecl);
         } else if (auto* multi = dynamic_cast<MultiVarDeclAST*>(node.decl.get())) {
@@ -5470,11 +5442,6 @@ void SemanticAnalyzer::visit(CompileTimeIfDeclAST& node) {
             Type* poison = tc.getEnum(e->name);
             if (!liveNames.count(e->name)) tc.removeEnum(e->name);
             if (poison) poison->ctDeadBranch = true;
-        } else if (auto* t = dynamic_cast<TypedefDeclAST*>(d.get())) {
-            // 评审 I3: typedef 别名毒化（别名包装层在检查中穿透）。
-            if (Type* poison = TypeContext::instance().getTypedef(t->name)) {
-                poison->ctDeadBranch = true;
-            }
         } else if (auto* u2 = dynamic_cast<UsingDeclAST*>(d.get())) {
             if (Type* poison = TypeContext::instance().getTypedef(u2->name)) {
                 poison->ctDeadBranch = true;
@@ -5511,14 +5478,10 @@ void SemanticAnalyzer::analyzeTopLevelDecl(DeclAST& decl) {
         visit(*unionDecl);
     } else if (auto* enumDecl = dynamic_cast<EnumDeclAST*>(&decl)) {
         visit(*enumDecl);
-    } else if (auto* typedefDecl = dynamic_cast<TypedefDeclAST*>(&decl)) {
-        visit(*typedefDecl);
     } else if (auto* fwdDecl = dynamic_cast<ForwardDeclAST*>(&decl)) {
         visit(*fwdDecl);
     } else if (auto* usingDecl = dynamic_cast<UsingDeclAST*>(&decl)) {
         visit(*usingDecl);
-    } else if (auto* typeDecl = dynamic_cast<TypeDeclAST*>(&decl)) {
-        visit(*typeDecl);
     } else if (auto* moduleDecl = dynamic_cast<ModuleDeclAST*>(&decl)) {
         visit(*moduleDecl);
     } else if (auto* nsDecl = dynamic_cast<NamespaceDeclAST*>(&decl)) {
@@ -6140,13 +6103,6 @@ void SemanticAnalyzer::visit(UsingDeclAST& node) {
         }
     }
 
-    declare(node.name, node.aliasedType);
-}
-
-void SemanticAnalyzer::visit(TypeDeclAST& node) {
-    // type 声明：创建新类型（distinct type）
-    // 目前简单实现为类型别名
-    typeCtx->addTypedef(node.name, node.aliasedType);
     declare(node.name, node.aliasedType);
 }
 

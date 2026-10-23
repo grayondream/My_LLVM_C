@@ -1497,6 +1497,16 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
         }
     }
 
+    // PAR-24: legacy alias forms and block-scope using get targeted diagnostics.
+    if (isRemovedTypeAliasStart()) {
+        rejectRemovedTypeAlias();
+        return std::make_unique<NullStmtAST>();
+    }
+    if (isLocalUsingStart()) {
+        rejectLocalUsing();
+        return std::make_unique<NullStmtAST>();
+    }
+
     // local declaration (type keyword or typedef name)
     if (isTypeStart() || check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE) ||
         check(TokenType::TOKEN_ATOMIC)) {
@@ -2673,6 +2683,57 @@ std::unique_ptr<DeclAST> Parser::parseDeclaration() {
     return decl;
 }
 
+// PAR-24: `typedef` / `type` were removed. Recognize their declaration shape
+// in every scope so the diagnostic is the same instead of a cascade (block) or
+// a silent ignore (class body).
+bool Parser::isRemovedTypeAliasStart() const {
+    if (check(TokenType::TOKEN_TYPEDEF)) return true;
+    if (!check(TokenType::TOKEN_IDENTIFIER) || !peek() || peek()->lexeme != "type")
+        return false;
+    return m_currentTokenPos + 2 < m_tokens.size() &&
+           m_tokens[m_currentTokenPos + 1].type == TokenType::TOKEN_IDENTIFIER &&
+           m_tokens[m_currentTokenPos + 2].type == TokenType::TOKEN_ASSIGN;
+}
+
+bool Parser::isLocalUsingStart() const {
+    if (!check(TokenType::TOKEN_IDENTIFIER) || !peek() || peek()->lexeme != "using")
+        return false;
+    return m_currentTokenPos + 2 < m_tokens.size() &&
+           m_tokens[m_currentTokenPos + 1].type == TokenType::TOKEN_IDENTIFIER &&
+           m_tokens[m_currentTokenPos + 2].type == TokenType::TOKEN_ASSIGN;
+}
+
+void Parser::skipPastSemicolon() {
+    int depth = 0;
+    while (!eof()) {
+        if (check(TokenType::TOKEN_LBRACE) || check(TokenType::TOKEN_LPAREN) ||
+            check(TokenType::TOKEN_LBRACKET)) {
+            ++depth;
+        } else if (check(TokenType::TOKEN_RBRACE)) {
+            if (depth == 0) return; // don't eat the enclosing body's '}'
+            --depth;
+        } else if (check(TokenType::TOKEN_RPAREN) || check(TokenType::TOKEN_RBRACKET)) {
+            if (depth > 0) --depth;
+        } else if (check(TokenType::TOKEN_SEMICOLON) && depth == 0) {
+            advance();
+            return;
+        }
+        advance();
+    }
+}
+
+void Parser::rejectRemovedTypeAlias() {
+    Token tok = *peek();
+    std::string kw = tok.type == TokenType::TOKEN_TYPEDEF ? "typedef" : "type";
+    error("'" + kw + "' has been removed; use 'using Name = Type;' instead", tok);
+    skipPastSemicolon();
+}
+
+void Parser::rejectLocalUsing() {
+    error("'using' alias declarations are only allowed at namespace scope", *peek());
+    skipPastSemicolon();
+}
+
 std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
     // C linkage: `extern` declarations keep their plain, unmangled symbol name.
     if (check(TokenType::TOKEN_EXTERN)) {
@@ -2714,8 +2775,9 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
         return decl;
     }
 
-    if (check(TokenType::TOKEN_TYPEDEF)) {
-        return parseTypedefDecl();
+    if (isRemovedTypeAliasStart()) {
+        rejectRemovedTypeAlias();
+        return nullptr;
     }
 
     // P1-03 / GEN-01 / PAR-21: `template<...>` 声明。
@@ -2746,29 +2808,6 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
                         match(TokenType::TOKEN_SEMICOLON);
                         TypeContext::instance().addTypedef(aliasName, aliasedType);
                         return std::make_unique<UsingDeclAST>(aliasName, aliasedType);
-                    }
-                }
-            }
-            // 如果解析失败，回退
-            m_currentTokenPos = savedPos;
-        }
-    }
-
-    // 新增：支持 type 新类型（distinct type）
-    if (check(TokenType::TOKEN_IDENTIFIER)) {
-        std::string name = peek()->lexeme;
-        if (name == "type") {
-            size_t savedPos = m_currentTokenPos;
-            advance(); // 消耗 "type"
-            // 解析: type Name = Type;
-            if (check(TokenType::TOKEN_IDENTIFIER)) {
-                std::string typeName = qualifyTypeDeclName(advance()->lexeme);
-                if (match(TokenType::TOKEN_ASSIGN)) {
-                    Type* aliasedType = parseType();
-                    if (aliasedType) {
-                        match(TokenType::TOKEN_SEMICOLON);
-                        TypeContext::instance().addTypedef(typeName, aliasedType);
-                        return std::make_unique<TypeDeclAST>(typeName, aliasedType);
                     }
                 }
             }
@@ -3740,6 +3779,16 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
         // P1-05 / ANN-01: 字段/嵌套类型/静态成员注解（成员起始位置）。
         std::vector<Annotation> memberAnns = parseAnnotations();
 
+        // PAR-24: legacy alias forms / member-scope using are rejected explicitly.
+        if (isRemovedTypeAliasStart()) {
+            rejectRemovedTypeAlias();
+            continue;
+        }
+        if (isLocalUsingStart()) {
+            rejectLocalUsing();
+            continue;
+        }
+
         // AGG-11: a nested type declaration is `keyword IDENT {` (a forward
         // `class D;` and an inherited `class D : Base` also route here);
         // `keyword {` stays an anonymous inline member (AGG-03) and any other
@@ -4098,6 +4147,16 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
     while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
         // P1-05 / ANN-01: 字段/方法/嵌套类型/静态成员注解。
         std::vector<Annotation> memberAnns = parseAnnotations();
+
+        // PAR-24: legacy alias forms / member-scope using are rejected explicitly.
+        if (isRemovedTypeAliasStart()) {
+            rejectRemovedTypeAlias();
+            continue;
+        }
+        if (isLocalUsingStart()) {
+            rejectLocalUsing();
+            continue;
+        }
 
         // Access specifier section: `public:` / `private:` / `protected:`.
         // `public`/`private` are keywords; `protected` is contextual, so it
@@ -4465,6 +4524,16 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
         // P1-05 / ANN-01: union 成员注解。
         std::vector<Annotation> memberAnns = parseAnnotations();
 
+        // PAR-24: legacy alias forms / member-scope using are rejected explicitly.
+        if (isRemovedTypeAliasStart()) {
+            rejectRemovedTypeAlias();
+            continue;
+        }
+        if (isLocalUsingStart()) {
+            rejectLocalUsing();
+            continue;
+        }
+
         // AGG-11: a nested type declaration is `keyword IDENT {`; `keyword {`
         // stays an anonymous inline member (AGG-03), any other shape a field.
         {
@@ -4681,70 +4750,6 @@ std::unique_ptr<EnumDeclAST> Parser::parseEnumDecl() {
     auto decl = std::make_unique<EnumDeclAST>(name, std::move(values), underlyingType);
     decl->bareName = bareName;
     return decl;
-}
-
-std::unique_ptr<TypedefDeclAST> Parser::parseTypedefDecl() {
-    if (!match(TokenType::TOKEN_TYPEDEF)) return nullptr;
-
-    Type* type = parseType();
-    if (!type) return nullptr;
-
-    // 函数指针 typedef：`typedef int32 (*BinOp)(int32, int32);` ——名字在
-    // `(*name)(params)` declarator 里，别名做成 Pointer(FunctionType)。
-    std::string name;
-    if (check(TokenType::TOKEN_LPAREN)) {
-        std::string fpName;
-        if (Type* fpType = parseFunctionPointerDeclarator(type, fpName, true)) {
-            name = qualifyTypeDeclName(fpName);
-            type = fpType;
-        }
-    }
-    if (name.empty()) {
-        name = qualifyTypeDeclName(parseQualifiedTypeName());
-        if (name.empty()) return nullptr;
-    }
-
-    // typedef 数组：`typedef int32 IntArr[4]`（可多维 `[2][3]`）——名字后的
-    // 数组后缀必须包装进别名类型（右到左建嵌套 ArrayType），否则 IntArr 只
-    // 拿到基础类型（丢维度，下标/slice/sizeof 全坏）。
-    if (check(TokenType::TOKEN_LBRACKET)) {
-        std::vector<int> dims;
-        std::vector<bool> explicitDim;
-        while (check(TokenType::TOKEN_LBRACKET)) {
-            advance();
-            int size = 0;
-            bool hasNumber = false;
-            if (!check(TokenType::TOKEN_NUMBER) && !check(TokenType::TOKEN_RBRACKET)) {
-                errorUnexpected("variable-length arrays are not supported: array size must be an integer literal");
-                return nullptr;
-            }
-            if (auto numTok = match(TokenType::TOKEN_NUMBER)) {
-                size = static_cast<int>(static_cast<long long>(std::get<unsigned __int128>(numTok->value)));
-                hasNumber = true;
-            }
-            if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after array size")) {
-                return nullptr;
-            }
-            dims.push_back(size);
-            explicitDim.push_back(hasNumber);
-        }
-        for (size_t i = 1; i < dims.size(); ++i) {
-            if (!explicitDim[i]) {
-                errorUnexpected("expected array dimension: only the first dimension may be empty");
-                return nullptr;
-            }
-        }
-        Type* elemType = type;
-        for (size_t i = dims.size() - 1; i >= 1; --i) {
-            elemType = new ArrayType(elemType, dims[i]);
-        }
-        type = new ArrayType(elemType, dims[0]);
-    }
-
-    match(TokenType::TOKEN_SEMICOLON);
-
-    TypeContext::instance().addTypedef(name, type);
-    return std::make_unique<TypedefDeclAST>(name, type);
 }
 
 // namespace A { ... } / namespace A::B { ... } (PAR-22)

@@ -226,10 +226,8 @@ private:
     void visit(StructDeclAST& node);
     void visit(UnionDeclAST& node);
     void visit(EnumDeclAST& node);
-    void visit(TypedefDeclAST& node);
     void visit(ForwardDeclAST& node);
     void visit(UsingDeclAST& node);
-    void visit(TypeDeclAST& node);
     void visit(ModuleDeclAST& node);
     void visit(NamespaceDeclAST& node);
     // P1-04 / CT-03: compile_time.if 条件编译——求值条件、选分支、原位展开。

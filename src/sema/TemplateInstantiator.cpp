@@ -352,11 +352,6 @@ std::unique_ptr<DeclAST> TemplateInstantiator::cloneDeclInternal(const DeclAST& 
         copyLoc(cloned, *ud);
         return std::unique_ptr<DeclAST>(cloned);
     }
-    if (auto* td = dynamic_cast<const TypedefDeclAST*>(&decl)) {
-        auto* cloned = new TypedefDeclAST(td->name, rewrite(td->aliasedType));
-        copyLoc(cloned, *td);
-        return std::unique_ptr<DeclAST>(cloned);
-    }
     // 评审 I4：嵌套 union/enum/type 声明此前被静默丢弃。
     if (auto* un = dynamic_cast<const UnionDeclAST*>(&decl)) {
         std::vector<FieldInfo> members;
@@ -373,11 +368,6 @@ std::unique_ptr<DeclAST> TemplateInstantiator::cloneDeclInternal(const DeclAST& 
         cloned->bareName = ed->bareName;
         cloned->isForwardDecl = ed->isForwardDecl;
         copyLoc(cloned, *ed);
-        return std::unique_ptr<DeclAST>(cloned);
-    }
-    if (auto* ty = dynamic_cast<const TypeDeclAST*>(&decl)) {
-        auto* cloned = new TypeDeclAST(ty->name, rewrite(ty->aliasedType));
-        copyLoc(cloned, *ty);
         return std::unique_ptr<DeclAST>(cloned);
     }
     if (auto* ns = dynamic_cast<const NamespaceDeclAST*>(&decl)) {

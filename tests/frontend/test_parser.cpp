@@ -31,6 +31,13 @@ static auto parse(const std::string& source) {
     return parser.parse();
 }
 
+static std::vector<Diagnostic> parseErrors(const std::string& source) {
+    Lexer lexer("alias_err.c", source);
+    Parser parser(lexer.tokenize());
+    parser.parse();
+    return parser.getErrors();
+}
+
 static std::unique_ptr<TranslationUnitAST> s_lastTU;
 
 static auto parseExpr(const std::string& source) {
@@ -1760,6 +1767,56 @@ TEST_F(ParserDeclTest, UsingArrayAliasKeepsDimensions) {
     ASSERT_NE(u, nullptr);
     ASSERT_EQ(u->aliasedType->kind, TypeKind::Array);
     EXPECT_EQ(static_cast<ArrayType*>(u->aliasedType)->size, 4);
+}
+
+TEST_F(ParserDeclTest, TypedefRejectedWithHint) {
+    auto errs = parseErrors("typedef int32 T;");
+    ASSERT_FALSE(errs.empty());
+    EXPECT_NE(errs[0].message.find("'typedef' has been removed"), std::string::npos);
+    EXPECT_NE(errs[0].message.find("using Name = Type;"), std::string::npos);
+}
+
+TEST_F(ParserDeclTest, TypeRejectedWithHint) {
+    auto errs = parseErrors("type T = int32;");
+    ASSERT_FALSE(errs.empty());
+    EXPECT_NE(errs[0].message.find("'type' has been removed"), std::string::npos);
+    EXPECT_NE(errs[0].message.find("using Name = Type;"), std::string::npos);
+}
+
+TEST_F(ParserDeclTest, TypedefInBlockRejected) {
+    auto errs = parseErrors("int32 main() { typedef int32 T; return 0; }");
+    ASSERT_FALSE(errs.empty());
+    EXPECT_NE(errs[0].message.find("using Name = Type;"), std::string::npos);
+}
+
+TEST_F(ParserDeclTest, TypeInBlockRejected) {
+    auto errs = parseErrors("int32 main() { type T = int32; return 0; }");
+    ASSERT_FALSE(errs.empty());
+    EXPECT_NE(errs[0].message.find("using Name = Type;"), std::string::npos);
+}
+
+TEST_F(ParserDeclTest, TypedefInStructBodyRejected) {
+    auto errs = parseErrors("struct S { typedef int32 T; int32 x; };");
+    ASSERT_FALSE(errs.empty());
+    EXPECT_NE(errs[0].message.find("using Name = Type;"), std::string::npos);
+}
+
+TEST_F(ParserDeclTest, TypeInClassBodyRejected) {
+    auto errs = parseErrors("class C { public: typedef int32 T; int32 x; };");
+    ASSERT_FALSE(errs.empty());
+    EXPECT_NE(errs[0].message.find("using Name = Type;"), std::string::npos);
+}
+
+TEST_F(ParserDeclTest, UsingInBlockRejected) {
+    auto errs = parseErrors("int32 main() { using T = int32; return 0; }");
+    ASSERT_FALSE(errs.empty());
+    EXPECT_NE(errs[0].message.find("only allowed at namespace scope"), std::string::npos);
+}
+
+TEST_F(ParserDeclTest, UsingInClassBodyRejected) {
+    auto errs = parseErrors("class C { public: using T = int32; };");
+    ASSERT_FALSE(errs.empty());
+    EXPECT_NE(errs[0].message.find("only allowed at namespace scope"), std::string::npos);
 }
 
 TEST_F(ParserDeclTest, ConstexprVarDecl) {
