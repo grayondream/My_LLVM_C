@@ -133,3 +133,10 @@ TEST_F(UsingAliasE2E, FnPtrAliasReturn) {
         int32 main() { Fn f = pick(); return f(3, 4) - 7; }
     )", "using_fnptr_ret.c"), 0);
 }
+
+TEST_F(UsingAliasE2E, InlineEnumAliasExposesEnumerators) {
+    EXPECT_EQ(runSource(R"(
+        using E = enum : uint16 { Lo = 1, Hi = 2 };
+        int32 main() { E e = Hi; return (int32)e + Lo - 3; }
+    )", "using_enum.c"), 0);
+}

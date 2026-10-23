@@ -126,6 +126,18 @@ TEST_F(AnnotationSemantics, NonNullLiteralNullW3005) {
 
 // ---- P1-05 / T7 硬化（回归 pin）----
 
+TEST_F(AnnotationSemantics, ReprCOnUsingE2011) {
+    EXPECT_TRUE(hasError("[[repr(C)]] using T = int32;",
+                         "annotation 'repr' is not valid on using"));
+}
+
+TEST_F(AnnotationSemantics, DeprecatedUsingW3004) {
+    EXPECT_TRUE(hasWarning(
+        "[[deprecated(\"old\")]] using T = int32;\n"
+        "int32 main() { T x = 1; return x; }",
+        "is deprecated: old"));
+}
+
 TEST_F(AnnotationSemantics, ReprCOnTypedefE2011) {
     EXPECT_TRUE(hasError("[[repr(C)]] typedef int32 T;",
                          "annotation 'repr' is not valid on typedef"));

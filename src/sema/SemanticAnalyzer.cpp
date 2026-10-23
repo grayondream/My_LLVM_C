@@ -6107,8 +6107,39 @@ bool SemanticAnalyzer::isMethodCall(ExprAST& expr) {
 
 // 新增AST节点的visit方法实现
 void SemanticAnalyzer::visit(UsingDeclAST& node) {
-    // using 声明：将类型别名添加到类型上下文
+    // PAR-24: using 是唯一别名形式——注解目标校验、弃用折叠与内联 enum
+    // 枚举量注册都与原 typedef 语义对齐。
+    validateAnnotations(node.annotations, node, "using");
+    // 解析期已登记过一次别名；sema 再登记会产生新的 TypedefType 包装。
+    // 已经解析完的声明（如 `T x;`）持有解析期包装，弃用标志必须同时落到
+    // 两份包装上，否则使用点看不到 deprecated。
+    Type* parseTimeAlias = typeCtx->getTypedef(node.name);
     typeCtx->addTypedef(node.name, node.aliasedType);
+    Type* storedAlias = typeCtx->getTypedef(node.name);
+
+    // `[[deprecated]] using T = ...;` —— 折叠到别名类型，使用点告警。
+    auto markDeprecated = [&](Type* td) {
+        for (const auto& ann : node.annotations) {
+            if (ann.name == "deprecated") {
+                td->deprecated = true;
+                if (ann.args.size() == 1 &&
+                    ann.args[0].kind == AnnotationArg::Kind::String) {
+                    td->deprecatedMsg = ann.args[0].text;
+                }
+            }
+        }
+    };
+    if (parseTimeAlias) markDeprecated(parseTimeAlias);
+    if (storedAlias && storedAlias != parseTimeAlias) markDeprecated(storedAlias);
+
+    // `using E = enum { A, B };` 的枚举量在别名作用域可见（TYP-25 对齐）。
+    if (Type* t = stripTypedef(node.aliasedType); t && t->kind == TypeKind::Enum) {
+        auto* enumType = static_cast<EnumType*>(t);
+        for (auto& val : enumType->values) {
+            enumConstants[scopedName(val.first)] = {enumType, val.second};
+        }
+    }
+
     declare(node.name, node.aliasedType);
 }
 
