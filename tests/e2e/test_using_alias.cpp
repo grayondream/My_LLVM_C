@@ -107,3 +107,29 @@ TEST_F(UsingAliasE2E, ArrayAliasDesignatedZeroFill) {
         int32 main() { Arr a = {[1] = 5}; return a[0]; }
     )", "using_arr_di.c"), 0);
 }
+
+TEST_F(UsingAliasE2E, FnPtrAliasCall) {
+    EXPECT_EQ(runSource(R"(
+        using Fn = int32 (*)(int32, int32);
+        int32 add(int32 a, int32 b) { return a + b; }
+        int32 main() { Fn f = add; return f(2, 3) - 5; }
+    )", "using_fnptr.c"), 0);
+}
+
+TEST_F(UsingAliasE2E, FnPtrAliasParam) {
+    EXPECT_EQ(runSource(R"(
+        using Fn = int32 (*)(int32, int32);
+        int32 add(int32 a, int32 b) { return a + b; }
+        int32 apply(Fn f, int32 x) { return f(x, 1); }
+        int32 main() { return apply(add, 4) - 5; }
+    )", "using_fnptr_param.c"), 0);
+}
+
+TEST_F(UsingAliasE2E, FnPtrAliasReturn) {
+    EXPECT_EQ(runSource(R"(
+        using Fn = int32 (*)(int32, int32);
+        int32 add(int32 a, int32 b) { return a + b; }
+        Fn pick() { return add; }
+        int32 main() { Fn f = pick(); return f(3, 4) - 7; }
+    )", "using_fnptr_ret.c"), 0);
+}
