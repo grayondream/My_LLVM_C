@@ -1504,30 +1504,30 @@ TEST_F(ParserDeclTest, EnumVarDecl) {
     EXPECT_EQ(var->type->kind, TypeKind::Enum);
 }
 
-// ========== Typedef Declarations ==========
+// ========== using Alias Declarations ==========
 
-TEST_F(ParserDeclTest, TypedefDecl) {
-    auto tu = parse("typedef int32 Integer;");
+TEST_F(ParserDeclTest, UsingDecl) {
+    auto tu = parse("using Integer = int32;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
-    auto td = dynamic_cast<TypedefDeclAST*>(tu->declarations[0].get());
-    ASSERT_NE(td, nullptr);
-    EXPECT_EQ(td->name, "Integer");
-    EXPECT_EQ(td->aliasedType->kind, TypeKind::Int32);
+    auto u = dynamic_cast<UsingDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(u, nullptr);
+    EXPECT_EQ(u->name, "Integer");
+    EXPECT_EQ(u->aliasedType->kind, TypeKind::Int32);
 }
 
-TEST_F(ParserDeclTest, TypedefStruct) {
-    auto tu = parse("typedef struct { int32 x; int32 y; } Point;");
+TEST_F(ParserDeclTest, UsingAnonStruct) {
+    auto tu = parse("using Point = struct { int32 x; int32 y; };");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 1u);
-    auto td = dynamic_cast<TypedefDeclAST*>(tu->declarations[0].get());
-    ASSERT_NE(td, nullptr);
-    EXPECT_EQ(td->name, "Point");
-    EXPECT_EQ(td->aliasedType->kind, TypeKind::Struct);
+    auto u = dynamic_cast<UsingDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(u, nullptr);
+    EXPECT_EQ(u->name, "Point");
+    EXPECT_EQ(u->aliasedType->kind, TypeKind::Struct);
 }
 
-TEST_F(ParserDeclTest, TypedefUsage) {
-    auto tu = parse("typedef int32 Integer; Integer x = 5;");
+TEST_F(ParserDeclTest, UsingUsage) {
+    auto tu = parse("using Integer = int32; Integer x = 5;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 2u);
     auto var = dynamic_cast<VarDeclAST*>(tu->declarations[1].get());
@@ -1656,14 +1656,14 @@ TEST_F(ParserDeclTest, EnumDeclWithMixedValues) {
     EXPECT_EQ(en->values[3].second, 4);
 }
 
-TEST_F(ParserDeclTest, TypedefStructForward) {
-    auto tu = parse("typedef struct Node Node; struct Node { int32 data; Node* next; };");
+TEST_F(ParserDeclTest, ForwardStructDecl) {
+    auto tu = parse("struct Node; struct Node { int32 data; Node* next; };");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 2u);
-    auto td = dynamic_cast<TypedefDeclAST*>(tu->declarations[0].get());
-    ASSERT_NE(td, nullptr);
-    EXPECT_EQ(td->name, "Node");
-    EXPECT_EQ(td->aliasedType->kind, TypeKind::Struct);
+    auto fwd = dynamic_cast<StructDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(fwd, nullptr);
+    EXPECT_TRUE(fwd->isForwardDecl);
+    EXPECT_EQ(fwd->name, "Node");
 }
 
 TEST_F(ParserDeclTest, ConstVolatileDecl) {
@@ -1725,24 +1725,31 @@ TEST_F(ParserDeclTest, FunctionDeclPointerReturn) {
     EXPECT_NE(func->body, nullptr);
 }
 
-TEST_F(ParserDeclTest, TypedefPointer) {
-    auto tu = parse("typedef int32* IntPtr; IntPtr p;");
+TEST_F(ParserDeclTest, UsingPointer) {
+    auto tu = parse("using IntPtr = int32*; IntPtr p;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 2u);
     auto var = dynamic_cast<VarDeclAST*>(tu->declarations[1].get());
     ASSERT_NE(var, nullptr);
     EXPECT_EQ(var->name, "p");
     EXPECT_EQ(var->type->kind, TypeKind::Typedef);
+    auto u = dynamic_cast<UsingDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(u, nullptr);
+    EXPECT_EQ(u->aliasedType->kind, TypeKind::Pointer);
 }
 
-TEST_F(ParserDeclTest, TypedefArray) {
-    auto tu = parse("typedef int32 IntArr[10]; IntArr a;");
+TEST_F(ParserDeclTest, UsingArray) {
+    auto tu = parse("using IntArr = int32[10]; IntArr a;");
     ASSERT_NE(tu, nullptr);
     ASSERT_EQ(tu->declarations.size(), 2u);
     auto var = dynamic_cast<VarDeclAST*>(tu->declarations[1].get());
     ASSERT_NE(var, nullptr);
     EXPECT_EQ(var->name, "a");
     EXPECT_EQ(var->type->kind, TypeKind::Typedef);
+    auto u = dynamic_cast<UsingDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(u, nullptr);
+    ASSERT_EQ(u->aliasedType->kind, TypeKind::Array);
+    EXPECT_EQ(static_cast<ArrayType*>(u->aliasedType)->size, 10);
 }
 
 TEST_F(ParserDeclTest, UsingArrayAliasKeepsDimensions) {

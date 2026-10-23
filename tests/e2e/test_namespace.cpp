@@ -125,14 +125,14 @@ int32 main() {
 )", "ns_type_struct.c"), 0);
 }
 
-TEST_F(NamespaceE2E, QualifiedTypedefType) {
+TEST_F(NamespaceE2E, QualifiedUsingType) {
     EXPECT_EQ(runSource(R"(
-namespace A { typedef int32 Handle; }
+namespace A { using Handle = int32; }
 int32 main() {
     A::Handle h = 5;
     return h - 5;
 }
-)", "ns_type_typedef.c"), 0);
+)", "ns_type_using.c"), 0);
 }
 
 TEST_F(NamespaceE2E, QualifiedEnumConstant) {

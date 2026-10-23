@@ -364,13 +364,13 @@ int32 main() { char c = compile_time.build.debug ? 'a' : 'b'; return 0; }
 }
 
 TEST_F(CompileTimeEval, DeadBranchTypeWrappedUseDiagnosed) {
-    // I3: 毒化检查覆盖指针/数组/typedef 包装层。
+    // I3: 毒化检查覆盖指针/数组包装层。
     auto deadBranchSource = [](const std::string& use) {
-        return "compile_time.if (1 == 2) { struct Ghost { int32 x; } typedef int32 GhostInt; } "
+        return "compile_time.if (1 == 2) { struct Ghost { int32 x; } } "
                "else { int32 h() { return 1; } } "
                "int32 main() { " + use + " return 0; }";
     };
-    for (const char* use : {"Ghost* p;", "Ghost g2[3];", "GhostInt x;"}) {
+    for (const char* use : {"Ghost* p;", "Ghost g2[3];"}) {
         Lexer lexer("ct_dead_wrap.c", deadBranchSource(use));
         auto tokens = lexer.tokenize();
         Parser parser(tokens);

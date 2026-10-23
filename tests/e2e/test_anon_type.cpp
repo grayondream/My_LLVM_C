@@ -1,5 +1,5 @@
 // PAR-12: 匿名类型身份验证——每个匿名定义是独立类型（C 语义）：
-// 赋值/传参/返回互斥；typedef 命名后同型可互赋；定义即用的返回类型可用。
+// 赋值/传参/返回互斥；using 命名后同型可互赋；定义即用的返回类型可用。
 #include <gtest/gtest.h>
 
 #include "codegen/CodegenContext.h"
@@ -94,10 +94,10 @@ TEST_F(AnonTypeE2E, DistinctAnonymousUnionsRejectAssignment) {
     )"));
 }
 
-TEST_F(AnonTypeE2E, TypedefNamedAnonymousStructsAreSameType) {
-    // typedef 给匿名类型命名后，同一 typedef 的两个变量可互赋。
+TEST_F(AnonTypeE2E, UsingNamedAnonymousStructsAreSameType) {
+    // using 给匿名类型命名后，同一别名的两个变量可互赋。
     EXPECT_EQ(runSource(R"(
-        typedef struct { int32 v; } S;
+        using S = struct { int32 v; };
         int32 main() {
             S a = { 3 };
             S b;
@@ -105,7 +105,7 @@ TEST_F(AnonTypeE2E, TypedefNamedAnonymousStructsAreSameType) {
             if (b.v != 3) return 1;
             return 0;
         }
-    )", "anon_typedef.c"), 0);
+    )", "anon_using.c"), 0);
 }
 
 TEST_F(AnonTypeE2E, SameDefinitionMultipleDeclaratorsShareType) {
@@ -124,7 +124,7 @@ TEST_F(AnonTypeE2E, SameDefinitionMultipleDeclaratorsShareType) {
 TEST_F(AnonTypeE2E, AnonymousStructAsFieldArrayPointerNested) {
     EXPECT_EQ(runSource(R"(
         struct Outer { int32 tag; struct { int32 a; int32 b; } inner; };
-        typedef struct { int32 q; } Q;
+        using Q = struct { int32 q; };
         int32 main() {
             struct Outer o = { 0, { 0, 0 } };
             o.inner.a = 1; o.inner.b = 2;
@@ -145,7 +145,7 @@ TEST_F(AnonTypeE2E, AnonymousStructAsFieldArrayPointerNested) {
 TEST_F(AnonTypeE2E, AnonymousReturnTypeDefinitionUses) {
     // 定义即用的匿名返回类型（同一 AST 节点内）可用。
     EXPECT_EQ(runSource(R"(
-        typedef struct { int32 v; } S;
+        using S = struct { int32 v; };
         S make(int32 x) { S t; t.v = x; return t; }
         int32 main() {
             S r = make(42);

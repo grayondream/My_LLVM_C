@@ -171,17 +171,17 @@ TEST_F(AtomicE2E, AtomicMultiplyRejected) {
               std::string::npos);
 }
 
-// C1 (review): `atomic` on a typedef base strips to the underlying scalar and
+// C1 (review): `atomic` on an alias base strips to the underlying scalar and
 // works (must not be silently dropped nor crash).
-TEST_F(AtomicE2E, AtomicTypedefBaseWorks) {
+TEST_F(AtomicE2E, AtomicAliasBaseWorks) {
     EXPECT_EQ(runSource(R"(
-        typedef int32 myint;
+        using myint = int32;
         atomic myint x = 5;
         int32 main() {
             x = x + 1;
             return x == 6 ? 0 : 1;
         }
-    )", "at_typedef.c"), 0);
+    )", "at_using.c"), 0);
 }
 
 // I2 (review): `atomic` works in a function-local declaration too (was

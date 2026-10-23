@@ -206,10 +206,10 @@ TEST_F(DesignatedInitE2E, GlobalUnionLastWins) {
     )", "di_global_union_lw.c"), 0);
 }
 
-TEST_F(DesignatedInitE2E, TypedefArrayZeroFill) {
-    // I2: VarDeclAST(typedef 数组) 设计符初始化补零。
+TEST_F(DesignatedInitE2E, UsingArrayZeroFill) {
+    // I2: VarDeclAST(数组别名) 设计符初始化补零。
     EXPECT_EQ(runSource(R"(
-        typedef int32 Arr[4];
+        using Arr = int32[4];
         int32 main() {
             int32 junk[8];
             for (int32 i = 0; i < 8; ++i) junk[i] = 0x7f7f7f7f;
@@ -217,7 +217,7 @@ TEST_F(DesignatedInitE2E, TypedefArrayZeroFill) {
             if (a[0] != 0 || a[1] != 7 || a[2] != 0 || a[3] != 0) { return 1; }
             return 0;
         }
-    )", "di_typedef_arr_zero.c"), 0);
+    )", "di_using_arr_zero.c"), 0);
 }
 
 TEST_F(DesignatedInitE2E, MultiDimDesignatorInference) {

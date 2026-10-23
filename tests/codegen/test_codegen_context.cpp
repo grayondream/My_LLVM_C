@@ -466,9 +466,9 @@ TEST_F(CodegenContextTest, EnumDecl) {
     EXPECT_TRUE(verifyModule());
 }
 
-TEST_F(CodegenContextTest, TypedefDecl) {
-    auto typedefDecl = std::make_unique<TypedefDeclAST>("MyInt", typeCtx->getInt32());
-    llvm::Value* val = typedefDecl->codegen(*ctx);
+TEST_F(CodegenContextTest, UsingDecl) {
+    auto usingDecl = std::make_unique<UsingDeclAST>("MyInt", typeCtx->getInt32());
+    llvm::Value* val = usingDecl->codegen(*ctx);
     EXPECT_TRUE(verifyModule());
 }
 

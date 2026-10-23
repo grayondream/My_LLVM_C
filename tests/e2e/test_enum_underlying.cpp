@@ -116,9 +116,9 @@ TEST_F(EnumUnderlyingE2E, QualifiedEnumTypeReferenceWithoutKeyword) {
         "int32 main() { cfg::Mode m = cfg::On; return m - 2; }"), 0);
 }
 
-TEST_F(EnumUnderlyingE2E, AnonymousEnumTypedefWithUnderlyingType) {
+TEST_F(EnumUnderlyingE2E, AnonymousEnumAliasWithUnderlyingType) {
     EXPECT_EQ(runSource(
-        "typedef enum : uint16 { Lo = 1, Hi = 2 } Small;"
+        "using Small = enum : uint16 { Lo = 1, Hi = 2 };"
         "int32 main() { Small s = Hi; return ((int32)s - 2) + (sizeof(Small) - 2); }"), 0);
 }
 

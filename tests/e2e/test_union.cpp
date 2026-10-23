@@ -175,11 +175,11 @@ TEST_F(UnionE2E, AnonymousStructMembersArePromoted) {
     )"), 0);
 }
 
-// Typedefs to aggregates must behave like the underlying type for member access.
-TEST_F(UnionE2E, TypedefAggregateMemberAccess) {
+// Aliases to aggregates must behave like the underlying type for member access.
+TEST_F(UnionE2E, UsingAggregateMemberAccess) {
     EXPECT_EQ(runSource(R"(
-        typedef struct S2 { int32 x; } S2;
-        typedef union U2 { int32 i; float32 f; } U2;
+        using S2 = struct S2 { int32 x; };
+        using U2 = union U2 { int32 i; float32 f; };
         int32 main() {
             S2 s;
             s.x = 3;

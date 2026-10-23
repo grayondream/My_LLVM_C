@@ -1901,14 +1901,14 @@ TEST(SliceSemTest, OptLogicalRejected) {
 }
 
 TEST(SliceSemTest, OptTypedefArgPin) {
-    // 评审 I2：init-list 校验须剥 typedef。
+    // 评审 I2：init-list 校验须剥别名。
     EXPECT_TRUE(analyzeOk(
-        "typedef int32 MyInt; int32 main() { optional<MyInt> o = {true, 5}; return 0; }"));
+        "using MyInt = int32; int32 main() { optional<MyInt> o = {true, 5}; return 0; }"));
 }
 
 TEST(SliceSemTest, OptTypedefValuePin) {
     EXPECT_TRUE(analyzeOk(
-        "typedef int32 MyInt; int32 main() { MyInt x = 5; int32? p = {true, x}; return x; }"));
+        "using MyInt = int32; int32 main() { MyInt x = 5; int32? p = {true, x}; return x; }"));
 }
 
 TEST(SliceSemTest, OptTernaryBranchAllowed) {

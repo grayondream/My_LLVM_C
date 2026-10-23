@@ -65,21 +65,21 @@ void section_types() {
 }
 
 // ---------------------------------------------------------------------------
-// 2. typedef / using / type 别名
+// 2. using 类型别名
 // ---------------------------------------------------------------------------
-typedef int32 Integer;
-typedef struct { int32 x; int32 y; } Point;
-typedef int32* IntPtr;
-typedef int32 IntArr[10];
-typedef int32? Opt;                  // optional 别名
+using Integer = int32;
+using Point = struct { int32 x; int32 y; };
+using IntPtr = int32*;
+using IntArr = int32[10];
+using Opt = int32?;                 // optional 别名
 using Size = int32;
-type Speed = float64;                // `type` 上下文关键字（当前 = typedef）
+using Speed = float64;              // 唯一的别名形式
 
 // 全局 f()：与 namespace io::f() 隔离（第 13 节用）
 int32 f() { return 1; }
 
 void section_aliases() {
-    println("== 2. typedef / using / type ==");
+    println("== 2. using ==");
     Integer n = 7;
     Point p = {1, 2};
     IntPtr ip = null;
@@ -87,17 +87,17 @@ void section_aliases() {
     Opt o = {true, 42};
     Size s = 9;
     Speed sp = 3.25;
-    check(n == 7, "typedef int32");
-    check(p.x + p.y == 3, "anonymous struct typedef");
-    check(ip == null, "typedef pointer");
-    // 数组 typedef：下标 / sizeof / slice 退化全部可用。
-    check(arr[0] == 0 && arr[9] == 9, "array typedef subscript");
-    check(sizeof(arr) == 40, "array typedef sizeof");
+    check(n == 7, "using int32");
+    check(p.x + p.y == 3, "anonymous struct alias");
+    check(ip == null, "pointer alias");
+    // 数组别名：下标 / sizeof / slice 退化全部可用。
+    check(arr[0] == 0 && arr[9] == 9, "array alias subscript");
+    check(sizeof(arr) == 40, "array alias sizeof");
     int32[] arrv = arr;
-    check(arrv.len == 10, "array typedef slice");
-    check(o.valid && o.value == 42, "optional typedef");
+    check(arrv.len == 10, "array alias slice");
+    check(o.valid && o.value == 42, "optional alias");
     check(s == 9, "using alias");
-    check(sp == 3.25, "type alias");
+    check(sp == 3.25, "using float64 alias");
 }
 
 // ---------------------------------------------------------------------------

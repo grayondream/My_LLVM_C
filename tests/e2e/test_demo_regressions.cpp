@@ -284,11 +284,11 @@ TEST_F(DemoRegressionE2E, PointerDifference) {
     )", "reg_ptrdiff.c"), 0);
 }
 
-// Gap 4：数组 typedef（下标 / slice / sizeof / 多维）。
-TEST_F(DemoRegressionE2E, ArrayTypedefWorks) {
+// Gap 4：数组别名（下标 / slice / sizeof / 多维）。
+TEST_F(DemoRegressionE2E, ArrayAliasWorks) {
     EXPECT_EQ(runSource(R"(
-        typedef int32 IntArr[4];
-        typedef int32 Mat[2][3];
+        using IntArr = int32[4];
+        using Mat = int32[2][3];
         int32 sum(int32[] s) {
             int32 t = 0;
             for (int32 i = 0; i < s.len; i = i + 1) { t = t + s[i]; }
@@ -307,10 +307,10 @@ TEST_F(DemoRegressionE2E, ArrayTypedefWorks) {
     )", "reg_arrtyp.c"), 0);
 }
 
-// Gap 5：函数指针 typedef + 函数返回函数指针（经 typedef 惯用法）。
-TEST_F(DemoRegressionE2E, FunctionPointerTypedefAndReturn) {
+// Gap 5：函数指针别名 + 函数返回函数指针（经 using 惯用法）。
+TEST_F(DemoRegressionE2E, FunctionPointerAliasAndReturn) {
     EXPECT_EQ(runSource(R"(
-        typedef int32 (*BinOp)(int32, int32);
+        using BinOp = int32 (*)(int32, int32);
         int32 add(int32 a, int32 b) { return a + b; }
         int32 mul(int32 a, int32 b) { return a * b; }
         BinOp pick(bool useAdd) { return useAdd ? add : mul; }

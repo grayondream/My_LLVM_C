@@ -209,10 +209,10 @@ TEST_F(OptionalResultE2E, EnumOverloadDistinct) {
     )", "optres9.c"), 1);
 }
 
-TEST_F(OptionalResultE2E, TypedefRvalueMember) {
-    // 评审 I3：typedef 返回类型的 rvalue 伪字段访问曾生成 load%struct 崩溃。
+TEST_F(OptionalResultE2E, UsingRvalueMember) {
+    // 评审 I3：别名返回类型的 rvalue 伪字段访问曾生成 load%struct 崩溃。
     EXPECT_EQ(runSource(R"(
-        typedef int32? Opt;
+        using Opt = int32?;
         Opt make(int32 v) { Opt t = {v != 0, 7}; return t; }
         int32 main() { return make(1).value; }
     )", "optres10.c"), 7);

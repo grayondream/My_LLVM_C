@@ -310,7 +310,7 @@ TEST_F(GenericE2E, InstanceSharedAcrossFunctions) {
 TEST_F(GenericE2E, SpeculativeRollbackRestoresRshift) {
     // C2：投机解析失败回滚须恢复被拆分的 >> token（静默错译回归）。
     EXPECT_EQ(runSource(R"(
-        typedef int32 b;
+        using b = int32;
         int32 main() {
             int32 b2 = 8; int32 x = 0;
             int32 b = b2;

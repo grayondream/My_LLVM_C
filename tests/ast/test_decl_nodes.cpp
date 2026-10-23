@@ -68,12 +68,12 @@ TEST_F(DeclNodeTest, EnumDeclAST) {
     EXPECT_EQ(enumDecl->values[2].second, 2);
 }
 
-TEST_F(DeclNodeTest, TypedefDeclAST) {
-    auto typedefDecl = std::make_unique<TypedefDeclAST>(
+TEST_F(DeclNodeTest, UsingDeclAST) {
+    auto usingDecl = std::make_unique<UsingDeclAST>(
         "MyInt", typeCtx->getInt32());
 
-    EXPECT_EQ(typedefDecl->name, "MyInt");
-    EXPECT_EQ(typedefDecl->aliasedType->kind, TypeKind::Int32);
+    EXPECT_EQ(usingDecl->name, "MyInt");
+    EXPECT_EQ(usingDecl->aliasedType->kind, TypeKind::Int32);
 }
 
 TEST_F(DeclNodeTest, ForwardDeclAST) {

@@ -138,11 +138,6 @@ TEST_F(AnnotationSemantics, DeprecatedUsingW3004) {
         "is deprecated: old"));
 }
 
-TEST_F(AnnotationSemantics, ReprCOnTypedefE2011) {
-    EXPECT_TRUE(hasError("[[repr(C)]] typedef int32 T;",
-                         "annotation 'repr' is not valid on typedef"));
-}
-
 TEST_F(AnnotationSemantics, ReprCUnionOk) {
     // union 合法目标：不产生错误（ReprC 语义为 marker）。
     Lexer lexer("ann_repr_union.c", "[[repr(C)]] union U { int32 i; }");
