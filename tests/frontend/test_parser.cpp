@@ -1745,6 +1745,16 @@ TEST_F(ParserDeclTest, TypedefArray) {
     EXPECT_EQ(var->type->kind, TypeKind::Typedef);
 }
 
+TEST_F(ParserDeclTest, UsingArrayAliasKeepsDimensions) {
+    auto tu = parse("using IntArr = int32[4];");
+    ASSERT_NE(tu, nullptr);
+    ASSERT_EQ(tu->declarations.size(), 1u);
+    auto u = dynamic_cast<UsingDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(u, nullptr);
+    ASSERT_EQ(u->aliasedType->kind, TypeKind::Array);
+    EXPECT_EQ(static_cast<ArrayType*>(u->aliasedType)->size, 4);
+}
+
 TEST_F(ParserDeclTest, ConstexprVarDecl) {
     auto tu = parse("constexpr int32 x = 42;");
     ASSERT_NE(tu, nullptr);

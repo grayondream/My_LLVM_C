@@ -40,6 +40,7 @@ private:
     void applyLocation(ASTNode* node, const Token* tok);
 
     Type* parseType();
+    Type* parseTypeId();
 
     Type* parseBaseType();
 

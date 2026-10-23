@@ -2550,6 +2550,46 @@ Type* Parser::parseType() {
     return baseType;
 }
 
+// PAR-24: `using Name = <type-id>;` 的右侧是完整 type-id。
+// parseType() 已消费基础类型/指针/切片 `[]`/optional `?`；这里补上只有
+// “无声明符名的 type-id”才需要的两种后缀：固定数组维度与抽象函数指针
+// `Ret (*)(params)`。
+Type* Parser::parseTypeId() {
+    Type* type = parseType();
+    if (!type) return nullptr;
+
+    // 固定数组后缀（可多维）：`T[2][3]`，从右到左包装。
+    if (check(TokenType::TOKEN_LBRACKET)) {
+        std::vector<int> dims;
+        while (check(TokenType::TOKEN_LBRACKET)) {
+            advance(); // '['
+            auto numTok = match(TokenType::TOKEN_NUMBER);
+            if (!numTok) {
+                errorUnexpected("array size must be an integer literal");
+                return nullptr;
+            }
+            int size = static_cast<int>(
+                static_cast<long long>(std::get<unsigned __int128>(numTok->value)));
+            if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after array size"))
+                return nullptr;
+            dims.push_back(size);
+        }
+        Type* elem = type;
+        for (int i = static_cast<int>(dims.size()) - 1; i >= 1; --i)
+            elem = new ArrayType(elem, dims[i]);
+        type = new ArrayType(elem, dims[0]);
+    }
+
+    // 抽象函数指针：`Ret (*)(params)`（requireName=false）。
+    {
+        std::string ignored;
+        if (Type* fp = parseFunctionPointerDeclarator(type, ignored, /*requireName=*/false))
+            type = fp;
+    }
+
+    return type;
+}
+
 // P1-05 / ANN-01: `[[` 判定（连续两个 LBRACKET；注解名非关键字）。
 bool Parser::isAnnotationStart() const {
     if (eof() || peek()->type != TokenType::TOKEN_LBRACKET) return false;
@@ -2701,7 +2741,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
             if (check(TokenType::TOKEN_IDENTIFIER)) {
                 std::string aliasName = qualifyTypeDeclName(advance()->lexeme);
                 if (match(TokenType::TOKEN_ASSIGN)) {
-                    Type* aliasedType = parseType();
+                    Type* aliasedType = parseTypeId();
                     if (aliasedType) {
                         match(TokenType::TOKEN_SEMICOLON);
                         TypeContext::instance().addTypedef(aliasName, aliasedType);
