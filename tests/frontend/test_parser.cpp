@@ -1807,6 +1807,16 @@ TEST_F(ParserDeclTest, TypeInClassBodyRejected) {
     EXPECT_NE(errs[0].message.find("using Name = Type;"), std::string::npos);
 }
 
+TEST_F(ParserDeclTest, AliasRejectionDoesNotCascadeInTranslationUnit) {
+    auto errs = parseErrors("typedef int32 T; int32 x;");
+    ASSERT_EQ(errs.size(), 1u);
+}
+
+TEST_F(ParserDeclTest, AliasRejectionDoesNotCascadeInNamespace) {
+    auto errs = parseErrors("namespace A { typedef int32 T; int32 x; }");
+    ASSERT_EQ(errs.size(), 1u);
+}
+
 TEST_F(ParserDeclTest, UsingInBlockRejected) {
     auto errs = parseErrors("int32 main() { using T = int32; return 0; }");
     ASSERT_FALSE(errs.empty());

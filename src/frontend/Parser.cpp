@@ -1854,12 +1854,13 @@ std::unique_ptr<TranslationUnitAST> Parser::parse() {
                 }
                 continue;
             }
+            size_t declStart = m_currentTokenPos;
             auto decl = parseDeclaration();
             if (decl) {
                 decl->isExported = true;
                 decls.push_back(std::move(decl));
-            } else {
-                advance();
+            } else if (m_currentTokenPos == declStart) {
+                advance(); // no progress: skip one token
             }
             continue;
         }
@@ -1869,11 +1870,12 @@ std::unique_ptr<TranslationUnitAST> Parser::parse() {
             continue;
         }
 
+        size_t declStart = m_currentTokenPos;
         auto decl = parseDeclaration();
         if (decl) {
             decls.push_back(std::move(decl));
-        } else {
-            advance();
+        } else if (m_currentTokenPos == declStart) {
+            advance(); // no progress: skip one token (recover without cascading)
         }
     }
     
@@ -4795,11 +4797,12 @@ std::unique_ptr<DeclAST> Parser::parseNamespaceDeclImpl() {
             else advance();
             continue;
         }
+        size_t declStart = m_currentTokenPos;
         auto decl = parseDeclaration();
         if (decl) {
             decls.push_back(std::move(decl));
-        } else {
-            advance();
+        } else if (m_currentTokenPos == declStart) {
+            advance(); // no progress: skip one token (recover without cascading)
         }
     }
     expect(TokenType::TOKEN_RBRACE, "expected '}' to close namespace");
