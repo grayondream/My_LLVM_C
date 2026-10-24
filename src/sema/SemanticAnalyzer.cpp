@@ -4668,29 +4668,37 @@ void SemanticAnalyzer::visitNestedTypeDecls(
 void SemanticAnalyzer::checkNestedTypeAccess(Type* type, const ASTNode& site) {
     if (!type) return;
     // PAR-24: a class-scoped alias is itself an access-controlled name; walk
-    // the typedef chain before stripping it away.
-    for (Type* alias = type; alias && alias->kind == TypeKind::Typedef;
-         alias = static_cast<TypedefType*>(alias)->aliasedType) {
-        auto* td = static_cast<TypedefType*>(alias);
-        auto it = nestedTypeAccess.find(td->name);
-        if (it == nestedTypeAccess.end()) continue;
-        if (it->second.second == AccessLevel::Public) continue;
-        if (currentClass == it->second.first) continue;
-        emitError(DiagnosticCode::SemPrivateMemberAccess,
-                  "cannot access private type '" + td->name + "' of class '" +
-                      it->second.first->name +
-                      "' outside the class; make it public or add an accessor",
-                  site);
-        return;
-    }
+    // each typedef chain before stripping it away.
+    auto aliasDenied = [&](Type* raw) -> bool {
+        for (Type* alias = raw; alias && alias->kind == TypeKind::Typedef;
+             alias = static_cast<TypedefType*>(alias)->aliasedType) {
+            auto* td = static_cast<TypedefType*>(alias);
+            auto it = nestedTypeAccess.find(td->name);
+            if (it == nestedTypeAccess.end()) continue;
+            if (it->second.second == AccessLevel::Public) continue;
+            if (currentClass == it->second.first) continue;
+            emitError(DiagnosticCode::SemPrivateMemberAccess,
+                      "cannot access private type '" + td->name + "' of class '" +
+                          it->second.first->name +
+                          "' outside the class; make it public or add an accessor",
+                      site);
+            return true;
+        }
+        return false;
+    };
+    if (aliasDenied(type)) return;
     Type* t = stripTypedef(type);
     // AGG-11 评审 I2: arrays are named-type carriers too (`NTP::Secret a[3]`).
+    // Check the inner spelling before stripping its aliases so `C::T*` is
+    // rejected just like the by-value form.
     while (t && (t->kind == TypeKind::Pointer || t->kind == TypeKind::Array)) {
         // Array types are ArrayType objects (codebase convention, cf.
         // typeToString); pointer element is `base`.
-        t = stripTypedef(t->kind == TypeKind::Pointer
-                             ? t->base
-                             : static_cast<ArrayType*>(t)->elementType);
+        Type* inner = t->kind == TypeKind::Pointer
+                          ? t->base
+                          : static_cast<ArrayType*>(t)->elementType;
+        if (aliasDenied(inner)) return;
+        t = stripTypedef(inner);
     }
     if (!t) return;
     std::string name;

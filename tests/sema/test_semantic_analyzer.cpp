@@ -2700,3 +2700,16 @@ TEST(SemanticAnalyzerAccessTest, PrivateMemberAliasInsideClassOk) {
         "class C { using T = int32; public: T get() { T v = 2; return v; } }; "
         "int32 main() { C c; return c.get() - 2; }"));
 }
+
+TEST(SemanticAnalyzerAccessTest, PrivateMemberAliasPointerDeniedOutside) {
+    Lexer lexer("t.c", "class C { using T = int32; }; int32 main() { C::T* p = null; return 0; }");
+    Parser parser(lexer.tokenize());
+    auto ast = parser.parse();
+    ASSERT_TRUE(ast != nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    bool found = false;
+    for (const auto& e : analyzer.getErrors())
+        if (e.code == DiagnosticCode::SemPrivateMemberAccess) found = true;
+    EXPECT_TRUE(found);
+}

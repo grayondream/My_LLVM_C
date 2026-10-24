@@ -905,3 +905,4 @@
 - **Task 5**：`grammar.ebnf`（`declaration-statement`、`class-member`、struct/union 体加 `type-alias`）、`semantics.md` §5.5（作用域/前向/解引用）、`keywords.md`、`examples/all_features.c`（块别名、成员别名、前向别名、别名解引用）；TODO MOD-03 `[x]` + PAR-24 补丁 + 2026-10-24 快照。
 - 验证：每任务 TDD RED→GREEN；最终全量 **1534/1534** 通过（2 个既有 `GTEST_SKIP` 不变）；示例输出 `ALL FEATURES OK`。
 - 遗留：前向类型按值使用（`N n;` 在定义前）未诊断；无花括号单语句体的 `using` 作用域延伸到外层块；成员别名不继承到派生类；同作用域重复别名不诊断。
+- **复核修复**：`checkNestedTypeAccess` 在指针/数组每一层先检查别名链，堵住 `C::T*` 绕过 E2009 的洞；新增 `PrivateMemberAliasPointerDeniedOutside`。最终全量 **1535/1535**。
