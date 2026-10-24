@@ -4185,6 +4185,7 @@ void SemanticAnalyzer::checkFlexibleArrayConstraint(StructDeclAST& node) {
 
 void SemanticAnalyzer::visit(CompoundStmtAST& node) {
     enterScope();
+    typeCtx->pushLocalTypedefScope();
     bool terminated = false;
     bool warned = false;
     for (auto& stmt : node.stmts) {
@@ -4202,6 +4203,7 @@ void SemanticAnalyzer::visit(CompoundStmtAST& node) {
             terminated = true;
         }
     }
+    typeCtx->popLocalTypedefScope();
     exitScope();
 }
 
@@ -5178,6 +5180,8 @@ void SemanticAnalyzer::visit(DeclStmtAST& node) {
             visit(*enumDecl);
         } else if (auto* fwdDecl = dynamic_cast<ForwardDeclAST*>(node.decl.get())) {
             visit(*fwdDecl);
+        } else if (auto* usingDecl = dynamic_cast<UsingDeclAST*>(node.decl.get())) {
+            visit(*usingDecl);
         } else if (auto* multi = dynamic_cast<MultiVarDeclAST*>(node.decl.get())) {
             for (auto& d : multi->decls) {
                 if (auto* v = dynamic_cast<VarDeclAST*>(d.get())) visit(*v);
@@ -5650,6 +5654,9 @@ Type* SemanticAnalyzer::resolveTypeInstance(Type* t, ASTNode& at) {
 // P1-03 / INH-05: 模板基类实参拼写 → 类型。按裸名与 scoped 名在各类型表
 // 中查找；CRTP 场景下派生类自身的占位 ClassType 已由 getOrCreateClass 建。
 Type* SemanticAnalyzer::resolveTypeByName(const std::string& name) {
+    if (name.find("::") == std::string::npos && name.find('.') == std::string::npos) {
+        if (Type* local = typeCtx->getLocalTypedef(name)) return local;
+    }
     auto tryOne = [&](const std::string& n) -> Type* {
         if (Type* t = typeCtx->getClass(n)) return t;
         if (Type* t = typeCtx->getStruct(n)) return t;
@@ -6075,12 +6082,6 @@ void SemanticAnalyzer::visit(UsingDeclAST& node) {
     // PAR-24: using 是唯一别名形式——注解目标校验、弃用折叠与内联 enum
     // 枚举量注册都与原 typedef 语义对齐。
     validateAnnotations(node.annotations, node, "using");
-    // 解析期已登记过一次别名；sema 再登记会产生新的 TypedefType 包装。
-    // 已经解析完的声明（如 `T x;`）持有解析期包装，弃用标志必须同时落到
-    // 两份包装上，否则使用点看不到 deprecated。
-    Type* parseTimeAlias = typeCtx->getTypedef(node.name);
-    typeCtx->addTypedef(node.name, node.aliasedType);
-    Type* storedAlias = typeCtx->getTypedef(node.name);
 
     // `[[deprecated]] using T = ...;` —— 折叠到别名类型，使用点告警。
     auto markDeprecated = [&](Type* td) {
@@ -6094,6 +6095,21 @@ void SemanticAnalyzer::visit(UsingDeclAST& node) {
             }
         }
     };
+
+    if (node.isBlockScope) {
+        // Block aliases are type-only; they never declare a value symbol.
+        Type* storedAlias = typeCtx->addLocalTypedef(node.bareName, node.aliasedType);
+        if (node.aliasWrapper) markDeprecated(node.aliasWrapper);
+        if (storedAlias && storedAlias != node.aliasWrapper) markDeprecated(storedAlias);
+        return;
+    }
+
+    // 解析期已登记过一次别名；sema 再登记会产生新的 TypedefType 包装。
+    // 已经解析完的声明（如 `T x;`）持有解析期包装，弃用标志必须同时落到
+    // 两份包装上，否则使用点看不到 deprecated。
+    Type* parseTimeAlias = typeCtx->getTypedef(node.name);
+    typeCtx->addTypedef(node.name, node.aliasedType);
+    Type* storedAlias = typeCtx->getTypedef(node.name);
     if (parseTimeAlias) markDeprecated(parseTimeAlias);
     if (storedAlias && storedAlias != parseTimeAlias) markDeprecated(storedAlias);
 

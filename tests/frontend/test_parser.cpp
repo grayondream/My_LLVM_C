@@ -1817,10 +1817,29 @@ TEST_F(ParserDeclTest, AliasRejectionDoesNotCascadeInNamespace) {
     ASSERT_EQ(errs.size(), 1u);
 }
 
-TEST_F(ParserDeclTest, UsingInBlockRejected) {
-    auto errs = parseErrors("int32 main() { using T = int32; return 0; }");
-    ASSERT_FALSE(errs.empty());
-    EXPECT_NE(errs[0].message.find("only allowed at namespace scope"), std::string::npos);
+TEST_F(ParserDeclTest, UsingInBlockParses) {
+    EXPECT_TRUE(parseErrors("int32 main() { using T = int32; T x = 1; return x; }").empty());
+}
+
+TEST_F(ParserDeclTest, UsingBlockScopeEndsAtBlock) {
+    EXPECT_FALSE(parseErrors("int32 main() { { using T = int32; } T x = 1; }").empty());
+}
+
+TEST_F(ParserDeclTest, UsingBlockShadowRestoresOuter) {
+    auto tu = parse("using T = int32; int32 main() { { using T = float64; } T y = 2; return y; }");
+    ASSERT_NE(tu, nullptr);
+    auto* fn = dynamic_cast<FunctionDeclAST*>(tu->declarations[1].get());
+    ASSERT_NE(fn, nullptr);
+    auto* block = dynamic_cast<CompoundStmtAST*>(fn->body.get());
+    ASSERT_NE(block, nullptr);
+    auto* declStmt = dynamic_cast<DeclStmtAST*>(block->stmts[1].get());
+    ASSERT_NE(declStmt, nullptr);
+    auto* var = dynamic_cast<VarDeclAST*>(declStmt->decl.get());
+    ASSERT_NE(var, nullptr);
+    ASSERT_NE(var->type, nullptr);
+    ASSERT_EQ(var->type->kind, TypeKind::Typedef);
+    auto* td = static_cast<TypedefType*>(var->type);
+    EXPECT_EQ(td->aliasedType->kind, TypeKind::Int32);
 }
 
 TEST_F(ParserDeclTest, UsingInClassBodyRejected) {

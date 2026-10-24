@@ -267,6 +267,12 @@ class UsingDeclAST : public DeclAST {
 public:
     std::string name;
     Type* aliasedType;
+    // PAR-24 scoping: original spelling for local/member aliases, whether this
+    // is a block-scoped alias, and the parse-time wrapper (deprecation folding
+    // must reach the type node held by already-parsed declarators).
+    std::string bareName;
+    bool isBlockScope = false;
+    Type* aliasWrapper = nullptr;
 
     UsingDeclAST(const std::string& n, Type* aliased)
         : name(n), aliasedType(aliased) {}

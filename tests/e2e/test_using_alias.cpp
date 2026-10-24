@@ -163,3 +163,19 @@ TEST_F(UsingAliasE2E, DerefAliasChain) {
         int32 main() { int32 x = 3; P p = &x; PP pp = &p; return **pp - 3; }
     )", "deref_alias_chain.c"), 0);
 }
+
+TEST_F(UsingAliasE2E, BlockScopedAliasRuns) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() { using T = int32; T x = 3; return x - 3; }
+    )", "block_alias.c"), 0);
+}
+
+TEST_F(UsingAliasE2E, TemplateAliasAcrossFunctions) {
+    EXPECT_EQ(runSource(R"(
+        template<typename T, usize N> struct Arr { T data[N]; };
+        template<typename T> using Vec = Arr<T, 2>;
+        int32 first() { Vec<int32> v; v.data[0] = 1; return v.data[0]; }
+        int32 second() { Vec<int32> v; v.data[0] = 2; return v.data[0]; }
+        int32 main() { return first() + second() - 3; }
+    )", "tpl_alias_fns.c"), 0);
+}

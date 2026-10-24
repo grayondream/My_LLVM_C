@@ -1348,6 +1348,7 @@ std::unique_ptr<CompoundStmtAST> Parser::parseCompoundStmt() {
         return nullptr;
     }
 
+    TypeContext::instance().pushLocalTypedefScope();
     std::vector<std::unique_ptr<StmtAST>> stmts{};
     while(!eof() && peek()->type != TokenType::TOKEN_RBRACE) {
         auto stmt = parseStmt();
@@ -1358,6 +1359,7 @@ std::unique_ptr<CompoundStmtAST> Parser::parseCompoundStmt() {
         stmts.push_back(std::move(stmt));
     }
     expect(TokenType::TOKEN_RBRACE, "expected '}' to end compound statement");
+    TypeContext::instance().popLocalTypedefScope();
 
     return std::make_unique<CompoundStmtAST>(std::move(stmts));
 }
@@ -1385,7 +1387,7 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
         stmtAnns = parseAnnotations();
         if (!(isTypeStart() || check(TokenType::TOKEN_CONST) ||
               check(TokenType::TOKEN_VOLATILE) || check(TokenType::TOKEN_CONSTEXPR) ||
-              check(TokenType::TOKEN_ATOMIC))) {
+              check(TokenType::TOKEN_ATOMIC) || isLocalUsingStart())) {
             errorUnexpected("annotations are only allowed on declarations");
             return nullptr;
         }
@@ -1403,6 +1405,24 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
         }
         return stmt;
     };
+
+    // PAR-24: block-scoped alias declaration (`using T = type-id;`).
+    if (isLocalUsingStart()) {
+        advance(); // consume "using"
+        std::string bare = advance()->lexeme;
+        advance(); // consume '='
+        Type* aliased = parseTypeId();
+        if (!aliased) {
+            skipPastSemicolon();
+            return nullptr;
+        }
+        match(TokenType::TOKEN_SEMICOLON);
+        auto u = std::make_unique<UsingDeclAST>(bare, aliased);
+        u->bareName = bare;
+        u->isBlockScope = true;
+        u->aliasWrapper = TypeContext::instance().addLocalTypedef(bare, aliased);
+        return makeDeclStmt(std::move(u));
+    }
 
     // if statement
     if (peek() && peek()->type == TokenType::TOKEN_IF) {
@@ -1502,11 +1522,6 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
         rejectRemovedTypeAlias();
         return std::make_unique<NullStmtAST>();
     }
-    if (isLocalUsingStart()) {
-        rejectLocalUsing();
-        return std::make_unique<NullStmtAST>();
-    }
-
     // local declaration (type keyword or typedef name)
     if (isTypeStart() || check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE) ||
         check(TokenType::TOKEN_ATOMIC)) {
@@ -2028,6 +2043,8 @@ Type* Parser::lookupNamedType(const std::string& name) const {
     if (name.find("::") != std::string::npos || name.find('.') != std::string::npos) {
         return tryKey(mangleQualifiedTypeName(name));
     }
+    // PAR-24: block-scoped aliases shadow unqualified outer names.
+    if (Type* t = tc.getLocalTypedef(name)) return t;
     // Unqualified: prefer the enclosing namespace, then the global name.
     if (!m_typeNamespacePrefix.empty()) {
         if (Type* t = tryKey(m_typeNamespacePrefix + name)) return t;

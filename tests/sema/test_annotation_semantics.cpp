@@ -178,3 +178,9 @@ TEST_F(AnnotationSemantics, DeprecatedTypeInFieldAndParam) {
         "int32 main() { return 0; }",
         "is deprecated"));
 }
+
+TEST_F(AnnotationSemantics, DeprecatedBlockUsingW3004) {
+    EXPECT_TRUE(hasWarning(
+        "int32 main() { [[deprecated(\"old\")]] using T = int32; T x = 1; return x; }",
+        "is deprecated: old"));
+}

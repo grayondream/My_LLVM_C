@@ -346,6 +346,13 @@ public:
     void addTypedef(const std::string& name, Type* type);
     Type* getTypedef(const std::string& name) const;
 
+    // PAR-24: block-scoped aliases live in a lexical stack; unqualified
+    // lookups see the innermost binding, qualified names bypass it.
+    void pushLocalTypedefScope();
+    void popLocalTypedefScope();
+    Type* addLocalTypedef(const std::string& name, Type* type);
+    Type* getLocalTypedef(const std::string& name) const;
+
     void addStruct(const std::string& name, StructType* type);
     StructType* getStruct(const std::string& name) const;
 
@@ -412,4 +419,5 @@ private:
     std::unordered_map<std::string, EnumType*> m_enums;
     std::unordered_map<std::string, ClassType*> m_classes;
     std::unordered_map<std::string, TypeVarType*> m_typeVars;
+    std::vector<std::unordered_map<std::string, Type*>> m_localTypedefs;
 };

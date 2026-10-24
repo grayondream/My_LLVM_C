@@ -40,6 +40,32 @@ Type* TypeContext::getTypedef(const std::string& name) const {
     return nullptr;
 }
 
+void TypeContext::pushLocalTypedefScope() {
+    m_localTypedefs.emplace_back();
+}
+
+void TypeContext::popLocalTypedefScope() {
+    if (!m_localTypedefs.empty()) m_localTypedefs.pop_back();
+}
+
+Type* TypeContext::addLocalTypedef(const std::string& name, Type* type) {
+    Type* wrapper = new TypedefType(name, type);
+    if (m_localTypedefs.empty()) {
+        m_typedefs[name] = wrapper;
+    } else {
+        m_localTypedefs.back()[name] = wrapper;
+    }
+    return wrapper;
+}
+
+Type* TypeContext::getLocalTypedef(const std::string& name) const {
+    for (auto it = m_localTypedefs.rbegin(); it != m_localTypedefs.rend(); ++it) {
+        auto found = it->find(name);
+        if (found != it->end()) return found->second;
+    }
+    return nullptr;
+}
+
 void TypeContext::addStruct(const std::string& name, StructType* type) {
     m_structs[name] = type;
 }
