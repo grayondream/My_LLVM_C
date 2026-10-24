@@ -179,3 +179,38 @@ TEST_F(UsingAliasE2E, TemplateAliasAcrossFunctions) {
         int32 main() { return first() + second() - 3; }
     )", "tpl_alias_fns.c"), 0);
 }
+
+TEST_F(UsingAliasE2E, StructMemberAlias) {
+    EXPECT_EQ(runSource(R"(
+        struct S { using T = int32; T x; };
+        int32 main() { S s; s.x = 3; return s.x - 3; }
+    )", "member_alias_struct.c"), 0);
+}
+
+TEST_F(UsingAliasE2E, ClassPublicMemberAliasQualified) {
+    EXPECT_EQ(runSource(R"(
+        class C { public: using T = int32; };
+        int32 main() { C::T v = 4; return v - 4; }
+    )", "member_alias_class.c"), 0);
+}
+
+TEST_F(UsingAliasE2E, UnionMemberAlias) {
+    EXPECT_EQ(runSource(R"(
+        union U { using T = int32; T i; };
+        int32 main() { U u; u.i = 6; return u.i - 6; }
+    )", "member_alias_union.c"), 0);
+}
+
+TEST_F(UsingAliasE2E, PrivateMemberAliasInsideMethod) {
+    EXPECT_EQ(runSource(R"(
+        class C { using T = int32; public: T get() { T v = 5; return v; } };
+        int32 main() { C c; return c.get() - 5; }
+    )", "member_alias_private_method.c"), 0);
+}
+
+TEST_F(UsingAliasE2E, QualifiedMemberAliasBypassesBlockAlias) {
+    EXPECT_EQ(runSource(R"(
+        class C { public: using T = int32; };
+        int32 main() { using T = float64; C::T v = 0; return sizeof(v) == 4 ? 0 : 1; }
+    )", "member_alias_qualified.c"), 0);
+}

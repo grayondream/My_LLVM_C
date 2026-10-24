@@ -1842,10 +1842,17 @@ TEST_F(ParserDeclTest, UsingBlockShadowRestoresOuter) {
     EXPECT_EQ(td->aliasedType->kind, TypeKind::Int32);
 }
 
-TEST_F(ParserDeclTest, UsingInClassBodyRejected) {
-    auto errs = parseErrors("class C { public: using T = int32; };");
-    ASSERT_FALSE(errs.empty());
-    EXPECT_NE(errs[0].message.find("only allowed at namespace scope"), std::string::npos);
+TEST_F(ParserDeclTest, ClassMemberUsingAlias) {
+    auto tu = parse("class C { public: using T = int32; };");
+    ASSERT_NE(tu, nullptr);
+    auto* cls = dynamic_cast<StructDeclAST*>(tu->declarations[0].get());
+    ASSERT_NE(cls, nullptr);
+    ASSERT_EQ(cls->nestedTypes.size(), 1u);
+    auto* u = dynamic_cast<UsingDeclAST*>(cls->nestedTypes[0].get());
+    ASSERT_NE(u, nullptr);
+    EXPECT_EQ(u->name, "C_T");
+    EXPECT_EQ(u->bareName, "T");
+    EXPECT_FALSE(u->isBlockScope);
 }
 
 TEST_F(ParserDeclTest, ConstexprVarDecl) {

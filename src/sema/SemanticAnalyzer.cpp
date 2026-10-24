@@ -4623,6 +4623,8 @@ void SemanticAnalyzer::visitNestedDecl(DeclAST& node) {
         visit(*ed);
     } else if (auto* ud = dynamic_cast<UnionDeclAST*>(&node)) {
         visit(*ud);
+    } else if (auto* u = dynamic_cast<UsingDeclAST*>(&node)) {
+        visit(*u);
     }
 }
 
@@ -4646,6 +4648,9 @@ void SemanticAnalyzer::visitNestedTypeDecls(
         } else if (auto* ud = dynamic_cast<UnionDeclAST*>(nested.get())) {
             flatName = ud->name;
             bareNested = ud->bareName;
+        } else if (auto* u = dynamic_cast<UsingDeclAST*>(nested.get())) {
+            flatName = u->name;
+            bareNested = u->bareName;
         }
         if (bareNested.empty()) bareNested = flatName;
         // DS5: record the access level so E2009 checks can find it. Struct
@@ -4662,6 +4667,22 @@ void SemanticAnalyzer::visitNestedTypeDecls(
 // defining class — checked at var declarations and cast targets.
 void SemanticAnalyzer::checkNestedTypeAccess(Type* type, const ASTNode& site) {
     if (!type) return;
+    // PAR-24: a class-scoped alias is itself an access-controlled name; walk
+    // the typedef chain before stripping it away.
+    for (Type* alias = type; alias && alias->kind == TypeKind::Typedef;
+         alias = static_cast<TypedefType*>(alias)->aliasedType) {
+        auto* td = static_cast<TypedefType*>(alias);
+        auto it = nestedTypeAccess.find(td->name);
+        if (it == nestedTypeAccess.end()) continue;
+        if (it->second.second == AccessLevel::Public) continue;
+        if (currentClass == it->second.first) continue;
+        emitError(DiagnosticCode::SemPrivateMemberAccess,
+                  "cannot access private type '" + td->name + "' of class '" +
+                      it->second.first->name +
+                      "' outside the class; make it public or add an accessor",
+                  site);
+        return;
+    }
     Type* t = stripTypedef(type);
     // AGG-11 评审 I2: arrays are named-type carriers too (`NTP::Secret a[3]`).
     while (t && (t->kind == TypeKind::Pointer || t->kind == TypeKind::Array)) {
@@ -4724,6 +4745,8 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
     for (auto& f : node.fields) {
         validateAnnotations(f.annotations, node, "field");
         f.type = resolveTypeInstance(f.type, node);
+        // PAR-24: a private class-scoped alias may not name a field here.
+        checkNestedTypeAccess(f.type, node);
         // P1-05 评审 I4: 字段类型弃用检查。
         checkDeprecatedTypeUse(f.type, node);
         // P1-04 评审 I3: 字段类型不得来自 compile_time.if 死分支。
@@ -5058,6 +5081,8 @@ void SemanticAnalyzer::visit(UnionDeclAST& node) {
     validateAnnotations(node.annotations, node, "union");
     for (auto& member : node.members) {
         validateAnnotations(member.annotations, node, "field");
+        // PAR-24: a private class-scoped alias may not name a union member.
+        checkNestedTypeAccess(member.type, node);
         // P1-07 / SEM-12: 位域基础类型与宽度范围校验。
         checkBitFieldField(member, node);
     }

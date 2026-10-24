@@ -41,12 +41,12 @@ private:
 
     Type* parseType();
     Type* parseTypeId();
+    std::unique_ptr<UsingDeclAST> parseUsingAliasDecl(bool member);
 
     // PAR-24: legacy alias forms (typedef/type) and block/member-scope using.
     bool isRemovedTypeAliasStart() const;
     bool isLocalUsingStart() const;
     void rejectRemovedTypeAlias();
-    void rejectLocalUsing();
     void skipPastSemicolon();
 
     Type* parseBaseType();

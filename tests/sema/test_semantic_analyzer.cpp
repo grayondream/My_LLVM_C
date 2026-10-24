@@ -2681,3 +2681,22 @@ TEST(SemanticAnalyzerAccessTest, PrivateBaseMemberStillRejectedFromDerived) {
         "class PVD : public PV { int32 get() { return this->x; } };\n"
         "int32 main() { PVD d; return 0; }"));
 }
+
+TEST(SemanticAnalyzerAccessTest, PrivateMemberAliasDeniedOutside) {
+    Lexer lexer("t.c", "class C { using T = int32; }; int32 main() { C::T v = 1; return v; }");
+    Parser parser(lexer.tokenize());
+    auto ast = parser.parse();
+    ASSERT_TRUE(ast != nullptr);
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    bool found = false;
+    for (const auto& e : analyzer.getErrors())
+        if (e.code == DiagnosticCode::SemPrivateMemberAccess) found = true;
+    EXPECT_TRUE(found);
+}
+
+TEST(SemanticAnalyzerAccessTest, PrivateMemberAliasInsideClassOk) {
+    EXPECT_TRUE(analyzeOk(
+        "class C { using T = int32; public: T get() { T v = 2; return v; } }; "
+        "int32 main() { C c; return c.get() - 2; }"));
+}

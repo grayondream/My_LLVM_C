@@ -1408,19 +1408,8 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
 
     // PAR-24: block-scoped alias declaration (`using T = type-id;`).
     if (isLocalUsingStart()) {
-        advance(); // consume "using"
-        std::string bare = advance()->lexeme;
-        advance(); // consume '='
-        Type* aliased = parseTypeId();
-        if (!aliased) {
-            skipPastSemicolon();
-            return nullptr;
-        }
-        match(TokenType::TOKEN_SEMICOLON);
-        auto u = std::make_unique<UsingDeclAST>(bare, aliased);
-        u->bareName = bare;
-        u->isBlockScope = true;
-        u->aliasWrapper = TypeContext::instance().addLocalTypedef(bare, aliased);
+        auto u = parseUsingAliasDecl(/*member=*/false);
+        if (!u) return nullptr;
         return makeDeclStmt(std::move(u));
     }
 
@@ -2636,6 +2625,33 @@ Type* Parser::parseTypeId() {
     return type;
 }
 
+// PAR-24: shared parser for `using IDENT = type-id ;` in block and aggregate
+// member scopes. `member=true` registers the flat qualified key and persists;
+// `member=false` writes the block-local stack and keeps the parse-time wrapper.
+std::unique_ptr<UsingDeclAST> Parser::parseUsingAliasDecl(bool member) {
+    advance(); // consume "using"
+    std::string bare = advance()->lexeme;
+    advance(); // consume '='
+    Type* aliased = parseTypeId();
+    if (!aliased) {
+        skipPastSemicolon();
+        return nullptr;
+    }
+    match(TokenType::TOKEN_SEMICOLON);
+
+    auto u = member
+        ? std::make_unique<UsingDeclAST>(qualifyTypeDeclName(bare), aliased)
+        : std::make_unique<UsingDeclAST>(bare, aliased);
+    u->bareName = bare;
+    u->isBlockScope = !member;
+    if (member) {
+        TypeContext::instance().addTypedef(u->name, aliased);
+    } else {
+        u->aliasWrapper = TypeContext::instance().addLocalTypedef(bare, aliased);
+    }
+    return u;
+}
+
 // P1-05 / ANN-01: `[[` 判定（连续两个 LBRACKET；注解名非关键字）。
 bool Parser::isAnnotationStart() const {
     if (eof() || peek()->type != TokenType::TOKEN_LBRACKET) return false;
@@ -2762,11 +2778,6 @@ void Parser::rejectRemovedTypeAlias() {
     Token tok = *peek();
     std::string kw = tok.type == TokenType::TOKEN_TYPEDEF ? "typedef" : "type";
     error("'" + kw + "' has been removed; use 'using Name = Type;' instead", tok);
-    skipPastSemicolon();
-}
-
-void Parser::rejectLocalUsing() {
-    error("'using' alias declarations are only allowed at namespace scope", *peek());
     skipPastSemicolon();
 }
 
@@ -3834,7 +3845,10 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
             continue;
         }
         if (isLocalUsingStart()) {
-            rejectLocalUsing();
+            auto u = parseUsingAliasDecl(/*member=*/true);
+            if (!u) continue;
+            u->annotations = std::move(memberAnns);
+            nestedTypes.push_back(std::move(u));
             continue;
         }
 
@@ -4203,7 +4217,11 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
             continue;
         }
         if (isLocalUsingStart()) {
-            rejectLocalUsing();
+            auto u = parseUsingAliasDecl(/*member=*/true);
+            if (!u) continue;
+            u->annotations = std::move(memberAnns);
+            memberAccess["type:" + u->bareName] = currentAccess;
+            nestedTypes.push_back(std::move(u));
             continue;
         }
 
@@ -4579,7 +4597,10 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
             continue;
         }
         if (isLocalUsingStart()) {
-            rejectLocalUsing();
+            auto u = parseUsingAliasDecl(/*member=*/true);
+            if (!u) continue;
+            u->annotations = std::move(memberAnns);
+            nestedTypes.push_back(std::move(u));
             continue;
         }
 

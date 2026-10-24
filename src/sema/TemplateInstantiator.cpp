@@ -349,6 +349,8 @@ std::unique_ptr<DeclAST> TemplateInstantiator::cloneDeclInternal(const DeclAST& 
     }
     if (auto* ud = dynamic_cast<const UsingDeclAST*>(&decl)) {
         auto* cloned = new UsingDeclAST(ud->name, rewrite(ud->aliasedType));
+        cloned->bareName = ud->bareName;
+        cloned->isBlockScope = ud->isBlockScope;
         copyLoc(cloned, *ud);
         return std::unique_ptr<DeclAST>(cloned);
     }
