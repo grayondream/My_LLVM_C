@@ -711,11 +711,12 @@ llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
             // `*p` denotes the pointee as an lvalue: yield its address and let
             // consumers load it, mirroring how variable references work.
             llvm::Value* ptrVal = emitRValue(ctx, *operand, v);
-            if (operand->type && operand->type->kind == TypeKind::Pointer) {
+            Type* opType = stripTypedefsT12(operand->type);
+            if (opType && opType->kind == TypeKind::Pointer) {
                 return ptrVal;
             }
             // Fallback when the operand type is unknown/lowering cannot tell.
-            llvm::Type* pointeeType = ctx.getLLVMType(operand->type ? operand->type->base : nullptr);
+            llvm::Type* pointeeType = ctx.getLLVMType(opType ? opType->base : nullptr);
             if (!pointeeType) pointeeType = llvm::Type::getInt8Ty(ctx.getContext());
             return builder.CreateLoad(pointeeType, ptrVal, "dereftmp");
         }

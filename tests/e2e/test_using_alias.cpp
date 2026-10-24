@@ -140,3 +140,26 @@ TEST_F(UsingAliasE2E, InlineEnumAliasExposesEnumerators) {
         int32 main() { E e = Hi; return (int32)e + Lo - 3; }
     )", "using_enum.c"), 0);
 }
+
+TEST_F(UsingAliasE2E, DerefPointerAliasReadWrite) {
+    EXPECT_EQ(runSource(R"(
+        using P = int32*;
+        int32 main() { int32 x = 7; P p = &x; *p = 9; return *p - 9; }
+    )", "deref_alias.c"), 0);
+}
+
+TEST_F(UsingAliasE2E, DerefStructPointerAliasMember) {
+    EXPECT_EQ(runSource(R"(
+        struct S { int32 x; };
+        using PS = struct S*;
+        int32 main() { S s; s.x = 1; PS p = &s; (*p).x = 5; return p->x - 5; }
+    )", "deref_struct_alias.c"), 0);
+}
+
+TEST_F(UsingAliasE2E, DerefAliasChain) {
+    EXPECT_EQ(runSource(R"(
+        using P = int32*;
+        using PP = P*;
+        int32 main() { int32 x = 3; P p = &x; PP pp = &p; return **pp - 3; }
+    )", "deref_alias_chain.c"), 0);
+}

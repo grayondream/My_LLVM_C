@@ -1988,14 +1988,16 @@ void SemanticAnalyzer::visit(UnaryExprAST& node) {
                 node.type = operandType;
             }
             break;
-        case UnaryOp::Deref:
-            if (operandType && operandType->kind == TypeKind::Pointer) {
-                node.type = operandType->base;
+        case UnaryOp::Deref: {
+            Type* pointee = stripTypedef(operandType);
+            if (pointee && pointee->kind == TypeKind::Pointer) {
+                node.type = pointee->base;
             } else {
                 emitError("cannot dereference non-pointer type '" + typeToString(operandType) + "'", node);
                 node.type = nullptr;
             }
             break;
+        }
         case UnaryOp::AddressOf:
             // P1-07 / SEM-12: a bit-field has no address (C constraint).
             if (auto* ma = dynamic_cast<MemberAccessExprAST*>(node.operand.get())) {
