@@ -161,3 +161,44 @@ TEST_F(TopLevelUserTypeE2E, PointerAliasAfterDefinition) {
         int32 main() { S s; s.x = 2; p = &s; return p->x - 2; }
     )", "tl_using_ptr.c"), 0);
 }
+
+TEST_F(TopLevelUserTypeE2E, UsingAliasBeforeStructDefinition) {
+    EXPECT_EQ(runSource(R"(
+        using N = struct Node;
+        struct Node { int32 x; };
+        int32 main() { N n; n.x = 5; return n.x - 5; }
+    )", "fwd_alias_struct.c"), 0);
+}
+
+TEST_F(TopLevelUserTypeE2E, ForwardDeclThenAliasBeforeDefinition) {
+    EXPECT_EQ(runSource(R"(
+        struct Node;
+        using N = Node;
+        struct Node { int32 x; };
+        int32 main() { N n; n.x = 6; return n.x - 6; }
+    )", "fwd_decl_alias.c"), 0);
+}
+
+TEST_F(TopLevelUserTypeE2E, UsingAliasBeforeUnionDefinition) {
+    EXPECT_EQ(runSource(R"(
+        using U = union Value;
+        union Value { int32 i; float32 f; };
+        int32 main() { U u; u.i = 7; return u.i - 7; }
+    )", "fwd_alias_union.c"), 0);
+}
+
+TEST_F(TopLevelUserTypeE2E, ForwardPointerMemberAfterDefinition) {
+    EXPECT_EQ(runSource(R"(
+        struct S; S* p;
+        struct S { int32 x; };
+        int32 main() { S s; s.x = 4; p = &s; return p->x - 4; }
+    )", "fwd_ptr_member.c"), 0);
+}
+
+TEST_F(TopLevelUserTypeE2E, PointerAliasToForwardStruct) {
+    EXPECT_EQ(runSource(R"(
+        using P = struct S*;
+        struct S { int32 x; };
+        int32 main() { S s; s.x = 8; P p = &s; return p->x - 8; }
+    )", "fwd_ptr_alias.c"), 0);
+}

@@ -2135,7 +2135,8 @@ Type* Parser::parseBaseType() {
             std::string name = parseQualifiedTypeName();
             // PAR-12: 匿名定义 `struct { ... }` 获得唯一合成名（C 语义：每次
             // 匿名定义 = 独立类型）。
-            if (name.empty() && check(TokenType::TOKEN_LBRACE)) {
+            const bool isAnonymous = name.empty();
+            if (isAnonymous && check(TokenType::TOKEN_LBRACE)) {
                 name = TypeContext::instance().nextAnonId();
             }
             std::string key = qualifyTypeDeclName(name);
@@ -2143,7 +2144,15 @@ Type* Parser::parseBaseType() {
             // Check if this is a definition or just a reference
             if (check(TokenType::TOKEN_LBRACE)) {
                 advance(); // consume '{'
-                auto* structType = new StructType(key);
+                // MOD-03: reuse an earlier forward placeholder so aliases and
+                // pointers parsed before the definition see the fields.
+                StructType* structType = nullptr;
+                if (!isAnonymous) structType = TypeContext::instance().getStruct(key);
+                if (!structType) {
+                    structType = new StructType(key);
+                } else {
+                    structType->fields.clear();
+                }
                 while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
                     Type* fieldType = parseType();
                     if (!fieldType) break;
@@ -2207,14 +2216,22 @@ Type* Parser::parseBaseType() {
             advance(); // consume 'union'
             std::string name = parseQualifiedTypeName();
             // PAR-12: 匿名 union 定义获得唯一合成名。
-            if (name.empty() && check(TokenType::TOKEN_LBRACE)) {
+            const bool isAnonymous = name.empty();
+            if (isAnonymous && check(TokenType::TOKEN_LBRACE)) {
                 name = TypeContext::instance().nextAnonId();
             }
             std::string key = qualifyTypeDeclName(name);
 
             if (check(TokenType::TOKEN_LBRACE)) {
                 advance(); // consume '{'
-                auto* unionType = new UnionType(key);
+                // MOD-03: mirror the struct placeholder reuse.
+                UnionType* unionType = nullptr;
+                if (!isAnonymous) unionType = TypeContext::instance().getUnion(key);
+                if (!unionType) {
+                    unionType = new UnionType(key);
+                } else {
+                    unionType->members.clear();
+                }
                 while (!eof() && !check(TokenType::TOKEN_RBRACE)) {
                     Type* memberType = parseType();
                     if (!memberType) break;
@@ -2826,7 +2843,14 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
         // Register struct type in TypeContext if it has fields or nested
         // type declarations (AGG-11: a nested-only struct still names a type).
         if (!structDecl->fields.empty() || !structDecl->nestedTypes.empty()) {
-            auto structType = new StructType(structDecl->name);
+            // MOD-03: a definition completes the parse-time placeholder in
+            // place, so aliases/pointers bound before it see the fields.
+            StructType* structType = TypeContext::instance().getStruct(structDecl->name);
+            if (!structType) {
+                structType = new StructType(structDecl->name);
+            } else {
+                structType->fields.clear();
+            }
             for (auto& field : structDecl->fields) {
                 structType->addField(field.name, field.type, field.bitWidth);
                 if (field.flexibleArray && !structType->fields.empty())
@@ -2927,7 +2951,13 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
         // Register union type in TypeContext if it has members or nested
         // type declarations (AGG-11: a nested-only union still names a type).
         if (!unionDecl->members.empty() || !unionDecl->nestedTypes.empty()) {
-            auto unionType = new UnionType(unionDecl->name);
+            // MOD-03: mirror the struct placeholder reuse.
+            UnionType* unionType = TypeContext::instance().getUnion(unionDecl->name);
+            if (!unionType) {
+                unionType = new UnionType(unionDecl->name);
+            } else {
+                unionType->members.clear();
+            }
             for (auto& member : unionDecl->members) {
                 unionType->addMember(member.name, member.type, member.bitWidth);
                 if (member.flexibleArray && !unionType->members.empty())
