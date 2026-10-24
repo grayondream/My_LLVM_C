@@ -74,6 +74,9 @@ using IntArr = int32[10];
 using Opt = int32?;                 // optional 别名
 using Size = int32;
 using Speed = float64;              // 唯一的别名形式
+class AliasHolder { public: using Value = int32; Value get() { return 7; } };
+using FwdNode = struct FwdNodeDef;
+struct FwdNodeDef { int32 v; };
 
 // 全局 f()：与 namespace io::f() 隔离（第 13 节用）
 int32 f() { return 1; }
@@ -90,6 +93,7 @@ void section_aliases() {
     check(n == 7, "using int32");
     check(p.x + p.y == 3, "anonymous struct alias");
     check(ip == null, "pointer alias");
+    int32 dx = 3; IntPtr dpx = &dx; *dpx = 4; check(dx == 4, "pointer alias deref");
     // 数组别名：下标 / sizeof / slice 退化全部可用。
     check(arr[0] == 0 && arr[9] == 9, "array alias subscript");
     check(sizeof(arr) == 40, "array alias sizeof");
@@ -98,6 +102,9 @@ void section_aliases() {
     check(o.valid && o.value == 42, "optional alias");
     check(s == 9, "using alias");
     check(sp == 3.25, "using float64 alias");
+    { using LocalInt = int32; LocalInt lv = 5; check(lv == 5, "block-scoped using"); }
+    AliasHolder ah; check(ah.get() == 7, "member using");
+    FwdNode fnode; fnode.v = 9; check(fnode.v == 9, "forward alias");
 }
 
 // ---------------------------------------------------------------------------

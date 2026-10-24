@@ -69,7 +69,7 @@
 | `template` | `[impl]` | GEN-01 / PAR-21（函数/class/别名模板） |
 | `typename` | `[impl]` | GEN-01 |
 | `this` | `[impl]` | CRTP 必需，PAR-17 / INH-05 |
-| `using` | `[impl]` 上下文 | 唯一类型别名形式 `using X = type-id;`；仅顶层/namespace |
+| `using` | `[impl]` 上下文 | 唯一类型别名形式 `using X = type-id;`；顶层/namespace/块/聚合成员体（块内词法作用域，成员受访问控制） |
 | `type` | `[removed]` | PAR-24：distinct 别名方案取消，由 `using` 取代 |
 | `generic` | `[remove]` | 未使用的旧泛型关键字；token 已移除（LEX-02 / DEC-18） |
 

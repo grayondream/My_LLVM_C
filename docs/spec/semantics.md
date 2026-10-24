@@ -70,7 +70,8 @@
 
 - 唯一形式：`using Name = type-id;`。
 - `type-id` 支持基础类型与限定符、指针 `T*`、切片 `T[]`、optional `T?`、固定数组 `T[N]`（可多维，维度须整数字面量）、抽象函数指针 `Ret (*)(params)`、模板实例，以及内联/命名 struct/union/enum 定义。
-- 别名在顶层与 namespace 作用域可用；块内、class/struct/union 成员体内的别名声明被拒绝（报 “only allowed at namespace scope”）。
+- 别名在顶层、namespace、块内、class/struct/union 成员体均可用。块内别名是词法作用域：声明点至块尾，可遮蔽外层，块尾失效；嵌套块独立。成员别名在类内可用裸名，类外经 `C::T` 访问；class 内受 `public/private/protected` 控制，struct/union 恒 public；不继承到派生类。
+- `using N = struct Node;` 隐式前向声明 `Node`；同名定义与占位合并，早先绑定的别名/指针在定义后看到字段。`*p` 对任意层指针别名透明。
 - `using E = enum { A, B };` 的枚举量在别名所在作用域可见。
 - `[[deprecated]]` 折叠到别名，使用点告警；`[[repr(C)]]` 等非别名目标注解报错。
 - `typedef` 与 `type` 已移除：出现即报硬错误并提示改用 `using`，无兼容模式。内部 `TypeKind::Typedef` 仍是别名的实现表示。

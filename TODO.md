@@ -39,6 +39,9 @@
 
 > **进度快照（2026-10-23，using 别名收口 / PAR-24）**：**删除 `typedef` 与 `type`，`using` 成为唯一类型别名形式**（spec/plan `docs/superpowers/specs|plans/2026-10-23-using-alias*`）。`using` RHS 升级为完整 type-id：固定数组（多维）、抽象函数指针、切片/optional/模板实例、内联/命名聚合；内联 enum 枚举量在别名作用域可见；`deprecated`/`repr` 注解语义对齐。`typedef`/`type` 在顶层、namespace、块、聚合成员体统一硬错误并提示改写；删除 `TypedefDeclAST`/`TypeDeclAST`，保留内部 `TypedefType`。迁移 16 个测试文件与 `examples/all_features.c`。当前全量 **1512** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。DEC-16/PAR-24 关闭；块内/类内 `using`、前向别名身份、`*p` 解引用既有缺陷仍挂账。
 
+> **进度快照（2026-10-24，类型解析三缺口收口）**：**块/成员体 `using`、前向类型身份、别名指针解引用完成**（spec/plan `docs/superpowers/{specs,plans}/2026-10-24-type-resolution-gaps*`）。块内 `using` 走 TypeContext 局部别名栈（词法作用域、可遮蔽、块尾失效）；class/struct/union 成员别名以扁平键 + `C::T` 暴露，class 受 E2009 访问控制；struct/union 前向占位与定义合并，`using N = struct Node;` / `struct S; S* p;` 后 `p->x` 可用；`*p` 穿透任意层指针别名。全量 **1534** 测试 0 失败。MOD-03 关闭；剩余：前向类型按值使用诊断、单语句体 `using` 作用域、成员别名继承。
+
+
 > **进度快照（2026-10-19，语法遗漏收口完成）**：**语法层面审计 + 11 项特性/缺陷收口**（spec/plan `docs/superpowers/specs|plans/2026-10-18-syntax-gaps*`）。多行字符串 `"""..."""` 与 Unicode 标识符（LEX-16/18）；`char8/16/32` 类型（uint 别名）与 `thread_local`（TYP-05/CON-04）；`atomic` 限定符（整型标量，原子 load/store + atomicrmw 子集，CON-01）；默认参数（区间重载 + 少默认优先，FUN-09）；**未知类型名声明静默丢弃修复**（E2031，此前 `f16 x;` 零诊断消失）；compile_time 反射 `name_of/fields_of/attributes_of`（ReflectionRegistry 交接，CT-07/13）；protected 派生访问放宽（INH-06）；`alignof/offsetof` 独立关键字与 `nullptr`（PAR-14/TYP-24）。当前全量 **1418** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。P1-09 剩余：仅 std.collections（STD-06~08，阻塞于「模块导出类型」语言缺口）。
 
 ---
@@ -124,7 +127,7 @@
 - `[x]` **PAR-21** `(新)` 模板声明语法（2026-10-06）。函数/struct/class/别名模板；union/enum 拒绝；`class T` 参数诊断提示 typename；非类型参数仅整数。
 - `[x]` **PAR-22** `(新)` `namespace` 声明与限定名 `ns::name` 语法（现缺失；`src/libsafec` 已使用 `namespace safec`）。函数/变量成员、嵌套命名空间、限定类型名（struct/class/union/enum/typedef）均已实现。
 - `[x]` **PAR-23** `(新)` 运算符优先级/结合性在解析器中的显式实现与表驱动测试（配合 INF-10）。`smc::getOperatorInfo` 表驱动 + `test_operator_precedence` + `test_spec_conformance`。
-- `[x]` **PAR-24** `(新)` 别名声明规范形式收敛：**已收口（2026-10-23）**——删除 `typedef`/`type`，只留 `using`；`using` RHS = 完整 type-id（固定数组、函数指针、内联 enum、聚合定义）；删除 `TypedefDeclAST`/`TypeDeclAST`，保留内部 `TypedefType`。
+- `[x]` **PAR-24** `(新)` 别名声明规范形式收敛：**已收口（2026-10-23）**——删除 `typedef`/`type`，只留 `using`；`using` RHS = 完整 type-id（固定数组、函数指针、内联 enum、聚合定义）；删除 `TypedefDeclAST`/`TypeDeclAST`，保留内部 `TypedefType`。 **2026-10-24 补丁**：块/成员体作用域别名、前向占位合并、`*p` 穿透指针别名（MOD-03 关闭）。
 
 ---
 
@@ -132,7 +135,7 @@
 
 - `[ ]` **MOD-01** 符号表：全局/模块/类型/函数/变量/字段/方法。
 - `[ ]` **MOD-02** 作用域规则：块/函数/类型/模块。
-- `[ ]` **MOD-03** 前向声明：函数/struct/class/enum/union/类型别名。**已知缺口**（2026-10-22）：struct/union 前向声明的占位类型与后续定义不合并——`struct S; S* p; struct S { ... }; p->x` 报「no member」；class/enum 因 eager 注册不受影响。
+- `[x]` **MOD-03** 前向声明：函数/struct/class/enum/union/类型别名。**已完成（2026-10-24）**：struct/union 前向占位与定义合并为同一对象——`using N = struct Node;`、`struct S; S* p; struct S { ... };` 后 `N`/`p->x` 均可见字段；class/enum 原有 eager 注册不变。
 - `[x]` **MOD-04** `module` 声明与文件映射。点分/`::` 模块名 → `TranslationUnitAST::moduleName`；`import` 点分名解析 + 文件↔模块名校验（MOD-13）。
 - `[x]` **MOD-05** `export` 导出规则；`import` 导入规则与访问语法（DEC-02 已冻结：直接非限定访问）。参与模块默认私有，`export`/`public` 后可见。
 - `[x]` **MOD-06** 模块可见性与 `public/private`。每模块私有作用域 + `export` 提升到全局；顶层 `public` 与 `export` 同义（类成员访问级别仍待 PAR-04）。类型名可见性见 `docs/spec/modules.md` §11 限制。

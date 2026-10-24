@@ -115,8 +115,9 @@ decl-core           = type-alias
                     | function-decl
                     | variable-decl-list ;
 
-(* --- 类型别名（PAR-24：using 是唯一形式；typedef/type 已移除） --- *)
-type-alias          = 'using' , identifier , '=' , type-id , ';' ;  (* [impl] 上下文关键字，仅顶层/namespace *)
+(* --- 类型别名（PAR-24：using 是唯一形式；顶层/namespace/块/聚合成员体，
+   块内词法作用域，成员受访问控制；typedef/type 已移除） --- *)
+type-alias          = 'using' , identifier , '=' , type-id , ';' ;  (* [impl] 上下文关键字；块/成员体见作用域规则 *)
 type-id             = type , { '[' , integer-literal , ']' }
                     , [ '(' , '*' , ')' , '(' , [ parameter-list ] , ')' ] ;
 
@@ -126,19 +127,20 @@ record-decl         = struct-decl | class-decl | union-decl ;
 (* PAR-12 [impl] 2026-10-17: 匿名聚合定义——无 tag 的
    struct/union/class 定义 + 内联变量声明符（`struct { ... } v;`）。
    每个匿名定义是独立类型（合成名 __anon_N，C 语义）。*)
-struct-decl         = 'struct' , [ identifier ] , [ '{' , { field-decl } , '}' ] , ';'
-                    | 'struct' , '{' , { field-decl } , '}' , identifier , { ',' , identifier } , ';' ;
+struct-decl         = 'struct' , [ identifier ] , [ '{' , { field-decl | type-alias } , '}' ] , ';'
+                    | 'struct' , '{' , { field-decl | type-alias } , '}' , identifier , { ',' , identifier } , ';' ;
 
 class-decl          = 'class' , [ identifier ]
                       [ ':' , [ access-specifier ] , qualified-name ]   (* [impl] 仅记录 baseClass; 继承语义 INH-01 [plan] *)
                       [ '{' , { class-member } , '}' ] , ';' ;
 class-member        = access-section
                     | field-decl , ';'
-                    | function-decl ;
+                    | function-decl
+                    | type-alias ;
 access-section      = ( 'public' | 'private' | 'protected' ) , ':' ;  (* [plan] protected 见 PAR-04；默认级别 DEC-01 *)
 
-union-decl          = 'union' , [ identifier ] , [ '{' , { field-decl } , '}' ] , ';'
-                    | 'union' , '{' , { field-decl } , '}' , identifier , { ',' , identifier } , ';' ;
+union-decl          = 'union' , [ identifier ] , [ '{' , { field-decl | type-alias } , '}' ] , ';'
+                    | 'union' , '{' , { field-decl | type-alias } , '}' , identifier , { ',' , identifier } , ';' ;
 
 field-decl          = type , identifier , [ '[' , const-expr , ']' ]
                     | bit-field-decl ;                              (* [plan] AGG-06 / PAR-10 *)
@@ -238,7 +240,7 @@ statement           = declaration-statement
                     | compile-time-if
                     | asm-statement ;                               (* [impl] asm PAR-16/CG-10 P1-08 *)
 
-declaration-statement = declaration ;
+declaration-statement = declaration | type-alias ;
 expression-statement  = expr , ';' ;
 
 if-statement        = 'if' , '(' , expr , ')' , statement , [ 'else' , statement ] ;

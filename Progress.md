@@ -893,3 +893,15 @@
 - **Task 6**：`grammar.ebnf`（唯一 `type-alias` + `type-id` 产生式）、`keywords.md`（typedef/type 标 `[removed]`，using 为唯一形式）、`semantics.md` §5.5、`abi.md`/`conversions.md`/`fixed-width-types.md` 措辞；TODO PAR-24/DEC-16 `[x]` + 进度快照 1512；本记录。
 - 验证：每任务 TDD RED→GREEN；最终全量 ctest **1512/1512** 通过（2 个既有 `GTEST_SKIP` 不变）；语言源 `typedef`/`type` 扫描与 `TypedefDeclAST`/`TypeDeclAST` 扫描均为空；工作区 clean。
 - 遗留：块/类/结构体内 `using`（需局部类型作用域）、前向别名身份（`using N = struct Node;` 后定义仍无成员）、`*p` 对指针别名不解引用（typedef/using 既有）、`resources/main.c` 非构建源未迁移。
+
+## 2026-10-24 — 类型解析三缺口收口
+
+- 流程：brainstorming → spec `docs/superpowers/specs/2026-10-24-type-resolution-gaps-design.md` → builder-check（4 点裁决：局部词法键、分层 delta 栈、模板别名风险不成立、块别名不 declare）→ plan `docs/superpowers/plans/2026-10-24-type-resolution-gaps.md` → executing-plans Native。
+- 提交线：Task1 `045bccc`（`*p` 穿透别名）→ Task2 `9775a95`（前向占位合并）→ Task3 `6ff650d`（块作用域 using）→ Task4 `8cef859`（成员体 using + 访问控制）→ Task5 本文档提交。
+- **Task 1**：sema `UnaryOp::Deref` 与 codegen 先剥 `TypedefType`；`using P=int32*; *p` 读写、`(*p).x`、`**pp` 全通。
+- **Task 2**：parser 在 `parseType()` 内联定义与 `parseDeclarationImpl()` 注册处复用已有 struct/union 占位（清空字段重填），不再 `new` 覆盖；`using N=struct Node;`、`struct S; S* p;` 定义后可见成员；parser 不置 `isComplete`，重定义判定仍归 sema。
+- **Task 3**：TypeContext 新增局部别名栈（`push/pop/add/getLocalTypedef`，`addLocalTypedef` 返回解析期包装）；`parseCompoundStmt`/sema `visit(CompoundStmtAST)` 配平 push/pop；块 `using` 走 `parseUsingAliasDecl(false)`，非限定名先查局部栈，限定名跳过；块别名不 `declare`、弃用标志落到 `aliasWrapper` + 新包装。
+- **Task 4**：`parseUsingAliasDecl(true)` 用扁平键登记成员别名并入 `nestedTypes`；class 记录 `type:<bare>` 访问级别；sema `visitNestedTypeDecls/visitNestedDecl` 识别 `UsingDeclAST`，`checkNestedTypeAccess` 先走 typedef 链，字段/union 成员/变量/转换目标均受 E2009 约束；TemplateInstantiator 复制 `bareName/isBlockScope`。
+- **Task 5**：`grammar.ebnf`（`declaration-statement`、`class-member`、struct/union 体加 `type-alias`）、`semantics.md` §5.5（作用域/前向/解引用）、`keywords.md`、`examples/all_features.c`（块别名、成员别名、前向别名、别名解引用）；TODO MOD-03 `[x]` + PAR-24 补丁 + 2026-10-24 快照。
+- 验证：每任务 TDD RED→GREEN；最终全量 **1534/1534** 通过（2 个既有 `GTEST_SKIP` 不变）；示例输出 `ALL FEATURES OK`。
+- 遗留：前向类型按值使用（`N n;` 在定义前）未诊断；无花括号单语句体的 `using` 作用域延伸到外层块；成员别名不继承到派生类；同作用域重复别名不诊断。
