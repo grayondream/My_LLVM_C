@@ -20,9 +20,8 @@ import std.math;
 
 int32 fails = 0;
 
-// 统一断言助手：msg 为 string_view 字面量；cond 失败则计数并打印。
-// 注：本语言比较表达式不能直接作 bool 实参（已知解析局限），故形参用 int32。
-void check(int32 c, string_view msg) {
+// 统一断言助手：cond 为 bool（比较结果可隐式转为 bool）；失败则计数并打印。
+void check(bool c, string_view msg) {
     if (!c) {
         fails = fails + 1;
         println("FAIL: {}", msg);

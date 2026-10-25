@@ -41,6 +41,7 @@
 
 > **进度快照（2026-10-24，类型解析三缺口收口）**：**块/成员体 `using`、前向类型身份、别名指针解引用完成**（spec/plan `docs/superpowers/{specs,plans}/2026-10-24-type-resolution-gaps*`）。块内 `using` 走 TypeContext 局部别名栈（词法作用域、可遮蔽、块尾失效）；class/struct/union 成员别名以扁平键 + `C::T` 暴露，class 受 E2009 访问控制；struct/union 前向占位与定义合并，`using N = struct Node;` / `struct S; S* p;` 后 `p->x` 可用；`*p` 穿透任意层指针别名。全量 **1534** 测试 0 失败。MOD-03 关闭；剩余：前向类型按值使用诊断、单语句体 `using` 作用域、成员别名继承。
 > **进度快照（2026-10-25，full_feature 验收示例）**：新增 `examples/full_feature.c`（25 节），单文件覆盖 module/import/export、lambda、运算符重载、块/成员 `using`、前向类型与指针别名解引用、u8/u16/u32/raw/multiline、thread_local/static/atomic/volatile/inline 等；编译运行输出 `FULL FEATURE OK`。全量测试仍 **1535/1535**。
+> **进度快照（2026-10-25，比较结果作 bool 实参）**：`conversionRank` 增加整数 → `bool`（rank 2），比较表达式（`int32`）可直接传 `bool` 形参，同时保留 `int32` 重载优先；`bool → 整数` 仍按拓宽。全量 **1537/1537**；两个示例的 `check` 已改回 `bool` 形参并运行通过。
 
 
 > **进度快照（2026-10-19，语法遗漏收口完成）**：**语法层面审计 + 11 项特性/缺陷收口**（spec/plan `docs/superpowers/specs|plans/2026-10-18-syntax-gaps*`）。多行字符串 `"""..."""` 与 Unicode 标识符（LEX-16/18）；`char8/16/32` 类型（uint 别名）与 `thread_local`（TYP-05/CON-04）；`atomic` 限定符（整型标量，原子 load/store + atomicrmw 子集，CON-01）；默认参数（区间重载 + 少默认优先，FUN-09）；**未知类型名声明静默丢弃修复**（E2031，此前 `f16 x;` 零诊断消失）；compile_time 反射 `name_of/fields_of/attributes_of`（ReflectionRegistry 交接，CT-07/13）；protected 派生访问放宽（INH-06）；`alignof/offsetof` 独立关键字与 `nullptr`（PAR-14/TYP-24）。当前全量 **1418** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。P1-09 剩余：仅 std.collections（STD-06~08，阻塞于「模块导出类型」语言缺口）。

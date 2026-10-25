@@ -912,3 +912,11 @@
 - 新增 `examples/full_feature.c`（908 行，25 节）：在单文件内覆盖当前实现的定宽类型/字面量、`using`（顶层/块作用域/成员体/前向别名/指针别名链）、struct/union/enum/位域、class（单继承/访问控制/protected/类外方法）、指针与函数指针、数组/切片、string_view/string/format/split、u8/u16/u32/raw/multiline 字符串、optional/result、模板与别名模板、namespace、函数与运算符重载、lambda、控制流（含 do-while）、显式转换、constexpr/compile_time/alignof/offsetof、模块（`module full_feature;` + `import std.math;` + `export`）、内联 asm、libc、thread_local/static/atomic/volatile/inline。
 - 编译运行：`./build/bin/my_llvm_c examples/full_feature.c -o /tmp/full_feature && /tmp/full_feature`，输出 `FULL FEATURE OK`，退出码 0。
 - 说明：`examples/all_features.c` 保持原样；full_feature 以模块单元形式演示 module/import/export。
+
+## 2026-10-25 — 比较结果作 bool 实参
+
+- 根因：`conversionRank`（`src/ast/Symbol.cpp`）只放行拓宽/衰变，比较表达式类型为 `int32`，`int32 → bool` 无 rank；而赋值/返回走 `checkAssignmentTypes` 的算术转换，两条路径不一致。
+- 修复：`conversionRank` 增加整数 → `bool`（rank 2，低于拓宽，`int32` 重载仍优先）；`bool → 整数` 保持 rank 1；浮点 → `bool` 仍仅显式。
+- 测试：`OverloadingE2E.ComparisonResultAsBoolArgument`（比较/整数实参）、`ComparisonResultPrefersInt32Overload`；全量 **1537/1537** 通过。
+- `examples/all_features.c` 与 `examples/full_feature.c` 的 `check` 帮手改为 `bool` 形参，直接接收比较结果；两者分别输出 `ALL FEATURES OK` / `FULL FEATURE OK`。
+- 文档：`docs/spec/conversions.md` §3 记录实参路径的整数 → `bool` 转换。

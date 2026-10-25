@@ -105,3 +105,25 @@ TEST_F(OverloadingE2E, OperatorOverloading) {
         }
     )", "test_op_overload.c"), 0);
 }
+
+// TYP-23: an int32-valued expression (notably a comparison) must be usable
+// where a bool parameter is expected, like assignment already allows.
+TEST_F(OverloadingE2E, ComparisonResultAsBoolArgument) {
+    EXPECT_EQ(runSource(R"(
+        int32 truth(bool b) { return b ? 1 : 0; }
+        int32 main() {
+            if (truth(1 == 1) != 1) return 1;
+            if (truth(1 == 2) != 0) return 2;
+            if (truth(7) != 1) return 3;
+            return 0;
+        }
+    )", "cmp_bool_arg.c"), 0);
+}
+
+TEST_F(OverloadingE2E, ComparisonResultPrefersInt32Overload) {
+    EXPECT_EQ(runSource(R"(
+        int32 pick(bool b) { return 1; }
+        int32 pick(int32 x) { return 2; }
+        int32 main() { return pick(1 == 1) - 2; }
+    )", "cmp_bool_overload.c"), 0);
+}

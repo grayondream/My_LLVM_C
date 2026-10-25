@@ -260,6 +260,10 @@ int conversionRank(Type* from, Type* to) {
     int fb = floatWidth(from->kind);
     int tb = floatWidth(to->kind);
 
+    // TYP-23: integers convert implicitly to bool (comparison results are
+    // int32). Ranked below widening so a real integer overload still wins.
+    if (fw > 0 && to->kind == TypeKind::Bool) return 2;
+
     if (fw > 0 && tw > 0 && tw >= fw) return 1;   // integer widening
     if (fw > 0 && tb > 0) return 1;               // integer -> floating point
     if (fb > 0 && tb > 0 && tb >= fb) return 1;   // floating point widening

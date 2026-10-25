@@ -56,6 +56,7 @@
      - 符号性相同 → 取 rank 较高者。
      - 不同符号性：无符号 rank ≥ 有符号 → 无符号；有符号 rank 更高则取有符号（可覆盖无符号全部值）。
 3. 转换等级（rank，由低到高）：`bool < char/int8/uint8 < int16/uint16 < int32/uint32 < int64/uint64/isize/usize < int128/uint128`；同宽度有/无符号同 rank。
+4. `[impl]` 函数实参转换（`conversionRank`）允许整数 → `bool`（rank 2，低于拓宽），因此比较结果（类型为 `int32`）可直接传给 `bool` 形参；`bool → 整数` 按拓宽（rank 1）。浮点 → `bool` 仍需显式转换。
 
 | kind | 位宽（`integerRank`） |
 |---|---|
