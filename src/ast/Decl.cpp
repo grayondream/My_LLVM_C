@@ -941,7 +941,39 @@ llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
 
 llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
     llvm::Type* llvmType = ctx.getLLVMType(type);
-    
+
+    // C static local: emit one module-scope global and bind the function-local
+    // name to it. Sema has already proven the initializer is constant.
+    if (isStaticLocal && !ctx.isGlobalScope()) {
+        llvm::Constant* initConstant = nullptr;
+        if (foldedValue) {
+            initConstant = foldToConstant(ctx, *foldedValue);
+        } else if (initExpr) {
+            initConstant = llvm::dyn_cast_or_null<llvm::Constant>(initExpr->codegen(ctx));
+        }
+        if (initConstant) {
+            initConstant = llvm::dyn_cast_or_null<llvm::Constant>(
+                ctx.castValue(initConstant, initExpr ? initExpr->type : nullptr, llvmType));
+        }
+        if (!initConstant) {
+            initConstant = llvm::Constant::getNullValue(llvmType);
+        }
+        llvm::Function* fn = ctx.getBuilder().GetInsertBlock()
+                                 ? ctx.getBuilder().GetInsertBlock()->getParent()
+                                 : nullptr;
+        std::string fnName = fn ? fn->getName().str() : "global";
+        static unsigned long staticLocalId = 0;
+        std::string globalName = "__smc_static_" + fnName + "_" + name + "_" +
+                                 std::to_string(staticLocalId++);
+        auto* global = new llvm::GlobalVariable(
+            ctx.getModule(), llvmType, type->isConst,
+            llvm::GlobalVariable::InternalLinkage, initConstant, globalName);
+        if (isThreadLocal) global->setThreadLocal(true);
+        if (declAlign) global->setAlignment(llvm::Align(declAlign));
+        ctx.declareVariable(name, global, type);
+        return global;
+    }
+
     if (ctx.isGlobalScope()) {
         llvm::Constant* initConstant = nullptr;
         if (isConstexpr && foldedValue) {

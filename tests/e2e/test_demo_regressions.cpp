@@ -390,3 +390,52 @@ TEST_F(DemoRegressionE2E, IncompleteTypePointerAllowed) {
         int32 main() { struct S s; s.x = 1; p = &s; return p->x - 1; }
     )", "reg_incomplete_ptr.c"), 0);
 }
+
+TEST_F(DemoRegressionE2E, StaticLocalPersistsAcrossCalls) {
+    EXPECT_EQ(runSource(R"(
+        int32 next() { static int32 x = 0; x = x + 1; return x; }
+        int32 main() {
+            if (next() != 1) return 1;
+            if (next() != 2) return 2;
+            if (next() != 3) return 3;
+            return 0;
+        }
+    )", "reg_static_local.c"), 0);
+}
+
+TEST_F(DemoRegressionE2E, StaticLocalWithoutInitializerIsZero) {
+    EXPECT_EQ(runSource(R"(
+        int32 next() { static int32 x; x = x + 1; return x; }
+        int32 main() { return next() == 1 ? 0 : 1; }
+    )", "reg_static_local_zero.c"), 0);
+}
+
+TEST_F(DemoRegressionE2E, StaticLocalNonConstantInitRejected) {
+    EXPECT_EQ(runSource(R"(
+        int32 seed() { return 5; }
+        int32 f() { static int32 x = seed(); return x; }
+        int32 main() { return f(); }
+    )", "reg_static_local_nonconst.c"), -1);
+}
+
+TEST_F(DemoRegressionE2E, ThreadLocalStaticLocalCompiles) {
+    EXPECT_EQ(runSource(R"(
+        int32 next() { static thread_local int32 x = 3; x = x + 1; return x; }
+        int32 main() {
+            if (next() != 4) return 1;
+            if (next() != 5) return 2;
+            return 0;
+        }
+    )", "reg_tls_local.c"), 0);
+}
+
+TEST_F(DemoRegressionE2E, LocalRecordDefinitions) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            struct S { int32 x; }; S s; s.x = 1;
+            union U { int32 i; float32 f; }; U u; u.i = 2;
+            enum E { A = 3 }; int32 e = (int32)A;
+            return s.x + u.i + e - 6;
+        }
+    )", "reg_local_records.c"), 0);
+}

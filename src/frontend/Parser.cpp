@@ -1487,6 +1487,62 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
         return parseCompoundStmt();
     }
 
+    // Local record declarations: `struct S { ... };`, `union U { ... };`,
+    // `enum E { ... };` — route through the normal declaration parser (the
+    // sema/codegen already handle record decls in DeclStmtAST).
+    if (check(TokenType::TOKEN_STRUCT) || check(TokenType::TOKEN_UNION) ||
+        check(TokenType::TOKEN_ENUM)) {
+        size_t savedPos = m_currentTokenPos;
+        auto decl = parseDeclaration();
+        if (decl) {
+            applyLocation(decl.get(), stmtStart ? &*stmtStart : nullptr);
+            return makeDeclStmt(std::move(decl));
+        }
+        m_currentTokenPos = savedPos;
+    }
+
+    // Local storage classes: `static T x;` / `thread_local T x;`
+    // (and `static thread_local`). C gives block-scope thread_local static
+    // storage duration, so both forms allocate at module scope.
+    if (check(TokenType::TOKEN_STATIC) || check(TokenType::TOKEN_THREAD_LOCAL)) {
+        bool isStatic = false;
+        bool isTls = false;
+        while (check(TokenType::TOKEN_STATIC) || check(TokenType::TOKEN_THREAD_LOCAL)) {
+            if (check(TokenType::TOKEN_STATIC)) {
+                advance();
+                isStatic = true;
+            } else {
+                advance();
+                isTls = true;
+            }
+        }
+        if (!isStatic && isTls) isStatic = true;
+        if (!(isTypeStart() || check(TokenType::TOKEN_CONST) ||
+              check(TokenType::TOKEN_VOLATILE) || check(TokenType::TOKEN_ATOMIC))) {
+            errorUnexpected("expected a variable declaration after storage class");
+            return std::make_unique<NullStmtAST>();
+        }
+        Type* type = parseType();
+        if (!type || !check(TokenType::TOKEN_IDENTIFIER)) {
+            errorUnexpected("expected variable name in storage-class declaration");
+            return std::make_unique<NullStmtAST>();
+        }
+        auto nameTok = advance();
+        auto varDecl = parseVariableDeclList(type, nameTok->lexeme);
+        if (!varDecl) return nullptr;
+        std::function<void(DeclAST*)> mark = [&mark, isStatic, isTls](DeclAST* d) {
+            if (auto* var = dynamic_cast<VarDeclAST*>(d)) {
+                var->isStaticLocal = isStatic;
+                var->isThreadLocal = isTls;
+            } else if (auto* multi = dynamic_cast<MultiVarDeclAST*>(d)) {
+                for (auto& sub : multi->decls) mark(sub.get());
+            }
+        };
+        mark(varDecl.get());
+        applyLocation(varDecl.get(), stmtStart ? &*stmtStart : nullptr);
+        return makeDeclStmt(std::move(varDecl));
+    }
+
     // local constexpr declaration: `constexpr T name = ...;`
     if (check(TokenType::TOKEN_CONSTEXPR)) {
         auto decl = parseDeclaration();

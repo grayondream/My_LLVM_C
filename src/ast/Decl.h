@@ -59,6 +59,8 @@ public:
     // Parser-side source-order snapshot for MOD-03: the declared aggregate had
     // no definition at this point (a later definition must not silence it).
     bool typeIncompleteAtParse = false;
+    // C static local: function-scoped declaration with static storage duration.
+    bool isStaticLocal = false;
 
     VarDeclAST(const std::string& n, Type* t, std::unique_ptr<ExprAST> init = nullptr, bool constexpr_ = false)
         : name(n), type(t), initExpr(std::move(init)), isConstexpr(constexpr_) {}

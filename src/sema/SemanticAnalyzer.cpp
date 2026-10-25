@@ -4433,6 +4433,26 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
         m_globalVarNames.insert(node.name);
         m_globalVarNames.insert(sourceVarName);
     }
+    // C static local: initialization must be a compile-time constant; the
+    // storage itself is emitted at module scope by codegen.
+    if (node.isStaticLocal && node.initExpr) {
+        auto folded = evaluateConstexpr(node.initExpr.get());
+        if (!folded) {
+            emitError("static local variable '" + node.name +
+                          "' must be initialized with a constant expression",
+                      node);
+        } else {
+            FoldedValue fv;
+            fv.type = static_cast<FoldedValue::Type>(folded->type);
+            switch (folded->type) {
+                case ConstValue::INT: fv.intVal = folded->intVal; break;
+                case ConstValue::DOUBLE: fv.doubleVal = folded->doubleVal; break;
+                case ConstValue::CHAR: fv.charVal = folded->charVal; break;
+            }
+            node.foldedValue = fv;
+        }
+    }
+
     if (node.isConstexpr) {
         if (!node.initExpr) {
             emitError("constexpr variable '" + node.name + "' must have initializer", node);
