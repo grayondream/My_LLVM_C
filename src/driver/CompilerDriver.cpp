@@ -252,6 +252,35 @@ int CompilerDriver::compileFile(const std::string& inputFile) {
         return 1;
     }
 
+    // P0-04/MOD-04: load imports before parsing the importer so imported
+    // types are registered in TypeContext when `S s;` is parsed. Functions and
+    // variables already worked through sema; types need this parse-time pass.
+    std::set<std::string> loadedModules;
+    smc::ModuleSearchPaths paths;
+    std::vector<std::unique_ptr<DeclAST>> importedDecls;
+    std::vector<std::string> importErrors;
+    std::string importerDir =
+        std::filesystem::path(inputFile).parent_path().string();
+    {
+        std::error_code canonEc;
+        loadedModules.insert(
+            std::filesystem::weakly_canonical(std::filesystem::path(inputFile), canonEc).string());
+        for (const auto& dir : modulePaths) {
+            paths.dirs.push_back(dir);
+        }
+#ifdef STD_DIR
+        paths.dirs.push_back(STD_DIR);
+#endif
+        auto specs = smc::collectImportSpecifiers(tokens);
+        smc::preloadImports(specs, importerDir, paths, loadedModules, importedDecls, importErrors);
+        if (!importErrors.empty()) {
+            for (const auto& err : importErrors) {
+                std::cerr << err << "\n";
+            }
+            return 1;
+        }
+    }
+
     Parser parser(tokens);
     auto ast = parser.parse();
     if (!ast) {
@@ -265,31 +294,20 @@ int CompilerDriver::compileFile(const std::string& inputFile) {
         return 1;
     }
 
-    // Resolve source-file imports (P0-04 / MOD-04): parse each imported module
-    // and splice its declarations in front of this unit's.
-    {
-        std::set<std::string> loadedModules;
-        std::error_code canonEc;
-        loadedModules.insert(
-            std::filesystem::weakly_canonical(std::filesystem::path(inputFile), canonEc).string());
-
-        smc::ModuleSearchPaths paths;
-        for (const auto& dir : modulePaths) {
-            paths.dirs.push_back(dir);
+    if (!importedDecls.empty()) {
+        ast->declarations.insert(
+            ast->declarations.begin(),
+            std::make_move_iterator(importedDecls.begin()),
+            std::make_move_iterator(importedDecls.end()));
+    }
+    // Keep the existing post-parse path as a safety net; `loadedModules`
+    // deduplicates anything preloaded above.
+    smc::processImports(*ast, importerDir, paths, loadedModules, importErrors);
+    if (!importErrors.empty()) {
+        for (const auto& err : importErrors) {
+            std::cerr << err << "\n";
         }
-#ifdef STD_DIR
-        paths.dirs.push_back(STD_DIR);
-#endif
-        std::vector<std::string> importErrors;
-        std::string importerDir =
-            std::filesystem::path(inputFile).parent_path().string();
-        smc::processImports(*ast, importerDir, paths, loadedModules, importErrors);
-        if (!importErrors.empty()) {
-            for (const auto& err : importErrors) {
-                std::cerr << err << "\n";
-            }
-            return 1;
-        }
+        return 1;
     }
 
     if (syntaxOnly) {

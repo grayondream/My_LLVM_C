@@ -164,3 +164,62 @@ TEST_F(ModuleLoaderTest, CyclicImportsReported) {
     EXPECT_TRUE(reported) << "expected a circular-import diagnostic";
     fs::remove_all(dir);
 }
+
+TEST_F(ModuleLoaderTest, ExportedTypesVisibleBeforeParsingImporter) {
+    const fs::path dir = fs::temp_directory_path() / "smc_module_types_test";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    {
+        std::ofstream out(dir / "types.smc");
+        out << "module types;\n"
+               "export struct Point { int32 x; int32 y; };\n"
+               "export using Handle = int32;\n"
+               "export class Box { public: int32 v; };\n"
+               "export template<typename T> struct Wrap { T v; };\n"
+               "export int32 add(int32 a, int32 b) { return a + b; }\n";
+    }
+
+    const std::string mainSource = R"(
+        module main;
+        import types;
+        int32 main() {
+            Point p; p.x = 1; p.y = 2;
+            Handle h = 3;
+            Box b; b.v = 4;
+            Wrap<int32> w; w.v = 5;
+            return add(p.x + p.y, h + b.v + w.v) - 15;
+        }
+    )";
+    const std::string mainPath = (dir / "main.smc").string();
+    Lexer lexer(mainPath, mainSource);
+    auto tokens = lexer.tokenize();
+    ASSERT_TRUE(lexer.getDiagnostics().empty());
+
+    std::set<std::string> loaded;
+    std::vector<std::unique_ptr<DeclAST>> imported;
+    std::vector<std::string> errors;
+    const auto specs = smc::collectImportSpecifiers(tokens);
+    ASSERT_EQ(specs.size(), 1u);
+    EXPECT_EQ(specs[0], "types");
+    smc::preloadImports(specs, dir.string(), smc::ModuleSearchPaths{{dir.string()}},
+                        loaded, imported, errors);
+    for (const auto& e : errors) ADD_FAILURE() << e;
+    ASSERT_TRUE(errors.empty());
+    ASSERT_FALSE(imported.empty());
+
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    ASSERT_NE(ast, nullptr);
+    for (const auto& d : parser.getErrors()) ADD_FAILURE() << d.formatWithSeverity();
+    ASSERT_TRUE(parser.getErrors().empty());
+
+    ast->declarations.insert(ast->declarations.begin(),
+                             std::make_move_iterator(imported.begin()),
+                             std::make_move_iterator(imported.end()));
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*ast);
+    for (const auto& e : analyzer.getErrors()) ADD_FAILURE() << e.formatWithSeverity();
+    ASSERT_TRUE(analyzer.getErrors().empty());
+    EXPECT_EQ(jitRun(*ast), 0);
+    fs::remove_all(dir);
+}

@@ -97,6 +97,53 @@ std::string resolveImport(const std::string& specifier, const ModuleSearchPaths&
     return "";
 }
 
+std::vector<std::string> collectImportSpecifiers(const std::vector<Token>& tokens) {
+    std::vector<std::string> imports;
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        if (tokens[i].type != TokenType::TOKEN_IMPORT) continue;
+        size_t j = i + 1;
+        std::string name;
+        if (j < tokens.size() && tokens[j].type == TokenType::TOKEN_STRING) {
+            const std::string& lex = tokens[j].lexeme;
+            if (lex.size() >= 2 && lex.front() == '"' && lex.back() == '"') {
+                name = lex.substr(1, lex.size() - 2);
+            }
+        } else if (j < tokens.size() && tokens[j].type == TokenType::TOKEN_IDENTIFIER) {
+            name = tokens[j].lexeme;
+            ++j;
+            while (j + 1 < tokens.size() && tokens[j].type == TokenType::TOKEN_DOT &&
+                   tokens[j + 1].type == TokenType::TOKEN_IDENTIFIER) {
+                name += "." + tokens[j + 1].lexeme;
+                j += 2;
+            }
+        }
+        if (!name.empty()) imports.push_back(name);
+    }
+    return imports;
+}
+
+void preloadImports(const std::vector<std::string>& specifiers,
+                    const std::string& importerDir,
+                    const ModuleSearchPaths& paths,
+                    std::set<std::string>& loaded,
+                    std::vector<std::unique_ptr<DeclAST>>& out,
+                    std::vector<std::string>& errors) {
+    if (specifiers.empty()) return;
+    ModuleSearchPaths localPaths = paths;
+    if (!importerDir.empty()) {
+        localPaths.dirs.insert(localPaths.dirs.begin(), importerDir);
+    }
+    std::vector<std::string> active;
+    for (const std::string& spec : specifiers) {
+        std::string resolved = resolveImport(spec, localPaths);
+        if (resolved.empty()) {
+            errors.push_back("cannot resolve import '" + spec + "'");
+            continue;
+        }
+        loadModuleFile(resolved, spec, localPaths, loaded, active, out, errors);
+    }
+}
+
 void loadModuleFile(const std::string& path,
                     const std::string& specifier,
                     const ModuleSearchPaths& paths,

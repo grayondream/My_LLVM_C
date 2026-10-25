@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "frontend/Token.h"
+
 class TranslationUnitAST;
 class DeclAST;
 
@@ -20,6 +22,20 @@ struct ModuleSearchPaths {
 // path; otherwise dots map to directory separators and ".smc" is appended
 // (`std.c` -> `std/c.smc`). `paths.dirs` are searched in order.
 std::string resolveImport(const std::string& specifier, const ModuleSearchPaths& paths);
+
+// P0-04/MOD-04: collect top-level `import` specifiers from a token stream
+// before parsing the importing unit. Imported module types must be registered
+// before the importer's parser resolves type names (`S s;`).
+std::vector<std::string> collectImportSpecifiers(const std::vector<Token>& tokens);
+
+// Load the given import specifiers (searching `importerDir` first) into `out`
+// in dependency order. This is the pre-parse counterpart of processImports.
+void preloadImports(const std::vector<std::string>& specifiers,
+                    const std::string& importerDir,
+                    const ModuleSearchPaths& paths,
+                    std::set<std::string>& loaded,
+                    std::vector<std::unique_ptr<DeclAST>>& out,
+                    std::vector<std::string>& errors);
 
 // Load `path` and, recursively, its imports. Declarations are appended to `out`
 // in dependency order (imports before importers). `loaded` holds canonical
