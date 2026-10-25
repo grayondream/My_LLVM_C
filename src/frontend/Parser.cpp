@@ -1777,7 +1777,9 @@ std::unique_ptr<TranslationUnitAST> Parser::parse() {
     std::string moduleName;
     std::vector<std::string> imports;
     std::vector<std::string> exports;
-    
+    bool sawModule = false;
+    bool sawOtherTopLevel = false;
+
     while (!eof()) {
         // P1-05 / ANN-01: `[[...]] module ...;` ——模块注解中转至 ModuleDeclAST；
         // 其余声明交由 parseDeclaration 统一解析注解（此处回退）。
@@ -1790,6 +1792,10 @@ std::unique_ptr<TranslationUnitAST> Parser::parse() {
                 m_currentTokenPos = saved;
             }
         }
+
+        // MOD-13: `module` must be the first declaration (annotations may
+        // precede it). Any other token before it is a violation.
+        if (!check(TokenType::TOKEN_MODULE)) sawOtherTopLevel = true;
 
         // namespace declaration
         if (check(TokenType::TOKEN_NAMESPACE)) {
@@ -1804,7 +1810,14 @@ std::unique_ptr<TranslationUnitAST> Parser::parse() {
 
         // 检查模块声明：`module a.b.c;`（点分或 `::` 连接）
         if (check(TokenType::TOKEN_MODULE)) {
+            auto moduleTok = peek();
             advance(); // 消耗 "module"
+            if (sawModule) {
+                error("duplicate module declaration", *moduleTok);
+            } else if (sawOtherTopLevel) {
+                error("module declaration must appear before other declarations", *moduleTok);
+            }
+            sawModule = true;
             if (check(TokenType::TOKEN_IDENTIFIER)) {
                 moduleName = advance()->lexeme;
                 while (check(TokenType::TOKEN_DOT) || check(TokenType::TOKEN_COLON_COLON)) {
@@ -1813,6 +1826,9 @@ std::unique_ptr<TranslationUnitAST> Parser::parse() {
                     if (!part) break;
                     moduleName += "." + part->lexeme;
                 }
+            }
+            if (moduleName.empty()) {
+                error("expected module name after 'module'", *moduleTok);
             }
             match(TokenType::TOKEN_SEMICOLON);
             continue;

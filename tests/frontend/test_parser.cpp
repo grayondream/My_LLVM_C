@@ -2596,3 +2596,31 @@ TEST_F(ParserTest, OffsetofKeywordExpr) {
     auto fn = dynamic_cast<FunctionDeclAST*>(tu->declarations[1].get());
     ASSERT_NE(fn, nullptr);
 }
+
+TEST_F(ParserTest, ModuleMustBeFirstDeclaration) {
+    auto errs = parseErrors("int32 x = 1;\nmodule late;\n");
+    bool found = false;
+    for (const auto& e : errs) {
+        if (e.message.find("module declaration must appear before other declarations") !=
+            std::string::npos) found = true;
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(ParserTest, DuplicateModuleDeclarationRejected) {
+    auto errs = parseErrors("module a;\nmodule b;\n");
+    bool found = false;
+    for (const auto& e : errs) {
+        if (e.message.find("duplicate module declaration") != std::string::npos) found = true;
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(ParserTest, ModuleWithoutNameRejected) {
+    auto errs = parseErrors("module ;\n");
+    bool found = false;
+    for (const auto& e : errs) {
+        if (e.message.find("expected module name") != std::string::npos) found = true;
+    }
+    EXPECT_TRUE(found);
+}

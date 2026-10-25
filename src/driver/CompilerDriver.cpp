@@ -294,6 +294,34 @@ int CompilerDriver::compileFile(const std::string& inputFile) {
         return 1;
     }
 
+    // MOD-13: the entry unit's module name must match its file path, mirroring
+    // the check loadModuleFile performs for imported modules.
+    if (!ast->moduleName.empty()) {
+        std::filesystem::path inputPath(inputFile);
+        std::string module = ast->moduleName;
+        bool matches = false;
+        if (module.find('.') == std::string::npos) {
+            matches = inputPath.stem().string() == module;
+        } else {
+            std::string relative = module;
+            for (char& c : relative) {
+                if (c == '.') c = '/';
+            }
+            std::string canonical =
+                std::filesystem::weakly_canonical(inputPath).string();
+            std::string ext = inputPath.extension().string();
+            std::string suffix = "/" + relative + ext;
+            matches = canonical.size() >= suffix.size() &&
+                      canonical.compare(canonical.size() - suffix.size(), suffix.size(),
+                                        suffix) == 0;
+        }
+        if (!matches) {
+            std::cerr << inputFile << ": module declares name '" << module
+                      << "' but the file name does not match\n";
+            return 1;
+        }
+    }
+
     if (!importedDecls.empty()) {
         ast->declarations.insert(
             ast->declarations.begin(),
