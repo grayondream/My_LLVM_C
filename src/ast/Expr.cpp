@@ -2224,6 +2224,27 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
     Type* valBase =
         (valType && valType->kind == TypeKind::Pointer) ? stripTypedefsOf(valType->base) : nullptr;
 
+    // CG-05: a member of an rvalue aggregate (`make().x`) has no address in
+    // the source program. Spill the aggregate to a temporary so the existing
+    // GEP paths (inheritance/bit-fields) work, then read the selected field
+    // back as a value. Semantically this is an xvalue, not an lvalue.
+    bool spilledRvalue = false;
+    if (!object->isLValue && valType &&
+        (valType->kind == TypeKind::Struct || valType->kind == TypeKind::Class ||
+         valType->kind == TypeKind::Union)) {
+        llvm::Value* tmp = builder.CreateAlloca(objVal->getType(), nullptr, "agg.tmp");
+        builder.CreateStore(objVal, tmp);
+        objVal = tmp;
+        spilledRvalue = true;
+    }
+    auto finishMember = [&](llvm::Value* addr) -> llvm::Value* {
+        if (!spilledRvalue) return addr;
+        if (isBitField) {
+            return ctx.loadBitFieldValue(addr, bitOffset, bitWidth, type, unitBits);
+        }
+        return builder.CreateLoad(ctx.getLLVMType(type), addr, "member.val");
+    };
+
     // Union members all live at offset 0: GEP to field 0 gives the address of
     // the requested member regardless of which member it is.
     if (valType && valType->kind == TypeKind::Union) {
@@ -2237,7 +2258,7 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
                 unitBits = it->second.unitBits;
             }
         }
-        return builder.CreateStructGEP(unionLLVM, objVal, 0, "unionmember");
+        return finishMember(builder.CreateStructGEP(unionLLVM, objVal, 0, "unionmember"));
     }
     if (valType && valType->kind == TypeKind::Pointer &&
         valBase && valBase->kind == TypeKind::Union) {
@@ -2263,13 +2284,13 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
         // 无位域名，普通扫描会误 GEP 到字段 0）。
         if (isBitField) {
             if (auto* gep = emitBitFieldGEP(ctx, valType, objVal, *this)) {
-                return gep;
+                return finishMember(gep);
             }
         }
         // INH-01: chain-aware GEP first (inherited fields live in the base
         // sub-object); falls back to the local scan below.
         if (auto* gep = emitClassFieldGEP(ctx, valType, objVal, memberName)) {
-            return gep;
+            return finishMember(gep);
         }
         for (size_t i = 0; i < structType->fields.size(); ++i) {
             if (structType->fields[i].name == memberName) {
@@ -2283,11 +2304,11 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
         // P1-07: 位域成员 → 存储单元 GEP（链式：定义类型可能为基类）。
         if (isBitField) {
             if (auto* gep = emitBitFieldGEP(ctx, classType, objVal, *this)) {
-                return gep;
+                return finishMember(gep);
             }
         }
         if (auto* gep = emitClassFieldGEP(ctx, classType, objVal, memberName)) {
-            return gep;
+            return finishMember(gep);
         }
         objType = ctx.getLLVMType(valType);
     } else if (valType && valType->kind == TypeKind::Pointer &&
@@ -2342,7 +2363,7 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
         objType = objVal->getType();
     }
 
-    return builder.CreateStructGEP(objType, objVal, fieldIndex, "member");
+    return finishMember(builder.CreateStructGEP(objType, objVal, fieldIndex, "member"));
 }
 
 llvm::Value* SizeofExprAST::codegen(CodegenContext& ctx) {

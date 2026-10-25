@@ -3193,6 +3193,13 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
             strippedBase = b;
         }
     }
+    // A field of an rvalue aggregate is an xvalue: readable, not assignable.
+    // Arrow access (and dot auto-deref through a pointer) always names the
+    // pointed-to object, so the field remains an lvalue.
+    const bool pointerAccess =
+        node.accessKind == MemberAccessKind::Arrow ||
+        (strippedObj && strippedObj->kind == TypeKind::Pointer);
+    const bool memberLValue = pointerAccess || node.object->isLValue;
     if (!strippedObj || (strippedObj->kind == TypeKind::Pointer && !strippedBase)) {
         node.type = nullptr;
         node.isLValue = false;
@@ -3302,7 +3309,7 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
             for (auto& field : lookupFields) {
                 if (field.name == node.memberName) {
                     node.type = field.type;
-                    node.isLValue = true;
+                    node.isLValue = memberLValue;
                     // P1-07 / SEM-12: bit-field access marker (isLValue stays
                     // true — the sema assignment gate depends on it; codegen
                     // returns the storage-unit address).
@@ -3336,7 +3343,7 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
             for (auto& field : lookupFields) {
                 if (field.name == node.memberName) {
                     node.type = field.type;
-                    node.isLValue = true;
+                    node.isLValue = memberLValue;
                     // P1-07 / SEM-12: bit-field access marker (see struct path).
                     node.isBitField = field.bitWidth > 0;
                     node.bitWidth = static_cast<uint32_t>(field.bitWidth > 0 ? field.bitWidth : 0);
@@ -3372,7 +3379,7 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
         for (auto& member : unionType->members) {
             if (member.name == node.memberName) {
                 node.type = member.type;
-                node.isLValue = true;
+                node.isLValue = memberLValue;
                 // P1-07 / SEM-12: bit-field access marker (see struct path).
                 node.isBitField = member.bitWidth > 0;
                 node.bitWidth = static_cast<uint32_t>(member.bitWidth > 0 ? member.bitWidth : 0);
@@ -4398,6 +4405,24 @@ void SemanticAnalyzer::visit(VarDeclAST& node) {
     // AGG-11/DS5: naming a private nested type outside its class is E2009.
     node.type = resolveTypeInstance(node.type, node);
     checkNestedTypeAccess(node.type, node);
+    // MOD-03: a by-value variable requires a complete aggregate type. Pointers
+    // and slices are fine (they only need a declaration), so peel typedefs and
+    // array layers but stop at the first pointer/slice.
+    if (node.type) {
+        Type* valueType = node.type;
+        while (valueType && valueType->kind == TypeKind::Typedef)
+            valueType = static_cast<TypedefType*>(valueType)->aliasedType;
+        while (valueType && valueType->kind == TypeKind::Array)
+            valueType = static_cast<ArrayType*>(valueType)->elementType;
+        while (valueType && valueType->kind == TypeKind::Typedef)
+            valueType = static_cast<TypedefType*>(valueType)->aliasedType;
+        if (valueType && node.typeIncompleteAtParse) {
+            emitError("variable '" + node.name + "' has incomplete type '" +
+                          typeToString(valueType) +
+                          "'; define the type before using it by value",
+                      node);
+        }
+    }
     // P1-04 / CT-03 / 评审 I3: 毒化类型（含 typedef/指针/数组包装层）拒绝。
     checkCtDeadBranchUse(node.type, node);
     std::string sourceVarName = node.name;

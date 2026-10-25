@@ -263,6 +263,7 @@ TEST_F(CodegenContextTest, MemberAccessExpr) {
 
     auto obj = std::make_unique<VariableExprAST>("p");
     obj->type = structType;
+    obj->isLValue = true;  // a variable reference denotes storage
     auto access = std::make_unique<MemberAccessExprAST>(
         MemberAccessKind::Dot, std::move(obj), "y");
     llvm::Value* val = access->codegen(*ctx);

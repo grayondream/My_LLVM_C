@@ -2200,6 +2200,7 @@ Type* Parser::parseBaseType() {
                 }
                 match(TokenType::TOKEN_RBRACE);
                 match(TokenType::TOKEN_SEMICOLON);
+                structType->parsedDefinition = true;
                 TypeContext::instance().addStruct(key, structType);
                 return structType;
             }
@@ -2279,6 +2280,7 @@ Type* Parser::parseBaseType() {
                 }
                 match(TokenType::TOKEN_RBRACE);
                 match(TokenType::TOKEN_SEMICOLON);
+                unionType->parsedDefinition = true;
                 TypeContext::instance().addUnion(key, unionType);
                 return unionType;
             }
@@ -2885,6 +2887,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
                     structType->fields.back().flexibleArray = true;
             }
             TypeContext::instance().addStruct(structDecl->name, structType);
+            if (!structDecl->isForwardDecl) structType->parsedDefinition = true;
         }
 
         // A record parser stops in one of three places:
@@ -2939,7 +2942,9 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
                     classType->fields.back().flexibleArray = true;
             }
             TypeContext::instance().addClass(classDecl->name, classType);
+            existingType = classType;
         }
+        if (existingType && !classDecl->isForwardDecl) existingType->parsedDefinition = true;
 
         // See the struct branch: only a body followed by a declarator owns the
         // next identifier. A bodiless `class C` is either a forward
@@ -2992,6 +2997,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
                     unionType->members.back().flexibleArray = true;
             }
             TypeContext::instance().addUnion(unionDecl->name, unionType);
+            if (!unionDecl->isForwardDecl) unionType->parsedDefinition = true;
         }
 
         const bool hasBody = !unionDecl->isForwardDecl;
@@ -3440,7 +3446,28 @@ std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string
         init = parseExpr(2);
     }
 
-    return std::make_unique<VarDeclAST>(name, type, std::move(init), isConstexpr);
+    auto decl = std::make_unique<VarDeclAST>(name, type, std::move(init), isConstexpr);
+    // Snapshot source-order completeness. isComplete is only filled by sema;
+    // a later definition must not validate an earlier by-value use.
+    Type* vt = type;
+    while (vt && vt->kind == TypeKind::Typedef)
+        vt = static_cast<TypedefType*>(vt)->aliasedType;
+    while (vt && vt->kind == TypeKind::Array)
+        vt = static_cast<ArrayType*>(vt)->elementType;
+    while (vt && vt->kind == TypeKind::Typedef)
+        vt = static_cast<TypedefType*>(vt)->aliasedType;
+    if (vt) {
+        if (vt->kind == TypeKind::Struct)
+            decl->typeIncompleteAtParse = !static_cast<StructType*>(vt)->parsedDefinition &&
+                                          static_cast<StructType*>(vt)->name.rfind("__anon_", 0) != 0;
+        else if (vt->kind == TypeKind::Class)
+            decl->typeIncompleteAtParse = !static_cast<ClassType*>(vt)->parsedDefinition &&
+                                          static_cast<ClassType*>(vt)->name.rfind("__anon_", 0) != 0;
+        else if (vt->kind == TypeKind::Union)
+            decl->typeIncompleteAtParse = !static_cast<UnionType*>(vt)->parsedDefinition &&
+                                          static_cast<UnionType*>(vt)->name.rfind("__anon_", 0) != 0;
+    }
+    return decl;
 }
 
 std::unique_ptr<ParamDeclAST> Parser::parseParamDecl() {
@@ -4042,14 +4069,24 @@ void Parser::registerNestedDeclType(DeclAST* decl) {
                 }
                 tc.addClass(sd->name, classType);
             }
-        } else if (!tc.getStruct(sd->name)) {
-            auto* structType = new StructType(sd->name);
-            for (auto& f : sd->fields) {
-                structType->addField(f.name, f.type, f.bitWidth);
-                if (f.flexibleArray && !structType->fields.empty())
-                    structType->fields.back().flexibleArray = true;
+            if (!sd->isForwardDecl) {
+                if (auto* ct = tc.getClass(sd->name)) ct->parsedDefinition = true;
             }
-            tc.addStruct(sd->name, structType);
+        } else {
+            StructType* structType = tc.getStruct(sd->name);
+            if (!structType) {
+                structType = new StructType(sd->name);
+                tc.addStruct(sd->name, structType);
+            }
+            if (!sd->isForwardDecl) {
+                structType->fields.clear();
+                for (auto& f : sd->fields) {
+                    structType->addField(f.name, f.type, f.bitWidth);
+                    if (f.flexibleArray && !structType->fields.empty())
+                        structType->fields.back().flexibleArray = true;
+                }
+                structType->parsedDefinition = true;
+            }
         }
         return;
     }
@@ -4071,6 +4108,9 @@ void Parser::registerNestedDeclType(DeclAST* decl) {
                     unionType->members.back().flexibleArray = true;
             }
             tc.addUnion(ud->name, unionType);
+        }
+        if (!ud->isForwardDecl) {
+            if (auto* ut = tc.getUnion(ud->name)) ut->parsedDefinition = true;
         }
         return;
     }

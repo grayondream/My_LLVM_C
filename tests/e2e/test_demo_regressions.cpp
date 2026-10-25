@@ -342,3 +342,51 @@ TEST_F(DemoRegressionE2E, Int128Literal) {
         }
     )", "reg_i128.c"), 0);
 }
+
+// CG-05：rvalue 聚合的成员访问必须按值读取（`make().x`），
+// 不能把 GEP 直接作用在聚合值上；rvalue 字段也不可赋值。
+TEST_F(DemoRegressionE2E, RvalueAggregateMemberReadsValue) {
+    EXPECT_EQ(runSource(R"(
+        struct P { int32 x; int32 y; };
+        struct P make() { struct P p; p.x = 7; p.y = 9; return p; }
+        int32 main() {
+            if (make().x != 7) { return 1; }
+            if (make().y != 9) { return 2; }
+            if (make().x + make().y != 16) { return 3; }
+            return 0;
+        }
+    )", "reg_rvalue_member.c"), 0);
+}
+
+TEST_F(DemoRegressionE2E, RvalueAggregateMemberNotAssignable) {
+    EXPECT_EQ(runSource(R"(
+        struct P { int32 x; };
+        struct P make() { struct P p; p.x = 7; return p; }
+        int32 main() { make().x = 5; return 0; }
+    )", "reg_rvalue_member_assign.c"), -1);
+}
+
+// MOD-03：前向类型按值使用必须报 incomplete；指针/引用形态仍允许。
+TEST_F(DemoRegressionE2E, IncompleteTypeByValueRejected) {
+    EXPECT_EQ(runSource(R"(
+        struct S;
+        struct S s;
+        struct S { int32 x; };
+        int32 main() { return 0; }
+    )", "reg_incomplete_value.c"), -1);
+    EXPECT_EQ(runSource(R"(
+        struct S;
+        struct S arr[2];
+        struct S { int32 x; };
+        int32 main() { return 0; }
+    )", "reg_incomplete_array.c"), -1);
+}
+
+TEST_F(DemoRegressionE2E, IncompleteTypePointerAllowed) {
+    EXPECT_EQ(runSource(R"(
+        struct S;
+        struct S* p;
+        struct S { int32 x; };
+        int32 main() { struct S s; s.x = 1; p = &s; return p->x - 1; }
+    )", "reg_incomplete_ptr.c"), 0);
+}

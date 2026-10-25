@@ -118,6 +118,10 @@ public:
     Type* base{};
     // INH-01: completion tracking (mirrors ClassType::isComplete).
     bool isComplete{};
+    // Parser-side source-order snapshot: a definition body was parsed at this
+    // point. Unlike isComplete (sema order), a later definition must not
+    // retroactively make an earlier by-value use complete.
+    bool parsedDefinition{};
     // P1-03 / GEN: 模板体 parse 经普通声明路径注册的占位类型——裸模板名
     // （无实参）使用时由 sema 诊断。
     bool isTemplatePattern = false;
@@ -165,6 +169,7 @@ public:
     // Redef 轮: completion tracking (mirrors ClassType::isComplete) — a
     // forward declaration leaves the placeholder incomplete.
     bool isComplete{};
+    bool parsedDefinition{};
 
     UnionType(const std::string& n)
         : Type(TypeKind::Union), name(n) {}
@@ -283,6 +288,7 @@ public:
     // it when the definition is visited. Deriving from an incomplete class is
     // diagnosed.
     bool isComplete{};
+    bool parsedDefinition{};
 
     // P1-03 / GEN: 模板体 parse 的占位注册（同 StructType::isTemplatePattern）。
     bool isTemplatePattern = false;
