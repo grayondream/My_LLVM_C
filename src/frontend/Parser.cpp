@@ -1183,6 +1183,12 @@ std::unique_ptr<ExprAST> Parser::parsePostfix(std::unique_ptr<ExprAST> lhs) {
                     auto lamPtr = std::unique_ptr<LambdaExprAST>(
                         static_cast<LambdaExprAST*>(lhs.release()));
                     lhs = std::make_unique<LambdaCallExprAST>(std::move(lamPtr), std::move(args));
+                } else {
+                    // General expression callee: `arr[0](1)`, `get()(1)`.
+                    auto call = std::make_unique<CallExprAST>("", std::move(args));
+                    call->calleeExpr = std::move(lhs);
+                    call->isExprCallee = true;
+                    lhs = std::move(call);
                 }
                 break;
             }
@@ -2689,11 +2695,15 @@ Type* Parser::parseTypeId() {
         type = new ArrayType(elem, dims[0]);
     }
 
-    // 抽象函数指针：`Ret (*)(params)`（requireName=false）。
+    // 抽象函数指针/函数类型：`Ret (*)(params)` 或 `Ret(params)`。
     {
         std::string ignored;
-        if (Type* fp = parseFunctionPointerDeclarator(type, ignored, /*requireName=*/false))
+        bool isFunction = false;
+        if (Type* fp = parseFunctionPointerDeclarator(
+                type, ignored, /*requireName=*/false, &isFunction))
             type = fp;
+        else if (Type* fn = parseAbstractFunctionSuffix(type))
+            type = fn;
     }
 
     return type;
@@ -3258,11 +3268,27 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationAsType() {
         return parseFunctionDecl(type, opName, isConstexpr);
     }
 
-    // Function pointer declarator: returnType (*name)(paramTypes)
+    // Parenthesized pointer declarator: function pointer, pointer-to-array,
+    // array-of-function-pointers, or function returning a function pointer.
     {
         std::string fpName;
-        if (Type* ptrType = parseFunctionPointerDeclarator(type, fpName, /*requireName=*/true)) {
-            return parseVariableDeclList(ptrType, fpName, isConstexpr);
+        bool isFunction = false;
+        std::vector<std::unique_ptr<ParamDeclAST>> fnParams;
+        if (Type* declType = parseFunctionPointerDeclarator(
+                type, fpName, /*requireName=*/true, &isFunction, &fnParams)) {
+            if (isFunction) {
+                if (declType->kind != TypeKind::Function) return nullptr;
+                auto* ft = static_cast<FunctionType*>(declType);
+                std::unique_ptr<CompoundStmtAST> body;
+                if (check(TokenType::TOKEN_LBRACE)) {
+                    body = parseCompoundStmt();
+                } else if (!check(TokenType::TOKEN_SEMICOLON) && !eof()) {
+                    errorUnexpected("expected '{' or ';' after function declaration");
+                }
+                return std::make_unique<FunctionDeclAST>(
+                    fpName, ft->returnType, fnParams, body, isConstexpr, ft->isVarArg);
+            }
+            return parseVariableDeclList(declType, fpName, isConstexpr);
         }
     }
 
@@ -3335,8 +3361,17 @@ std::unique_ptr<DeclAST> Parser::parseVariableDeclList(Type* type, const std::st
 }
 
 Type* Parser::parseFunctionPointerDeclarator(Type* returnType, std::string& outName,
-                                             bool requireName) {
+                                             bool requireName,
+                                             bool* outIsFunction,
+                                             std::vector<std::unique_ptr<ParamDeclAST>>* outFunctionParams) {
+    struct Op {
+        enum Kind { Pointer, Array, Function } kind;
+        int size = 0;
+        bool varArg = false;
+        std::vector<std::unique_ptr<ParamDeclAST>> params;
+    };
     outName.clear();
+    if (outIsFunction) *outIsFunction = false;
     if (!check(TokenType::TOKEN_LPAREN)) return nullptr;
 
     size_t saved = m_currentTokenPos;
@@ -3347,7 +3382,8 @@ Type* Parser::parseFunctionPointerDeclarator(Type* returnType, std::string& outN
         return nullptr;
     }
     advance(); // '*'
-    while (check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE)) advance();
+    while (check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE) ||
+           check(TokenType::TOKEN_RESTRICT)) advance();
 
     if (check(TokenType::TOKEN_IDENTIFIER)) {
         outName = advance()->lexeme;
@@ -3356,19 +3392,130 @@ Type* Parser::parseFunctionPointerDeclarator(Type* returnType, std::string& outN
         return nullptr;
     }
 
-    if (!match(TokenType::TOKEN_RPAREN) || !check(TokenType::TOKEN_LPAREN)) {
+    // Parse a suffix list: [N] or (params). These bind to the declarator name.
+    auto parseSuffixes = [&](std::vector<Op>& ops) -> bool {
+        while (!eof()) {
+            if (check(TokenType::TOKEN_LBRACKET)) {
+                advance();
+                auto numTok = match(TokenType::TOKEN_NUMBER);
+                if (!numTok) {
+                    errorUnexpected("array size must be an integer literal");
+                    return false;
+                }
+                int size = static_cast<int>(
+                    static_cast<long long>(std::get<unsigned __int128>(numTok->value)));
+                if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after array size"))
+                    return false;
+                Op op; op.kind = Op::Array; op.size = size;
+                ops.push_back(std::move(op));
+                continue;
+            }
+            if (check(TokenType::TOKEN_LPAREN)) {
+                advance();
+                Op op; op.kind = Op::Function;
+                if (!check(TokenType::TOKEN_RPAREN)) {
+                    while (true) {
+                        if (check(TokenType::TOKEN_VOID)) {
+                            size_t v = m_currentTokenPos;
+                            advance();
+                            if (check(TokenType::TOKEN_RPAREN)) break;
+                            m_currentTokenPos = v;
+                        }
+                        if (check(TokenType::TOKEN_ELLIPSIS)) {
+                            op.varArg = true;
+                            advance();
+                            break;
+                        }
+                        auto param = parseParamDecl();
+                        if (!param) return false;
+                        op.params.push_back(std::move(param));
+                        if (!match(TokenType::TOKEN_COMMA)) break;
+                    }
+                }
+                if (!expect(TokenType::TOKEN_RPAREN, "expected ')' after parameter list"))
+                    return false;
+                ops.push_back(std::move(op));
+                continue;
+            }
+            break;
+        }
+        return true;
+    };
+
+    std::vector<Op> inner;
+    if (!parseSuffixes(inner) || !match(TokenType::TOKEN_RPAREN)) {
+        m_currentTokenPos = saved;
+        outName.clear();
+        return nullptr;
+    }
+    std::vector<Op> outer;
+    if (!parseSuffixes(outer)) {
         m_currentTokenPos = saved;
         outName.clear();
         return nullptr;
     }
 
-    Type* funcType = parseFunctionPointerType(returnType);
-    if (!funcType) {
+    // Identifier-outward order: inner suffixes, the pointer prefix, then the
+    // suffixes after the closing ')'.
+    std::vector<Op> ops;
+    for (auto& op : inner) ops.push_back(std::move(op));
+    { Op p; p.kind = Op::Pointer; ops.push_back(std::move(p)); }
+    for (auto& op : outer) ops.push_back(std::move(op));
+
+    const bool entityIsFunction = !ops.empty() && ops.front().kind == Op::Function;
+    if (outIsFunction) *outIsFunction = entityIsFunction;
+    if (entityIsFunction && outFunctionParams) {
+        *outFunctionParams = std::move(ops.front().params);
+    }
+
+    Type* type = returnType;
+    for (auto it = ops.rbegin(); it != ops.rend(); ++it) {
+        if (it->kind == Op::Pointer) {
+            type = new Type(TypeKind::Pointer, type);
+        } else if (it->kind == Op::Array) {
+            type = new ArrayType(type, it->size);
+        } else {
+            std::vector<Type*> pts;
+            for (auto& p : it->params) pts.push_back(p->type);
+            type = new FunctionType(type, std::move(pts), it->varArg);
+        }
+    }
+    return type;
+}
+
+Type* Parser::parseAbstractFunctionSuffix(Type* returnType) {
+    if (!check(TokenType::TOKEN_LPAREN)) return nullptr;
+    size_t saved = m_currentTokenPos;
+    advance(); // '('
+    std::vector<Type*> paramTypes;
+    bool isVarArg = false;
+    if (!check(TokenType::TOKEN_RPAREN)) {
+        while (true) {
+            if (check(TokenType::TOKEN_VOID)) {
+                size_t v = m_currentTokenPos;
+                advance();
+                if (check(TokenType::TOKEN_RPAREN)) break;
+                m_currentTokenPos = v;
+            }
+            if (check(TokenType::TOKEN_ELLIPSIS)) {
+                isVarArg = true;
+                advance();
+                break;
+            }
+            auto param = parseParamDecl();
+            if (!param) {
+                m_currentTokenPos = saved;
+                return nullptr;
+            }
+            paramTypes.push_back(param->type);
+            if (!match(TokenType::TOKEN_COMMA)) break;
+        }
+    }
+    if (!expect(TokenType::TOKEN_RPAREN, "expected ')' after function type parameters")) {
         m_currentTokenPos = saved;
-        outName.clear();
         return nullptr;
     }
-    return new Type(TypeKind::Pointer, funcType);
+    return new FunctionType(returnType, std::move(paramTypes), isVarArg);
 }
 
 Type* Parser::parseFunctionPointerType(Type* returnType) {

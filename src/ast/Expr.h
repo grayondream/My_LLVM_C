@@ -234,6 +234,9 @@ public:
     std::vector<DefaultArgValue> defaultArgValues;
     // Set by semantic analysis for calls through a function-pointer variable.
     bool isIndirect = false;
+    // SEM-17: `(expr)(args)` where `expr` yields a function pointer — the
+    // callee is an arbitrary expression (`arr[0](1)`, `get()(1)`).
+    bool isExprCallee = false;
     // Set by semantic analysis when this is the builtin `print`/`println`.
     bool isPrint = false;
     bool printNewline = false;

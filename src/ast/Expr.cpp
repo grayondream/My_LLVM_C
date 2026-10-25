@@ -811,6 +811,29 @@ static std::string nodeSourcePrefix(const ASTNode& node) {
 }
 
 llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
+    // General expression callee: evaluate the function pointer expression.
+    if (isExprCallee) {
+        llvm::Value* fnPtr = calleeExpr ? calleeExpr->codegen(ctx) : nullptr;
+        if (!fnPtr) return nullptr;
+        if (calleeExpr->isLValue) fnPtr = readLValue(ctx, *calleeExpr, fnPtr);
+        std::vector<llvm::Value*> callArgs;
+        for (size_t i = 0; i < args.size(); ++i) {
+            llvm::Value* v = args[i]->codegen(ctx);
+            if (!v) return nullptr;
+            if (args[i]->isLValue) v = readLValue(ctx, *args[i], v);
+            if (i < resolvedParamTypes.size())
+                v = ctx.castValue(v, args[i]->type, ctx.getLLVMType(resolvedParamTypes[i]));
+            callArgs.push_back(v);
+        }
+        std::vector<llvm::Type*> paramLLVMTypes;
+        for (auto* t : resolvedParamTypes) paramLLVMTypes.push_back(ctx.getLLVMType(t));
+        llvm::Type* retLLVM = type ? ctx.getLLVMType(type)
+                                   : llvm::Type::getVoidTy(ctx.getContext());
+        auto* fnType = llvm::FunctionType::get(retLLVM, paramLLVMTypes, false);
+        if (retLLVM->isVoidTy())
+            return ctx.getBuilder().CreateCall(fnType, fnPtr, callArgs);
+        return ctx.getBuilder().CreateCall(fnType, fnPtr, callArgs, "icalltmp");
+    }
     // SEM-17: `obj(args)` through an overloaded `operator()` — call with the
     // object as the first argument.
     if (calleeExpr) {

@@ -2591,6 +2591,26 @@ void SemanticAnalyzer::visit(CallExprAST& node) {
     // Resolve a namespace-qualified or namespace-local callee to its mangled key.
     node.callee = resolveNamespaceName(node.callee);
 
+    // General expression callee: `arr[0](1)`, `get()(1)`. The parser stores
+    // the callee expression; sema types it as a function pointer and records
+    // the signature for codegen's indirect call.
+    if (node.isExprCallee && node.calleeExpr) {
+        Type* ct = stripTypedef(getExprType(*node.calleeExpr));
+        Type* pointee = ct && ct->kind == TypeKind::Pointer ? stripTypedef(ct->base) : nullptr;
+        if (!pointee || pointee->kind != TypeKind::Function) {
+            emitError("called object is not a function pointer", node);
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
+        }
+        auto* ft = static_cast<FunctionType*>(pointee);
+        for (auto& arg : node.args) getExprType(*arg);
+        node.resolvedParamTypes = ft->paramTypes;
+        node.type = ft->returnType;
+        node.isLValue = false;
+        return;
+    }
+
     // P1-03 / GEN-03/06: 函数模板调用（显式实参或推导）。模板命中但普通
     // 函数精确匹配可行时走普通路径（SEM-16 最小规则）；诊断型失败返回
     // true 就地结束。
@@ -2657,9 +2677,12 @@ void SemanticAnalyzer::visit(CallExprAST& node) {
         Type* st = sym->type;
         while (st && st->kind == TypeKind::Typedef)
             st = static_cast<TypedefType*>(st)->aliasedType;
-        if (st && st->kind == TypeKind::Pointer && st->base &&
-            st->base->kind == TypeKind::Function) {
-            auto* funcType = static_cast<FunctionType*>(st->base);
+        Type* pointee = st && st->kind == TypeKind::Pointer ? st->base : nullptr;
+        while (pointee && pointee->kind == TypeKind::Typedef)
+            pointee = static_cast<TypedefType*>(pointee)->aliasedType;
+        if (st && st->kind == TypeKind::Pointer && pointee &&
+            pointee->kind == TypeKind::Function) {
+            auto* funcType = static_cast<FunctionType*>(pointee);
             for (auto& arg : node.args) getExprType(*arg);
             node.isIndirect = true;
             node.resolvedParamTypes = funcType->paramTypes;

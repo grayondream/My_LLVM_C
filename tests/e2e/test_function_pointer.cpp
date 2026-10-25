@@ -207,3 +207,51 @@ TEST_F(FunctionPointerE2E, CastPointerRoundTrip) {
         }
     )", "fp_cast_roundtrip.c"), 0);
 }
+
+TEST_F(FunctionPointerE2E, FunctionReturningFunctionPointer) {
+    EXPECT_EQ(runWithPrelude(R"(
+        int32 add1(int32 x) { return x + 1; }
+        int32 (*get(int32 k))(int32) { return add1; }
+        int32 main() {
+            if (get(0)(1) != 2) return 1;
+            int32 (*p)(int32) = get(1);
+            return p(3) - 4;
+        }
+    )", "fp_ret_fnptr.c"), 0);
+}
+
+TEST_F(FunctionPointerE2E, FunctionTypeAlias) {
+    EXPECT_EQ(runWithPrelude(R"(
+        using F = int32(int32);
+        int32 inc(int32 x) { return x + 1; }
+        F* get() { return inc; }
+        int32 main() {
+            F* f = get();
+            return f(1) == 2 ? 0 : 1;
+        }
+    )", "fp_fn_type_alias.c"), 0);
+}
+
+TEST_F(FunctionPointerE2E, PointerToArrayDeclarator) {
+    EXPECT_EQ(runWithPrelude(R"(
+        int32 main() {
+            int32 a[3] = {1, 2, 3};
+            int32 (*p)[3] = &a;
+            (*p)[1] = 7;
+            return a[1] - 7;
+        }
+    )", "fp_ptr_to_array.c"), 0);
+}
+
+TEST_F(FunctionPointerE2E, ArrayOfFunctionPointers) {
+    EXPECT_EQ(runWithPrelude(R"(
+        int32 inc(int32 x) { return x + 1; }
+        int32 dbl(int32 x) { return x * 2; }
+        int32 (*arr[2])(int32) = { inc, dbl };
+        int32 main() {
+            if (arr[0](3) != 4) return 1;
+            if (arr[1](3) != 6) return 2;
+            return 0;
+        }
+    )", "fp_array_fnptr.c"), 0);
+}

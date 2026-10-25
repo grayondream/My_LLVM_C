@@ -114,13 +114,19 @@ private:
     // closing ')' of "(*name)"; returns the pointed-to FunctionType.
     Type* parseFunctionPointerType(Type* returnType);
 
-    // Parse a function-pointer declarator tail after its base return type:
-    //   (* [name]) ( paramTypes )
-    // Returns a pointer-to-function type with `outName` set, or nullptr (and
-    // restores the position) when the input is not a function-pointer
-    // declarator. When `requireName` is true an omitted name is rejected.
+    // Parse a parenthesized pointer declarator tail after its base type:
+    //   (* [name] [suffix]) [suffix]
+    // Covers pointer-to-function, pointer-to-array, array-of-function-pointer,
+    // and function-returning-function-pointer. `outIsFunction` reports whether
+    // the declared entity itself is a function (first declarator op), and
+    // `outFunctionParams` receives that function's named parameters.
     Type* parseFunctionPointerDeclarator(Type* returnType, std::string& outName,
-                                         bool requireName);
+                                         bool requireName,
+                                         bool* outIsFunction = nullptr,
+                                         std::vector<std::unique_ptr<ParamDeclAST>>* outFunctionParams = nullptr);
+
+    // Parse an abstract function-type suffix: `( paramTypes )`.
+    Type* parseAbstractFunctionSuffix(Type* returnType);
 
     std::unique_ptr<ParamDeclAST> parseParamDecl();
 
