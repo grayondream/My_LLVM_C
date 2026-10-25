@@ -906,3 +906,9 @@
 - 验证：每任务 TDD RED→GREEN；最终全量 **1534/1534** 通过（2 个既有 `GTEST_SKIP` 不变）；示例输出 `ALL FEATURES OK`。
 - 遗留：前向类型按值使用（`N n;` 在定义前）未诊断；无花括号单语句体的 `using` 作用域延伸到外层块；成员别名不继承到派生类；同作用域重复别名不诊断。
 - **复核修复**：`checkNestedTypeAccess` 在指针/数组每一层先检查别名链，堵住 `C::T*` 绕过 E2009 的洞；新增 `PrivateMemberAliasPointerDeniedOutside`。最终全量 **1535/1535**。
+
+## 2026-10-25 — full_feature 验收示例
+
+- 新增 `examples/full_feature.c`（908 行，25 节）：在单文件内覆盖当前实现的定宽类型/字面量、`using`（顶层/块作用域/成员体/前向别名/指针别名链）、struct/union/enum/位域、class（单继承/访问控制/protected/类外方法）、指针与函数指针、数组/切片、string_view/string/format/split、u8/u16/u32/raw/multiline 字符串、optional/result、模板与别名模板、namespace、函数与运算符重载、lambda、控制流（含 do-while）、显式转换、constexpr/compile_time/alignof/offsetof、模块（`module full_feature;` + `import std.math;` + `export`）、内联 asm、libc、thread_local/static/atomic/volatile/inline。
+- 编译运行：`./build/bin/my_llvm_c examples/full_feature.c -o /tmp/full_feature && /tmp/full_feature`，输出 `FULL FEATURE OK`，退出码 0。
+- 说明：`examples/all_features.c` 保持原样；full_feature 以模块单元形式演示 module/import/export。
