@@ -192,6 +192,17 @@ TEST_F(SyntaxGapsE2E, RecordAttachedFunctionPointerVariable) {
     )", "syntax_record_attached_fp.c"), 0);
 }
 
+TEST_F(SyntaxGapsE2E, RecordAttachedFunctionReturningPointer) {
+    EXPECT_EQ(runSyntaxSource(R"(
+        struct SAttachPtr { int32 x; } *makeAttachPtr() {
+            static struct SAttachPtr s;
+            s.x = 7;
+            return &s;
+        }
+        int32 main() { return makeAttachPtr()->x - 7; }
+    )", "syntax_record_attached_ptrfn.c"), 0);
+}
+
 TEST_F(SyntaxGapsE2E, ClassAttachedPointerKeepsMethods) {
     EXPECT_EQ(runSyntaxSource(R"(
         class CAttach { public: int32 x; int32 get() { return this->x; } } *pCAttach;
