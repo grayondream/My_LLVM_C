@@ -1556,19 +1556,25 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
     // Local storage classes: `static T x;` / `thread_local T x;`
     // (and `static thread_local`). C gives block-scope thread_local static
     // storage duration, so both forms allocate at module scope.
-    if (check(TokenType::TOKEN_STATIC) || check(TokenType::TOKEN_THREAD_LOCAL)) {
+    if (check(TokenType::TOKEN_STATIC) || check(TokenType::TOKEN_THREAD_LOCAL) ||
+        check(TokenType::TOKEN_EXTERN)) {
         bool isStatic = false;
         bool isTls = false;
-        while (check(TokenType::TOKEN_STATIC) || check(TokenType::TOKEN_THREAD_LOCAL)) {
+        bool isExtern = false;
+        while (check(TokenType::TOKEN_STATIC) || check(TokenType::TOKEN_THREAD_LOCAL) ||
+               check(TokenType::TOKEN_EXTERN)) {
             if (check(TokenType::TOKEN_STATIC)) {
                 advance();
                 isStatic = true;
-            } else {
+            } else if (check(TokenType::TOKEN_THREAD_LOCAL)) {
                 advance();
                 isTls = true;
+            } else {
+                advance();
+                isExtern = true;
             }
         }
-        if (!isStatic && isTls) isStatic = true;
+        if (!isStatic && !isExtern && isTls) isStatic = true;
         if (!(isTypeStart() || check(TokenType::TOKEN_CONST) ||
               check(TokenType::TOKEN_VOLATILE) || check(TokenType::TOKEN_ATOMIC))) {
             errorUnexpected("expected a variable declaration after storage class");
@@ -1582,10 +1588,11 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
         auto nameTok = advance();
         auto varDecl = parseVariableDeclList(type, nameTok->lexeme);
         if (!varDecl) return nullptr;
-        std::function<void(DeclAST*)> mark = [&mark, isStatic, isTls](DeclAST* d) {
+        std::function<void(DeclAST*)> mark = [&mark, isStatic, isTls, isExtern](DeclAST* d) {
             if (auto* var = dynamic_cast<VarDeclAST*>(d)) {
                 var->isStaticLocal = isStatic;
                 var->isThreadLocal = isTls;
+                var->isExternLocal = isExtern;
             } else if (auto* multi = dynamic_cast<MultiVarDeclAST*>(d)) {
                 for (auto& sub : multi->decls) mark(sub.get());
             }

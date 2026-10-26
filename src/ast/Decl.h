@@ -61,6 +61,9 @@ public:
     bool typeIncompleteAtParse = false;
     // C static local: function-scoped declaration with static storage duration.
     bool isStaticLocal = false;
+    // C block-scope `extern`: refers to an existing/global symbol; no local
+    // storage is allocated for it.
+    bool isExternLocal = false;
 
     VarDeclAST(const std::string& n, Type* t, std::unique_ptr<ExprAST> init = nullptr, bool constexpr_ = false)
         : name(n), type(t), initExpr(std::move(init)), isConstexpr(constexpr_) {}

@@ -942,6 +942,19 @@ llvm::Constant* buildAggregateConstant(CodegenContext& ctx, Type* type,
 llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
     llvm::Type* llvmType = ctx.getLLVMType(type);
 
+    // C block-scope `extern`: alias the existing global (or emit an external
+    // declaration); never allocate function-local storage.
+    if (isExternLocal && !ctx.isGlobalScope()) {
+        llvm::GlobalVariable* global = ctx.getModule().getGlobalVariable(name);
+        if (!global) {
+            global = new llvm::GlobalVariable(
+                ctx.getModule(), llvmType, /*isConstant=*/false,
+                llvm::GlobalVariable::ExternalLinkage, /*Initializer=*/nullptr, name);
+        }
+        ctx.declareVariable(name, global, type);
+        return global;
+    }
+
     // C static local: emit one module-scope global and bind the function-local
     // name to it. Sema has already proven the initializer is constant.
     if (isStaticLocal && !ctx.isGlobalScope()) {
