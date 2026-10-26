@@ -439,3 +439,40 @@ TEST_F(DemoRegressionE2E, LocalRecordDefinitions) {
         }
     )", "reg_local_records.c"), 0);
 }
+
+// 自引用类（`Node* next`）曾因 getLLVMType(Pointer) 递归解析 pointee 爆栈。
+TEST_F(DemoRegressionE2E, SelfReferentialClassPointerField) {
+    EXPECT_EQ(runSource(R"(
+        class Node { public: Node* next; int32 v; };
+        int32 main() {
+            Node a; Node b;
+            a.next = &b; a.v = 1; b.next = null; b.v = 2;
+            return a.next->v + a.v - 3;
+        }
+    )", "reg_class_self.c"), 0);
+}
+
+TEST_F(DemoRegressionE2E, ClassMemberBinaryAndUnaryOperators) {
+    EXPECT_EQ(runSource(R"(
+        class V {
+        public:
+            int32 x;
+            int32 operator+(V o) { return this->x + o.x; }
+            int32 operator-() { return -(this->x); }
+        };
+        int32 main() {
+            V a; a.x = 3; V b; b.x = 4;
+            if (a + b != 7) return 1;
+            if (-a != -3) return 2;
+            return 0;
+        }
+    )", "reg_class_ops.c"), 0);
+}
+
+TEST_F(DemoRegressionE2E, OutOfLineMemberOperatorDefinition) {
+    EXPECT_EQ(runSource(R"(
+        class V { public: int32 x; int32 operator+(V o); };
+        int32 V::operator+(V o) { return this->x + o.x; }
+        int32 main() { V a; a.x = 1; V b; b.x = 2; return a + b - 3; }
+    )", "reg_class_op_ooc.c"), 0);
+}

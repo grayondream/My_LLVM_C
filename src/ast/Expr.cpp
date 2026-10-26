@@ -416,19 +416,38 @@ llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
     if (auto* ct = ctConstantOrNull(ctx, *this)) return ct;
     // Check if this is an overloaded operator call
     if (!mangledCallee.empty()) {
+        llvm::Value* lhs = left->codegen(ctx);
+        llvm::Value* rhs = right->codegen(ctx);
+        if (!lhs || !rhs) return nullptr;
+
+        // Member-form operator: pass the left object address as implicit this.
+        if (isMethodOperator) {
+            auto& builder = ctx.getBuilder();
+            llvm::Function* calleeFn = ctx.getModule().getFunction(mangledCallee);
+            if (!calleeFn) {
+                llvm::Type* retLLVM = type ? ctx.getLLVMType(type)
+                                           : llvm::Type::getVoidTy(ctx.getContext());
+                std::vector<llvm::Type*> paramLLVM;
+                for (auto* pt : resolvedParamTypes) paramLLVM.push_back(ctx.getLLVMType(pt));
+                auto* fnType = llvm::FunctionType::get(retLLVM, paramLLVM, false);
+                calleeFn = llvm::Function::Create(fnType, llvm::Function::ExternalLinkage,
+                                                  mangledCallee, ctx.getModule());
+            }
+            if (right->isLValue) rhs = readLValue(ctx, *right, rhs);
+            if (resolvedParamTypes.size() > 1)
+                rhs = ctx.castValue(rhs, right->type,
+                                    ctx.getLLVMType(resolvedParamTypes[1]));
+            return builder.CreateCall(calleeFn, {lhs, rhs}, "mopcalltmp");
+        }
+
+        lhs = emitRValue(ctx, *left, lhs);
+        rhs = emitRValue(ctx, *right, rhs);
+
         llvm::Function* calleeFn = ctx.getModule().getFunction(mangledCallee);
         if (!calleeFn) {
             LOGE("unknown operator function: {}", mangledCallee);
             return nullptr;
         }
-        
-        llvm::Value* lhs = left->codegen(ctx);
-        llvm::Value* rhs = right->codegen(ctx);
-        if (!lhs || !rhs) return nullptr;
-        
-        lhs = emitRValue(ctx, *left, lhs);
-        rhs = emitRValue(ctx, *right, rhs);
-        
         return ctx.getBuilder().CreateCall(calleeFn, {lhs, rhs}, "opcalltmp");
     }
 
@@ -674,13 +693,26 @@ llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
     if (auto* ct = ctConstantOrNull(ctx, *this)) return ct;
     // SEM-17: overloaded unary operator — emit a call to the resolved function.
     if (!mangledCallee.empty()) {
+        llvm::Value* arg = operand->codegen(ctx);
+        if (!arg) return nullptr;
+        if (isMethodOperator) {
+            llvm::Function* calleeFn = ctx.getModule().getFunction(mangledCallee);
+            if (!calleeFn) {
+                llvm::Type* retLLVM = type ? ctx.getLLVMType(type)
+                                           : llvm::Type::getVoidTy(ctx.getContext());
+                std::vector<llvm::Type*> paramLLVM;
+                for (auto* pt : resolvedParamTypes) paramLLVM.push_back(ctx.getLLVMType(pt));
+                auto* fnType = llvm::FunctionType::get(retLLVM, paramLLVM, false);
+                calleeFn = llvm::Function::Create(fnType, llvm::Function::ExternalLinkage,
+                                                  mangledCallee, ctx.getModule());
+            }
+            return ctx.getBuilder().CreateCall(calleeFn, {arg}, "umopcalltmp");
+        }
         llvm::Function* calleeFn = ctx.getModule().getFunction(mangledCallee);
         if (!calleeFn) {
             LOGE("unknown unary operator function: {}", mangledCallee);
             return nullptr;
         }
-        llvm::Value* arg = operand->codegen(ctx);
-        if (!arg) return nullptr;
         arg = emitRValue(ctx, *operand, arg);
         return ctx.getBuilder().CreateCall(calleeFn, {arg}, "uopcalltmp");
     }

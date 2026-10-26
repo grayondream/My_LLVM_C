@@ -3307,6 +3307,61 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationAsType() {
                     if (fn) fn->className = classTok->lexeme;
                     return fn;
                 }
+            } else if (check(TokenType::TOKEN_OPERATOR)) {
+                advance(); // 'operator'
+                auto opTok = peek();
+                std::string sym;
+                if (opTok) {
+                    switch (opTok->type) {
+                        case TokenType::TOKEN_PLUS:        sym = "+"; advance(); break;
+                        case TokenType::TOKEN_MINUS:       sym = "-"; advance(); break;
+                        case TokenType::TOKEN_STAR:        sym = "*"; advance(); break;
+                        case TokenType::TOKEN_SLASH:       sym = "/"; advance(); break;
+                        case TokenType::TOKEN_PERCENT:     sym = "%"; advance(); break;
+                        case TokenType::TOKEN_EQ:          sym = "=="; advance(); break;
+                        case TokenType::TOKEN_NOT_EQ:      sym = "!="; advance(); break;
+                        case TokenType::TOKEN_LT:          sym = "<"; advance(); break;
+                        case TokenType::TOKEN_GT:          sym = ">"; advance(); break;
+                        case TokenType::TOKEN_LE:          sym = "<="; advance(); break;
+                        case TokenType::TOKEN_GE:          sym = ">="; advance(); break;
+                        case TokenType::TOKEN_AND:         sym = "&&"; advance(); break;
+                        case TokenType::TOKEN_OR:          sym = "||"; advance(); break;
+                        case TokenType::TOKEN_BIT_AND:     sym = "&"; advance(); break;
+                        case TokenType::TOKEN_BIT_OR:      sym = "|"; advance(); break;
+                        case TokenType::TOKEN_CARET:       sym = "^"; advance(); break;
+                        case TokenType::TOKEN_LSHIFT:      sym = "<<"; advance(); break;
+                        case TokenType::TOKEN_RSHIFT:      sym = ">>"; advance(); break;
+                        case TokenType::TOKEN_TILDE:       sym = "~"; advance(); break;
+                        case TokenType::TOKEN_NOT:         sym = "!"; advance(); break;
+                        case TokenType::TOKEN_PLUS_PLUS:   sym = "++"; advance(); break;
+                        case TokenType::TOKEN_MINUS_MINUS: sym = "--"; advance(); break;
+                        case TokenType::TOKEN_LBRACKET:
+                            advance();
+                            if (!match(TokenType::TOKEN_RBRACKET)) {
+                                errorUnexpected("expected ']' after 'operator['");
+                                return nullptr;
+                            }
+                            sym = "[]";
+                            break;
+                        case TokenType::TOKEN_LPAREN:
+                            advance();
+                            if (!match(TokenType::TOKEN_RPAREN)) {
+                                errorUnexpected("expected ')' after 'operator('");
+                                return nullptr;
+                            }
+                            sym = "()";
+                            break;
+                        default:
+                            break;
+                    }
+                }
+                if (sym.empty() || !check(TokenType::TOKEN_LPAREN)) {
+                    errorUnexpected("expected operator symbol and parameter list");
+                    return nullptr;
+                }
+                auto fn = parseFunctionDecl(type, "operator" + sym, isConstexpr);
+                if (fn) fn->className = classTok->lexeme;
+                return fn;
             }
         }
         m_currentTokenPos = saved;
@@ -4701,7 +4756,31 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                         opSym = "()";
                         symbolConsumed = true;
                     } else {
-                        opSym = opToken->lexeme;
+                        switch (opToken->type) {
+                            case TokenType::TOKEN_PLUS:        opSym = "+"; break;
+                            case TokenType::TOKEN_MINUS:       opSym = "-"; break;
+                            case TokenType::TOKEN_STAR:        opSym = "*"; break;
+                            case TokenType::TOKEN_SLASH:       opSym = "/"; break;
+                            case TokenType::TOKEN_PERCENT:     opSym = "%"; break;
+                            case TokenType::TOKEN_EQ:          opSym = "=="; break;
+                            case TokenType::TOKEN_NOT_EQ:      opSym = "!="; break;
+                            case TokenType::TOKEN_LT:          opSym = "<"; break;
+                            case TokenType::TOKEN_GT:          opSym = ">"; break;
+                            case TokenType::TOKEN_LE:          opSym = "<="; break;
+                            case TokenType::TOKEN_GE:          opSym = ">="; break;
+                            case TokenType::TOKEN_AND:         opSym = "&&"; break;
+                            case TokenType::TOKEN_OR:          opSym = "||"; break;
+                            case TokenType::TOKEN_BIT_AND:     opSym = "&"; break;
+                            case TokenType::TOKEN_BIT_OR:      opSym = "|"; break;
+                            case TokenType::TOKEN_CARET:       opSym = "^"; break;
+                            case TokenType::TOKEN_LSHIFT:      opSym = "<<"; break;
+                            case TokenType::TOKEN_RSHIFT:      opSym = ">>"; break;
+                            case TokenType::TOKEN_TILDE:       opSym = "~"; break;
+                            case TokenType::TOKEN_NOT:         opSym = "!"; break;
+                            case TokenType::TOKEN_PLUS_PLUS:   opSym = "++"; break;
+                            case TokenType::TOKEN_MINUS_MINUS: opSym = "--"; break;
+                            default: opSym = opToken->lexeme; break;
+                        }
                     }
                     std::string opName = "operator" + opSym;
                     if (!symbolConsumed) advance(); // consume operator symbol

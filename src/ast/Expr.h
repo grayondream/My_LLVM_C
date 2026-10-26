@@ -189,6 +189,9 @@ public:
     std::unique_ptr<ExprAST> left;
     std::unique_ptr<ExprAST> right;
     std::string mangledCallee;  // Set by sema for operator overloading
+    // SEM-17: member-form operator call (`a + b` resolving to `a.operator+(b)`).
+    bool isMethodOperator = false;
+    std::vector<Type*> resolvedParamTypes;
 
 
     BinaryExprAST(BinaryOp oper, std::unique_ptr<ExprAST> l, std::unique_ptr<ExprAST> r)
@@ -205,6 +208,8 @@ public:
     // (prefix) free function. codegen then emits a call instead of the
     // built-in instruction.
     std::string mangledCallee;
+    bool isMethodOperator = false;
+    std::vector<Type*> resolvedParamTypes;
 
 
     UnaryExprAST(UnaryOp oper, std::unique_ptr<ExprAST> expr)

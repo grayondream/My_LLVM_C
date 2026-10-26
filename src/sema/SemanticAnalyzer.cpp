@@ -1872,20 +1872,40 @@ void SemanticAnalyzer::visit(BinaryExprAST& node) {
                     }
                     node.isLValue = false;
                     return;
-                } else {
-                    emitError("no matching " + binaryOpToString(node.op) + " operator for types '" 
-                        + typeToString(leftType) + "' and '" + typeToString(rightType) + "'", node);
-                    node.type = nullptr;
-                    node.isLValue = false;
-                    return;
                 }
-            } else {
-                emitError("no matching " + binaryOpToString(node.op) + " operator for types '" 
-                    + typeToString(leftType) + "' and '" + typeToString(rightType) + "'", node);
-                node.type = nullptr;
-                node.isLValue = false;
-                return;
             }
+            // Member form: `a + b` -> `a.operator+(b)`.
+            Type* lt = stripTypedef(leftType);
+            if (lt && lt->kind == TypeKind::Class) {
+                auto* ct = static_cast<ClassType*>(lt);
+                ClassType* definingClass = nullptr;
+                Symbol* method = resolveMethod(ct, opName, {rightType}, &definingClass);
+                if (method && method->type && method->type->kind == TypeKind::Function) {
+                    if (definingClass &&
+                        !canAccessMember(definingClass, definingClass->memberAccessLevel(opName))) {
+                        emitError(DiagnosticCode::SemPrivateMemberAccess,
+                                  "cannot access private/protected operator '" + opName +
+                                      "' of class '" + definingClass->name + "'",
+                                  node);
+                    } else {
+                        auto* ft = static_cast<FunctionType*>(method->type);
+                        node.isMethodOperator = true;
+                        node.resolvedParamTypes = ft->paramTypes;
+                        node.mangledCallee = mangleFunction(
+                            opName, {new Type(TypeKind::Pointer, definingClass), rightType});
+                        node.type = ft->returnType;
+                        node.isLValue = false;
+                        delete method;
+                        return;
+                    }
+                }
+                if (method) delete method;
+            }
+            emitError("no matching " + binaryOpToString(node.op) + " operator for types '" 
+                + typeToString(leftType) + "' and '" + typeToString(rightType) + "'", node);
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
         }
     }
 
@@ -1955,6 +1975,33 @@ void SemanticAnalyzer::visit(UnaryExprAST& node) {
                     node.isLValue = false;
                     return;
                 }
+            }
+            // Member form: `-v` -> `v.operator-()`.
+            Type* ot = stripTypedef(operandType);
+            if (ot && ot->kind == TypeKind::Class) {
+                auto* ct = static_cast<ClassType*>(ot);
+                ClassType* definingClass = nullptr;
+                Symbol* method = resolveMethod(ct, opName, {}, &definingClass);
+                if (method && method->type && method->type->kind == TypeKind::Function) {
+                    if (definingClass &&
+                        !canAccessMember(definingClass, definingClass->memberAccessLevel(opName))) {
+                        emitError(DiagnosticCode::SemPrivateMemberAccess,
+                                  "cannot access private/protected operator '" + opName +
+                                      "' of class '" + definingClass->name + "'",
+                                  node);
+                    } else {
+                        auto* ft = static_cast<FunctionType*>(method->type);
+                        node.isMethodOperator = true;
+                        node.resolvedParamTypes = ft->paramTypes;
+                        node.mangledCallee = mangleFunction(
+                            opName, {new Type(TypeKind::Pointer, definingClass)});
+                        node.type = ft->returnType;
+                        node.isLValue = false;
+                        delete method;
+                        return;
+                    }
+                }
+                if (method) delete method;
             }
             // No overload: `!aggregate` has no built-in meaning (coerceToBool
             // cannot lower an aggregate) — diagnose instead of emitting bad IR.
