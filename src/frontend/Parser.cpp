@@ -3054,14 +3054,15 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
             return parseDeclarationAsType();
         }
 
-        if (!consumedSemicolon && check(TokenType::TOKEN_IDENTIFIER)) {
-            auto nameTok = advance();
+        if (!consumedSemicolon &&
+            (check(TokenType::TOKEN_IDENTIFIER) || check(TokenType::TOKEN_STAR) ||
+             check(TokenType::TOKEN_LPAREN))) {
             auto type = TypeContext::instance().getStruct(structDecl->name);
             if (!type) {
                 type = new StructType(structDecl->name);
                 TypeContext::instance().addStruct(structDecl->name, static_cast<StructType*>(type));
             }
-            return parseVariableDeclList(type, nameTok->lexeme);
+            return parseDeclarationFromBaseType(type);
         }
 
         return structDecl;
@@ -3099,8 +3100,9 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
             return parseDeclarationAsType();
         }
 
-        if (!consumedSemicolon && check(TokenType::TOKEN_IDENTIFIER)) {
-            auto nameTok = advance();
+        if (!consumedSemicolon &&
+            (check(TokenType::TOKEN_IDENTIFIER) || check(TokenType::TOKEN_STAR) ||
+             check(TokenType::TOKEN_LPAREN))) {
             auto type = TypeContext::instance().getClass(classDecl->name);
             if (!type) {
                 type = new ClassType(classDecl->name);
@@ -3109,7 +3111,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
             // PAR-12: 变量挂在 classDecl AST 上（不丢弃聚合 AST）——sema 先
             // 注册字段/方法/访问段，再处理变量；codegen 同理。此前直接返回
             // 变量导致字段/方法从未注册（`class { ... } c;` 成员不可用）。
-            classDecl->attachedVars = parseVariableDeclList(type, nameTok->lexeme);
+            classDecl->attachedVars = parseDeclarationFromBaseType(type);
             return classDecl;
         }
 
@@ -3155,14 +3157,15 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
             return parseDeclarationAsType();
         }
 
-        if (!consumedSemicolon && check(TokenType::TOKEN_IDENTIFIER)) {
-            auto nameTok = advance();
+        if (!consumedSemicolon &&
+            (check(TokenType::TOKEN_IDENTIFIER) || check(TokenType::TOKEN_STAR) ||
+             check(TokenType::TOKEN_LPAREN))) {
             auto type = TypeContext::instance().getUnion(unionDecl->name);
             if (!type) {
                 type = new UnionType(unionDecl->name);
                 TypeContext::instance().addUnion(unionDecl->name, static_cast<UnionType*>(type));
             }
-            return parseVariableDeclList(type, nameTok->lexeme);
+            return parseDeclarationFromBaseType(type);
         }
 
         return unionDecl;
@@ -3192,14 +3195,14 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
             return parseDeclarationAsType();
         }
 
-        if (check(TokenType::TOKEN_IDENTIFIER)) {
-            auto nameTok = advance();
+        if (check(TokenType::TOKEN_IDENTIFIER) || check(TokenType::TOKEN_STAR) ||
+            check(TokenType::TOKEN_LPAREN)) {
             auto type = TypeContext::instance().getEnum(enumDecl->name);
             if (!type) {
                 type = new EnumType(enumDecl->name);
                 TypeContext::instance().addEnum(enumDecl->name, static_cast<EnumType*>(type));
             }
-            return parseVariableDecl(type, nameTok->lexeme);
+            return parseDeclarationFromBaseType(type);
         }
 
         match(TokenType::TOKEN_SEMICOLON); // definition terminator
@@ -3234,6 +3237,59 @@ static Type* stripDeclaratorType(Type* type) {
         }
     }
     return type;
+}
+
+std::unique_ptr<DeclAST> Parser::parseDeclarationFromBaseType(Type* base,
+                                                              bool isConstexpr) {
+    // Parenthesized declarator: `(*fp)(int32)` / `(*p)[3]`.
+    if (check(TokenType::TOKEN_LPAREN)) {
+        std::string name;
+        bool isFunction = false;
+        std::vector<std::unique_ptr<ParamDeclAST>> params;
+        Type* declType = parseFunctionPointerDeclarator(
+            base, name, /*requireName=*/true, &isFunction, &params);
+        if (!declType) return nullptr;
+        if (isFunction) {
+            std::unique_ptr<CompoundStmtAST> body;
+            if (check(TokenType::TOKEN_LBRACE)) {
+                body = parseCompoundStmt();
+            } else if (!check(TokenType::TOKEN_SEMICOLON) && !eof()) {
+                errorUnexpected("expected '{' or ';' after function declaration");
+            }
+            if (declType->kind != TypeKind::Function) return nullptr;
+            auto* ft = static_cast<FunctionType*>(declType);
+            return std::make_unique<FunctionDeclAST>(
+                name, ft->returnType, params, body, isConstexpr, ft->isVarArg);
+        }
+        return parseVariableDeclList(declType, name, isConstexpr);
+    }
+
+    // Leading pointers: `*p`, `**p`, `*f()` (function returning pointer).
+    Type* type = base;
+    while (check(TokenType::TOKEN_STAR)) {
+        advance();
+        type = new Type(TypeKind::Pointer, type);
+        while (check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE) ||
+               check(TokenType::TOKEN_RESTRICT)) {
+            const bool isConst = check(TokenType::TOKEN_CONST);
+            const bool isVolatile = check(TokenType::TOKEN_VOLATILE);
+            const bool isRestrict = check(TokenType::TOKEN_RESTRICT);
+            advance();
+            if (isConst) type->isConst = true;
+            if (isVolatile) type->isVolatile = true;
+            if (isRestrict) type->isRestrict = true;
+        }
+    }
+
+    if (!check(TokenType::TOKEN_IDENTIFIER)) {
+        errorUnexpected("expected declarator after record definition");
+        return nullptr;
+    }
+    auto nameTok = advance();
+    if (check(TokenType::TOKEN_LPAREN)) {
+        return parseFunctionDecl(type, nameTok->lexeme, isConstexpr);
+    }
+    return parseVariableDeclList(type, nameTok->lexeme, isConstexpr);
 }
 
 std::unique_ptr<DeclAST> Parser::parseDeclarationAsType() {

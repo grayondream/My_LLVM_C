@@ -105,6 +105,12 @@ private:
 
     std::unique_ptr<DeclAST> parseDeclarationAsType();
 
+    // Continue a declaration whose base type was already parsed. Handles the
+    // attached forms after a record definition: `s`, `*p`, `f()`, `*f()`,
+    // `(*fp)(...)`, `(*p)[N]`.
+    std::unique_ptr<DeclAST> parseDeclarationFromBaseType(Type* base,
+                                                          bool isConstexpr = false);
+
     std::unique_ptr<FunctionDeclAST> parseFunctionDecl(Type* returnType, const std::string& name, bool isConstexpr = false);
 
     std::unique_ptr<DeclAST> parseVariableDecl(Type* type, const std::string& name, bool isConstexpr = false);
