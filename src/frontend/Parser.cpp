@@ -1427,6 +1427,14 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
         }
     }
 
+    // C null statement: a lone ';' is a valid statement (and the natural
+    // empty body for `while (...) ;` / `for (...) ;`).
+    if (auto semi = match(TokenType::TOKEN_SEMICOLON)) {
+        auto stmt = std::make_unique<NullStmtAST>();
+        stmt->setLocation(semi->filename, semi->line, semi->column);
+        return stmt;
+    }
+
     // Stamp declaration statements with the location of their first token
     // (INF-03 / P0-06), so sema diagnostics on the statement carry a position.
     auto makeDeclStmt = [&](std::unique_ptr<DeclAST> decl) {
