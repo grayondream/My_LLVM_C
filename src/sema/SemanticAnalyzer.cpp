@@ -11,6 +11,7 @@
 #include "sema/TemplateInstantiator.h"
 #include <algorithm>
 #include <climits>
+#include <functional>
 
 // Strip any number of typedef/alias layers, returning the underlying type.
 static Type* stripTypedef(Type* type) {
@@ -3498,17 +3499,108 @@ void SemanticAnalyzer::visit(MethodCallExprAST& node) {
         classType = static_cast<ClassType*>(objType->base);
     }
 
+    std::vector<Type*> argTypes;
+    for (auto& arg : node.args) {
+        Type* argType = getExprType(*arg);
+        argTypes.push_back(argType);
+    }
+
+    // PAR-05: `s.f(args)` / `c.f(args)` where `f` is a function-pointer
+    // aggregate field. This is an indirect call, not a class method.
+    {
+        auto strip = [](Type* t) {
+            while (t && t->kind == TypeKind::Typedef)
+                t = static_cast<TypedefType*>(t)->aliasedType;
+            return t;
+        };
+        Type* owner = strip(objType);
+        if (owner && owner->kind == TypeKind::Pointer) owner = strip(owner->base);
+        Type* fieldType = nullptr;
+        Type* accessOwner = owner;
+        std::function<Type*(Type*, const std::string&)> findField =
+            [&](Type* t, const std::string& name) -> Type* {
+                t = strip(t);
+                if (!t) return nullptr;
+                if (t->kind == TypeKind::Struct) {
+                    auto* st = static_cast<StructType*>(t);
+                    if (Type* ft = st->getFieldType(name)) return ft;
+                    if (!st->baseClass.empty()) {
+                        if (auto* b = typeCtx->getStruct(st->baseClass))
+                            if (Type* ft = findField(b, name)) return ft;
+                    }
+                } else if (t->kind == TypeKind::Class) {
+                    auto* ct = static_cast<ClassType*>(t);
+                    if (Type* ft = ct->getFieldType(name)) return ft;
+                    if (!ct->baseClass.empty()) {
+                        if (auto* b = typeCtx->getClass(ct->baseClass))
+                            if (Type* ft = findField(b, name)) return ft;
+                    }
+                } else if (t->kind == TypeKind::Union) {
+                    auto* ut = static_cast<UnionType*>(t);
+                    for (auto& m : ut->members)
+                        if (m.name == name) return m.type;
+                }
+                return nullptr;
+            };
+        fieldType = findField(owner, node.methodName);
+        if (fieldType) {
+            Type* ft = strip(fieldType);
+            FunctionType* fnType = nullptr;
+            if (ft && ft->kind == TypeKind::Pointer) {
+                Type* pointee = strip(ft->base);
+                if (pointee && pointee->kind == TypeKind::Function)
+                    fnType = static_cast<FunctionType*>(pointee);
+            } else if (ft && ft->kind == TypeKind::Function) {
+                fnType = static_cast<FunctionType*>(ft);
+            }
+            if (fnType) {
+                if (accessOwner && accessOwner->kind == TypeKind::Class) {
+                    auto* ct = static_cast<ClassType*>(accessOwner);
+                    AccessLevel level = ct->memberAccessLevel(node.methodName);
+                    if (!canAccessMember(ct, level)) {
+                        emitError(DiagnosticCode::SemPrivateMemberAccess,
+                                  "cannot access " +
+                                      std::string(level == AccessLevel::Private
+                                                      ? "private" : "protected") +
+                                      " member '" + node.methodName + "' of class '" +
+                                      ct->name + "'",
+                                  node);
+                        node.type = nullptr;
+                        node.isLValue = false;
+                        return;
+                    }
+                }
+                if (argTypes.size() != fnType->paramTypes.size()) {
+                    emitError("function-pointer field '" + node.methodName +
+                                  "' expects " + std::to_string(fnType->paramTypes.size()) +
+                                  " arguments, got " + std::to_string(argTypes.size()),
+                              node);
+                    node.type = nullptr;
+                    node.isLValue = false;
+                    return;
+                }
+                for (size_t i = 0; i < argTypes.size(); ++i) {
+                    checkAssignmentTypes(fnType->paramTypes[i], argTypes[i], *node.args[i]);
+                }
+                const bool wasLValue = node.object->isLValue;
+                node.fieldCallee = std::make_unique<MemberAccessExprAST>(
+                    MemberAccessKind::Dot, std::move(node.object), node.methodName);
+                node.fieldCallee->type = fieldType;
+                node.fieldCallee->isLValue = wasLValue;
+                node.isFunctionPointerCall = true;
+                node.resolvedParamTypes = fnType->paramTypes;
+                node.type = fnType->returnType;
+                node.isLValue = false;
+                return;
+            }
+        }
+    }
+
     if (!classType) {
         emitError("cannot call method on non-class type '" + typeToString(objType) + "'", node);
         node.type = nullptr;
         node.isLValue = false;
         return;
-    }
-
-    std::vector<Type*> argTypes;
-    for (auto& arg : node.args) {
-        Type* argType = getExprType(*arg);
-        argTypes.push_back(argType);
     }
 
     // INH-06（方案乙）: the class whose table provided the method (possibly a

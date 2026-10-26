@@ -443,6 +443,12 @@ public:
     // dispatches on it before the class-method path.
     BuiltinMethod builtinMethod = BuiltinMethod::None;
 
+    // PAR-05: `s.f(args)` where `f` is a function-pointer aggregate field.
+    // Sema moves the object reference into `fieldCallee` and records the
+    // pointee function signature in `resolvedParamTypes` (no implicit this).
+    bool isFunctionPointerCall = false;
+    std::unique_ptr<MemberAccessExprAST> fieldCallee;
+
     // CT-07: compile_time reflection call (name_of/fields_of/attributes_of).
     // Sema records data in ReflectionRegistry and sets the kind + target type;
     // codegen materializes the global array/slice and returns it.

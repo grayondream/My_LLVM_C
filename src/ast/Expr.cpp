@@ -1448,6 +1448,30 @@ llvm::Value* MethodCallExprAST::codegen(CodegenContext& ctx) {
     if (builtinMethod != BuiltinMethod::None) {
         return codegenBuiltinMethod(ctx, *this);
     }
+    // PAR-05: indirect call through a function-pointer aggregate field.
+    if (isFunctionPointerCall && fieldCallee) {
+        llvm::Value* fnPtr = fieldCallee->codegen(ctx);
+        if (!fnPtr) return nullptr;
+        if (fieldCallee->isLValue) fnPtr = readLValue(ctx, *fieldCallee, fnPtr);
+        std::vector<llvm::Value*> callArgs;
+        for (size_t i = 0; i < args.size(); ++i) {
+            llvm::Value* v = args[i]->codegen(ctx);
+            if (!v) return nullptr;
+            if (args[i]->isLValue) v = readLValue(ctx, *args[i], v);
+            if (i < resolvedParamTypes.size())
+                v = ctx.castValue(v, args[i]->type,
+                                  ctx.getLLVMType(resolvedParamTypes[i]));
+            callArgs.push_back(v);
+        }
+        std::vector<llvm::Type*> paramLLVM;
+        for (auto* pt : resolvedParamTypes) paramLLVM.push_back(ctx.getLLVMType(pt));
+        llvm::Type* retLLVM = type ? ctx.getLLVMType(type)
+                                   : llvm::Type::getVoidTy(ctx.getContext());
+        auto* fnType = llvm::FunctionType::get(retLLVM, paramLLVM, false);
+        if (retLLVM->isVoidTy())
+            return ctx.getBuilder().CreateCall(fnType, fnPtr, callArgs);
+        return ctx.getBuilder().CreateCall(fnType, fnPtr, callArgs, "fieldcalltmp");
+    }
     llvm::Value* objVal = object->codegen(ctx);
     if (!objVal) return nullptr;
 

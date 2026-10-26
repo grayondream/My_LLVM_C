@@ -161,6 +161,8 @@ bool evalIntConstExpr(const ExprAST* expr, long long& out) {
 
 } // namespace
 
+static Type* stripDeclaratorType(Type* type);
+
 const std::vector<Diagnostic>& Parser::getErrors() const {
     return m_errors;
 }
@@ -2293,32 +2295,26 @@ Type* Parser::parseBaseType() {
                         match(TokenType::TOKEN_SEMICOLON);
                         continue;
                     }
-                    if (!check(TokenType::TOKEN_IDENTIFIER)) break;
-                    std::string fieldName = advance()->lexeme;
-                    // P1-07 / PAR-10: named bit-field `T name : N;`.
-                    if (check(TokenType::TOKEN_COLON)) {
-                        advance();
-                        int bw = 0;
-                        if (!parseBitFieldWidth(bw)) break;
-                        // 命名零宽位域 parse 期拒绝（FieldInfo 编码不可表示）。
-                        if (bw == 0) {
-                            error("bit-field width must be non-zero for a named bit-field", *peek());
-                            break;
-                        }
-                        if (check(TokenType::TOKEN_LBRACKET)) {
-                            error("bit-field cannot have array suffix", *peek());
-                            break;
-                        }
-                        structType->addField(fieldName, fieldType, bw);
-                        match(TokenType::TOKEN_SEMICOLON);
-                        continue;
+                    if (!check(TokenType::TOKEN_IDENTIFIER) &&
+                        !check(TokenType::TOKEN_STAR) &&
+                        !check(TokenType::TOKEN_LPAREN)) {
+                        break;
                     }
-                    bool isFlexMember = false;
-                    fieldType = parseMemberArraySuffix(fieldType, &isFlexMember);
-                    structType->addField(fieldName, fieldType);
-                    if (isFlexMember && !structType->fields.empty())
-                        structType->fields.back().flexibleArray = true;
-                    match(TokenType::TOKEN_SEMICOLON);
+                    Type* memberBase = stripDeclaratorType(fieldType);
+                    bool firstField = true;
+                    while (true) {
+                        MemberFieldDecl fd;
+                        if (!parseMemberFieldDecl(firstField ? fieldType : memberBase, fd))
+                            break;
+                        structType->addField(fd.name, fd.type, fd.bitWidth);
+                        if (fd.flexibleArray && !structType->fields.empty())
+                            structType->fields.back().flexibleArray = true;
+                        firstField = false;
+                        if (!match(TokenType::TOKEN_COMMA)) {
+                            match(TokenType::TOKEN_SEMICOLON);
+                            break;
+                        }
+                    }
                 }
                 match(TokenType::TOKEN_RBRACE);
                 match(TokenType::TOKEN_SEMICOLON);
@@ -2373,32 +2369,26 @@ Type* Parser::parseBaseType() {
                         match(TokenType::TOKEN_SEMICOLON);
                         continue;
                     }
-                    if (!check(TokenType::TOKEN_IDENTIFIER)) break;
-                    std::string memberName = advance()->lexeme;
-                    // P1-07 / PAR-10: named bit-field `T name : N;`.
-                    if (check(TokenType::TOKEN_COLON)) {
-                        advance();
-                        int bw = 0;
-                        if (!parseBitFieldWidth(bw)) break;
-                        // 命名零宽位域 parse 期拒绝（FieldInfo 编码不可表示）。
-                        if (bw == 0) {
-                            error("bit-field width must be non-zero for a named bit-field", *peek());
-                            break;
-                        }
-                        if (check(TokenType::TOKEN_LBRACKET)) {
-                            error("bit-field cannot have array suffix", *peek());
-                            break;
-                        }
-                        unionType->addMember(memberName, memberType, bw);
-                        match(TokenType::TOKEN_SEMICOLON);
-                        continue;
+                    if (!check(TokenType::TOKEN_IDENTIFIER) &&
+                        !check(TokenType::TOKEN_STAR) &&
+                        !check(TokenType::TOKEN_LPAREN)) {
+                        break;
                     }
-                    bool isFlexMember = false;
-                    memberType = parseMemberArraySuffix(memberType, &isFlexMember);
-                    unionType->addMember(memberName, memberType);
-                    if (isFlexMember && !unionType->members.empty())
-                        unionType->members.back().flexibleArray = true;
-                    match(TokenType::TOKEN_SEMICOLON);
+                    Type* memberBase = stripDeclaratorType(memberType);
+                    bool firstField = true;
+                    while (true) {
+                        MemberFieldDecl fd;
+                        if (!parseMemberFieldDecl(firstField ? memberType : memberBase, fd))
+                            break;
+                        unionType->addMember(fd.name, fd.type, fd.bitWidth);
+                        if (fd.flexibleArray && !unionType->members.empty())
+                            unionType->members.back().flexibleArray = true;
+                        firstField = false;
+                        if (!match(TokenType::TOKEN_COMMA)) {
+                            match(TokenType::TOKEN_SEMICOLON);
+                            break;
+                        }
+                    }
                 }
                 match(TokenType::TOKEN_RBRACE);
                 match(TokenType::TOKEN_SEMICOLON);
@@ -3211,6 +3201,9 @@ static Type* stripDeclaratorType(Type* type) {
                 break;
             case TypeKind::Optional:
                 type = static_cast<OptionalType*>(type)->elementType;
+                break;
+            case TypeKind::Function:
+                type = static_cast<FunctionType*>(type)->returnType;
                 break;
             default:
                 return type;
@@ -4111,6 +4104,72 @@ std::unique_ptr<DeclAST> Parser::parseTemplateDecl() {
     return tpl;
 }
 
+bool Parser::parseMemberFieldDecl(Type* baseType, MemberFieldDecl& out) {
+    out = MemberFieldDecl{};
+    Type* type = baseType;
+
+    // Parenthesized declarator: `(*f)(int32)` / `(*p)[3]`.
+    if (check(TokenType::TOKEN_LPAREN)) {
+        std::string name;
+        bool isFunction = false;
+        std::vector<std::unique_ptr<ParamDeclAST>> params;
+        Type* declType = parseFunctionPointerDeclarator(
+            type, name, /*requireName=*/true, &isFunction, &params);
+        if (!declType) return false;
+        if (isFunction) {
+            error("aggregate member cannot be a function", *peek());
+            return false;
+        }
+        out.name = std::move(name);
+        out.type = declType;
+        return true;
+    }
+
+    // Leading pointer declarators: `*a`, `**b`, with pointer qualifiers.
+    while (check(TokenType::TOKEN_STAR)) {
+        advance();
+        type = new Type(TypeKind::Pointer, type);
+        while (check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE) ||
+               check(TokenType::TOKEN_RESTRICT)) {
+            const bool isConst = check(TokenType::TOKEN_CONST);
+            const bool isVolatile = check(TokenType::TOKEN_VOLATILE);
+            const bool isRestrict = check(TokenType::TOKEN_RESTRICT);
+            advance();
+            if (isConst) type->isConst = true;
+            if (isVolatile) type->isVolatile = true;
+            if (isRestrict) type->isRestrict = true;
+        }
+    }
+
+    if (!check(TokenType::TOKEN_IDENTIFIER)) {
+        errorUnexpected("expected member name");
+        return false;
+    }
+    out.name = advance()->lexeme;
+
+    if (check(TokenType::TOKEN_COLON)) {
+        advance();
+        int bw = 0;
+        if (!parseBitFieldWidth(bw)) return false;
+        if (bw == 0) {
+            error("bit-field width must be non-zero for a named bit-field", *peek());
+            return false;
+        }
+        if (check(TokenType::TOKEN_LBRACKET)) {
+            error("bit-field cannot have array suffix", *peek());
+            return false;
+        }
+        out.type = type;
+        out.bitWidth = bw;
+        return true;
+    }
+
+    type = parseMemberArraySuffix(type, &out.flexibleArray);
+    if (!type) return false;
+    out.type = type;
+    return true;
+}
+
 std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
     if (!match(TokenType::TOKEN_STRUCT)) return nullptr;
 
@@ -4317,7 +4376,8 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
             continue;
         }
 
-        if (!check(TokenType::TOKEN_IDENTIFIER)) {
+        if (!memberIsStatic && !check(TokenType::TOKEN_IDENTIFIER) &&
+            !check(TokenType::TOKEN_STAR) && !check(TokenType::TOKEN_LPAREN)) {
             // AGG-03: an anonymous struct/union member promotes its
             // fields/members into the enclosing struct. The trailing ';' was
             // already consumed by parseType's inline-definition path.
@@ -4331,58 +4391,58 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
             }
             break;
         }
-        std::string fieldName = advance()->lexeme;
-        if (memberIsStatic) {
-            std::unique_ptr<ExprAST> init = nullptr;
-            if (match(TokenType::TOKEN_ASSIGN)) {
-                init = parseExpr(2);
-                if (!init) {
+
+        Type* memberBase = stripDeclaratorType(fieldType);
+        bool firstField = true;
+        while (true) {
+            MemberFieldDecl fd;
+            if (!parseMemberFieldDecl(firstField ? fieldType : memberBase, fd)) {
+                m_typeNamespacePrefix = savedPrefix;
+                return nullptr;
+            }
+            auto anns = firstField ? std::move(memberAnns) : std::vector<Annotation>{};
+            if (memberIsStatic) {
+                if (fd.bitWidth != 0 || fd.flexibleArray) {
+                    error("invalid static member declarator", *peek());
                     m_typeNamespacePrefix = savedPrefix;
                     return nullptr;
                 }
+                std::unique_ptr<ExprAST> init = nullptr;
+                if (match(TokenType::TOKEN_ASSIGN)) {
+                    init = parseExpr(2);
+                    if (!init) {
+                        m_typeNamespacePrefix = savedPrefix;
+                        return nullptr;
+                    }
+                }
+                auto staticVar = std::make_unique<VarDeclAST>(fd.name, fd.type, std::move(init));
+                staticVar->annotations = std::move(anns);
+                staticMembers.push_back(std::move(staticVar));
+                if (check(TokenType::TOKEN_COMMA)) {
+                    error("multiple static member declarators are not supported", *peek());
+                    m_typeNamespacePrefix = savedPrefix;
+                    return nullptr;
+                }
+                if (!expect(TokenType::TOKEN_SEMICOLON,
+                            "expected ';' after static member declaration")) {
+                    m_typeNamespacePrefix = savedPrefix;
+                    return nullptr;
+                }
+                break;
             }
-            if (!expect(TokenType::TOKEN_SEMICOLON,
-                        "expected ';' after static member declaration")) {
-                m_typeNamespacePrefix = savedPrefix;
-                return nullptr;
+            FieldInfo fi{fd.name, fd.type, std::move(anns), fd.bitWidth};
+            fi.flexibleArray = fd.flexibleArray;
+            fields.push_back(std::move(fi));
+            firstField = false;
+            if (!match(TokenType::TOKEN_COMMA)) {
+                if (!expect(TokenType::TOKEN_SEMICOLON,
+                            "expected ';' after member declaration")) {
+                    m_typeNamespacePrefix = savedPrefix;
+                    return nullptr;
+                }
+                break;
             }
-            auto staticVar = std::make_unique<VarDeclAST>(fieldName, fieldType, std::move(init));
-            staticVar->annotations = std::move(memberAnns);
-            staticMembers.push_back(std::move(staticVar));
-            continue;
         }
-        // P1-07 / PAR-10: named bit-field `T name : N;`.
-        if (check(TokenType::TOKEN_COLON)) {
-            advance();
-            int bw = 0;
-            if (!parseBitFieldWidth(bw)) {
-                m_typeNamespacePrefix = savedPrefix;
-                return nullptr;
-            }
-            // 命名零宽位域无法在 FieldInfo 编码中表示（bitWidth 0 = 普通字段），
-            // 亦属 C 约束违反——parse 期拒绝（信息只在此处存在）。
-            if (bw == 0) {
-                error("bit-field width must be non-zero for a named bit-field", *peek());
-                m_typeNamespacePrefix = savedPrefix;
-                return nullptr;
-            }
-            if (check(TokenType::TOKEN_LBRACKET)) {
-                error("bit-field cannot have array suffix", *peek());
-                m_typeNamespacePrefix = savedPrefix;
-                return nullptr;
-            }
-            fields.push_back(FieldInfo{fieldName, fieldType, std::move(memberAnns), bw});
-            match(TokenType::TOKEN_SEMICOLON);
-            continue;
-        }
-        bool isFlexMember = false;
-        fieldType = parseMemberArraySuffix(fieldType, &isFlexMember);
-
-        FieldInfo fi{fieldName, fieldType, std::move(memberAnns)};
-        fi.flexibleArray = isFlexMember;
-        fields.push_back(std::move(fi));
-
-        match(TokenType::TOKEN_SEMICOLON);
     }
 
     m_typeNamespacePrefix = savedPrefix;
@@ -4728,7 +4788,32 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                 continue;
             }
 
+            auto parseFieldGroup = [&](Type* firstBase) -> bool {
+                Type* memberBase = stripDeclaratorType(firstBase);
+                bool firstField = true;
+                while (true) {
+                    MemberFieldDecl fd;
+                    if (!parseMemberFieldDecl(firstField ? firstBase : memberBase, fd))
+                        return false;
+                    auto anns = firstField ? std::move(memberAnns)
+                                           : std::vector<Annotation>{};
+                    FieldInfo fi{fd.name, fd.type, std::move(anns), fd.bitWidth};
+                    fi.flexibleArray = fd.flexibleArray;
+                    fields.push_back(std::move(fi));
+                    memberAccess[fd.name] = currentAccess;
+                    firstField = false;
+                    if (!match(TokenType::TOKEN_COMMA)) {
+                        if (!expect(TokenType::TOKEN_SEMICOLON,
+                                    "expected ';' after member declaration"))
+                            return false;
+                        break;
+                    }
+                }
+                return true;
+            };
+
             if (check(TokenType::TOKEN_IDENTIFIER)) {
+                size_t namePos = m_currentTokenPos;
                 std::string memberName = advance()->lexeme;
 
                 if (check(TokenType::TOKEN_LPAREN)) {
@@ -4767,38 +4852,18 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
                     // so same-name static/instance members stay independent.
                     memberAccess["static:" + memberName] = currentAccess;
                 } else {
-                    // Field declaration
-                    // P1-07 / PAR-10: named bit-field `T name : N;`.
-                    if (check(TokenType::TOKEN_COLON)) {
-                        advance();
-                        int bw = 0;
-                        if (!parseBitFieldWidth(bw)) {
-                            m_typeNamespacePrefix = savedPrefix;
-                            return nullptr;
-                        }
-                        // 命名零宽位域 parse 期拒绝（FieldInfo 编码不可表示）。
-                        if (bw == 0) {
-                            error("bit-field width must be non-zero for a named bit-field", *peek());
-                            m_typeNamespacePrefix = savedPrefix;
-                            return nullptr;
-                        }
-                        if (check(TokenType::TOKEN_LBRACKET)) {
-                            error("bit-field cannot have array suffix", *peek());
-                            m_typeNamespacePrefix = savedPrefix;
-                            return nullptr;
-                        }
-                        fields.push_back(FieldInfo{memberName, declType, std::move(memberAnns), bw});
-                        memberAccess[memberName] = currentAccess;
-                        match(TokenType::TOKEN_SEMICOLON);
-                        continue;
+                    m_currentTokenPos = namePos;
+                    if (!parseFieldGroup(declType)) {
+                        m_typeNamespacePrefix = savedPrefix;
+                        return nullptr;
                     }
-                    bool isFlexMember = false;
-                    declType = parseMemberArraySuffix(declType, &isFlexMember);
-                    FieldInfo fi{memberName, declType, std::move(memberAnns)};
-                    fi.flexibleArray = isFlexMember;
-                    fields.push_back(std::move(fi));
-                    memberAccess[memberName] = currentAccess;
-                    match(TokenType::TOKEN_SEMICOLON);
+                }
+            } else if (check(TokenType::TOKEN_LPAREN) && !memberIsStatic) {
+                // Direct function-pointer / pointer-to-array member:
+                // `int32 (*f)(int32);` / `int32 (*p)[3];`.
+                if (!parseFieldGroup(declType)) {
+                    m_typeNamespacePrefix = savedPrefix;
+                    return nullptr;
                 }
             } else if (check(TokenType::TOKEN_OPERATOR)) {
                 // Operator overload: type operator+(...)
@@ -5097,7 +5162,8 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
             continue;
         }
 
-        if (!check(TokenType::TOKEN_IDENTIFIER)) {
+        if (!check(TokenType::TOKEN_IDENTIFIER) && !check(TokenType::TOKEN_STAR) &&
+            !check(TokenType::TOKEN_LPAREN)) {
             // AGG-03: an anonymous struct/union inside a union body promotes
             // its members; parseType already consumed the trailing ';'.
             if (isAnonymousAggregate(memberType)) {
@@ -5110,37 +5176,29 @@ std::unique_ptr<UnionDeclAST> Parser::parseUnionDecl() {
             }
             break;
         }
-        std::string memberName = advance()->lexeme;
-        // P1-07 / PAR-10: named bit-field `T name : N;`.
-        if (check(TokenType::TOKEN_COLON)) {
-            advance();
-            int bw = 0;
-            if (!parseBitFieldWidth(bw)) {
+
+        Type* memberBase = stripDeclaratorType(memberType);
+        bool firstField = true;
+        while (true) {
+            MemberFieldDecl fd;
+            if (!parseMemberFieldDecl(firstField ? memberType : memberBase, fd)) {
                 m_typeNamespacePrefix = savedPrefix;
                 return nullptr;
             }
-            // 命名零宽位域 parse 期拒绝（FieldInfo 编码不可表示）。
-            if (bw == 0) {
-                error("bit-field width must be non-zero for a named bit-field", *peek());
-                m_typeNamespacePrefix = savedPrefix;
-                return nullptr;
+            auto anns = firstField ? std::move(memberAnns) : std::vector<Annotation>{};
+            FieldInfo fi{fd.name, fd.type, std::move(anns), fd.bitWidth};
+            fi.flexibleArray = fd.flexibleArray;
+            members.push_back(std::move(fi));
+            firstField = false;
+            if (!match(TokenType::TOKEN_COMMA)) {
+                if (!expect(TokenType::TOKEN_SEMICOLON,
+                            "expected ';' after member declaration")) {
+                    m_typeNamespacePrefix = savedPrefix;
+                    return nullptr;
+                }
+                break;
             }
-            if (check(TokenType::TOKEN_LBRACKET)) {
-                error("bit-field cannot have array suffix", *peek());
-                m_typeNamespacePrefix = savedPrefix;
-                return nullptr;
-            }
-            members.push_back(FieldInfo{memberName, memberType, std::move(memberAnns), bw});
-            match(TokenType::TOKEN_SEMICOLON);
-            continue;
         }
-        bool isFlexMember = false;
-        memberType = parseMemberArraySuffix(memberType, &isFlexMember);
-
-        FieldInfo fi{memberName, memberType, std::move(memberAnns)};
-        fi.flexibleArray = isFlexMember;
-        members.push_back(std::move(fi));
-
         match(TokenType::TOKEN_SEMICOLON);
     }
 

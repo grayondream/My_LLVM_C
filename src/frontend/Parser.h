@@ -131,6 +131,17 @@ private:
 
     std::unique_ptr<ParamDeclAST> parseParamDecl();
 
+    // PAR-05 / AGG: one aggregate member declarator after its base type.
+    // Handles `name`, `*name`, `(*name)(params)`, `(*name)[N]`, array
+    // suffixes and bit-fields; the caller owns the comma/semicolon loop.
+    struct MemberFieldDecl {
+        std::string name;
+        Type* type = nullptr;
+        int bitWidth = 0;
+        bool flexibleArray = false;
+    };
+    bool parseMemberFieldDecl(Type* baseType, MemberFieldDecl& out);
+
     std::unique_ptr<StructDeclAST> parseStructDecl();
 
     std::unique_ptr<StructDeclAST> parseClassDecl();

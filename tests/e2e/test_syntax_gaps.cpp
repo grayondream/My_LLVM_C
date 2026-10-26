@@ -36,11 +36,17 @@ static int runSyntaxSource(const std::string& source, const std::string& filenam
     auto tokens = lexer.tokenize();
     Parser parser(tokens);
     auto ast = parser.parse();
-    if (!ast || !parser.getErrors().empty()) return -1;
+    if (!ast || !parser.getErrors().empty()) {
+        for (auto& err : parser.getErrors()) ADD_FAILURE() << err.format();
+        return -1;
+    }
 
     SemanticAnalyzer analyzer;
     analyzer.analyze(*ast);
-    if (!analyzer.getErrors().empty()) return -1;
+    if (!analyzer.getErrors().empty()) {
+        for (auto& err : analyzer.getErrors()) ADD_FAILURE() << err.format();
+        return -1;
+    }
 
     CodegenContext ctx;
     ctx.setSourceFile(filename);
@@ -49,7 +55,10 @@ static int runSyntaxSource(const std::string& source, const std::string& filenam
 
     std::string ve;
     llvm::raw_string_ostream vs(ve);
-    if (llvm::verifyModule(ctx.getModule(), &vs)) return -1;
+    if (llvm::verifyModule(ctx.getModule(), &vs)) {
+        ADD_FAILURE() << "invalid IR: " << vs.str();
+        return -1;
+    }
 
     auto jtmb = llvm::orc::JITTargetMachineBuilder::detectHost();
     if (!jtmb) return -1;
@@ -79,11 +88,11 @@ TEST_F(SyntaxGapsE2E, EmptyStatement) {
 
 TEST_F(SyntaxGapsE2E, StructAndClassMultipleFields) {
     EXPECT_EQ(runSyntaxSource(R"(
-        struct S { int32 a, b; };
-        class C { public: int32 a, b; };
+        struct SMulti { int32 a, b; };
+        class CMulti { public: int32 a, b; };
         int32 main() {
-            struct S s; s.a = 1; s.b = 2;
-            C c; c.a = 3; c.b = 4;
+            struct SMulti s; s.a = 1; s.b = 2;
+            CMulti c; c.a = 3; c.b = 4;
             return s.a + s.b + c.a + c.b - 10;
         }
     )", "syntax_multi_fields.c"), 0);
@@ -91,10 +100,10 @@ TEST_F(SyntaxGapsE2E, StructAndClassMultipleFields) {
 
 TEST_F(SyntaxGapsE2E, UnionMultipleFields) {
     EXPECT_EQ(runSyntaxSource(R"(
-        union U { int32 a, b; };
+        union UMulti { int32 a, b; };
         int32 main() {
-            union U u; u.a = 5;
-            if (sizeof(union U) != 4) return 1;
+            union UMulti u; u.a = 5;
+            if (sizeof(union UMulti) != 4) return 1;
             return u.a - 5;
         }
     )", "syntax_union_fields.c"), 0);
@@ -102,13 +111,13 @@ TEST_F(SyntaxGapsE2E, UnionMultipleFields) {
 
 TEST_F(SyntaxGapsE2E, AggregateDirectFunctionPointerField) {
     EXPECT_EQ(runSyntaxSource(R"(
-        int32 inc(int32 x) { return x + 1; }
-        int32 dbl(int32 x) { return x * 2; }
-        struct S { int32 (*f)(int32), (*g)(int32); };
-        class C { public: int32 (*h)(int32); };
+        int32 incFn(int32 x) { return x + 1; }
+        int32 dblFn(int32 x) { return x * 2; }
+        struct SFn { int32 (*f)(int32), (*g)(int32); };
+        class CFn { public: int32 (*h)(int32); };
         int32 main() {
-            struct S s; s.f = inc; s.g = dbl;
-            C c; c.h = inc;
+            struct SFn s; s.f = incFn; s.g = dblFn;
+            CFn c; c.h = incFn;
             return s.f(1) + s.g(2) + c.h(3) - 10;
         }
     )", "syntax_fnptr_field.c"), 0);
@@ -116,10 +125,10 @@ TEST_F(SyntaxGapsE2E, AggregateDirectFunctionPointerField) {
 
 TEST_F(SyntaxGapsE2E, AggregatePointerToArrayField) {
     EXPECT_EQ(runSyntaxSource(R"(
-        struct S { int32 (*p)[3]; };
+        struct SArr { int32 (*p)[3]; };
         int32 main() {
             int32 a[3] = {4, 5, 6};
-            struct S s; s.p = &a;
+            struct SArr s; s.p = &a;
             return (*s.p)[1] - 5;
         }
     )", "syntax_ptr_array_field.c"), 0);
@@ -151,45 +160,45 @@ TEST_F(SyntaxGapsE2E, PostfixQualifiers) {
 
 TEST_F(SyntaxGapsE2E, BlockScopeExternRefersToGlobal) {
     EXPECT_EQ(runSyntaxSource(R"(
-        int32 g = 7;
+        int32 gExtern = 7;
         int32 main() {
-            extern int32 g;
-            return g - 7;
+            extern int32 gExtern;
+            return gExtern - 7;
         }
     )", "syntax_block_extern.c"), 0);
 }
 
 TEST_F(SyntaxGapsE2E, RecordAttachedPointerAndFunction) {
     EXPECT_EQ(runSyntaxSource(R"(
-        struct S { int32 x; } *p;
-        struct S { int32 x; } make() { struct S s; s.x = 9; return s; }
+        struct SAttach { int32 x; } *pAttach;
+        struct SAttach { int32 x; } makeAttach() { struct SAttach s; s.x = 9; return s; }
         int32 main() {
-            struct S s; s.x = 4; p = &s;
-            return p->x + make().x - 13;
+            struct SAttach s; s.x = 4; pAttach = &s;
+            return pAttach->x + makeAttach().x - 13;
         }
     )", "syntax_record_attached.c"), 0);
 }
 
 TEST_F(SyntaxGapsE2E, ClassAttachedPointerKeepsMethods) {
     EXPECT_EQ(runSyntaxSource(R"(
-        class C { public: int32 x; int32 get() { return this->x; } } *p;
+        class CAttach { public: int32 x; int32 get() { return this->x; } } *pCAttach;
         int32 main() {
-            C c; c.x = 6; p = &c;
-            return p->get() - 6;
+            CAttach c; c.x = 6; pCAttach = &c;
+            return pCAttach->get() - 6;
         }
     )", "syntax_class_attached.c"), 0);
 }
 
 TEST_F(SyntaxGapsE2E, MultiDeclaratorComplexSuccessors) {
     EXPECT_EQ(runSyntaxSource(R"(
-        int32 inc(int32 x) { return x + 1; }
-        int32 dbl(int32 x) { return x * 2; }
-        int32 (*f)(int32), (*g)(int32);
-        int32 (*p)[2], (*q)[2];
+        int32 incMulti(int32 x) { return x + 1; }
+        int32 dblMulti(int32 x) { return x * 2; }
+        int32 (*fMulti)(int32), (*gMulti)(int32);
+        int32 (*pMulti)[2], (*qMulti)[2];
         int32 main() {
             int32 a[2] = {1, 2};
-            f = inc; g = dbl; p = &a; q = &a;
-            return f(1) + g(2) + (*p)[0] + (*q)[1] - 9;
+            fMulti = incMulti; gMulti = dblMulti; pMulti = &a; qMulti = &a;
+            return fMulti(1) + gMulti(2) + (*pMulti)[0] + (*qMulti)[1] - 9;
         }
     )", "syntax_multi_complex.c"), 0);
 }
