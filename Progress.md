@@ -954,3 +954,25 @@
 ### 验证
 - 每项 TDD（RED→GREEN）后提交；全量 `ctest -j8` **1559/1559**（2 个既有 GTEST_SKIP）。
 - `examples/all_features.c` → `ALL FEATURES OK`；`examples/full_feature.c` → `FULL FEATURE OK`。
+
+## 2026-10-26 — 基础 C 声明/语句语法收口（9 项）
+
+- 流程：用户指定 9 项语法缺口 → 计划 `docs/superpowers/plans/2026-10-26-syntax-gaps-r3.md`（`docs/superpowers` 被 .gitignore，未入库）→ 新增 `tests/e2e/test_syntax_gaps.cpp`，11 个 e2e 先 RED → 逐项 GREEN。
+- 提交线：`0bc3be2`（空语句）→ `88fca71`（聚合成员声明符/函数指针字段）→ `b07dc1f`（sizeof/alignof type-id）→ `42d3ed1`（后置限定符）→ `dfcb9cc`（块内 extern）→ `607ff32`（record attached 声明符）→ `dad042d`（多声明符复杂后继）→ `31a68fb`（带方法 struct/ClassType 注解修复）→ `27a1242`（attached 指针函数测试）。
+
+### 实现要点
+- **空语句**：`parseStmt()` 遇单独 `;` 直接返回 `NullStmtAST`（此前被当表达式起始报错）。
+- **聚合成员**：新增 `Parser::parseMemberFieldDecl()`，统一处理 `name`、前导 `*`、`(*f)(params)`、`(*p)[N]`、数组后缀和位域；struct/class/union 三个成员循环改为“首声明符 + 逗号循环”，后继声明符从 `stripDeclaratorType()` 的基础类型重新开始。`stripDeclaratorType` 增加 Function 层剥离，支持 `int (*f)(int), (*g)(int)`。
+- **直接函数指针字段**：`struct S { int32 (*f)(int32); }` 现在是普通字段；`s.f(1)` 在 sema 走字段函数指针分支（`MethodCallExprAST::fieldCallee`），codegen 加载字段并以无 `this` 的间接调用签名调用。class 字段同样支持并检查访问级别。
+- **指向数组的指针字段**：`int32 (*p)[3]` 复用 `parseFunctionPointerDeclarator`，codegen 走既有指针/数组访问路径。
+- **sizeof/alignof**：类型分支从 `parseType()` 改为 `parseTypeId()`，支持固定数组维度和抽象函数指针；`sizeof((T[N]){...})` 的复合字面量仍走表达式分支。
+- **后置限定符**：`parseType()` 在 `parseBaseType()` 后再次消费 `const/volatile/atomic`，`int32 const` 与 `const int32` 同型；`atomic` 克隆逻辑保持在指针层之前。
+- **块内 extern**：块存储类分支接受 `extern`，`VarDeclAST::isExternLocal`；codegen 复用/声明外部全局而非分配 alloca；不参与 static-local 常量初始化检查。
+- **record attached 声明符**：新增 `Parser::parseDeclarationFromBaseType()`，处理 `*p`、`f()`、`*f()`、`(*fp)(...)`、`(*p)[N]`；struct/union/enum 返回声明节点，class 放入 `attachedVars` 以保留方法/访问段注册。
+- **多声明符复杂后继**：`parseVariableDeclList` 的逗号循环遇 `(` 调 `parseFunctionPointerDeclarator(baseType, ...)`，支持 `int32 (*f)(int), (*g)(int);` 与 `int32 (*p)[3], (*q)[3];`。
+- **struct 方法兼容**：为不破坏 `AnnotationLayoutE2E.PackedOnMethodStructOk`，`parseStructDecl` 保留成员函数到 `StructDeclAST::methods`；带方法的 struct 解析期注册为 `ClassType`（字段仍默认 public）。同时修复 sema 布局注解把 `ClassType*` 强转 `StructType*` 的 UB：按 `isClass` 分派，并在注解前 `getOrCreateClass`。
+
+### 验证
+- 新增 `SyntaxGapsE2E` 12 个用例（空语句、struct/class/union 多字段、直接函数指针字段、指向数组字段、sizeof/alignof type-id、后置限定符、块 extern、attached 指针/函数/函数指针/返回指针函数、多复杂声明符）。
+- 全量 `ctest --test-dir build -j8` **1572/1572** 通过（2 个既有 GTEST_SKIP 不变）。
+- `examples/all_features.c` → `ALL FEATURES OK`；`examples/full_feature.c` → `FULL FEATURE OK`。

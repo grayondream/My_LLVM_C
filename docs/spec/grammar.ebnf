@@ -106,7 +106,7 @@ qualified-name      = identifier , { '::' , identifier } ;          (* [impl] ':
    ========================================================================= *)
 
 declaration         = [ storage-class ] , decl-core ;
-storage-class       = 'extern' | 'static' | 'inline' | 'thread_local' ;   (* [impl] thread_local CON-04 *)
+storage-class       = 'extern' | 'static' | 'inline' | 'thread_local' ;   (* [impl] thread_local CON-04；块内 extern 2026-10-26 *)
 
 decl-core           = type-alias
                     | record-decl
@@ -119,10 +119,15 @@ decl-core           = type-alias
    块内词法作用域，成员受访问控制；typedef/type 已移除） --- *)
 type-alias          = 'using' , identifier , '=' , type-id , ';' ;  (* [impl] 上下文关键字；块/成员体见作用域规则 *)
 type-id             = type , { '[' , integer-literal , ']' }
-                    , [ '(' , '*' , ')' , '(' , [ parameter-list ] , ')' ] ;
+                    , [ '(' , '*' , ')' , '(' , [ parameter-list ] , ')' ]
+                    | type , '(' , [ parameter-list ] , ')' ;  (* [impl] 抽象函数类型 *)
+(* [impl] 2026-10-26: 固定数组维度与抽象函数指针可用于 sizeof/alignof
+   以及 using 右值；`sizeof(int32[3])`、`sizeof(int32(*)(int32))`。 *)
 
 (* --- 记录类型 --- *)
 record-decl         = struct-decl | class-decl | union-decl ;
+(* [impl] 2026-10-26: 记录定义后可接 attached 声明符：`struct S {...} *p;`、
+   `struct S {...} f();`、`struct S {...} (*fp)(int32);`。 *)
 
 (* PAR-12 [impl] 2026-10-17: 匿名聚合定义——无 tag 的
    struct/union/class 定义 + 内联变量声明符（`struct { ... } v;`）。
@@ -134,7 +139,7 @@ class-decl          = 'class' , [ identifier ]
                       [ ':' , [ access-specifier ] , qualified-name ]   (* [impl] 仅记录 baseClass; 继承语义 INH-01 [plan] *)
                       [ '{' , { class-member } , '}' ] , ';' ;
 class-member        = access-section
-                    | field-decl , ';'
+                    | field-decl
                     | function-decl
                     | type-alias ;
 access-section      = ( 'public' | 'private' | 'protected' ) , ':' ;  (* [plan] protected 见 PAR-04；默认级别 DEC-01 *)
@@ -142,9 +147,14 @@ access-section      = ( 'public' | 'private' | 'protected' ) , ':' ;  (* [plan] 
 union-decl          = 'union' , [ identifier ] , [ '{' , { field-decl | type-alias } , '}' ] , ';'
                     | 'union' , '{' , { field-decl | type-alias } , '}' , identifier , { ',' , identifier } , ';' ;
 
-field-decl          = type , identifier , [ '[' , const-expr , ']' ]
-                    | bit-field-decl ;                              (* [plan] AGG-06 / PAR-10 *)
-bit-field-decl      = type , identifier , ':' , const-expr ;
+field-decl          = type , member-declarator , { ',' , member-declarator } , ';'
+                    | bit-field-decl ;                              (* [impl] AGG-06 / PAR-10 *)
+member-declarator   = [ '*' , { '*' } , [ pointer-qualifier ] ] , identifier
+                      , [ '[' , const-expr , ']' ]
+                    | '(' , '*' , identifier , ')' , ( '(' , [ parameter-list ] , ')' | '[' , const-expr , ']' ) ;
+(* [impl] 2026-10-26: 聚合成员支持多声明符、直接函数指针字段
+   `int32 (*f)(int32);` 与指向数组的指针字段 `int32 (*p)[3];`。 *)
+bit-field-decl      = type , identifier , ':' , const-expr , ';' ;
 
 (* --- 枚举（AGG-14 / TYP-09 / TYP-25） --- *)
 enum-decl           = 'enum' , identifier , [ ':' , type ]
@@ -193,9 +203,11 @@ function-pointer-type = type , '(' , '*' , identifier , ')'
    ========================================================================= *)
 
 type                = [ 'const' | 'volatile' | 'atomic' ] , base-type
-                      , { pointer-suffix }
+                      , [ 'const' | 'volatile' | 'atomic' ] , { pointer-suffix }
                       , [ slice-suffix | optional-suffix ] ;
+(* [impl] 2026-10-26: 限定符可前置或后置——`const int32` / `int32 const`。 *)
 pointer-suffix      = '*' , { 'const' | 'volatile' | 'atomic' | 'restrict' } ;
+pointer-qualifier   = 'const' | 'volatile' | 'restrict' ;
 (* [impl] PAR-06：`restrict` 只作为指针后缀限定符接受（`T* restrict`）；
    前导位置不作限定符解析。语义见 MEM-04。 *)
 slice-suffix        = '[' , ']' ;                                   (* [impl] SliceType; 可叠加: T[][] = slice of slice *)
@@ -227,6 +239,7 @@ block               = '{' , { statement } , '}' ;
 
 statement           = declaration-statement
                     | expression-statement
+                    | null-statement
                     | block
                     | if-statement
                     | while-statement
@@ -242,6 +255,7 @@ statement           = declaration-statement
 
 declaration-statement = declaration | type-alias ;
 expression-statement  = expr , ';' ;
+null-statement        = ';' ;                                    (* [impl] 2026-10-26 *)
 
 if-statement        = 'if' , '(' , expr , ')' , statement , [ 'else' , statement ] ;
 while-statement     = 'while' , '(' , expr , ')' , statement ;
@@ -296,8 +310,8 @@ unary-expr          = prefix-expr
                     | postfix-expr ;
 prefix-expr         = prefix-op , unary-expr
                     | 'sizeof' , unary-expr
-                    | 'sizeof' , '(' , type , ')'
-                    | 'alignof' , '(' , type , ')'                 (* [impl] PAR-14 *)
+                    | 'sizeof' , '(' , type-id , ')'                (* [impl] PAR-14：数组/函数指针 type-id *)
+                    | 'alignof' , '(' , type-id , ')'               (* [impl] PAR-14 *)
                     | 'offsetof' , '(' , type , ',' , member-designator , ')'  (* [impl] PAR-14 *)
                     | cast-expr ;
 prefix-op           = '+' | '-' | '!' | '~' | '*' | '&' | '++' | '--' ;
