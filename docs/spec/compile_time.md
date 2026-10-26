@@ -31,6 +31,8 @@ compile_time.if (compile_time.target.os == "linux") {
 ```
 
 - 条件在语义分析阶段求值；未选分支**不参与**类型检查与代码生成（死代码消除）。
+- 顶层形式分支内是声明序列；函数体内另有语句形式 `CompileTimeIfStmtAST`，两个
+  分支都是完整块，sema 只分析选中块、codegen 只出选中块。
 - 与 `#if` 的区别：无预处理器、作用域/语法完整、仍受语法解析。
 
 ## 4. 目标查询（CT-04）

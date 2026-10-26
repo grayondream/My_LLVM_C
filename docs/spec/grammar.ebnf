@@ -298,9 +298,10 @@ prefix-expr         = prefix-op , unary-expr
                     | 'sizeof' , unary-expr
                     | 'sizeof' , '(' , type , ')'
                     | 'alignof' , '(' , type , ')'                 (* [impl] PAR-14 *)
-                    | 'offsetof' , '(' , type , ',' , identifier , ')'  (* [impl] PAR-14 *)
+                    | 'offsetof' , '(' , type , ',' , member-designator , ')'  (* [impl] PAR-14 *)
                     | cast-expr ;
 prefix-op           = '+' | '-' | '!' | '~' | '*' | '&' | '++' | '--' ;
+member-designator   = identifier , { '.' , identifier | '[' , integer-literal , ']' } ;
 
 cast-expr           = '(' , type , ')' , unary-expr
                     | 'static_cast' , '<' , type , '>' , '(' , assign-expr , ')'      (* [impl] PAR-18 *)
