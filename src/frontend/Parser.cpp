@@ -3510,12 +3510,42 @@ std::unique_ptr<DeclAST> Parser::parseVariableDeclList(Type* type, const std::st
     // subsequent declarators start from the unqualified base type.
     Type* baseType = stripDeclaratorType(type);
     while (match(TokenType::TOKEN_COMMA)) {
+        // Parenthesized declarator after the comma:
+        // `int (*f)(int), (*g)(int);` or `int (*p)[3], (*q)[3];`.
+        if (check(TokenType::TOKEN_LPAREN)) {
+            std::string extraName;
+            bool isFunction = false;
+            std::vector<std::unique_ptr<ParamDeclAST>> params;
+            Type* varType = parseFunctionPointerDeclarator(
+                baseType, extraName, /*requireName=*/true, &isFunction, &params);
+            if (!varType) break;
+            if (isFunction) {
+                error("function declaration cannot follow a variable declarator", *peek());
+                break;
+            }
+            auto extra = parseVariableDecl(varType, extraName, isConstexpr);
+            if (!extra) break;
+            vars.push_back(std::move(extra));
+            continue;
+        }
+
         Type* varType = baseType;
         while (check(TokenType::TOKEN_STAR)) {
             advance();
             varType = new Type(TypeKind::Pointer, varType);
+            while (check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE) ||
+                   check(TokenType::TOKEN_RESTRICT)) {
+                const bool isConst = check(TokenType::TOKEN_CONST);
+                const bool isVolatile = check(TokenType::TOKEN_VOLATILE);
+                const bool isRestrict = check(TokenType::TOKEN_RESTRICT);
+                advance();
+                if (isConst) varType->isConst = true;
+                if (isVolatile) varType->isVolatile = true;
+                if (isRestrict) varType->isRestrict = true;
+            }
         }
-        while (check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE)) {
+        while (check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE) ||
+               check(TokenType::TOKEN_ATOMIC)) {
             advance();
         }
         if (!check(TokenType::TOKEN_IDENTIFIER)) {
