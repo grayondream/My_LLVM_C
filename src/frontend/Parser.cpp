@@ -3012,22 +3012,42 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
 
         // Register struct type in TypeContext if it has fields or nested
         // type declarations (AGG-11: a nested-only struct still names a type).
-        if (!structDecl->fields.empty() || !structDecl->nestedTypes.empty()) {
-            // MOD-03: a definition completes the parse-time placeholder in
-            // place, so aliases/pointers bound before it see the fields.
-            StructType* structType = TypeContext::instance().getStruct(structDecl->name);
-            if (!structType) {
-                structType = new StructType(structDecl->name);
+        if (!structDecl->fields.empty() || !structDecl->nestedTypes.empty() ||
+            !structDecl->methods.empty()) {
+            if (structDecl->isClassDecl) {
+                // A `struct` with member functions routes through the class
+                // type (same layout, methods); fields remain public because
+                // the parser recorded no access sections.
+                ClassType* classType = TypeContext::instance().getClass(structDecl->name);
+                if (!classType) {
+                    classType = new ClassType(structDecl->name);
+                } else {
+                    classType->fields.clear();
+                }
+                for (auto& field : structDecl->fields) {
+                    classType->addField(field.name, field.type, field.bitWidth);
+                    if (field.flexibleArray && !classType->fields.empty())
+                        classType->fields.back().flexibleArray = true;
+                }
+                TypeContext::instance().addClass(structDecl->name, classType);
+                if (!structDecl->isForwardDecl) classType->parsedDefinition = true;
             } else {
-                structType->fields.clear();
+                // MOD-03: a definition completes the parse-time placeholder in
+                // place, so aliases/pointers bound before it see the fields.
+                StructType* structType = TypeContext::instance().getStruct(structDecl->name);
+                if (!structType) {
+                    structType = new StructType(structDecl->name);
+                } else {
+                    structType->fields.clear();
+                }
+                for (auto& field : structDecl->fields) {
+                    structType->addField(field.name, field.type, field.bitWidth);
+                    if (field.flexibleArray && !structType->fields.empty())
+                        structType->fields.back().flexibleArray = true;
+                }
+                TypeContext::instance().addStruct(structDecl->name, structType);
+                if (!structDecl->isForwardDecl) structType->parsedDefinition = true;
             }
-            for (auto& field : structDecl->fields) {
-                structType->addField(field.name, field.type, field.bitWidth);
-                if (field.flexibleArray && !structType->fields.empty())
-                    structType->fields.back().flexibleArray = true;
-            }
-            TypeContext::instance().addStruct(structDecl->name, structType);
-            if (!structDecl->isForwardDecl) structType->parsedDefinition = true;
         }
 
         // A record parser stops in one of three places:
@@ -4373,6 +4393,7 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
     m_typeNamespacePrefix += mangleQualifiedTypeName(bareName) + "_";
 
     std::vector<FieldInfo> fields;
+    std::vector<std::unique_ptr<FunctionDeclAST>> methods;
     std::vector<std::unique_ptr<VarDeclAST>> staticMembers;
     // AGG-11: nested type declarations, in source order.
     std::vector<std::unique_ptr<DeclAST>> nestedTypes;
@@ -4486,6 +4507,21 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
             continue;
         }
 
+        if (check(TokenType::TOKEN_IDENTIFIER)) {
+            size_t namePos = m_currentTokenPos;
+            auto nameTok = advance();
+            if (check(TokenType::TOKEN_LPAREN)) {
+                auto func = parseFunctionDecl(fieldType, nameTok->lexeme);
+                if (func) {
+                    func->annotations = std::move(memberAnns);
+                    func->isStatic = memberIsStatic;
+                    methods.push_back(std::move(func));
+                }
+                continue;
+            }
+            m_currentTokenPos = namePos;
+        }
+
         if (!memberIsStatic && !check(TokenType::TOKEN_IDENTIFIER) &&
             !check(TokenType::TOKEN_STAR) && !check(TokenType::TOKEN_LPAREN)) {
             // AGG-03: an anonymous struct/union member promotes its
@@ -4560,6 +4596,8 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
     match(TokenType::TOKEN_SEMICOLON);
 
     auto decl = std::make_unique<StructDeclAST>(name, std::move(fields));
+    decl->methods = std::move(methods);
+    decl->isClassDecl = !decl->methods.empty();
     decl->bareName = bareName;
     decl->baseClass = std::move(baseClass);
     decl->staticMembers = std::move(staticMembers);

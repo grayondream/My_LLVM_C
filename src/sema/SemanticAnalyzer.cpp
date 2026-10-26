@@ -5001,35 +5001,41 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
 
     // P1-05 / ANN-02/03: 布局注解折叠进 Type（LayoutBuilder 消费）。
     {
-        Type* agg = isClass ? static_cast<Type*>(typeCtx->getClass(node.name))
+        Type* agg = isClass ? static_cast<Type*>(typeCtx->getOrCreateClass(node.name))
                             : static_cast<Type*>(typeCtx->getStruct(node.name));
         if (agg) {
-            auto* st = static_cast<StructType*>(agg);
-            for (const auto& ann : node.annotations) {
-                if (ann.name == "packed") st->isPacked = true;
-                else if (ann.name == "repr") st->reprC = true;
-                else if (ann.name == "align") st->forcedAlign = ctAlignArg(ann, *this);
-                else if (ann.name == "deprecated") {
-                    st->deprecated = true;
-                    if (ann.args.size() == 1
-                        && ann.args[0].kind == AnnotationArg::Kind::String) {
-                        st->deprecatedMsg = ann.args[0].text;
-                    }
-                }
-            }
-            for (const auto& f : node.fields) {
-                for (const auto& ann : f.annotations) {
-                    if (ann.name == "align") {
-                        st->fieldAligns[f.name] = ctAlignArg(ann, *this);
-                    } else if (ann.name == "deprecated") {
-                        st->fieldDeprecated[f.name] = true;
+            // StructType and ClassType carry identical annotation/layout
+            // members but are unrelated subclasses; dispatch to the actual
+            // kind instead of casting a ClassType to StructType (UB).
+            auto applyAnnotations = [&](auto* st) {
+                for (const auto& ann : node.annotations) {
+                    if (ann.name == "packed") st->isPacked = true;
+                    else if (ann.name == "repr") st->reprC = true;
+                    else if (ann.name == "align") st->forcedAlign = ctAlignArg(ann, *this);
+                    else if (ann.name == "deprecated") {
+                        st->deprecated = true;
                         if (ann.args.size() == 1
                             && ann.args[0].kind == AnnotationArg::Kind::String) {
-                            st->fieldDeprecatedMsg[f.name] = ann.args[0].text;
+                            st->deprecatedMsg = ann.args[0].text;
                         }
                     }
                 }
-            }
+                for (const auto& f : node.fields) {
+                    for (const auto& ann : f.annotations) {
+                        if (ann.name == "align") {
+                            st->fieldAligns[f.name] = ctAlignArg(ann, *this);
+                        } else if (ann.name == "deprecated") {
+                            st->fieldDeprecated[f.name] = true;
+                            if (ann.args.size() == 1
+                                && ann.args[0].kind == AnnotationArg::Kind::String) {
+                                st->fieldDeprecatedMsg[f.name] = ann.args[0].text;
+                            }
+                        }
+                    }
+                }
+            };
+            if (isClass) applyAnnotations(static_cast<ClassType*>(agg));
+            else applyAnnotations(static_cast<StructType*>(agg));
         }
     }
 
