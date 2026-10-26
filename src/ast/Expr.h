@@ -469,6 +469,12 @@ public:
 };
 
 // PAR-14: `offsetof(T, member)` — layout query returning usize.
+struct OffsetDesignator {
+    bool isIndex = false;
+    std::string field;
+    int64_t index = 0;
+};
+
 class OffsetOfExprAST : public ExprAST {
 public:
     // NOTE: named `aggregateType` (NOT `type`) — `type` would shadow the
@@ -476,6 +482,7 @@ public:
     // would clobber the aggregate operand (C3 review fix).
     Type* aggregateType;
     std::string field;
+    std::vector<OffsetDesignator> path;
     OffsetOfExprAST(Type* t, std::string f) : aggregateType(t), field(std::move(f)) {}
     llvm::Value* codegen(CodegenContext& ctx) override;
 };

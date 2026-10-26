@@ -293,6 +293,19 @@ public:
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
+// P1-04 / CT-03: function-body `compile_time.if (cond) { stmts } [else { stmts }]`.
+// Top-level declarations use CompileTimeIfDeclAST; this statement form selects
+// at sema time and emits only the live branch.
+class CompileTimeIfStmtAST : public StmtAST {
+public:
+    std::unique_ptr<ExprAST> cond;
+    std::unique_ptr<CompoundStmtAST> thenStmt;
+    std::unique_ptr<CompoundStmtAST> elseStmt;
+    bool ctResolved = false;
+    bool selectedThen = true;
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
 class ModuleDeclAST : public DeclAST {
 public:
     std::string name;

@@ -668,10 +668,38 @@ std::unique_ptr<ExprAST> Parser::parseUnaryImpl() {
             errorUnexpected("expected member name in offsetof");
             return nullptr;
         }
+        std::vector<OffsetDesignator> path;
+        { OffsetDesignator d; d.field = nameTok->lexeme; path.push_back(std::move(d)); }
+        while (!eof()) {
+            if (match(TokenType::TOKEN_DOT)) {
+                auto sub = match(TokenType::TOKEN_IDENTIFIER);
+                if (!sub) {
+                    errorUnexpected("expected member name after '.' in offsetof");
+                    return nullptr;
+                }
+                OffsetDesignator d; d.field = sub->lexeme; path.push_back(std::move(d));
+            } else if (match(TokenType::TOKEN_LBRACKET)) {
+                auto num = match(TokenType::TOKEN_NUMBER);
+                if (!num) {
+                    errorUnexpected("offsetof array index must be an integer literal");
+                    return nullptr;
+                }
+                OffsetDesignator d;
+                d.isIndex = true;
+                d.index = static_cast<int64_t>(
+                    static_cast<long long>(std::get<unsigned __int128>(num->value)));
+                path.push_back(std::move(d));
+                if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' in offsetof")) return nullptr;
+            } else {
+                break;
+            }
+        }
         if (!expect(TokenType::TOKEN_RPAREN, "expected ')' after offsetof")) {
             return nullptr;
         }
-        return std::make_unique<OffsetOfExprAST>(ty, nameTok->lexeme);
+        auto node = std::make_unique<OffsetOfExprAST>(ty, nameTok->lexeme);
+        node->path = std::move(path);
+        return node;
     }
 
     // Handle prefix unary operators
@@ -1491,6 +1519,14 @@ std::unique_ptr<StmtAST> Parser::parseStmt() {
     // compound statement (block)
     if (peek() && peek()->type == TokenType::TOKEN_LBRACE) {
         return parseCompoundStmt();
+    }
+
+    // Function-body compile_time.if — statement form.
+    if (peek() && peek()->type == TokenType::TOKEN_IDENTIFIER &&
+        peek()->lexeme == "compile_time" && m_currentTokenPos + 2 < m_tokens.size() &&
+        m_tokens[m_currentTokenPos + 1].type == TokenType::TOKEN_DOT &&
+        m_tokens[m_currentTokenPos + 2].type == TokenType::TOKEN_IF) {
+        if (auto ctIf = parseCompileTimeIfStmt()) return ctIf;
     }
 
     // Local record declarations: `struct S { ... };`, `union U { ... };`,
@@ -3897,6 +3933,33 @@ std::unique_ptr<DeclAST> Parser::parseCompileTimeIf() {
         if (!parseBranch(node->elseDecls)) {
             return nullptr;
         }
+    }
+    return node;
+}
+
+std::unique_ptr<StmtAST> Parser::parseCompileTimeIfStmt() {
+    advance(); // compile_time
+    advance(); // .
+    advance(); // if
+    if (!expect(TokenType::TOKEN_LPAREN, "'(' after 'compile_time.if'")) return nullptr;
+    auto cond = parseExpr(2);
+    if (!cond) return nullptr;
+    if (!expect(TokenType::TOKEN_RPAREN, "')' after 'compile_time.if' condition")) return nullptr;
+    auto node = std::make_unique<CompileTimeIfStmtAST>();
+    node->cond = std::move(cond);
+    if (!check(TokenType::TOKEN_LBRACE)) {
+        errorUnexpected("expected '{' after compile_time.if condition");
+        return nullptr;
+    }
+    node->thenStmt = parseCompoundStmt();
+    if (!node->thenStmt) return nullptr;
+    if (match(TokenType::TOKEN_ELSE)) {
+        if (!check(TokenType::TOKEN_LBRACE)) {
+            errorUnexpected("expected '{' after 'else' in compile_time.if");
+            return nullptr;
+        }
+        node->elseStmt = parseCompoundStmt();
+        if (!node->elseStmt) return nullptr;
     }
     return node;
 }

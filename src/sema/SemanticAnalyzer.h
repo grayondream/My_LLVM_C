@@ -232,6 +232,7 @@ private:
     void visit(NamespaceDeclAST& node);
     // P1-04 / CT-03: compile_time.if 条件编译——求值条件、选分支、原位展开。
     void visit(CompileTimeIfDeclAST& node);
+    void visit(CompileTimeIfStmtAST& node);
 
     // Shared top-level dispatcher (translation unit and namespace bodies).
     void analyzeTopLevelDecl(DeclAST& decl);

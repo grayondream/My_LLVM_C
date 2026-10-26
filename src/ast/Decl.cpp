@@ -1512,6 +1512,12 @@ llvm::Value* CompileTimeIfDeclAST::codegen(CodegenContext& ctx) {
     return last;
 }
 
+llvm::Value* CompileTimeIfStmtAST::codegen(CodegenContext& ctx) {
+    if (!ctResolved) return nullptr;
+    auto* live = selectedThen ? thenStmt.get() : elseStmt.get();
+    return live ? live->codegen(ctx) : nullptr;
+}
+
 llvm::Value* CompileTimeAssertDeclAST::codegen(CodegenContext& ctx) {
     (void)ctx;
     return nullptr;

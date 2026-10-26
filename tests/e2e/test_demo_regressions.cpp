@@ -476,3 +476,29 @@ TEST_F(DemoRegressionE2E, OutOfLineMemberOperatorDefinition) {
         int32 main() { V a; a.x = 1; V b; b.x = 2; return a + b - 3; }
     )", "reg_class_op_ooc.c"), 0);
 }
+
+TEST_F(DemoRegressionE2E, CompileTimeIfInFunctionBody) {
+    EXPECT_EQ(runSource(R"(
+        int32 f() {
+            compile_time.if(true) { return 1; } else { return 2; }
+        }
+        int32 g() {
+            int32 x = 0;
+            compile_time.if(false) { x = 5; } else { x = 7; }
+            return x;
+        }
+        int32 main() { return f() + g() - 8; }
+    )", "reg_ct_if_stmt.c"), 0);
+}
+
+TEST_F(DemoRegressionE2E, NestedOffsetof) {
+    EXPECT_EQ(runSource(R"(
+        struct Inner { int32 a; int32 b; };
+        struct Outer { int32 z; struct Inner in; int32 arr[3]; };
+        int32 main() {
+            if (offsetof(Outer, in.b) != 8) return 1;
+            if (offsetof(Outer, arr[1]) != 16) return 2;
+            return 0;
+        }
+    )", "reg_offsetof_nested.c"), 0);
+}

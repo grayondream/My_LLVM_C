@@ -5545,6 +5545,22 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
     if (oocClass) currentClass = oocSavedClass;
 }
 
+void SemanticAnalyzer::visit(CompileTimeIfStmtAST& node) {
+    auto cond = evalCompileTime(node.cond.get(), node);
+    if (!cond) {
+        emitError("compile_time.if condition must be a compile-time constant", node);
+        return;
+    }
+    if (cond->type != ConstValue::INT) {
+        emitError("compile_time.if condition must be a boolean", node);
+        return;
+    }
+    node.ctResolved = true;
+    node.selectedThen = cond->intVal != 0;
+    CompoundStmtAST* live = node.selectedThen ? node.thenStmt.get() : node.elseStmt.get();
+    if (live) visit(*live);
+}
+
 void SemanticAnalyzer::visit(CompileTimeIfDeclAST& node) {
     // P1-04 / CT-03: 条件求值与分支选择（诊断文案 spec §3 钉死）。
     auto cond = evalCompileTime(node.cond.get(), node);
@@ -6061,6 +6077,7 @@ void SemanticAnalyzer::visit(StmtAST& stmt) {
     if (auto* s = dynamic_cast<NullStmtAST*>(&stmt)) { visit(*s); return; }
     if (auto* s = dynamic_cast<DeclStmtAST*>(&stmt)) { visit(*s); return; }
     if (auto* s = dynamic_cast<DeferStmtAST*>(&stmt)) { visit(*s); return; }
+    if (auto* s = dynamic_cast<CompileTimeIfStmtAST*>(&stmt)) { visit(*s); return; }
 }
 
 bool SemanticAnalyzer::isTypeRedefined(const std::string& name) const {

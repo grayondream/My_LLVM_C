@@ -2440,24 +2440,89 @@ llvm::Value* SizeofExprAST::codegen(CodegenContext& ctx) {
 // PAR-14: `offsetof(T, member)` — field offset via LayoutBuilder (single source
 // with compile_time.offset_of / codegen layout).
 llvm::Value* OffsetOfExprAST::codegen(CodegenContext& ctx) {
-    Type* t = aggregateType;
-    while (t && t->kind == TypeKind::Typedef)
-        t = static_cast<TypedefType*>(t)->aliasedType;
+    Type* t = stripTypedefsT12(aggregateType);
     if (!t || (t->kind != TypeKind::Struct && t->kind != TypeKind::Class &&
                t->kind != TypeKind::Union)) {
         LOGE("offsetof requires an aggregate type");
         return nullptr;
     }
-    auto LR = LayoutBuilder::buildAggregate(t, ctx.getContext(),
-        ctx.getModule().getDataLayout(),
-        [&](Type* tt) { return ctx.getLLVMType(tt); },
-        [&](const std::string&) -> Type* { return nullptr; });
-    auto it = LR.fieldOffsets.find(field);
-    if (it == LR.fieldOffsets.end()) {
-        LOGE("unknown field '{}' in offsetof", field);
+
+    auto fieldTypeOf = [](Type* agg, const std::string& name) -> Type* {
+        if (agg->kind == TypeKind::Struct) {
+            auto* st = static_cast<StructType*>(agg);
+            const auto& fields = st->semanticFields.empty() ? st->fields : st->semanticFields;
+            for (auto& f : fields) if (f.name == name) return f.type;
+        } else if (agg->kind == TypeKind::Class) {
+            auto* ct = static_cast<ClassType*>(agg);
+            const auto& fields = ct->semanticFields.empty() ? ct->fields : ct->semanticFields;
+            for (auto& f : fields) if (f.name == name) return f.type;
+        } else if (agg->kind == TypeKind::Union) {
+            auto* ut = static_cast<UnionType*>(agg);
+            for (auto& m : ut->members) if (m.name == name) return m.type;
+        }
         return nullptr;
+    };
+    auto converter = [&](Type* tt) { return ctx.getLLVMType(tt); };
+    auto resolver = [](const std::string&) -> Type* { return nullptr; };
+
+    std::vector<OffsetDesignator> steps = path;
+    if (steps.empty()) {
+        OffsetDesignator d; d.field = field;
+        steps.push_back(std::move(d));
     }
-    return llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.getContext()), it->second);
+
+    uint64_t total = 0;
+    Type* cur = t;
+    for (const auto& step : steps) {
+        cur = stripTypedefsT12(cur);
+        if (!cur) {
+            LOGE("offsetof path has an unresolved type");
+            return nullptr;
+        }
+        if (step.isIndex) {
+            if (cur->kind != TypeKind::Array) {
+                LOGE("offsetof index applied to non-array type");
+                return nullptr;
+            }
+            auto* at = static_cast<ArrayType*>(cur);
+            llvm::Type* elemLLVM = ctx.getLLVMType(at->elementType);
+            if (!elemLLVM) return nullptr;
+            total += static_cast<uint64_t>(step.index) *
+                     ctx.getModule().getDataLayout().getTypeAllocSize(elemLLVM);
+            cur = at->elementType;
+            continue;
+        }
+
+        if (cur->kind == TypeKind::Union) {
+            // All union members alias offset 0.
+            Type* ft = fieldTypeOf(cur, step.field);
+            if (!ft) {
+                LOGE("unknown field '{}' in offsetof", step.field);
+                return nullptr;
+            }
+            cur = ft;
+            continue;
+        }
+        if (cur->kind != TypeKind::Struct && cur->kind != TypeKind::Class) {
+            LOGE("offsetof member '{}' applied to non-aggregate type", step.field);
+            return nullptr;
+        }
+        auto LR = LayoutBuilder::buildAggregate(cur, ctx.getContext(),
+            ctx.getModule().getDataLayout(), converter, resolver);
+        auto it = LR.fieldOffsets.find(step.field);
+        if (it == LR.fieldOffsets.end()) {
+            LOGE("unknown field '{}' in offsetof", step.field);
+            return nullptr;
+        }
+        total += it->second;
+        Type* ft = fieldTypeOf(cur, step.field);
+        if (!ft) {
+            LOGE("unknown field type '{}' in offsetof", step.field);
+            return nullptr;
+        }
+        cur = ft;
+    }
+    return llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.getContext()), total);
 }
 
 llvm::Value* InitializerListExprAST::codegen(CodegenContext& ctx) {
