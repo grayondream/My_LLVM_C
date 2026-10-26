@@ -4997,7 +4997,7 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
 
     // P1-05 / ANN-06: struct/class 与字段注解验证——class 的 repr(C) 目标
     // 不符（spec：仅 struct/union）。
-    validateAnnotations(node.annotations, node, isClass ? "class" : "struct");
+    validateAnnotations(node.annotations, node, node.isClassDecl ? "class" : "struct");
 
     // P1-05 / ANN-02/03: 布局注解折叠进 Type（LayoutBuilder 消费）。
     {

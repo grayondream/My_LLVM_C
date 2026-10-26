@@ -3014,7 +3014,7 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationImpl() {
         // type declarations (AGG-11: a nested-only struct still names a type).
         if (!structDecl->fields.empty() || !structDecl->nestedTypes.empty() ||
             !structDecl->methods.empty()) {
-            if (structDecl->isClassDecl) {
+            if (structDecl->isClassDecl || !structDecl->methods.empty()) {
                 // A `struct` with member functions routes through the class
                 // type (same layout, methods); fields remain public because
                 // the parser recorded no access sections.
@@ -4597,7 +4597,6 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
 
     auto decl = std::make_unique<StructDeclAST>(name, std::move(fields));
     decl->methods = std::move(methods);
-    decl->isClassDecl = !decl->methods.empty();
     decl->bareName = bareName;
     decl->baseClass = std::move(baseClass);
     decl->staticMembers = std::move(staticMembers);
@@ -4612,7 +4611,7 @@ std::unique_ptr<StructDeclAST> Parser::parseStructDecl() {
 void Parser::registerNestedDeclType(DeclAST* decl) {
     auto& tc = TypeContext::instance();
     if (auto* sd = dynamic_cast<StructDeclAST*>(decl)) {
-        if (sd->isClassDecl) {
+        if (sd->isClassDecl || !sd->methods.empty()) {
             if (!tc.getClass(sd->name)) {
                 auto* classType = new ClassType(sd->name);
                 for (auto& f : sd->fields) {
