@@ -2624,6 +2624,23 @@ Type* Parser::parseType() {
     Type* baseType = parseBaseType();
     if (!baseType) return nullptr;
 
+    // C allows declaration specifiers in either order: `const int32` and
+    // `int32 const` mean the same type.
+    while (!eof()) {
+        if (check(TokenType::TOKEN_CONST)) {
+            advance();
+            isConst = true;
+        } else if (check(TokenType::TOKEN_VOLATILE)) {
+            advance();
+            isVolatile = true;
+        } else if (check(TokenType::TOKEN_ATOMIC)) {
+            advance();
+            isAtomic = true;
+        } else {
+            break;
+        }
+    }
+
     baseType->isConst = isConst;
     baseType->isVolatile = isVolatile;
     // CON-01: `atomic T` must NOT mutate the shared scalar singletons
