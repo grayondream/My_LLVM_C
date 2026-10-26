@@ -920,3 +920,37 @@
 - 测试：`OverloadingE2E.ComparisonResultAsBoolArgument`（比较/整数实参）、`ComparisonResultPrefersInt32Overload`；全量 **1537/1537** 通过。
 - `examples/all_features.c` 与 `examples/full_feature.c` 的 `check` 帮手改为 `bool` 形参，直接接收比较结果；两者分别输出 `ALL FEATURES OK` / `FULL FEATURE OK`。
 - 文档：`docs/spec/conversions.md` §3 记录实参路径的整数 → `bool` 转换。
+
+## 2026-10-26 — 先修两个缺陷，再收口语法缺口 1–6
+
+### 先修缺陷
+- **CG-05 rvalue 聚合成员**：`make().x` 原先在聚合值上直接 GEP（非法 IR/后端崩溃）；sema 将 rvalue 聚合字段标为 xvalue，codegen 先 spill 到临时 alloca 再走继承/位域 GEP，最终按值读取。`make().x = 5` 现在被拒。提交 `a805740`。
+- **MOD-03 前向类型按值使用**：解析期为每个变量快照 `typeIncompleteAtParse`（`parsedDefinition`，不受后续定义追溯），sema 对未定义 struct/union/class 的按值变量/数组报 incomplete；指针/切片仍放行。提交同上。
+
+### 1. 模块导出类型
+- `ModuleLoader::collectImportSpecifiers` + `preloadImports`：在解析导入者前先加载模块，类型名进入 `TypeContext`；`export struct/class/using/template/函数` 均可跨模块使用。新增 `ModuleLoaderTest.ExportedTypesVisibleBeforeParsingImporter`。提交 `53768f1`。
+- 已知边界：非导出类型在 parse 期仍可能被导入者看到（TypeContext 全局、无模块作用域），留待类型可见性轮次。
+
+### 2. 模块头约束
+- 解析器强制 `module` 必须是首个顶层声明、不可重复、必须有名字；驱动校验入口文件 module 名 ↔ 文件路径（点分模块按目录匹配）。提交 `3d88e2b`。
+
+### 3. 局部存储类与局部记录
+- 函数内 `static T x` / `thread_local T x` / `static thread_local T x`：codegen 提升为内部链接全局（可 TLS），初始化器要求编译期常量；未初始化零初始化。`static` 局部跨调用持久。
+- 函数内 `struct/union/enum` 定义经 `parseDeclaration` 进入 `DeclStmtAST`，sema/codegen 复用既有记录路径；局部 `class` 原路径不变。提交 `c2d509b`。
+
+### 4. 通用声明符
+- `parseFunctionPointerDeclarator` 重写为通用括号声明符：`(*name[suffix])[suffix]`，支持 `int32 (*get(int32))(int32)`、`using F = int32(int32)` + `F*`、`int32 (*p)[3]`、`int32 (*arr[2])(int32)`。
+- 新增 `parseAbstractFunctionSuffix`；`CallExprAST::isExprCallee` 支持 `arr[0](1)` / `get()(1)` 表达式 callee 间接调用。函数类型别名经 typedef 剥层后可间接调用。提交 `4d77701`。
+
+### 5. 类与成员运算符
+- `CodegenContext::getLLVMType(Pointer)` 不再递归解析 pointee（opaque pointer），修复 `class Node { Node* next; }` 爆栈。
+- 类内成员运算符（二元/一元）调用点接入：sema 在自由函数失败后 `resolveMethod`，codegen 传 this；类外 `V::operator+` 解析与签名绑定打通；类体运算符符号改为 token 映射（此前 `"operator"` 丢符号）。提交 `8dd88ca`。
+
+### 6. 编译期/内省
+- 新增 `CompileTimeIfStmtAST`：函数体 `compile_time.if (cond) { ... } else { ... }` 按语句解析，sema 只分析选中分支，codegen 只出选中分支。
+- `offsetof` 支持成员链与数组下标：`offsetof(T, a.b)`、`offsetof(T, arr[i])`，按 LayoutBuilder 逐层累加偏移。提交 `2597f62`。
+- 未做（规范明确挂账）：自定义注解注册制（ANN-08，未知注解仍 E2010）、CT-08 类型作为值。
+
+### 验证
+- 每项 TDD（RED→GREEN）后提交；全量 `ctest -j8` **1559/1559**（2 个既有 GTEST_SKIP）。
+- `examples/all_features.c` → `ALL FEATURES OK`；`examples/full_feature.c` → `FULL FEATURE OK`。
