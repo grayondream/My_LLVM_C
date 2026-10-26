@@ -602,7 +602,7 @@ std::unique_ptr<ExprAST> Parser::parseUnaryImpl() {
             if (isTypeStart() || check(TokenType::TOKEN_CONST) ||
                 check(TokenType::TOKEN_VOLATILE) || check(TokenType::TOKEN_ATOMIC)) {
                 size_t savedPos = m_currentTokenPos;
-                Type* sizeofType = parseType();
+                Type* sizeofType = parseTypeId();
                 if (sizeofType && check(TokenType::TOKEN_RPAREN)) {
                     advance(); // consume ')'
                     return std::make_unique<SizeofExprAST>(sizeofType);
@@ -635,11 +635,11 @@ std::unique_ptr<ExprAST> Parser::parseUnaryImpl() {
             return nullptr;
         }
         if (!isTypeStart() && !check(TokenType::TOKEN_CONST) &&
-            !check(TokenType::TOKEN_VOLATILE)) {
+            !check(TokenType::TOKEN_VOLATILE) && !check(TokenType::TOKEN_ATOMIC)) {
             errorUnexpected("expected type after 'alignof('");
             return nullptr;
         }
-        Type* ty = parseType();
+        Type* ty = parseTypeId();
         if (!ty) return nullptr;
         if (!expect(TokenType::TOKEN_RPAREN, "expected ')' after alignof type")) {
             return nullptr;
