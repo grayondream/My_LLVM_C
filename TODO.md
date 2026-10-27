@@ -44,6 +44,7 @@
 > **进度快照（2026-10-25，比较结果作 bool 实参）**：`conversionRank` 增加整数 → `bool`（rank 2），比较表达式（`int32`）可直接传 `bool` 形参，同时保留 `int32` 重载优先；`bool → 整数` 仍按拓宽。全量 **1537/1537**；两个示例的 `check` 已改回 `bool` 形参并运行通过。
 > **进度快照（2026-10-26，语法缺口 1–6 收口）**：先修 CG-05（rvalue 聚合成员按值读取，`make().x` 不再产生非法 GEP）与 MOD-03（前向类型按值使用报 incomplete；指针仍允许）。随后：①模块导入改为 parse 前预载，`export struct/class/using/template` 可用；②强制 `module` 首部/唯一/文件名匹配；③函数内 `static`/`thread_local` 静态变量与局部 `struct/union/enum` 定义；④通用括号声明符（函数返回函数指针、函数类型别名、指向数组的指针、函数指针数组）+ 表达式 callee 间接调用；⑤自引用类指针字段爆栈修复、类内/类外成员运算符重载调用；⑥函数体 `compile_time.if` 与嵌套 `offsetof(T, a.b)`/`offsetof(T, arr[i])`。全量 **1559/1559**；两个示例仍输出 `ALL FEATURES OK` / `FULL FEATURE OK`。提交线：a805740、53768f1、3d88e2b、c2d509b、4d77701、8dd88ca、2597f62。
 > **进度快照（2026-10-26，基础 C 声明/语句收口）**：补齐 9 项基础语法：空语句 `;`；聚合成员多声明符 `struct S { int32 a, b; }`；聚合成员直接函数指针字段与指向数组的指针字段；`sizeof`/`alignof` 的完整 type-id（数组/抽象函数指针）；后置限定符 `int32 const`；块内 `extern`；record 定义后的 attached 指针/函数声明符；多声明符中的复杂后继（`int32 (*f)(int), (*g)(int);`）。顺带把带方法的 `struct` 正确路由为 class 类型，并修复布局注解对 `ClassType` 的 UB 强转。全量 **1572/1572**；两个示例仍输出 OK。提交线：0bc3be2、88fca71、b07dc1f、42d3ed1、dfcb9cc、607ff32、dad042d、31a68fb、27a1242。
+> **进度快照（2026-10-27，语法缺口审计）**：对第三轮收口后的剩余语法缺口做规范+CLI 复核，按“规范已承诺 / C 兼容性 / 规范未覆盖扩展 / 非语法边界 / Non-goals”分类，详细清单见 **§24**（SG-01 ~ SG-11、SG-B01 ~ SG-B06）。本轮不改代码。
 
 
 > **进度快照（2026-10-19，语法遗漏收口完成）**：**语法层面审计 + 11 项特性/缺陷收口**（spec/plan `docs/superpowers/specs|plans/2026-10-18-syntax-gaps*`）。多行字符串 `"""..."""` 与 Unicode 标识符（LEX-16/18）；`char8/16/32` 类型（uint 别名）与 `thread_local`（TYP-05/CON-04）；`atomic` 限定符（整型标量，原子 load/store + atomicrmw 子集，CON-01）；默认参数（区间重载 + 少默认优先，FUN-09）；**未知类型名声明静默丢弃修复**（E2031，此前 `f16 x;` 零诊断消失）；compile_time 反射 `name_of/fields_of/attributes_of`（ReflectionRegistry 交接，CT-07/13）；protected 派生访问放宽（INH-06）；`alignof/offsetof` 独立关键字与 `nullptr`（PAR-14/TYP-24）。当前全量 **1418** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。P1-09 剩余：仅 std.collections（STD-06~08，阻塞于「模块导出类型」语言缺口）。
@@ -579,3 +580,202 @@
 - `[ ]` **ACC-05** 保持 C 风格调用模型与 FFI 能力（经 `extern` 绑定层）。
 - `[ ]` **ACC-06** 静态分析优先；运行时检查可配置且不默认破坏性能。
 - `[ ]` **ACC-07** UB 行为对齐 C 标准（SEM-13），并由 ASan/UBSan 验证。
+
+---
+
+## 24. 语法缺口审计（2026-10-27，第三轮后）
+
+> 范围：仅列**语法/解析层**尚未覆盖、或只覆盖简化形式的能力；语义/ABI/codegen 边界见 §24.4。
+> 方法：对照 `docs/spec/grammar.ebnf`、本文件，并用 `build/bin/my_llvm_c` 对每个例子做 `-fsyntax-only` 与完整编译探测。
+> 基线：基础 C 声明/语句 9 项收口后，全量 **1572/1572**，两个示例 OK；本轮只做审计，未改代码。
+> 结论：基础 C 主干已基本收口；剩余集中在模板常量实参、块内函数声明、C 声明符完整性，以及规范未覆盖的现代语法扩展。
+
+### 24.1 规范已承诺、实现未收口（优先）
+
+#### SG-01 模板常量表达式实参 / 依赖值实参 `[gap][P1]`
+
+```c
+template<int32 N> struct A { int32 x; };
+A<1 + 2> a;                         // 失败：模板实参只接受简单整数字面量
+
+template<int32 N> struct B { A<N> a; };  // 失败：N 不能作类型模板实参
+template<int32 N> int32 g() { return N; }
+g<1 + 1>();                         // 失败
+g<N>();                             // 失败；GEN-02 已明确“参数作显式模板实参延后”
+```
+
+- 规范：`template-argument = type | const-expr`。
+- 目标：解析期/实例化期求值常量表达式；依赖值参数在单态化时替换。
+- 关联：GEN-02、GEN-04、PAR-21、SEM-06。
+
+#### SG-02 块内 `extern` 函数声明 `[gap][P1]`
+
+```c
+int32 main() {
+    extern int32 puts(const char* s);
+    puts("x");
+    return 0;
+}
+```
+
+- 当前：块内 `extern` 只按变量声明解析，遇 `(` 报 `expected ';' after variable declaration`。
+- 已支持：块内 `extern int32 g;`（提交 `dfcb9cc`）。
+- 目标：块内 `declaration-statement` 接受 `extern` 函数原型；sema 按外部函数声明处理。
+- 关联：PAR-02、MOD-09、MEM-10。
+
+### 24.2 C 兼容性 / 声明符文法只覆盖简化形式
+
+#### SG-03 `offsetof` 常量表达式下标 `[gap][P1]`
+
+```c
+offsetof(S, a[1 + 1]);   // 失败：offsetof array index must be an integer literal
+offsetof(S, a[K]);       // 失败；K 为枚举常量
+```
+
+- 规范现状：`member-designator = identifier { '.' identifier | '[' integer-literal ']' }`。
+- 已支持：`offsetof(S, a[1])`、`offsetof(S, a.b)`、嵌套成员。
+- 目标：若按 C 语义补齐，下标改为 `const-expr`，在 parse/sema 期求值。
+- 关联：PAR-14。
+
+#### SG-04 C 风格强转到抽象函数指针类型 `[gap][P1]`
+
+```c
+((int32 (*)(int32))p)(1);        // 失败
+using F = int32 (*)(int32);
+((F)p)(1);                       // 可绕过
+```
+
+- 当前：C 风格 cast 的类型分支仍走 `parseType()`；`sizeof`/`alignof` 已改走完整 `parseTypeId()`。
+- 目标：cast 的 type-id 支持抽象函数指针/指针数组等声明符；数组本身仍不能作 cast 目标。
+- 关联：PAR-14、PAR-18。
+
+#### SG-05 深层嵌套声明符 `[gap][P2]`
+
+```c
+int32 (*(*g)(int32))(int32);
+```
+
+- 当前：单层函数指针、函数返回函数指针、函数指针数组已支持；多层嵌套仍失败。
+- 目标：声明符递归（内层后缀 + 指针 + 外层后缀，反向应用）覆盖任意可表达嵌套。
+- 关联：PAR-05。
+
+#### SG-06 C99 数组形参限定符 `[gap][P2]`
+
+```c
+int32 f(int32 a[static 3]);
+```
+
+- 当前：`static` 被当作数组长度表达式，报 VLA/数组大小错误。
+- 说明：这不是 VLA；`static` 表示数组形参的最小长度。
+- 目标：形参数组后缀接受 `static`/`const`/`volatile`/`restrict` 限定。
+- 关联：TYP-11、PAR-05。
+
+#### SG-07 相邻字符串字面量拼接 `[gap][P2]`
+
+```c
+string_view s = "a" "b";
+```
+
+- 当前：两个独立字符串 token，报 `expected ';' after variable declaration`。
+- 目标：按 C 翻译阶段拼接相邻字符串字面量（lexer 末尾或 parser 初始化/实参位置均可，需统一）。
+- 关联：LEX-06。
+
+### 24.3 规范未覆盖的现代/C++ 兼容扩展（需先裁决，不直接当 bug）
+
+#### SG-08 namespace 的 using 语法 `[ext][P2]`
+
+```c
+using namespace A;
+using A::f;
+namespace B = A;
+```
+
+- 当前：三者均解析失败；只支持 `using X = Type;` 类型别名。
+- 已支持：`namespace A::B { ... }` 嵌套命名空间、限定名 `A::f`。
+- 说明：`grammar.ebnf` 未定义 using-declaration / namespace-alias；需补文法与作用域/可见性规则。
+- 关联：PAR-22。
+
+#### SG-09 lambda 扩展捕获与 `noexcept` `[ext][P2]`
+
+```c
+[&]() { ... }
+[=, &x]() { ... }
+[y = x]() { ... }
+[]() noexcept { ... }
+```
+
+- 当前：均解析失败。
+- 已支持：`[]`、`[=]`、`[a]`、`[&a]`；文法只承诺这四种。
+- 目标：若扩展 DEC-10，需同时定义隐式捕获集合、初始化捕获生命周期、`noexcept` 语义（当前无异常）。
+- 关联：PAR-11、DEC-10。
+
+#### SG-10 注解的扩展形式 `[ext][P2]`
+
+```c
+[[gnu::packed]] struct S { ... };
+[[inline, cold]] int32 f();
+int32 f() [[nodiscard]];
+enum E { A [[deprecated]] };
+```
+
+- 当前：均解析失败。
+- 已支持：简单单名注解，如 `[[packed]]`、`[[align(8)]]`、`[[deprecated]]`。
+- 说明：`grammar.ebnf` 只定义单个简单 `annotation-name`，无命名空间限定、逗号列表、尾置位置、枚举成员挂载。
+- 关联：ANN-01、PAR-07。
+
+#### SG-11 class 语法扩展 `[ext/ng][P2]`
+
+```c
+class C { public: int32 get() const; };       // const 成员函数
+class C { public: operator int32(); };         // 转换运算符
+class C { friend int32 get(C); };              // friend
+class D : B { using B::f; };                   // 类内 using 基类成员
+class C { compile_time.if (true) { int32 x; } };  // 类体 compile_time.if
+enum class E { A };                            // enum class
+class C { public: template<typename T> T id(T x); }; // 成员模板
+```
+
+- 当前：以上均解析失败。
+- 规范现状：`class-member = access-section | field-decl | function-decl | type-alias`，不含上述形式；`enum-decl` 不含 `class`。
+- 裁定：
+  - 构造/析构/GC 仍是 **Non-goal**（ACC-02、NG-09）；构造当前虽能“解析”，sema 会因类型未完成而拒绝，不应视为已支持。
+  - 其余项（`const` 成员、转换运算符、`friend`、类内 `using`、类体 CT-if、`enum class`、成员模板）均需单独 DEC；成员模板若纳入，应与 GEN-08 的模板成员方法能力区分。
+- 关联：PAR-04、PAR-21、GEN-08、ACC-02、NG-09。
+
+### 24.4 不是语法缺口（语义 / ABI / codegen 边界）
+
+- **SG-B01 `static` 局部聚合初始化列表**：`static S s = {1};` 能解析，但 sema 报 `static local variable 's' must be initialized with a constant expression`。需要聚合常量折叠，不是 parser 缺口。关联 PAR-13/AGG。
+- **SG-B02 成员 `operator[]` 写穿**：`v[0] = 1;` 报 `no matching operator[] for types 'class V' and 'int32'`；当前成员 `operator[]` 路径只提交值，未形成可写左值。关联 SEM-17、CG。
+- **SG-B03 类方法内裸成员名**：方法体内 `return x;` 仍需写 `this->x`；这是名称查找/语言设计现状，不是语法解析。
+- **SG-B04 `-fsyntax-only` 只验证解析**：未知注解（如 `[[nodiscard]]`）可能 parse 通过、完整编译报 E2010；不能用 `-fsyntax-only` 证明特性可用。
+- **SG-B05 模块类型可见性**：非导出模块类型名仍可能被导入者看到；属 MOD 可见性，不是语法。
+- **SG-B06 聚合按值 ABI**：struct/class/union 的 byval/sret、对齐等由 MEM-14/TYP-27 跟踪，不是语法。
+
+### 24.5 明确不做（不计入缺口）
+
+按 §21 Non-goals，下列不应作为“语法缺口”排期：
+
+- `goto` / 标签（NG-01）
+- 预处理器与宏（NG-02）
+- VLA（TYP-11 用户裁决；动态长度由 Slice 承接）
+- 模板特化/偏特化、SFINAE、可变参数模板、模板模板参数、concepts、默认模板实参（GEN-10）
+- 多继承/虚继承/虚函数/vtable/RTTI（INH-07、NG-09）
+- 构造/析构/GC（ACC-02、NG-09）
+- `typedef` / `type`（PAR-24 已删除）
+- 异常与 `?` 传播（NG-05）
+- 命名参数（NG-13）
+
+### 24.6 建议顺序与验收
+
+1. **P1 语法收口**：SG-01 模板常量实参 → SG-02 块内 extern 函数 → SG-04 cast 完整 type-id → SG-03 `offsetof` 常量下标。
+2. **P2 C 兼容**：SG-07 相邻字符串 → SG-05 深层声明符 → SG-06 数组形参限定符。
+3. **先裁决再实现**：SG-08 namespace using、SG-09 lambda 扩展、SG-10 注解扩展、SG-11 class 扩展。
+4. **独立排期**：§24.4 的 sema/codegen/ABI 边界，不与 parser 修复混做。
+
+每项落地时：先补 RED 测试（至少 parser + e2e 各一条），再改实现；全量 `ctest -j8`；同步 `grammar.ebnf` 与本文件状态；涉及公开语法时更新两个示例或新增示例节。
+
+### 24.7 审计证据
+
+- 审计基线：全量 **1572/1572** 通过（2 个既有 `GTEST_SKIP`）；`examples/all_features.c` → `ALL FEATURES OK`，`examples/full_feature.c` → `FULL FEATURE OK`。
+- 每个 `[gap]` 例子均已用 `build/bin/my_llvm_c -fsyntax-only` 复现解析失败；涉及 sema/codegen 的 `[boundary]` 例子额外做了完整编译。
+- 本文档只记录现状与建议，不改动代码；新增语法前仍需按 §21 的 DEC/Non-goal 规则裁决。

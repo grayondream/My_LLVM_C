@@ -976,3 +976,10 @@
 - 新增 `SyntaxGapsE2E` 12 个用例（空语句、struct/class/union 多字段、直接函数指针字段、指向数组字段、sizeof/alignof type-id、后置限定符、块 extern、attached 指针/函数/函数指针/返回指针函数、多复杂声明符）。
 - 全量 `ctest --test-dir build -j8` **1572/1572** 通过（2 个既有 GTEST_SKIP 不变）。
 - `examples/all_features.c` → `ALL FEATURES OK`；`examples/full_feature.c` → `FULL FEATURE OK`。
+
+## 2026-10-27 — 语法缺口审计（第三轮后）
+
+- 对基础 C 声明/语句 9 项收口后的剩余语法缺口做规范 + CLI 复核；详细清单写入 `TODO.md` **§24 语法缺口审计**。
+- 分类：§24.1 规范已承诺未收口（SG-01 模板常量实参、SG-02 块内 extern 函数）；§24.2 C 兼容/声明符简化（SG-03 ~ SG-07）；§24.3 规范未覆盖扩展（SG-08 ~ SG-11）；§24.4 非语法边界（SG-B01 ~ SG-B06）；§24.5 Non-goals。
+- 审计基线：全量 **1572/1572**（2 个既有 `GTEST_SKIP`）；`examples/all_features.c` → `ALL FEATURES OK`，`examples/full_feature.c` → `FULL FEATURE OK`。
+- 本轮只改文档，未改代码；后续按 §24.6 顺序逐项 TDD 收口。
