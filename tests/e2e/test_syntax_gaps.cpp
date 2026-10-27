@@ -267,6 +267,18 @@ TEST_F(SyntaxGapsE2E, TypeIdArrayDimensionsAcceptConstExpressions) {
     )", "syntax_typeid_array_const_dim.c"), 0);
 }
 
+TEST_F(SyntaxGapsE2E, ParenthesizedDeclarators) {
+    EXPECT_EQ(runSyntaxSource(R"(
+        int32 (gParen) = 3;
+        int32 (fParen)(void) { return 4; }
+        int32 (aParen)[3];
+        int32 main() {
+            aParen[0] = 1;
+            return gParen + fParen() + aParen[0] - 8;
+        }
+    )", "syntax_paren_declarator.c"), 0);
+}
+
 TEST_F(SyntaxGapsE2E, GlobalStringViewLiteralDoesNotCrash) {
     EXPECT_EQ(runSyntaxSource(R"(
         string_view gStringView = "abc";

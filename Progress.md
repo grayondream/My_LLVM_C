@@ -1013,3 +1013,10 @@
 - 修复 §25 **SG-B09**：全局 `string_view s = "abc";` 在 `-c` 时段错误。根因是全局初始化阶段 IRBuilder 无 insertion block，`CreateGlobalString` 未传 Module 导致空指针解引用。
 - 改为显式传 `&ctx.getModule()`；新增 `SyntaxGapsE2E.GlobalStringViewLiteralDoesNotCrash`，先 RED（测试进程 SIGSEGV）后 GREEN。
 - 全量测试与示例在后续批次统一复跑。
+
+## 2026-10-27 — SG-16 括号声明符（部分）
+
+- `parseFunctionPointerDeclarator` 的 `*` 改为可选；`int32 (x);`、`int32 (f)(void);`、`int32 (a)[3];` 现在按 C 声明符语义解析。
+- 新增 `SyntaxGapsE2E.ParenthesizedDeclarators`，先 RED（unknown type）后 GREEN。
+- `int32 f(), g();` 多条函数声明符仍挂账（需函数声明列表/MultiVarDecl 扩展）。
+- 全量 `ctest --test-dir build -j8` **1579/1579** 通过（2 个既有 `GTEST_SKIP`）。

@@ -3631,13 +3631,17 @@ Type* Parser::parseFunctionPointerDeclarator(Type* returnType, std::string& outN
     size_t saved = m_currentTokenPos;
     advance(); // '('
     while (check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE)) advance();
-    if (!check(TokenType::TOKEN_STAR)) {
-        m_currentTokenPos = saved;
-        return nullptr;
+
+    // A parenthesized declarator may omit the pointer entirely:
+    // `int32 (x);`, `int32 (f)(void);`, `int32 (a)[3];`. With `*` it is the
+    // familiar pointer-to-function / pointer-to-array form.
+    bool hasPointer = false;
+    if (check(TokenType::TOKEN_STAR)) {
+        advance(); // '*'
+        hasPointer = true;
+        while (check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE) ||
+               check(TokenType::TOKEN_RESTRICT)) advance();
     }
-    advance(); // '*'
-    while (check(TokenType::TOKEN_CONST) || check(TokenType::TOKEN_VOLATILE) ||
-           check(TokenType::TOKEN_RESTRICT)) advance();
 
     if (check(TokenType::TOKEN_IDENTIFIER)) {
         outName = advance()->lexeme;
@@ -3713,7 +3717,11 @@ Type* Parser::parseFunctionPointerDeclarator(Type* returnType, std::string& outN
     // suffixes after the closing ')'.
     std::vector<Op> ops;
     for (auto& op : inner) ops.push_back(std::move(op));
-    { Op p; p.kind = Op::Pointer; ops.push_back(std::move(p)); }
+    if (hasPointer) {
+        Op p;
+        p.kind = Op::Pointer;
+        ops.push_back(std::move(p));
+    }
     for (auto& op : outer) ops.push_back(std::move(op));
 
     const bool entityIsFunction = !ops.empty() && ops.front().kind == Op::Function;
