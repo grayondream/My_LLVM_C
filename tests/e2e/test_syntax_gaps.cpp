@@ -267,6 +267,14 @@ TEST_F(SyntaxGapsE2E, TypeIdArrayDimensionsAcceptConstExpressions) {
     )", "syntax_typeid_array_const_dim.c"), 0);
 }
 
+TEST_F(SyntaxGapsE2E, OutOfClassStaticMethodDefinition) {
+    EXPECT_EQ(runSyntaxSource(R"(
+        struct SStaticOoc { static int32 f(); };
+        int32 SStaticOoc::f() { return 7; }
+        int32 main() { return SStaticOoc::f() - 7; }
+    )", "syntax_static_method_ooc.c"), 0);
+}
+
 TEST_F(SyntaxGapsE2E, FunctionTypeParameterDecaysToPointer) {
     EXPECT_EQ(runSyntaxSource(R"(
         int32 applyFnType(int32 gFnType(int32), int32 x);

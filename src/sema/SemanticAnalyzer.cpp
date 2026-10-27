@@ -5475,6 +5475,8 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
         }
         if (!nn.empty()) m_nonnullParams[node.name] = std::move(nn);
     }
+    // Keep the pre-mangling spelling for out-of-class static member lookup.
+    const std::string oocOriginalName = node.name;
     // Namespace members are registered/emitted under a mangled key.
     // C-linkage extern functions keep their plain symbol name even inside a
     // namespace (`std::sqrt` links to libm's `sqrt`): skip the prefix only
@@ -5501,32 +5503,54 @@ void SemanticAnalyzer::visit(FunctionDeclAST& node) {
                       "unknown class '" + node.className + "'", node);
             return;
         }
-        FunctionType* declared = oocClass->getMethod(node.name);
-        if (!declared) {
-            emitError("method '" + node.name + "' is not declared in class '" +
-                          node.className + "'", node);
-            return;
-        }
-        bool sigOk = declared->returnType && node.returnType &&
-                     typesEqual(declared->returnType, node.returnType) &&
-                     declared->paramTypes.size() == node.params.size() + 1;
-        if (sigOk) {
-            for (size_t i = 0; i < node.params.size(); ++i) {
-                if (!typesEqual(declared->paramTypes[i + 1], node.params[i]->type)) {
-                    sigOk = false;
-                    break;
-                }
+
+        // AGG-10: static methods have no instance entry in ClassType::methods;
+        // they are desugared into staticMemberIndex as globals. Bind an
+        // out-of-class definition to that existing symbol instead of inserting
+        // an implicit `this` parameter.
+        bool isStaticOoc = false;
+        std::string staticKey;
+        for (const auto& entry : staticMemberIndex) {
+            if (entry.second.first == oocClass &&
+                entry.second.second == oocOriginalName) {
+                isStaticOoc = true;
+                staticKey = entry.first;
+                break;
             }
         }
-        if (!sigOk) {
-            emitError("out-of-class definition of '" + node.className + "::" +
-                          node.name + "' does not match the declaration in the class", node);
-            return;
+        if (isStaticOoc) {
+            node.isStatic = true;
+            node.name = staticKey;
+            node.className.clear();
+            oocClass = nullptr;
+        } else {
+            FunctionType* declared = oocClass->getMethod(node.name);
+            if (!declared) {
+                emitError("method '" + node.name + "' is not declared in class '" +
+                              node.className + "'", node);
+                return;
+            }
+            bool sigOk = declared->returnType && node.returnType &&
+                         typesEqual(declared->returnType, node.returnType) &&
+                         declared->paramTypes.size() == node.params.size() + 1;
+            if (sigOk) {
+                for (size_t i = 0; i < node.params.size(); ++i) {
+                    if (!typesEqual(declared->paramTypes[i + 1], node.params[i]->type)) {
+                        sigOk = false;
+                        break;
+                    }
+                }
+            }
+            if (!sigOk) {
+                emitError("out-of-class definition of '" + node.className + "::" +
+                              node.name + "' does not match the declaration in the class", node);
+                return;
+            }
+            node.params.insert(node.params.begin(),
+                std::make_unique<ParamDeclAST>("this",
+                    new Type(TypeKind::Pointer, oocClass)));
+            currentClass = oocClass;
         }
-        node.params.insert(node.params.begin(),
-            std::make_unique<ParamDeclAST>("this",
-                new Type(TypeKind::Pointer, oocClass)));
-        currentClass = oocClass;
     }
 
     // P1-04 评审 I3: 返回/参数类型不得来自 compile_time.if 死分支。

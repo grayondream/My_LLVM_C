@@ -1026,3 +1026,9 @@
 - 修复 §25 **SG-17**：`parseParamDecl()` 在参数名后遇到 `(` 时解析抽象函数类型，并按 C 规则退化为函数指针；`int32 f(int32 cb(int32))` 与 `int32 f(int32 (*cb)(int32))` 等价。
 - 新增 `SyntaxGapsE2E.FunctionTypeParameterDecaysToPointer`，先 RED 后 GREEN。
 - 全量 `ctest --test-dir build -j8` **1580/1580** 通过（2 个既有 `GTEST_SKIP`）。
+
+## 2026-10-27 — SG-B07 类外静态成员函数定义
+
+- 修复 §25 **SG-B07**：sema 在处理 `Class::method` 类外定义时，先查 `staticMemberIndex`；命中静态方法后绑定到脱糖后的全局符号，不再报 `method ... is not declared`，也不插入隐式 `this`。
+- 新增 `SyntaxGapsE2E.OutOfClassStaticMethodDefinition`，先 RED（sema 报错）后 GREEN。
+- 全量 `ctest --test-dir build -j8` **1581/1581** 通过（2 个既有 `GTEST_SKIP`）。
