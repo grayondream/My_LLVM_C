@@ -267,6 +267,15 @@ TEST_F(SyntaxGapsE2E, TypeIdArrayDimensionsAcceptConstExpressions) {
     )", "syntax_typeid_array_const_dim.c"), 0);
 }
 
+TEST_F(SyntaxGapsE2E, MultipleFunctionDeclarators) {
+    EXPECT_EQ(runSyntaxSource(R"(
+        int32 fMultiDecl(), gMultiDecl();
+        int32 fMultiDecl() { return 1; }
+        int32 gMultiDecl() { return 2; }
+        int32 main() { return fMultiDecl() + gMultiDecl() - 3; }
+    )", "syntax_multi_function_decl.c"), 0);
+}
+
 TEST_F(SyntaxGapsE2E, OutOfClassStaticMethodDefinition) {
     EXPECT_EQ(runSyntaxSource(R"(
         struct SStaticOoc { static int32 f(); };

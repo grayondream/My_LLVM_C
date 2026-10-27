@@ -5432,6 +5432,7 @@ void SemanticAnalyzer::visit(DeclStmtAST& node) {
             for (auto& d : multi->decls) {
                 if (auto* v = dynamic_cast<VarDeclAST*>(d.get())) visit(*v);
                 else if (auto* a = dynamic_cast<ArrayDeclAST*>(d.get())) visit(*a);
+                else if (auto* f = dynamic_cast<FunctionDeclAST*>(d.get())) visit(*f);
             }
         }
     }
@@ -5785,6 +5786,7 @@ void SemanticAnalyzer::analyzeTopLevelDecl(DeclAST& decl) {
         for (auto& d : multi->decls) {
             if (auto* v = dynamic_cast<VarDeclAST*>(d.get())) visit(*v);
             else if (auto* a = dynamic_cast<ArrayDeclAST*>(d.get())) visit(*a);
+            else if (auto* f = dynamic_cast<FunctionDeclAST*>(d.get())) visit(*f);
         }
     } else if (auto* ctAssert = dynamic_cast<CompileTimeAssertDeclAST*>(&decl)) {
         // P1-04 / CT-02: 顶层 static_assert——内层 MethodCall 走钩子求值。

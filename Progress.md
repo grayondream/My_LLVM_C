@@ -1032,3 +1032,9 @@
 - 修复 §25 **SG-B07**：sema 在处理 `Class::method` 类外定义时，先查 `staticMemberIndex`；命中静态方法后绑定到脱糖后的全局符号，不再报 `method ... is not declared`，也不插入隐式 `this`。
 - 新增 `SyntaxGapsE2E.OutOfClassStaticMethodDefinition`，先 RED（sema 报错）后 GREEN。
 - 全量 `ctest --test-dir build -j8` **1581/1581** 通过（2 个既有 `GTEST_SKIP`）。
+
+## 2026-10-27 — SG-16 多函数声明符
+
+- 补齐 `int32 f(), g();`：`parseFunctionDecl` 增加 `allowComma`，普通函数声明分支收集多个 `FunctionDeclAST` 并包成 `MultiVarDeclAST`；sema 的 `MultiVarDeclAST` 分派补 `FunctionDeclAST`。
+- 新增 `SyntaxGapsE2E.MultipleFunctionDeclarators`，先 RED（`expected '{' or ';'`）后 GREEN。
+- 全量 `ctest --test-dir build -j8` **1582/1582** 通过（2 个既有 `GTEST_SKIP`）。

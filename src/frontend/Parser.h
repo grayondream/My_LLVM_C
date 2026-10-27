@@ -125,7 +125,9 @@ private:
     std::unique_ptr<DeclAST> parseDeclarationFromBaseType(Type* base,
                                                           bool isConstexpr = false);
 
-    std::unique_ptr<FunctionDeclAST> parseFunctionDecl(Type* returnType, const std::string& name, bool isConstexpr = false);
+    std::unique_ptr<FunctionDeclAST> parseFunctionDecl(Type* returnType, const std::string& name,
+                                                       bool isConstexpr = false,
+                                                       bool allowComma = false);
 
     std::unique_ptr<DeclAST> parseVariableDecl(Type* type, const std::string& name, bool isConstexpr = false);
 

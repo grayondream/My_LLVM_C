@@ -3541,7 +3541,37 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationAsType() {
 
     // Function declaration/definition: type name '('
     if (check(TokenType::TOKEN_LPAREN)) {
-        return parseFunctionDecl(type, nameTok->lexeme, isConstexpr);
+        auto first = parseFunctionDecl(type, nameTok->lexeme, isConstexpr,
+                                       /*allowComma=*/true);
+        if (!first) return nullptr;
+        if (!check(TokenType::TOKEN_COMMA)) return first;
+
+        // C permits several function declarators in one declaration:
+        // `int32 f(), g();`. A function *definition* cannot be part of such a
+        // list, so reject `int32 f() { ... }, g();`.
+        if (first->body) {
+            errorUnexpected("function definition cannot be followed by ','");
+            return first;
+        }
+        std::vector<std::unique_ptr<DeclAST>> fns;
+        fns.push_back(std::move(first));
+        while (match(TokenType::TOKEN_COMMA)) {
+            if (!check(TokenType::TOKEN_IDENTIFIER)) {
+                errorUnexpected("expected function name after ','");
+                break;
+            }
+            auto extraName = advance();
+            if (!check(TokenType::TOKEN_LPAREN)) {
+                errorUnexpected("expected '(' after function name");
+                break;
+            }
+            auto fn = parseFunctionDecl(type, extraName->lexeme, isConstexpr,
+                                        /*allowComma=*/true);
+            if (!fn) break;
+            fns.push_back(std::move(fn));
+        }
+        expect(TokenType::TOKEN_SEMICOLON, "expected ';' after function declarations");
+        return std::make_unique<MultiVarDeclAST>(std::move(fns));
     }
 
     // Variable declaration, possibly with several comma-separated declarators.
@@ -3815,7 +3845,8 @@ Type* Parser::parseFunctionPointerType(Type* returnType) {
     return new FunctionType(returnType, paramTypes, isVarArg);
 }
 
-std::unique_ptr<FunctionDeclAST> Parser::parseFunctionDecl(Type* returnType, const std::string& name, bool isConstexpr) {
+std::unique_ptr<FunctionDeclAST> Parser::parseFunctionDecl(Type* returnType, const std::string& name,
+                                                          bool isConstexpr, bool allowComma) {
     if (!expect(TokenType::TOKEN_LPAREN, "expected '(' after function name")) return nullptr;
 
     std::vector<std::unique_ptr<ParamDeclAST>> params;
@@ -3854,7 +3885,8 @@ std::unique_ptr<FunctionDeclAST> Parser::parseFunctionDecl(Type* returnType, con
     std::unique_ptr<CompoundStmtAST> body;
     if (check(TokenType::TOKEN_LBRACE)) {
         body = parseCompoundStmt();
-    } else if (!check(TokenType::TOKEN_SEMICOLON) && !eof()) {
+    } else if (!check(TokenType::TOKEN_SEMICOLON) &&
+               !(allowComma && check(TokenType::TOKEN_COMMA)) && !eof()) {
         errorUnexpected("expected '{' or ';' after function declaration");
     }
 
