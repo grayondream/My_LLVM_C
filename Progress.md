@@ -1020,3 +1020,9 @@
 - 新增 `SyntaxGapsE2E.ParenthesizedDeclarators`，先 RED（unknown type）后 GREEN。
 - `int32 f(), g();` 多条函数声明符仍挂账（需函数声明列表/MultiVarDecl 扩展）。
 - 全量 `ctest --test-dir build -j8` **1579/1579** 通过（2 个既有 `GTEST_SKIP`）。
+
+## 2026-10-27 — SG-17 函数类型形参 decay
+
+- 修复 §25 **SG-17**：`parseParamDecl()` 在参数名后遇到 `(` 时解析抽象函数类型，并按 C 规则退化为函数指针；`int32 f(int32 cb(int32))` 与 `int32 f(int32 (*cb)(int32))` 等价。
+- 新增 `SyntaxGapsE2E.FunctionTypeParameterDecaysToPointer`，先 RED 后 GREEN。
+- 全量 `ctest --test-dir build -j8` **1580/1580** 通过（2 个既有 `GTEST_SKIP`）。

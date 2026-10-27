@@ -267,6 +267,15 @@ TEST_F(SyntaxGapsE2E, TypeIdArrayDimensionsAcceptConstExpressions) {
     )", "syntax_typeid_array_const_dim.c"), 0);
 }
 
+TEST_F(SyntaxGapsE2E, FunctionTypeParameterDecaysToPointer) {
+    EXPECT_EQ(runSyntaxSource(R"(
+        int32 applyFnType(int32 gFnType(int32), int32 x);
+        int32 applyFnType(int32 gFnType(int32), int32 x) { return gFnType(x); }
+        int32 incFnType(int32 x) { return x + 1; }
+        int32 main() { return applyFnType(incFnType, 1) - 2; }
+    )", "syntax_function_type_param.c"), 0);
+}
+
 TEST_F(SyntaxGapsE2E, ParenthesizedDeclarators) {
     EXPECT_EQ(runSyntaxSource(R"(
         int32 (gParen) = 3;

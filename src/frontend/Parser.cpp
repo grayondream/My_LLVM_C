@@ -3988,6 +3988,15 @@ std::unique_ptr<ParamDeclAST> Parser::parseParamDecl() {
     if (check(TokenType::TOKEN_IDENTIFIER)) {
         name = advance()->lexeme;
 
+        // C parameter adjustment: a function type in a parameter list decays
+        // to a pointer to function. `int32 f(int32 cb(int32))` is equivalent
+        // to `int32 f(int32 (*cb)(int32))`.
+        if (check(TokenType::TOKEN_LPAREN)) {
+            Type* fn = parseAbstractFunctionSuffix(type);
+            if (!fn) return nullptr;
+            type = new Type(TypeKind::Pointer, fn);
+        }
+
         // TYP-11 D2: `T name[N]` 参数语法去糖为 slice `T[]`（[N] 为文档性
         // 标注，长度不静态检查——slice 长度本就动态，见
         // docs/superpowers/specs/2026-10-01-typ11-array-params-design.md）。
