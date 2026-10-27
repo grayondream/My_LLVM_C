@@ -994,3 +994,9 @@
 - 复核方式：`build/bin/my_llvm_c -fsyntax-only` 复现解析失败，`-c` 复现 sema/codegen 边界；对照通过项包括 `int32 (*p)[3]`、`sizeof(int32(*)(int32))`、`struct U { int32 c : 1 + 1; }`、`extern "C"`。
 - 基线沿用 **1572/1572**（2 个既有 `GTEST_SKIP`）；两个示例仍为 `ALL FEATURES OK` / `FULL FEATURE OK`。
 - 建议顺序并入 §24.6：**SG-01 → SG-02 → SG-12 → SG-04/SG-14 → SG-03**，随后 SG-16/SG-17 与 P2 扩展。
+
+## 2026-10-27 — SG-14 显式转换完整 type-id
+
+- 修复 §25 **SG-14**：`static_cast` / `reinterpret_cast` 的类型分支从 `parseType()` 改为 `parseTypeId()`，现在支持抽象函数指针 `Ret(*)(...)` 与指向数组的指针 `T(*)[N]`。
+- 新增 `CastOperatorsE2E.StaticCastToFunctionPointerTypeId`、`CastOperatorsE2E.ReinterpretCastToPointerToArrayTypeId`；先 RED（解析失败）后 GREEN。
+- 全量 `ctest --test-dir build -j8` **1574/1574** 通过（2 个既有 `GTEST_SKIP`）。

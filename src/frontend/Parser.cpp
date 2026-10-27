@@ -448,7 +448,7 @@ std::unique_ptr<ExprAST> Parser::parseUnaryImpl() {
         const bool isReinterpret = token->lexeme == "reinterpret_cast";
         advance(); // cast keyword
         advance(); // '<'
-        Type* castType = parseType();
+        Type* castType = parseTypeId();
         if (!castType) return nullptr;
         if (!expect(TokenType::TOKEN_GT, "expected '>' after cast type")) return nullptr;
         if (!expect(TokenType::TOKEN_LPAREN, "expected '(' after cast type")) return nullptr;

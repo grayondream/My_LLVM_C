@@ -157,3 +157,25 @@ TEST_F(CastOperatorsE2E, CStyleCastStillWarnsButCompiles) {
     EXPECT_EQ(r.errors, 0);
     EXPECT_GT(r.warnings, 0);
 }
+
+TEST_F(CastOperatorsE2E, StaticCastToFunctionPointerTypeId) {
+    EXPECT_EQ(runSource(R"(
+        int32 inc(int32 x) { return x + 1; }
+        int32 main() {
+            int32 (*src)(int32) = inc;
+            int32 (*dst)(int32) = static_cast<int32(*)(int32)>(src);
+            return dst(1) - 2;
+        }
+    )"), 0);
+}
+
+TEST_F(CastOperatorsE2E, ReinterpretCastToPointerToArrayTypeId) {
+    EXPECT_EQ(runSource(R"(
+        int32 main() {
+            int32 a[2] = {3, 4};
+            int64 addr = reinterpret_cast<int64>(&a);
+            int32 (*p)[2] = reinterpret_cast<int32(*)[2]>(addr);
+            return (*p)[1] - 4;
+        }
+    )"), 0);
+}
