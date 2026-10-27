@@ -983,3 +983,14 @@
 - 分类：§24.1 规范已承诺未收口（SG-01 模板常量实参、SG-02 块内 extern 函数）；§24.2 C 兼容/声明符简化（SG-03 ~ SG-07）；§24.3 规范未覆盖扩展（SG-08 ~ SG-11）；§24.4 非语法边界（SG-B01 ~ SG-B06）；§24.5 Non-goals。
 - 审计基线：全量 **1572/1572**（2 个既有 `GTEST_SKIP`）；`examples/all_features.c` → `ALL FEATURES OK`，`examples/full_feature.c` → `FULL FEATURE OK`。
 - 本轮只改文档，未改代码；后续按 §24.6 顺序逐项 TDD 收口。
+
+## 2026-10-27 — 语法缺口补充审计（第二轮）
+
+- 在 `TODO.md` **§24** 之后新增 **§25 语法缺口补充审计**；本轮仍只改文档，未改代码。
+- §25.1 规范已承诺未贯通：**SG-12** 数组维度只接受整数字面量、**SG-13** 位域宽度不能解析 enum/const 标识符、**SG-14** `static_cast`/`reinterpret_cast` 目标类型仍不走完整 type-id。
+- §25.2 C 兼容/声明符：**SG-15** 静态数据成员类外定义、**SG-16** 括号声明符与多函数声明符、**SG-17** 函数类型形参未按 C decay、**SG-18** C 字面量子集、**SG-19** asm 连续冒号/命名操作数。
+- §25.3 需先裁决的扩展：**SG-20** 模块扩展、**SG-21** 控制流扩展、**SG-22** struct/class 成员扩展、**SG-23** 模板类静态成员与类外模板成员定义。
+- §25.4 非语法边界：**SG-B07** 类外静态成员函数 sema 未绑定、**SG-B08** 成员 `operator[]`/`operator()` 调用绑定、**SG-B09** 全局 `string_view` 字面量 codegen 段错误。
+- 复核方式：`build/bin/my_llvm_c -fsyntax-only` 复现解析失败，`-c` 复现 sema/codegen 边界；对照通过项包括 `int32 (*p)[3]`、`sizeof(int32(*)(int32))`、`struct U { int32 c : 1 + 1; }`、`extern "C"`。
+- 基线沿用 **1572/1572**（2 个既有 `GTEST_SKIP`）；两个示例仍为 `ALL FEATURES OK` / `FULL FEATURE OK`。
+- 建议顺序并入 §24.6：**SG-01 → SG-02 → SG-12 → SG-04/SG-14 → SG-03**，随后 SG-16/SG-17 与 P2 扩展。
