@@ -381,7 +381,11 @@ llvm::Value* StringExprAST::codegen(CodegenContext& ctx) {
         strTy = llvm::StructType::create(c,
             {llvm::PointerType::get(c, 0), llvm::Type::getInt64Ty(c)}, "str");
     }
-    llvm::Value* ptr = ctx.getBuilder().CreateGlobalString(value, ".str");
+    // The builder has no insertion block while materializing a global
+    // initializer; pass the module explicitly so CreateGlobalString does not
+    // dereference a null insertion block.
+    llvm::Value* ptr = ctx.getBuilder().CreateGlobalString(
+        value, ".str", /*AddressSpace=*/0, &ctx.getModule());
     return llvm::ConstantStruct::get(strTy,
         {llvm::dyn_cast<llvm::Constant>(ptr),
          llvm::ConstantInt::get(llvm::Type::getInt64Ty(c), value.size())});

@@ -1007,3 +1007,9 @@
 - 修复 §25 **SG-13**：`evalIntConstExpr()` 增加标识符查找回调，枚举值解析时登记，`parseBitFieldWidth()` 复用同一查找；`int32 a : EnumN`、`: ConstN`、`: 1 + 1` 均通过。
 - 新增 `SyntaxGapsE2E.ArrayDimensionsAcceptConstExpressions`、`TypeIdArrayDimensionsAcceptConstExpressions`、`BitFieldWidthsAcceptEnumAndConst`；先 RED（三例均失败）后 GREEN。
 - 全量 `ctest --test-dir build -j8` **1577/1577** 通过（2 个既有 `GTEST_SKIP`）；两个示例仍输出 `ALL FEATURES OK` / `FULL FEATURE OK`。
+
+## 2026-10-27 — SG-B09 全局 string_view 字面量崩溃
+
+- 修复 §25 **SG-B09**：全局 `string_view s = "abc";` 在 `-c` 时段错误。根因是全局初始化阶段 IRBuilder 无 insertion block，`CreateGlobalString` 未传 Module 导致空指针解引用。
+- 改为显式传 `&ctx.getModule()`；新增 `SyntaxGapsE2E.GlobalStringViewLiteralDoesNotCrash`，先 RED（测试进程 SIGSEGV）后 GREEN。
+- 全量测试与示例在后续批次统一复跑。

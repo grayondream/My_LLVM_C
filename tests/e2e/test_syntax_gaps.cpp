@@ -267,6 +267,17 @@ TEST_F(SyntaxGapsE2E, TypeIdArrayDimensionsAcceptConstExpressions) {
     )", "syntax_typeid_array_const_dim.c"), 0);
 }
 
+TEST_F(SyntaxGapsE2E, GlobalStringViewLiteralDoesNotCrash) {
+    EXPECT_EQ(runSyntaxSource(R"(
+        string_view gStringView = "abc";
+        int32 main() {
+            if (gStringView.len() != 3) return 1;
+            if (gStringView[0] != 'a') return 2;
+            return 0;
+        }
+    )", "syntax_global_string_view.c"), 0);
+}
+
 TEST_F(SyntaxGapsE2E, BitFieldWidthsAcceptEnumAndConst) {
     EXPECT_EQ(runSyntaxSource(R"(
         enum { WBits = 2 };
