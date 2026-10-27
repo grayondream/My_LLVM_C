@@ -45,7 +45,7 @@
 > **进度快照（2026-10-26，语法缺口 1–6 收口）**：先修 CG-05（rvalue 聚合成员按值读取，`make().x` 不再产生非法 GEP）与 MOD-03（前向类型按值使用报 incomplete；指针仍允许）。随后：①模块导入改为 parse 前预载，`export struct/class/using/template` 可用；②强制 `module` 首部/唯一/文件名匹配；③函数内 `static`/`thread_local` 静态变量与局部 `struct/union/enum` 定义；④通用括号声明符（函数返回函数指针、函数类型别名、指向数组的指针、函数指针数组）+ 表达式 callee 间接调用；⑤自引用类指针字段爆栈修复、类内/类外成员运算符重载调用；⑥函数体 `compile_time.if` 与嵌套 `offsetof(T, a.b)`/`offsetof(T, arr[i])`。全量 **1559/1559**；两个示例仍输出 `ALL FEATURES OK` / `FULL FEATURE OK`。提交线：a805740、53768f1、3d88e2b、c2d509b、4d77701、8dd88ca、2597f62。
 > **进度快照（2026-10-26，基础 C 声明/语句收口）**：补齐 9 项基础语法：空语句 `;`；聚合成员多声明符 `struct S { int32 a, b; }`；聚合成员直接函数指针字段与指向数组的指针字段；`sizeof`/`alignof` 的完整 type-id（数组/抽象函数指针）；后置限定符 `int32 const`；块内 `extern`；record 定义后的 attached 指针/函数声明符；多声明符中的复杂后继（`int32 (*f)(int), (*g)(int);`）。顺带把带方法的 `struct` 正确路由为 class 类型，并修复布局注解对 `ClassType` 的 UB 强转。全量 **1572/1572**；两个示例仍输出 OK。提交线：0bc3be2、88fca71、b07dc1f、42d3ed1、dfcb9cc、607ff32、dad042d、31a68fb、27a1242。
 > **进度快照（2026-10-27，语法缺口审计）**：对第三轮收口后的剩余语法缺口做规范+CLI 复核，按“规范已承诺 / C 兼容性 / 规范未覆盖扩展 / 非语法边界 / Non-goals”分类，详细清单见 **§24**（SG-01 ~ SG-11、SG-B01 ~ SG-B06）。本轮不改代码。
-> **进度快照（2026-10-27，语法缺口补充审计）**：在 §24 基础上继续补漏，新增 **§25**（SG-12 ~ SG-23、SG-B07 ~ SG-B09），覆盖数组/位域常量表达式、声明符递归与函数类型形参、静态成员类外定义、C 字面量、asm、模块/控制流/类模板扩展。新补项中 P1 为 SG-12、SG-14；SG-14 已于 2026-10-27 修复，SG-12 仍挂账。
+> **进度快照（2026-10-27，语法缺口补充审计）**：在 §24 基础上继续补漏，新增 **§25**（SG-12 ~ SG-23、SG-B07 ~ SG-B09），覆盖数组/位域常量表达式、声明符递归与函数类型形参、静态成员类外定义、C 字面量、asm、模块/控制流/类模板扩展。新补项中 P1 为 SG-12、SG-14；SG-12、SG-13、SG-14 已于 2026-10-27 修复，SG-15 ~ SG-23 与 SG-B07 ~ SG-B09 仍挂账。
 
 
 > **进度快照（2026-10-19，语法遗漏收口完成）**：**语法层面审计 + 11 项特性/缺陷收口**（spec/plan `docs/superpowers/specs|plans/2026-10-18-syntax-gaps*`）。多行字符串 `"""..."""` 与 Unicode 标识符（LEX-16/18）；`char8/16/32` 类型（uint 别名）与 `thread_local`（TYP-05/CON-04）；`atomic` 限定符（整型标量，原子 load/store + atomicrmw 子集，CON-01）；默认参数（区间重载 + 少默认优先，FUN-09）；**未知类型名声明静默丢弃修复**（E2031，此前 `f16 x;` 零诊断消失）；compile_time 反射 `name_of/fields_of/attributes_of`（ReflectionRegistry 交接，CT-07/13）；protected 派生访问放宽（INH-06）；`alignof/offsetof` 独立关键字与 `nullptr`（PAR-14/TYP-24）。当前全量 **1418** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。P1-09 剩余：仅 std.collections（STD-06~08，阻塞于「模块导出类型」语言缺口）。
@@ -791,11 +791,11 @@ class C { public: template<typename T> T id(T x); }; // 成员模板
 > 范围：§24 之后的补漏，只列**语法/解析层**尚未覆盖、或规范已承诺但只实现简化形式的能力；语义/ABI/codegen 边界见 §25.4。
 > 方法：对照 `docs/spec/grammar.ebnf`、§24，并用 `build/bin/my_llvm_c -fsyntax-only` 与完整编译逐例复核；每个例子都给出当前失败形态。
 > 基线：沿用 §24 的 **1572/1572**（2 个既有 `GTEST_SKIP`）与两个示例 OK；本轮只改文档，未改代码。
-> 结论：§24 的 11 项之外，仍有一批“规范承诺未贯通、C 声明符/字面量兼容、规范未覆盖扩展”的缺口。真正需要优先补的只有 **SG-12 数组常量维度** 与 **SG-14 显式转换完整 type-id**。
+> 结论：§24 的 11 项之外，仍有一批“规范承诺未贯通、C 声明符/字面量兼容、规范未覆盖扩展”的缺口。真正需要优先补的 **SG-12 数组常量维度**、**SG-14 显式转换完整 type-id** 已于 2026-10-27 修复；其余按 §25.5 推进。
 
 ### 25.1 规范已承诺、实现未完全贯通（优先）
 
-#### SG-12 数组维度只接受整数字面量 `[gap][P1]`
+#### SG-12 数组维度只接受整数字面量 `[fixed][P1]`
 
 ```c
 int32 g[1 + 1];                         // 顶层：expected ';' after variable declaration
@@ -813,8 +813,9 @@ int32 f(int32 a[1 + 1]);                // 形参：expected ']' after array par
 - 目标：只对**编译期常量**求值（运行时长度 VLA 仍是 Non-goal，TYP-11 用户裁决不变）；解析期保存维度表达式，sema 求值并校验正数/溢出。
 - 补充：`sizeof(int32[1 + 1])`、`using A = int32[1 + 1];` 也失败；`type-id` 文法当前写的是 `integer-literal`，若要 C 兼容可一并扩展，但不算本项的规范承诺。
 - 关联：PAR-05、PAR-10、TYP-11、SG-03。
+- **已修复（2026-10-27）**：新增解析期常量表（enum / `const`/`constexpr` 整型变量）与 `parseArrayDimension()`；变量、成员、形参、`type-id` 的数组维度现在接受字面量表达式/枚举/const 整型。新增 `SyntaxGapsE2E.ArrayDimensionsAcceptConstExpressions`、`TypeIdArrayDimensionsAcceptConstExpressions`；全量 **1577/1577** 通过（2 个既有 `GTEST_SKIP`）。VLA 仍是 Non-goal。
 
-#### SG-13 位域宽度不能解析 enum/const 标识符 `[gap][P2]`
+#### SG-13 位域宽度不能解析 enum/const 标识符 `[fixed][P2]`
 
 ```c
 enum { N = 2 };
@@ -828,6 +829,7 @@ struct U { int32 c : 1 + 1; };          // 通过：字面量表达式路径存�
 - 规范：`bit-field-decl = type identifier ':' const-expr ';'`。
 - 目标：复用 sema 的常量求值器，或先把 enum/const 值注册进解析期常量表；不能用“只支持数字”替代 const-expr。
 - 关联：AGG-06、PAR-10、TYP-25。
+- **已修复（2026-10-27）**：`evalIntConstExpr()` 增加标识符回调，enum 值在解析时登记进常量表，`parseBitFieldWidth()` 使用同一查找；`int32 a : WBits`、`: VBits`、`: 1 + 1` 均通过。新增 `SyntaxGapsE2E.BitFieldWidthsAcceptEnumAndConst`；全量 **1577/1577** 通过。
 
 #### SG-14 `static_cast` / `reinterpret_cast` 目标类型仍不走完整 type-id `[fixed][P1]`
 
@@ -976,8 +978,8 @@ template<typename T> T V<T>::f() { return this->x; }  // 解析失败
 
 ### 25.5 建议顺序与验收
 
-1. **P1 规范收口**：SG-12 数组常量维度 → SG-14（与 SG-04 同轮）显式转换完整 type-id；并入 §24.6 后顺序为 **SG-01 → SG-02 → SG-12 → SG-04/SG-14 → SG-03**。
-2. **P2 声明符/常量贯通**：SG-16 括号/多函数声明符 → SG-17 函数类型形参 → SG-13 位域 enum/const → SG-15 静态数据类外定义。
+1. **P1 规范收口（已完成）**：SG-12 数组常量维度、SG-14 显式转换完整 type-id 均已修复；§24.6 剩余 P1 为 SG-01 → SG-02 → SG-04 → SG-03。
+2. **P2 声明符/常量贯通**：SG-16 括号/多函数声明符 → SG-17 函数类型形参 → SG-15 静态数据类外定义（SG-13 位域 enum/const 已修复）。
 3. **P2 C 兼容可选**：SG-18 字面量子集 → SG-19 asm clobber/命名操作数。
 4. **先裁决再实现**：SG-20 模块扩展、SG-21 控制流扩展、SG-22 struct/class 成员扩展、SG-23 模板类成员。
 5. **边界单列**：SG-B07 ~ SG-B09 不混入 parser 修复；其中 SG-B09 优先确认是否影响现有示例/全局常量路径。

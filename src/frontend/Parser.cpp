@@ -114,9 +114,13 @@ std::string stripStringQuotes(const std::string& s, bool multiline) {
 }
 
 // Evaluate an integer constant expression used for enumerator values and
-// similar compile-time integers. Supports literals, unary +/-/~ and the usual
-// binary operators (TYP-25). Returns false for non-constant expressions.
-bool evalIntConstExpr(const ExprAST* expr, long long& out) {
+// similar compile-time integers. Supports literals, unary +/-/~, the usual
+// binary operators (TYP-25), and named constants supplied by the parser
+// (enum values / const integer variables). Returns false otherwise.
+using IntConstLookup = std::function<bool(const std::string&, long long&)>;
+
+bool evalIntConstExpr(const ExprAST* expr, long long& out,
+                      const IntConstLookup& lookup = {}) {
     if (!expr) return false;
     if (auto* n = dynamic_cast<const NumberExprAST*>(expr)) {
         out = n->value;
@@ -126,9 +130,12 @@ bool evalIntConstExpr(const ExprAST* expr, long long& out) {
         out = static_cast<unsigned char>(c->value);
         return true;
     }
+    if (auto* v = dynamic_cast<const VariableExprAST*>(expr)) {
+        return lookup && lookup(v->name, out);
+    }
     if (auto* u = dynamic_cast<const UnaryExprAST*>(expr)) {
         long long v = 0;
-        if (!evalIntConstExpr(u->operand.get(), v)) return false;
+        if (!evalIntConstExpr(u->operand.get(), v, lookup)) return false;
         switch (u->op) {
             case UnaryOp::Plus:   out = v;  return true;
             case UnaryOp::Minus:  out = -v; return true;
@@ -138,8 +145,8 @@ bool evalIntConstExpr(const ExprAST* expr, long long& out) {
     }
     if (auto* b = dynamic_cast<const BinaryExprAST*>(expr)) {
         long long l = 0, r = 0;
-        if (!evalIntConstExpr(b->left.get(), l) ||
-            !evalIntConstExpr(b->right.get(), r)) {
+        if (!evalIntConstExpr(b->left.get(), l, lookup) ||
+            !evalIntConstExpr(b->right.get(), r, lookup)) {
             return false;
         }
         switch (b->op) {
@@ -157,6 +164,29 @@ bool evalIntConstExpr(const ExprAST* expr, long long& out) {
         }
     }
     return false;
+}
+
+bool isIntegerScalarType(const Type* type) {
+    if (!type) return false;
+    switch (type->kind) {
+        case TypeKind::Char:
+        case TypeKind::Bool:
+        case TypeKind::Int8:
+        case TypeKind::Int16:
+        case TypeKind::Int32:
+        case TypeKind::Int64:
+        case TypeKind::Int128:
+        case TypeKind::UInt8:
+        case TypeKind::UInt16:
+        case TypeKind::UInt32:
+        case TypeKind::UInt64:
+        case TypeKind::UInt128:
+        case TypeKind::ISize:
+        case TypeKind::USize:
+            return true;
+        default:
+            return false;
+    }
 }
 
 } // namespace
@@ -1385,6 +1415,7 @@ std::unique_ptr<CompoundStmtAST> Parser::parseCompoundStmt() {
     }
 
     TypeContext::instance().pushLocalTypedefScope();
+    m_constScopes.emplace_back();
     std::vector<std::unique_ptr<StmtAST>> stmts{};
     while(!eof() && peek()->type != TokenType::TOKEN_RBRACE) {
         auto stmt = parseStmt();
@@ -1395,6 +1426,7 @@ std::unique_ptr<CompoundStmtAST> Parser::parseCompoundStmt() {
         stmts.push_back(std::move(stmt));
     }
     expect(TokenType::TOKEN_RBRACE, "expected '}' to end compound statement");
+    m_constScopes.pop_back();
     TypeContext::instance().popLocalTypedefScope();
 
     return std::make_unique<CompoundStmtAST>(std::move(stmts));
@@ -2736,13 +2768,13 @@ Type* Parser::parseTypeId() {
         std::vector<int> dims;
         while (check(TokenType::TOKEN_LBRACKET)) {
             advance(); // '['
-            auto numTok = match(TokenType::TOKEN_NUMBER);
-            if (!numTok) {
-                errorUnexpected("array size must be an integer literal");
+            int size = 0;
+            bool hasSize = false;
+            if (!parseArrayDimension(size, hasSize)) return nullptr;
+            if (!hasSize) {
+                errorUnexpected("array size must be an integer constant");
                 return nullptr;
             }
-            int size = static_cast<int>(
-                static_cast<long long>(std::get<unsigned __int128>(numTok->value)));
             if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after array size"))
                 return nullptr;
             dims.push_back(size);
@@ -3839,17 +3871,10 @@ std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string
             advance();
             int size = 0;
             bool hasNumber = false;
-            if (!check(TokenType::TOKEN_NUMBER) && !check(TokenType::TOKEN_RBRACKET)) {
-                // VLA is a deliberate non-feature: runtime-length allocation
-                // is unbounded stack growth (safety), and dynamic lengths
-                // belong to Slice. C23 made VLAs optional.
-                errorUnexpected("variable-length arrays are not supported: array size must be an integer literal");
-                return nullptr;
-            }
-            if (auto numTok = match(TokenType::TOKEN_NUMBER)) {
-                size = static_cast<int>(static_cast<long long>(std::get<unsigned __int128>(numTok->value)));
-                hasNumber = true;
-            }
+            // VLA is a deliberate non-feature: runtime-length allocation is
+            // unbounded stack growth. Only compile-time integer constants
+            // (literals, enum constants, const/constexpr integers) are valid.
+            if (!parseArrayDimension(size, hasNumber)) return nullptr;
             if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after array size")) {
                 return nullptr;
             }
@@ -3887,6 +3912,19 @@ std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string
         init = parseExpr(2);
     }
 
+    // Remember const/constexpr integer initializers so later array dimensions
+    // and bit-field widths can use them as compile-time constants. Evaluate
+    // before moving `init` into the declaration node.
+    if ((isConstexpr || type->isConst) && isIntegerScalarType(type) && init) {
+        long long value = 0;
+        auto lookup = [this](const std::string& n, long long& out) {
+            return lookupConstValue(n, out);
+        };
+        if (evalIntConstExpr(init.get(), value, lookup)) {
+            registerConstValue(name, value);
+        }
+    }
+
     auto decl = std::make_unique<VarDeclAST>(name, type, std::move(init), isConstexpr);
     // Snapshot source-order completeness. isComplete is only filled by sema;
     // a later definition must not validate an earlier by-value use.
@@ -3908,6 +3946,7 @@ std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string
             decl->typeIncompleteAtParse = !static_cast<UnionType*>(vt)->parsedDefinition &&
                                           static_cast<UnionType*>(vt)->name.rfind("__anon_", 0) != 0;
     }
+
     return decl;
 }
 
@@ -3954,16 +3993,9 @@ std::unique_ptr<ParamDeclAST> Parser::parseParamDecl() {
                 advance();
                 int dimSize = 0;
                 bool hasNumber = false;
-                if (!check(TokenType::TOKEN_NUMBER) && !check(TokenType::TOKEN_RBRACKET)) {
-                    // Same deliberate non-feature as declarations: a runtime
-                    // parameter size is documentation we cannot check.
-                    errorUnexpected("variable-length arrays are not supported: array size must be an integer literal");
-                    return nullptr;
-                }
-                if (auto numTok = match(TokenType::TOKEN_NUMBER)) {
-                    dimSize = static_cast<int>(static_cast<long long>(std::get<unsigned __int128>(numTok->value)));
-                    hasNumber = true;
-                }
+                // Same deliberate non-feature as declarations: a runtime
+                // parameter size is documentation we cannot check.
+                if (!parseArrayDimension(dimSize, hasNumber)) return nullptr;
                 if (!expect(TokenType::TOKEN_RBRACKET, "expected ']' after array parameter size")) {
                     return nullptr;
                 }
@@ -5123,15 +5155,13 @@ Type* Parser::parseMemberArraySuffix(Type* base, bool* outFlexibleArray) {
         int size = 1;
         bool hasNumber = false;
         std::string sizeParam;
-        if (check(TokenType::TOKEN_NUMBER)) {
-            auto numTok = advance();
-            size = static_cast<int>(static_cast<long long>(std::get<unsigned __int128>(numTok->value)));
-            hasNumber = true;
-        } else if (!m_templateScopes.empty() && check(TokenType::TOKEN_IDENTIFIER) &&
-                   m_templateScopes.back().valueParams.count(peek()->lexeme)) {
+        if (!m_templateScopes.empty() && check(TokenType::TOKEN_IDENTIFIER) &&
+            m_templateScopes.back().valueParams.count(peek()->lexeme)) {
             sizeParam = advance()->lexeme;
             size = 0;
             hasNumber = true;
+        } else {
+            if (!parseArrayDimension(size, hasNumber)) return nullptr;
         }
         expect(TokenType::TOKEN_RBRACKET, "expected ']' after array size");
         dims.push_back(size);
@@ -5159,6 +5189,59 @@ Type* Parser::parseMemberArraySuffix(Type* base, bool* outFlexibleArray) {
     return result;
 }
 
+bool Parser::lookupConstValue(const std::string& name, long long& value) const {
+    auto lookup = [&](const std::string& key) -> bool {
+        for (auto it = m_constScopes.rbegin(); it != m_constScopes.rend(); ++it) {
+            auto found = it->find(key);
+            if (found != it->end()) {
+                value = found->second;
+                return true;
+            }
+        }
+        return false;
+    };
+
+    if (lookup(name)) return true;
+    // Enum constants may be written qualified as `E::A`.
+    auto pos = name.rfind("::");
+    if (pos != std::string::npos && pos + 2 < name.size()) {
+        return lookup(name.substr(pos + 2));
+    }
+    return false;
+}
+
+void Parser::registerConstValue(const std::string& name, long long value) {
+    if (m_constScopes.empty()) m_constScopes.emplace_back();
+    m_constScopes.back()[name] = value;
+}
+
+bool Parser::parseArrayDimension(int& size, bool& hasSize) {
+    if (check(TokenType::TOKEN_RBRACKET)) {
+        size = 0;
+        hasSize = false;
+        return true;
+    }
+
+    auto expr = parseExpr(2);
+    if (!expr) return false;
+
+    long long value = 0;
+    auto lookup = [this](const std::string& name, long long& out) {
+        return lookupConstValue(name, out);
+    };
+    if (!evalIntConstExpr(expr.get(), value, lookup)) {
+        errorUnexpected("variable-length arrays are not supported: array size must be a compile-time constant");
+        return false;
+    }
+    if (value < 0 || value > INT32_MAX) {
+        error("array size out of range", *peek());
+        return false;
+    }
+    size = static_cast<int>(value);
+    hasSize = true;
+    return true;
+}
+
 // P1-07 / PAR-10: parse + constant-evaluate a bit-field width. The caller has
 // already consumed the ':'. The width must be a compile-time integer constant
 // (evalIntConstExpr), matching how enum values are folded in parseEnumDecl.
@@ -5166,7 +5249,10 @@ bool Parser::parseBitFieldWidth(int& width) {
     auto e = parseExpr(2);
     if (!e) return false;
     long long w = 0;
-    if (!evalIntConstExpr(e.get(), w)) {
+    auto lookup = [this](const std::string& name, long long& out) {
+        return lookupConstValue(name, out);
+    };
+    if (!evalIntConstExpr(e.get(), w, lookup)) {
         error("bit-field width must be a constant expression", *peek());
         return false;
     }
@@ -5407,16 +5493,25 @@ std::unique_ptr<EnumDeclAST> Parser::parseEnumDecl() {
         std::string valueName = advance()->lexeme;
 
         int val = currentVal;
+        bool constantValue = true;
         if (check(TokenType::TOKEN_ASSIGN)) {
             advance();
             auto expr = parseExpr(2); // ',' separates enumerators
             long long evaluated = 0;
-            if (evalIntConstExpr(expr.get(), evaluated)) {
+            auto lookup = [this](const std::string& name, long long& out) {
+                return lookupConstValue(name, out);
+            };
+            if (evalIntConstExpr(expr.get(), evaluated, lookup)) {
                 val = static_cast<int>(evaluated);
+            } else {
+                // Leave the diagnostic to sema; don't publish a bogus value to
+                // later array/bit-field constant evaluation.
+                constantValue = false;
             }
         }
 
         values.push_back({valueName, val});
+        if (constantValue) registerConstValue(valueName, val);
         currentVal = val + 1;
 
         if (!check(TokenType::TOKEN_COMMA)) break;

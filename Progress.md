@@ -1000,3 +1000,10 @@
 - 修复 §25 **SG-14**：`static_cast` / `reinterpret_cast` 的类型分支从 `parseType()` 改为 `parseTypeId()`，现在支持抽象函数指针 `Ret(*)(...)` 与指向数组的指针 `T(*)[N]`。
 - 新增 `CastOperatorsE2E.StaticCastToFunctionPointerTypeId`、`CastOperatorsE2E.ReinterpretCastToPointerToArrayTypeId`；先 RED（解析失败）后 GREEN。
 - 全量 `ctest --test-dir build -j8` **1574/1574** 通过（2 个既有 `GTEST_SKIP`）。
+
+## 2026-10-27 — SG-12/SG-13 数组常量维度与位域常量
+
+- 修复 §25 **SG-12**：新增解析期常量表（enum 常量、`const`/`constexpr` 整型变量）与 `parseArrayDimension()`；变量、聚合成员、数组形参、`type-id` 的 `[const-expr]` 现在接受字面量表达式/枚举/const 整型。VLA 仍是 Non-goal。
+- 修复 §25 **SG-13**：`evalIntConstExpr()` 增加标识符查找回调，枚举值解析时登记，`parseBitFieldWidth()` 复用同一查找；`int32 a : EnumN`、`: ConstN`、`: 1 + 1` 均通过。
+- 新增 `SyntaxGapsE2E.ArrayDimensionsAcceptConstExpressions`、`TypeIdArrayDimensionsAcceptConstExpressions`、`BitFieldWidthsAcceptEnumAndConst`；先 RED（三例均失败）后 GREEN。
+- 全量 `ctest --test-dir build -j8` **1577/1577** 通过（2 个既有 `GTEST_SKIP`）；两个示例仍输出 `ALL FEATURES OK` / `FULL FEATURE OK`。

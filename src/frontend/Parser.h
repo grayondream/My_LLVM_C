@@ -3,6 +3,7 @@
 #include <vector>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 #include <unordered_set>
 #include "frontend/Token.h"
 #include "ast/Decl.h"
@@ -10,7 +11,9 @@
 
 class Parser{
 public:
-    Parser(const std::vector<Token>& tokens) : m_tokens(std::move(tokens)) {}
+    Parser(const std::vector<Token>& tokens) : m_tokens(std::move(tokens)) {
+        m_constScopes.emplace_back();
+    }
 
     std::unique_ptr<TranslationUnitAST> parse();
     const std::vector<Diagnostic>& getErrors() const;
@@ -90,6 +93,17 @@ private:
     // Turn `T name` into `T name[N]` when an array suffix follows a member
     // declarator (used for struct/class/union members).
     Type* parseMemberArraySuffix(Type* base, bool* outFlexibleArray = nullptr);
+
+    // Parse one bracketed array dimension as a compile-time integer constant.
+    // `hasSize=false` means the brackets were empty (only valid for the first
+    // dimension / flexible array member). The caller still consumes `]`.
+    bool parseArrayDimension(int& size, bool& hasSize);
+
+    // Parse-time constant values for enum constants and const/constexpr
+    // integer variables, used by array dimensions and bit-field widths.
+    bool lookupConstValue(const std::string& name, long long& value) const;
+    void registerConstValue(const std::string& name, long long value);
+    std::vector<std::unordered_map<std::string, long long>> m_constScopes;
 
     // P1-07 / PAR-10: parse a bit-field width after the caller consumed ':':
     //   width = parseExpr(2); evalIntConstExpr must succeed (constant expr).

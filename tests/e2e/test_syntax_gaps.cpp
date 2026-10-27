@@ -226,3 +226,57 @@ TEST_F(SyntaxGapsE2E, MultiDeclaratorComplexSuccessors) {
         }
     )", "syntax_multi_complex.c"), 0);
 }
+
+TEST_F(SyntaxGapsE2E, ArrayDimensionsAcceptConstExpressions) {
+    EXPECT_EQ(runSyntaxSource(R"(
+        enum { NArr = 3 };
+        const int32 MArr = 2;
+        struct SArrayDim { int32 a[1 + 1]; int32 b[NArr]; int32 c[MArr]; };
+        int32 gArrayDim[1 + 1];
+        int32 firstArrayDim(int32 a[1 + 1]) { return a[0]; }
+        int32 main() {
+            const int32 LArr = 4;
+            int32 a[1 + 1];
+            int32 b[NArr];
+            int32 c[MArr];
+            int32 d[LArr];
+            int32 x[2] = {7, 8};
+            struct SArrayDim s;
+            if (sizeof(gArrayDim) != 8) return 1;
+            if (sizeof(a) != 8) return 2;
+            if (sizeof(b) != 12) return 3;
+            if (sizeof(c) != 8) return 4;
+            if (sizeof(d) != 16) return 5;
+            if (sizeof(s.a) != 8 || sizeof(s.b) != 12 || sizeof(s.c) != 8) return 6;
+            if (firstArrayDim(x) != 7) return 7;
+            return 0;
+        }
+    )", "syntax_array_const_dim.c"), 0);
+}
+
+TEST_F(SyntaxGapsE2E, TypeIdArrayDimensionsAcceptConstExpressions) {
+    EXPECT_EQ(runSyntaxSource(R"(
+        enum { KArr = 2 };
+        using AArray = int32[1 + 1];
+        int32 main() {
+            if (sizeof(AArray) != 8) return 1;
+            if (sizeof(int32[1 + 1]) != 8) return 2;
+            if (sizeof(int32[KArr]) != 8) return 3;
+            return 0;
+        }
+    )", "syntax_typeid_array_const_dim.c"), 0);
+}
+
+TEST_F(SyntaxGapsE2E, BitFieldWidthsAcceptEnumAndConst) {
+    EXPECT_EQ(runSyntaxSource(R"(
+        enum { WBits = 2 };
+        const int32 VBits = 3;
+        struct SBits { int32 a : WBits; int32 b : VBits; int32 c : 1 + 1; };
+        int32 main() {
+            struct SBits s;
+            s.a = 1; s.b = 2; s.c = 1;
+            if (s.a != 1 || s.b != 2 || s.c != 1) return 1;
+            return 0;
+        }
+    )", "syntax_bitfield_const_width.c"), 0);
+}
