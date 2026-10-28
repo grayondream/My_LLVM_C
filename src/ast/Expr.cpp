@@ -881,7 +881,8 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
         std::vector<llvm::Value*> callArgs;
         llvm::Value* obj = calleeExpr->codegen(ctx);
         if (!obj) return nullptr;
-        callArgs.push_back(emitRValue(ctx, *calleeExpr, obj));
+        if (!memberOperator) obj = emitRValue(ctx, *calleeExpr, obj);
+        callArgs.push_back(obj);
         for (auto& arg : args) {
             llvm::Value* v = arg->codegen(ctx);
             if (!v) return nullptr;
@@ -2082,7 +2083,7 @@ llvm::Value* ArrayAccessExprAST::codegen(CodegenContext& ctx) {
         llvm::Value* obj = array->codegen(ctx);
         llvm::Value* idx = index->codegen(ctx);
         if (!obj || !idx) return nullptr;
-        obj = emitRValue(ctx, *array, obj);
+        if (!memberOperator) obj = emitRValue(ctx, *array, obj);
         idx = emitRValue(ctx, *index, idx);
         return ctx.getBuilder().CreateCall(calleeFn, {obj, idx}, "idxcalltmp");
     }

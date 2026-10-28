@@ -1058,3 +1058,10 @@
 - 新增 `SyntaxGapsE2E.LeadingDotFloatAndLongLongSuffix`，先 RED 后 GREEN。
 - 仍挂账：字符/字符串前缀、raw delimiter、十六进制浮点。
 - 全量 `ctest --test-dir build -j8` **1585/1585** 通过（2 个既有 `GTEST_SKIP`）。
+
+## 2026-10-28 — SG-B08 成员运算符调用绑定
+
+- sema 的 `operator[]` / `operator()` 解析在自由函数之后增加类方法表查找；命中成员运算符时以对象地址作为隐式 `this`，codegen 相应传地址。
+- 新增 `SyntaxGapsE2E.MemberSubscriptOperatorRead`、`SyntaxGapsE2E.MemberCallOperator`，先 RED（no matching operator）后 GREEN。
+- 全量 `ctest --test-dir build -j8` **1587/1587** 通过（2 个既有 `GTEST_SKIP`）；两个示例输出 `ALL FEATURES OK` / `FULL FEATURE OK`。
+- 写穿仍受无引用返回类型限制（SG-B02），不属于调用绑定缺口。

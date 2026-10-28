@@ -239,6 +239,9 @@ public:
     std::vector<DefaultArgValue> defaultArgValues;
     // Set by semantic analysis for calls through a function-pointer variable.
     bool isIndirect = false;
+    // SEM-17: member `operator()` resolved via a class method; codegen passes
+    // the object address as the implicit `this` argument.
+    bool memberOperator = false;
     // SEM-17: `(expr)(args)` where `expr` yields a function pointer — the
     // callee is an arbitrary expression (`arr[0](1)`, `get()(1)`).
     bool isExprCallee = false;
@@ -374,6 +377,8 @@ public:
     // SEM-17: `v[i]` on an aggregate object resolves to `operator[]`; sema
     // sets the mangled callee and codegen emits a call instead of a GEP.
     std::string mangledCallee;
+    // Member operator[] needs the object address as the implicit `this`.
+    bool memberOperator = false;
 
     ArrayAccessExprAST(std::unique_ptr<ExprAST> arr, std::unique_ptr<ExprAST> idx)
         : array(std::move(arr)), index(std::move(idx)) {}

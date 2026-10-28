@@ -267,6 +267,34 @@ TEST_F(SyntaxGapsE2E, TypeIdArrayDimensionsAcceptConstExpressions) {
     )", "syntax_typeid_array_const_dim.c"), 0);
 }
 
+TEST_F(SyntaxGapsE2E, MemberCallOperator) {
+    EXPECT_EQ(runSyntaxSource(R"(
+        class CMemberCall {
+        public:
+            int32 operator()(int32 x) { return x + 1; }
+        };
+        int32 main() {
+            CMemberCall c;
+            return c(1) - 2;
+        }
+    )", "syntax_member_operator_call.c"), 0);
+}
+
+TEST_F(SyntaxGapsE2E, MemberSubscriptOperatorRead) {
+    EXPECT_EQ(runSyntaxSource(R"(
+        class CMemberIndex {
+        public:
+            int32 data[3];
+            int32 operator[](int32 i) { return this->data[i]; }
+        };
+        int32 main() {
+            CMemberIndex c;
+            c.data[0] = 5;
+            return c[0] - 5;
+        }
+    )", "syntax_member_operator_index.c"), 0);
+}
+
 TEST_F(SyntaxGapsE2E, LeadingDotFloatAndLongLongSuffix) {
     EXPECT_EQ(runSyntaxSource(R"(
         float64 a = .5;

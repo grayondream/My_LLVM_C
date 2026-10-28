@@ -2762,6 +2762,38 @@ void SemanticAnalyzer::visit(CallExprAST& node) {
                     return;
                 }
             }
+
+            // Member `operator()` — resolve against the class method table.
+            if (st && st->kind == TypeKind::Class) {
+                auto* classType = static_cast<ClassType*>(st);
+                ClassType* definingClass = nullptr;
+                std::vector<Type*> methodArgs(params.begin() + 1, params.end());
+                Symbol* method = resolveMethod(classType, "operator()",
+                                               methodArgs, &definingClass);
+                if (method && method->type &&
+                    method->type->kind == TypeKind::Function) {
+                    AccessLevel level = definingClass->memberAccessLevel("operator()");
+                    if (!canAccessMember(definingClass, level)) {
+                        emitError(DiagnosticCode::SemPrivateMemberAccess,
+                                  "cannot call operator() of class '" +
+                                      definingClass->name + "' outside the class",
+                                  node);
+                        node.type = nullptr;
+                        node.isLValue = false;
+                        delete method;
+                        return;
+                    }
+                    auto* ft = static_cast<FunctionType*>(method->type);
+                    node.mangledCallee = mangleFunction("operator()", ft->paramTypes);
+                    node.memberOperator = true;
+                    node.type = ft->returnType;
+                    node.isLValue = false;
+                    delete method;
+                    return;
+                }
+                delete method;
+            }
+
             emitError("no matching operator() for type '" + typeToString(st) + "'", node);
             node.type = nullptr;
             node.isLValue = false;
@@ -3176,6 +3208,37 @@ void SemanticAnalyzer::visit(ArrayAccessExprAST& node) {
                 return;
             }
         }
+
+        // Member `operator[]` — resolve against the class's method table.
+        Type* operand = stripTypedef(arrayType);
+        if (operand && operand->kind == TypeKind::Class) {
+            auto* classType = static_cast<ClassType*>(operand);
+            ClassType* definingClass = nullptr;
+            Symbol* method = resolveMethod(classType, "operator[]",
+                                           {indexType}, &definingClass);
+            if (method && method->type && method->type->kind == TypeKind::Function) {
+                AccessLevel level = definingClass->memberAccessLevel("operator[]");
+                if (!canAccessMember(definingClass, level)) {
+                    emitError(DiagnosticCode::SemPrivateMemberAccess,
+                              "cannot call operator[] of class '" +
+                                  definingClass->name + "' outside the class",
+                              node);
+                    node.type = nullptr;
+                    node.isLValue = false;
+                    delete method;
+                    return;
+                }
+                auto* ft = static_cast<FunctionType*>(method->type);
+                node.mangledCallee = mangleFunction("operator[]", ft->paramTypes);
+                node.memberOperator = true;
+                node.type = ft->returnType;
+                node.isLValue = false;
+                delete method;
+                return;
+            }
+            delete method;
+        }
+
         emitError("no matching operator[] for types '" + typeToString(arrayType) +
                       "' and '" + typeToString(indexType) + "'", node);
         node.type = nullptr;
