@@ -45,7 +45,7 @@
 > **进度快照（2026-10-26，语法缺口 1–6 收口）**：先修 CG-05（rvalue 聚合成员按值读取，`make().x` 不再产生非法 GEP）与 MOD-03（前向类型按值使用报 incomplete；指针仍允许）。随后：①模块导入改为 parse 前预载，`export struct/class/using/template` 可用；②强制 `module` 首部/唯一/文件名匹配；③函数内 `static`/`thread_local` 静态变量与局部 `struct/union/enum` 定义；④通用括号声明符（函数返回函数指针、函数类型别名、指向数组的指针、函数指针数组）+ 表达式 callee 间接调用；⑤自引用类指针字段爆栈修复、类内/类外成员运算符重载调用；⑥函数体 `compile_time.if` 与嵌套 `offsetof(T, a.b)`/`offsetof(T, arr[i])`。全量 **1559/1559**；两个示例仍输出 `ALL FEATURES OK` / `FULL FEATURE OK`。提交线：a805740、53768f1、3d88e2b、c2d509b、4d77701、8dd88ca、2597f62。
 > **进度快照（2026-10-26，基础 C 声明/语句收口）**：补齐 9 项基础语法：空语句 `;`；聚合成员多声明符 `struct S { int32 a, b; }`；聚合成员直接函数指针字段与指向数组的指针字段；`sizeof`/`alignof` 的完整 type-id（数组/抽象函数指针）；后置限定符 `int32 const`；块内 `extern`；record 定义后的 attached 指针/函数声明符；多声明符中的复杂后继（`int32 (*f)(int), (*g)(int);`）。顺带把带方法的 `struct` 正确路由为 class 类型，并修复布局注解对 `ClassType` 的 UB 强转。全量 **1572/1572**；两个示例仍输出 OK。提交线：0bc3be2、88fca71、b07dc1f、42d3ed1、dfcb9cc、607ff32、dad042d、31a68fb、27a1242。
 > **进度快照（2026-10-27，语法缺口审计）**：对第三轮收口后的剩余语法缺口做规范+CLI 复核，按“规范已承诺 / C 兼容性 / 规范未覆盖扩展 / 非语法边界 / Non-goals”分类，详细清单见 **§24**（SG-01 ~ SG-11、SG-B01 ~ SG-B06）。本轮不改代码。
-> **进度快照（2026-10-27，语法缺口补充审计）**：在 §24 基础上继续补漏，新增 **§25**（SG-12 ~ SG-23、SG-B07 ~ SG-B09），覆盖数组/位域常量表达式、声明符递归与函数类型形参、静态成员类外定义、C 字面量、asm、模块/控制流/类模板扩展。新补项中 P1 为 SG-12、SG-14；SG-12、SG-13、SG-14、SG-16、SG-17 与 SG-B07、SG-B09 已于 2026-10-27 修复；SG-15、SG-18 ~ SG-23 与 SG-B08 仍挂账。
+> **进度快照（2026-10-27，语法缺口补充审计）**：在 §24 基础上继续补漏，新增 **§25**（SG-12 ~ SG-23、SG-B07 ~ SG-B09），覆盖数组/位域常量表达式、声明符递归与函数类型形参、静态成员类外定义、C 字面量、asm、模块/控制流/类模板扩展。新补项中 P1 为 SG-12、SG-14；SG-12、SG-13、SG-14、SG-15、SG-16、SG-17 与 SG-B07、SG-B09 已修复（SG-15 于 2026-10-28）；SG-18 ~ SG-23 与 SG-B08 仍挂账。
 
 
 > **进度快照（2026-10-19，语法遗漏收口完成）**：**语法层面审计 + 11 项特性/缺陷收口**（spec/plan `docs/superpowers/specs|plans/2026-10-18-syntax-gaps*`）。多行字符串 `"""..."""` 与 Unicode 标识符（LEX-16/18）；`char8/16/32` 类型（uint 别名）与 `thread_local`（TYP-05/CON-04）；`atomic` 限定符（整型标量，原子 load/store + atomicrmw 子集，CON-01）；默认参数（区间重载 + 少默认优先，FUN-09）；**未知类型名声明静默丢弃修复**（E2031，此前 `f16 x;` 零诊断消失）；compile_time 反射 `name_of/fields_of/attributes_of`（ReflectionRegistry 交接，CT-07/13）；protected 派生访问放宽（INH-06）；`alignof/offsetof` 独立关键字与 `nullptr`（PAR-14/TYP-24）。当前全量 **1418** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。P1-09 剩余：仅 std.collections（STD-06~08，阻塞于「模块导出类型」语言缺口）。
@@ -846,7 +846,7 @@ reinterpret_cast<int32 (*)[2]>(p);      // 解析失败
 
 ### 25.2 C 兼容性 / 声明符与字面量
 
-#### SG-15 静态数据成员的类外定义 `[gap][P2]`
+#### SG-15 静态数据成员的类外定义 `[fixed][P2]`
 
 ```c
 struct S { static int32 x; };
@@ -857,6 +857,7 @@ int32 S::x = 1;                         // 失败：unknown type 'x'
 - 当前：类外定义把 `S::x` 当成未知类型/变量；解析器只对 `Class::method(` 做了 out-of-class 方法分支，没有 `Class::data` 分支。
 - 目标：接受 `type Class::name [= init];`，按静态数据成员绑定；与 AGG-10、MOD-08 一起确认符号/链接语义。
 - 关联：AGG-10、MOD-08、SG-B07。
+- **已修复（2026-10-28）**：parser 增加 `Class::name` 数据定义分支；sema 用 `staticDataDecls` 把类外初始化器挂到类内静态成员，避免重复全局。新增 `SyntaxGapsE2E.OutOfClassStaticDataDefinition`；全量 **1583/1583** 通过（2 个既有 `GTEST_SKIP`）。
 
 #### SG-16 括号声明符与多函数声明符 `[fixed][P2]`
 
@@ -981,7 +982,7 @@ template<typename T> T V<T>::f() { return this->x; }  // 解析失败
 ### 25.5 建议顺序与验收
 
 1. **P1 规范收口（已完成）**：SG-12 数组常量维度、SG-14 显式转换完整 type-id 均已修复；§24.6 剩余 P1 为 SG-01 → SG-02 → SG-04 → SG-03。
-2. **P2 声明符/常量贯通**：SG-15 静态数据类外定义（SG-16 括号/多函数声明符、SG-17 函数类型形参、SG-13 位域 enum/const 已修复）。
+2. **P2 声明符/常量贯通（已完成）**：SG-15 静态数据类外定义、SG-16 括号/多函数声明符、SG-17 函数类型形参、SG-13 位域 enum/const 均已修复。
 3. **P2 C 兼容可选**：SG-18 字面量子集 → SG-19 asm clobber/命名操作数。
 4. **先裁决再实现**：SG-20 模块扩展、SG-21 控制流扩展、SG-22 struct/class 成员扩展、SG-23 模板类成员。
 5. **边界单列**：SG-B07 ~ SG-B09 不混入 parser 修复；SG-B07 类外静态方法、SG-B09 全局 `string_view` 字面量崩溃已修复，SG-B08 仍挂账。

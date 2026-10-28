@@ -307,6 +307,10 @@ private:
     // name}. Key is mangleNamespaceName of the fully qualified spelling
     // (namespace prefix included), matching what access sites resolve.
     std::unordered_map<std::string, std::pair<ClassType*, std::string>> staticMemberIndex;
+    // AGG-10: desugared static-data symbol key -> in-class VarDeclAST, used by
+    // an out-of-class definition to attach its initializer without emitting a
+    // second global.
+    std::unordered_map<std::string, VarDeclAST*> staticDataDecls;
     void checkStaticMemberAccess(const std::string& originalName, ExprAST& node);
     // PAR-13: 指定初始化器设计符解析——把每个元素展开为显式语义目标链写入
     // InitializerListExprAST::resolvedTargets（codegen 直接消费）。aggType 为

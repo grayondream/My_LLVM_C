@@ -3476,6 +3476,22 @@ std::unique_ptr<DeclAST> Parser::parseDeclarationAsType() {
                     if (fn) fn->className = classTok->lexeme;
                     return fn;
                 }
+
+                // Out-of-class static data definition: `int32 S::x = 1;`.
+                // Keep the member name and class separately so sema can bind
+                // it to the in-class static member before codegen.
+                auto decl = parseVariableDecl(type, methodTok->lexeme, isConstexpr);
+                if (auto* vd = dynamic_cast<VarDeclAST*>(decl.get())) {
+                    vd->isOutOfClassStatic = true;
+                    vd->staticClass = classTok->lexeme;
+                    vd->staticMember = methodTok->lexeme;
+                    expect(TokenType::TOKEN_SEMICOLON,
+                           "expected ';' after static data definition");
+                } else if (decl) {
+                    error("out-of-class static data definition must be a scalar variable",
+                          *methodTok);
+                }
+                return decl;
             } else if (check(TokenType::TOKEN_OPERATOR)) {
                 advance(); // 'operator'
                 auto opTok = peek();

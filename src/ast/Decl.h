@@ -64,6 +64,12 @@ public:
     // C block-scope `extern`: refers to an existing/global symbol; no local
     // storage is allocated for it.
     bool isExternLocal = false;
+    // C++-style out-of-class static data definition:
+    // `int32 S::x = 1;` — sema binds it to the in-class static member so the
+    // definition does not emit a second global.
+    bool isOutOfClassStatic = false;
+    std::string staticClass;
+    std::string staticMember;
 
     VarDeclAST(const std::string& n, Type* t, std::unique_ptr<ExprAST> init = nullptr, bool constexpr_ = false)
         : name(n), type(t), initExpr(std::move(init)), isConstexpr(constexpr_) {}

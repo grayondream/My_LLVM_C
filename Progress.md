@@ -1038,3 +1038,9 @@
 - 补齐 `int32 f(), g();`：`parseFunctionDecl` 增加 `allowComma`，普通函数声明分支收集多个 `FunctionDeclAST` 并包成 `MultiVarDeclAST`；sema 的 `MultiVarDeclAST` 分派补 `FunctionDeclAST`。
 - 新增 `SyntaxGapsE2E.MultipleFunctionDeclarators`，先 RED（`expected '{' or ';'`）后 GREEN。
 - 全量 `ctest --test-dir build -j8` **1582/1582** 通过（2 个既有 `GTEST_SKIP`）。
+
+## 2026-10-28 — SG-15 静态数据成员类外定义
+
+- 修复 §25 **SG-15**：parser 识别 `type Class::name [= init];`；sema 用 `staticDataDecls` 把初始化器挂到类内 `staticMembers` 的 VarDeclAST 上，避免生成重复全局。
+- 新增 `SyntaxGapsE2E.OutOfClassStaticDataDefinition`，先 RED（unknown type 'x'）后 GREEN。
+- 全量 `ctest --test-dir build -j8` **1583/1583** 通过（2 个既有 `GTEST_SKIP`）。

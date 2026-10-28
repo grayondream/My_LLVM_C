@@ -4490,6 +4490,40 @@ void SemanticAnalyzer::visit(ContinueStmtAST& node) {}
 void SemanticAnalyzer::visit(NullStmtAST& node) {}
 
 void SemanticAnalyzer::visit(VarDeclAST& node) {
+    // AGG-10: out-of-class static data definition. Attach its initializer to
+    // the in-class static member and do not declare/emit a second global.
+    if (node.isOutOfClassStatic) {
+        std::string key = scopedName(mangleNamespaceName(
+            node.staticClass + "::" + node.staticMember));
+        auto it = staticDataDecls.find(key);
+        if (it == staticDataDecls.end()) {
+            emitError("static data member '" + node.staticClass + "::" +
+                          node.staticMember + "' is not declared in its class",
+                      node);
+            return;
+        }
+        VarDeclAST* target = it->second;
+        if (node.initExpr) {
+            if (target->initExpr) {
+                emitError(DiagnosticCode::SemRedefinition,
+                          "redefinition of static data member '" + node.staticClass +
+                              "::" + node.staticMember + "'",
+                          node);
+                return;
+            }
+            Type* initType = getExprType(*node.initExpr);
+            if (initType && !typesCompatible(target->type, initType)) {
+                emitError("type mismatch in initialization of '" + node.staticClass +
+                              "::" + node.staticMember + "': expected '" +
+                              typeToString(target->type) + "', got '" +
+                              typeToString(initType) + "'",
+                          node);
+                return;
+            }
+            target->initExpr = std::move(node.initExpr);
+        }
+        return;
+    }
     // CON-01: `atomic` is allowed only directly on an integer scalar type.
     // `atomic int32 x` is valid; `atomic int32* p` (atomic wrapped under a
     // pointer/array/slice) and `atomic float64 f` are rejected.
@@ -5176,6 +5210,7 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
                 (node.bareName.empty() ? node.name : node.bareName);
             vd->name = mangleNamespaceName(clsPath + "::" + origName);
             staticMemberIndex[scopedName(vd->name)] = {classType, origName};
+            staticDataDecls[scopedName(vd->name)] = vd.get();
             ClassType* savedClass = currentClass;
             currentClass = classType;
             visit(*vd);
@@ -5283,9 +5318,11 @@ void SemanticAnalyzer::visitStructDeclImpl(StructDeclAST& node) {
         // index (struct members are always public).
         for (auto& vd : node.staticMembers) {
             if (!vd) continue;
+            std::string origName = vd->name;
             std::string clsPath = classPathPrefix +
                 (node.bareName.empty() ? node.name : node.bareName);
-            vd->name = mangleNamespaceName(clsPath + "::" + vd->name);
+            vd->name = mangleNamespaceName(clsPath + "::" + origName);
+            staticDataDecls[scopedName(vd->name)] = vd.get();
             visit(*vd);
         }
     }
