@@ -1065,3 +1065,10 @@
 - 新增 `SyntaxGapsE2E.MemberSubscriptOperatorRead`、`SyntaxGapsE2E.MemberCallOperator`，先 RED（no matching operator）后 GREEN。
 - 全量 `ctest --test-dir build -j8` **1587/1587** 通过（2 个既有 `GTEST_SKIP`）；两个示例输出 `ALL FEATURES OK` / `FULL FEATURE OK`。
 - 写穿仍受无引用返回类型限制（SG-B02），不属于调用绑定缺口。
+
+## 2026-10-28 — SG-18 C 字面量兼容子集收口
+
+- lexer 新增：前导小数点 `.5`、`LL`/`ULL`、`L'a'`/`u'a'`/`U'a'`/`u8'a'` 字符前缀、`L"..."`/`u"..."`/`U"..."` 字符串前缀、`R"(...)"` / `R"delim(...)delim"` 原始字符串、十六进制浮点 `0x1p3` / `0x1.8p1` / `0x.8p1`。
+- `L` 字符串映射到 32 位 code unit；本语言无独立 `wchar_t`，已在 TODO 记录该兼容取舍。
+- 新增 `SyntaxGapsE2E.CCharLiteralPrefixes`、`CStringLiteralPrefixesAndRaw`、`HexFloatLiteral` 与既有 `LeadingDotFloatAndLongLongSuffix`，先 RED 后 GREEN。
+- `docs/spec/grammar.ebnf` 同步字面量产生式；全量 `ctest --test-dir build -j8` **1591/1591** 通过（2 个既有 `GTEST_SKIP`）。

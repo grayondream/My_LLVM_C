@@ -48,6 +48,7 @@ private:
     Token scanNumber();
     Token scanString();
     Token scanPrefixedString(StringLiteralPrefix prefix);
+    Token scanRawString();
     Token scanMultilineString();
     Token scanChar();
 

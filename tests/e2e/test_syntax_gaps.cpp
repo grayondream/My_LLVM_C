@@ -295,6 +295,39 @@ TEST_F(SyntaxGapsE2E, MemberSubscriptOperatorRead) {
     )", "syntax_member_operator_index.c"), 0);
 }
 
+TEST_F(SyntaxGapsE2E, CCharLiteralPrefixes) {
+    EXPECT_EQ(runSyntaxSource(R"(
+        int32 a = L'A';
+        int32 b = u'A';
+        int32 c = U'A';
+        int32 d = u8'A';
+        int32 main() { return (a == 'A' && b == 'A' && c == 'A' && d == 'A') ? 0 : 1; }
+    )", "syntax_c_char_prefix.c"), 0);
+}
+
+TEST_F(SyntaxGapsE2E, CStringLiteralPrefixesAndRaw) {
+    EXPECT_EQ(runSyntaxSource(R"SRC(
+        char16* a = u"hi";
+        char32* b = U"hi";
+        char32* c = L"hi";
+        string_view d = R"(raw)";
+        string_view e = R"tag(raw)tag";
+        int32 main() {
+            return (a[0] == 'h' && b[0] == 'h' && c[0] == 'h' &&
+                    d[0] == 'r' && e[0] == 'r') ? 0 : 1;
+        }
+    )SRC", "syntax_c_string_prefix.c"), 0);
+}
+
+TEST_F(SyntaxGapsE2E, HexFloatLiteral) {
+    EXPECT_EQ(runSyntaxSource(R"(
+        float64 a = 0x1p3;
+        float64 b = 0x1.8p1;
+        float64 c = 0x.8p1;
+        int32 main() { return (a == 8.0 && b == 3.0 && c == 1.0) ? 0 : 1; }
+    )", "syntax_c_hex_float.c"), 0);
+}
+
 TEST_F(SyntaxGapsE2E, LeadingDotFloatAndLongLongSuffix) {
     EXPECT_EQ(runSyntaxSource(R"(
         float64 a = .5;

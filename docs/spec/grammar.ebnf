@@ -50,13 +50,20 @@ binary-literal      = '0' , ( 'b' | 'B' ) , binary-digits ;
 binary-digits       = binary-digit , { [ '_' ] , binary-digit } ;
 octal-literal       = '0' , ( 'o' | 'O' ) , octal-digits ;
 octal-digits        = octal-digit , { [ '_' ] , octal-digit } ;
-integer-suffix      = [ 'u' | 'l' | 'ul' | 'lu' ] ;
-(* [impl] LEX-15 后缀 → 基础类型：无→int32；u→uint32；l→int64；ul/lu→uint64（大小写不敏感）*)
+integer-suffix      = [ 'u' | 'l' | 'll' | 'ul' | 'lu' | 'ull' | 'llu' ] ;
+(* [impl] LEX-15 后缀 → 基础类型：无→int32；u→uint32；l/ll→int64；ul/lu/ull/llu→uint64
+   （大小写不敏感；SG-18 起接受 C 的 LL/ULL 写法）*)
 
 (* --- 浮点字面量 LEX-05 / TYP-04 --- *)
 float-literal       = decimal-digits , '.' , [ decimal-digits ] , [ exponent ] , [ float-suffix ]
-                    | decimal-digits , exponent , [ float-suffix ] ;
+                    | decimal-digits , exponent , [ float-suffix ]
+                    | '.' , decimal-digits , [ exponent ] , [ float-suffix ]   (* [impl] SG-18 *)
+                    | hex-float-literal ;                                     (* [impl] SG-18 *)
 exponent            = ( 'e' | 'E' ) , [ '+' | '-' ] , decimal-digits ;
+hex-float-literal   = '0' , ( 'x' | 'X' ) , [ hex-digits ] , '.' , [ hex-digits ] ,
+                      ( 'p' | 'P' ) , [ '+' | '-' ] , decimal-digits , [ float-suffix ]
+                    | '0' , ( 'x' | 'X' ) , hex-digits ,
+                      ( 'p' | 'P' ) , [ '+' | '-' ] , decimal-digits , [ float-suffix ] ;
 float-suffix        = 'f' | 'f16' | 'f32' | 'f64' | 'f128' | 'l' ;
 (* [impl] LEX-15 后缀 → 基础类型：无→float64；f/f32→float32；f64→float64；f16/f128→对应类型；l 为 float64 旧写法 *)
 (* [impl] LEX-05 指数 e/E（可带 +/-，数字间允许 '_'）已实现；小数点后允许空尾数，
@@ -64,13 +71,20 @@ float-suffix        = 'f' | 'f16' | 'f32' | 'f64' | 'f128' | 'l' ;
    `1.foo` 词法化为 FLOAT(`1.f`) + IDENT(`oo`)，与 `1.5.foo` 的既有切分同类。 *)
 
 (* --- 字符/字符串字面量 LEX-06 / LEX-16 --- *)
-char-literal        = "'" , ( char-char | escape-sequence ) , "'" ;
+char-literal        = [ ( 'u8' | 'u' | 'U' | 'L' ) ] ,
+                      "'" , ( char-char | escape-sequence ) , "'" ;
+                    (* [impl] SG-18 字符前缀；u8/u/U/L 均按单字符接受 *)
 string-literal      = '"' , { string-char | escape-sequence } , '"'
                     | 'r"' , { any-char - '"' } , '"'               (* [impl] 原始字符串 *)
+                    | 'R"' , [ raw-delimiter ] , '(' , { any-char } , ')' ,
+                      [ raw-delimiter ] , '"'                        (* [impl] SG-18 *)
                     | '"""' , { any-char } , '"""'                  (* [impl] 多行字符串 LEX-16 *)
-                    | ( 'u8' | 'u16' | 'u32' ) , '"' , { string-char | escape-sequence } , '"'
-                                                                    (* [impl] TYP-05 前缀字面量 → char8/16/32[] *)
+                    | ( 'u8' | 'u' | 'u16' | 'u32' | 'U' | 'L' ) , '"' ,
+                      { string-char | escape-sequence } , '"'
+                                                                    (* [impl] TYP-05 / SG-18 前缀字面量 *)
                     | multiline-string ;
+raw-delimiter       = raw-delim-char , { raw-delim-char } ;         (* 最长 16 字符 *)
+raw-delim-char      = any-char - ( '(' | ')' | '\\' | '"' | whitespace ) ;
 escape-sequence     = '\' , ( "'" | '"' | '\' | 'n' | 't' | 'r' | '0'
                             | 'a' | 'b' | 'f' | 'v' | '?'
                             | 'x' , hex-digit , hex-digit

@@ -955,8 +955,12 @@ std::unique_ptr<ExprAST> Parser::parsePrimaryImpl() {
         advance();
         std::string lex = token->lexeme;
         char val = 0;
-        if (lex.size() >= 2 && lex.front() == '\'' && lex.back() == '\'') {
-            std::string decoded = decodeEscapes(lex.substr(1, lex.size() - 2));
+        // SG-18: C character prefixes (`L'a'`, `u'a'`, `U'a'`, `u8'a'`).
+        const size_t openQuote = lex.find('\'');
+        const size_t closeQuote = lex.rfind('\'');
+        if (openQuote != std::string::npos && closeQuote > openQuote) {
+            std::string decoded = decodeEscapes(
+                lex.substr(openQuote + 1, closeQuote - openQuote - 1));
             if (!decoded.empty()) val = decoded[0];
         }
         return std::make_unique<CharExprAST>(val);
@@ -968,7 +972,19 @@ std::unique_ptr<ExprAST> Parser::parsePrimaryImpl() {
         std::string lex = token->lexeme;
         std::string val;
         StringLiteralPrefix prefix = token->stringPrefix;
-        if (lex.size() >= 2 && lex[0] == 'r' && lex[1] == '"') {
+        if (lex.size() >= 2 && lex[0] == 'R' && lex[1] == '"') {
+            // SG-18: C++ raw string R"delim(body)delim" — no escape processing.
+            const size_t open = lex.find('(', 2);
+            if (open != std::string::npos) {
+                const std::string delim = lex.substr(2, open - 2);
+                const size_t suffixLen = delim.size() + 2; // ')' + delim + '"'
+                if (lex.size() >= open + 1 + suffixLen) {
+                    val = lex.substr(open + 1,
+                                     lex.size() - suffixLen - (open + 1));
+                }
+            }
+            prefix = StringLiteralPrefix::None;
+        } else if (lex.size() >= 2 && lex[0] == 'r' && lex[1] == '"') {
             // Raw string: r"..." — no escape processing.
             if (lex.size() >= 3) val = lex.substr(2, lex.size() - 3);
             prefix = StringLiteralPrefix::None;

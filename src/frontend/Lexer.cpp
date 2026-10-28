@@ -452,6 +452,56 @@ Token Lexer::scanNumber(){
             while(isDigitForRadix(peek(), radix) || peek() == '_') {
                 advance();
             }
+
+            // SG-18: C hex floating literal `0x1.8p3` / `0x1p3` / `0x.8p1`.
+            // A '.' after the hex digits or a valid binary exponent `p`
+            // switches the token from integer to float; `0x1e10` stays an
+            // integer because 'e' is a hex digit and there is no 'p'.
+            if(radix == 16) {
+                bool hasHexFraction = false;
+                bool hasHexExponent = false;
+                if(peek() == '.') {
+                    hasHexFraction = true;
+                    advance();
+                    while(isDigitForRadix(peek(), 16) || peek() == '_') {
+                        advance();
+                    }
+                }
+                if(peek() == 'p' || peek() == 'P') {
+                    size_t j = m_currentPos + 1;
+                    if(j < m_source.size() &&
+                       (m_source[j] == '+' || m_source[j] == '-')) {
+                        ++j;
+                    }
+                    if(j < m_source.size() &&
+                       (isDigitForRadix(m_source[j], 10) || m_source[j] == '_')) {
+                        hasHexExponent = true;
+                    }
+                }
+                if(hasHexExponent) {
+                    advance(); // 'p' / 'P'
+                    if(peek() == '+' || peek() == '-') advance();
+                    while(isDigitForRadix(peek(), 10) || peek() == '_') {
+                        advance();
+                    }
+                }
+                if(hasHexFraction || hasHexExponent) {
+                    const size_t numberLen = m_currentPos - m_startPos;
+                    const LiteralKind floatKind = consumeFloatSuffix();
+                    const auto lexName = lexeme();
+                    validateDigitSeparators(lexName, 16);
+                    std::string cleanStr;
+                    for(size_t i = 0; i < numberLen; ++i) {
+                        if(lexName[i] == '_') continue;
+                        cleanStr += lexName[i];
+                    }
+                    double value = std::strtod(cleanStr.c_str(), nullptr);
+                    Token token = makeToken(TokenType::TOKEN_FLOAT, lexName, value);
+                    token.literalKind = floatKind;
+                    return token;
+                }
+            }
+
             const LiteralKind kind = consumeIntegerSuffix();
             const auto lexName = lexeme();
             validateDigitSeparators(lexName, radix);
@@ -661,6 +711,48 @@ Token Lexer::scanString() {
     return makeToken(TokenType::TOKEN_STRING, lexeme());
 }
 
+// SG-18: C++ raw string `R"delim(body)delim"`. The delimiter may be empty and
+// is at most 16 characters; the body is verbatim (no escape processing). The
+// lexeme keeps the whole span so the parser can strip the delimiter.
+Token Lexer::scanRawString() {
+    advance(); // 'R'
+    advance(); // '"'
+    std::string delim;
+    while (!isEof() && peek() != '(' && delim.size() < 16) {
+        const char c = peek();
+        if (c == '"' || c == '\\' ||
+            std::isspace(static_cast<unsigned char>(c))) {
+            report(DiagnosticCode::LexUnterminatedLiteral,
+                   "invalid raw string delimiter",
+                   m_tokenStartLine, m_tokenStartCol);
+            break;
+        }
+        delim += c;
+        advance();
+    }
+    if (peek() != '(') {
+        report(DiagnosticCode::LexUnterminatedLiteral,
+               "unterminated raw string literal",
+               m_tokenStartLine, m_tokenStartCol);
+        while (!isEof()) advance();
+        return makeToken(TokenType::TOKEN_STRING, lexeme());
+    }
+    advance(); // '('
+
+    const std::string terminator = ")" + delim + "\"";
+    const size_t close = m_source.find(terminator, m_currentPos);
+    if (close == std::string::npos) {
+        report(DiagnosticCode::LexUnterminatedLiteral,
+               "unterminated raw string literal",
+               m_tokenStartLine, m_tokenStartCol);
+        while (!isEof()) advance();
+        return makeToken(TokenType::TOKEN_STRING, lexeme());
+    }
+    const size_t end = close + terminator.size();
+    while (!isEof() && m_currentPos < end) advance();
+    return makeToken(TokenType::TOKEN_STRING, lexeme());
+}
+
 // TYP-05: scan a u8/u16/u32-prefixed string. The prefix characters were
 // already consumed by scanToken; this scans the quoted body exactly like a
 // plain string and records the prefix on the token. lexeme() keeps the whole
@@ -759,6 +851,21 @@ Token Lexer::scanToken() {
     m_tokenStartCol = m_colNum + 1;
 
     const char ch = peek();
+    // SG-18: C character prefixes. Consume the prefix and let scanChar() keep
+    // the whole span in the lexeme; the parser strips up to the first quote.
+    if (ch == 'u' && peekNext() == '8' && peekNext2() == '\'') {
+        advance();
+        advance();
+        return scanChar();
+    }
+    if ((ch == 'u' || ch == 'U' || ch == 'L') && peekNext() == '\'') {
+        advance();
+        return scanChar();
+    }
+    // SG-18: C++ raw string `R"(...)"` / `R"delim(...)delim"`.
+    if (ch == 'R' && peekNext() == '"') {
+        return scanRawString();
+    }
     if(ch == 'r' && peekNext() == '"') {
         return scanString();
     }
@@ -779,6 +886,20 @@ Token Lexer::scanToken() {
         advance(); // 'u'
         advance(); // '3'
         advance(); // '2'
+        return scanPrefixedString(StringLiteralPrefix::U32);
+    }
+    // SG-18: C++ `u"..."` / `U"..."` and C `L"..."` prefixes. The language has
+    // no separate wchar_t, so L maps to the 32-bit code-unit form.
+    if (ch == 'u' && peekNext() == '"') {
+        advance();
+        return scanPrefixedString(StringLiteralPrefix::U16);
+    }
+    if (ch == 'U' && peekNext() == '"') {
+        advance();
+        return scanPrefixedString(StringLiteralPrefix::U32);
+    }
+    if (ch == 'L' && peekNext() == '"') {
+        advance();
         return scanPrefixedString(StringLiteralPrefix::U32);
     }
     // LEX-16: multiline string `"""..."""` — detect before the plain `"` branch.
