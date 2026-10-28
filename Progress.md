@@ -1072,3 +1072,11 @@
 - `L` 字符串映射到 32 位 code unit；本语言无独立 `wchar_t`，已在 TODO 记录该兼容取舍。
 - 新增 `SyntaxGapsE2E.CCharLiteralPrefixes`、`CStringLiteralPrefixesAndRaw`、`HexFloatLiteral` 与既有 `LeadingDotFloatAndLongLongSuffix`，先 RED 后 GREEN。
 - `docs/spec/grammar.ebnf` 同步字面量产生式；全量 `ctest --test-dir build -j8` **1591/1591** 通过（2 个既有 `GTEST_SKIP`）。
+
+## 2026-10-28 — SG-19 asm 命名操作数
+
+- parser 在 output/input 约束前接受 `[name]`；`AsmOperand` 记录名字。
+- sema 收集 outputs→inputs 顺序的命名表，拒绝重名与模板中的未知名，并允许 `%[name]`。
+- codegen 把模板 `%[name]` 翻译为 LLVM `$N` 操作数引用，数字引用与 `%%` 转义保持原行为。
+- 新增 `SyntaxGapsE2E.NamedAsmOperand`（先 RED 后 GREEN）；`docs/spec/grammar.ebnf` 同步 asm 产生式。
+- 全量 `ctest --test-dir build -j8` **1591/1591** 通过（2 个既有 `GTEST_SKIP`）。

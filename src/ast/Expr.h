@@ -324,6 +324,8 @@ public:
 // P1-08 / PAR-16: 内联汇编操作数 —— 约束串 + 表达式（GCC extended asm 形态）。
 struct AsmOperand {
     std::string constraint;
+    // SG-19: optional GCC/C++ operand name (`[v] "=r"(x)`).
+    std::string name;
     std::unique_ptr<ExprAST> expr;
 };
 

@@ -821,14 +821,25 @@ std::unique_ptr<ExprAST> Parser::parseAsmExpr() {
             continue;
         }
 
-        // outputs / inputs: `"constraint"(expr)` 逗号分隔列表。
+        // outputs / inputs: `[name] "constraint"(expr)` 逗号分隔列表。
         do {
+            AsmOperand op;
+            if (match(TokenType::TOKEN_LBRACKET)) {
+                if (!check(TokenType::TOKEN_IDENTIFIER)) {
+                    errorUnexpected("expected asm operand name");
+                    return nullptr;
+                }
+                op.name = advance()->lexeme;
+                if (!expect(TokenType::TOKEN_RBRACKET,
+                            "expected ']' after asm operand name")) {
+                    return nullptr;
+                }
+            }
             if (!check(TokenType::TOKEN_STRING)) {
                 errorUnexpected("string literal asm constraint");
                 return nullptr;
             }
             auto tok = advance();
-            AsmOperand op;
             op.constraint = strValue(tok ? tok->lexeme : std::string());
             if (!expect(TokenType::TOKEN_LPAREN, "expected '(' after asm constraint")) return nullptr;
             op.expr = parseExpr();

@@ -11,6 +11,8 @@
 
 #include "llvm/IR/InlineAsm.h"
 
+#include <unordered_map>
+
 // P1-06: builtin str/string lowering (defined at file bottom).
 static llvm::Value* codegenBuiltinMethod(CodegenContext& ctx, MethodCallExprAST& node);
 static llvm::Value* codegenStringMethod(CodegenContext& ctx, MethodCallExprAST& node);
@@ -1900,6 +1902,15 @@ llvm::Value* AsmExprAST::codegen(CodegenContext& ctx) {
         constraintStr += cons[i];
     }
 
+    // SG-19: named operands are numbered outputs-first, then inputs.
+    std::unordered_map<std::string, unsigned> namedOperands;
+    for (unsigned i = 0; i < nOut; ++i) {
+        if (!outputs[i].name.empty()) namedOperands[outputs[i].name] = i;
+    }
+    for (unsigned i = 0; i < nIn; ++i) {
+        if (!inputs[i].name.empty()) namedOperands[inputs[i].name] = nOut + i;
+    }
+
     // 3. 模板 GCC → LLVM 翻译。
     std::string tpl;
     tpl.reserve(asmTemplate.size());
@@ -1919,6 +1930,22 @@ llvm::Value* AsmExprAST::codegen(CodegenContext& ctx) {
                 tpl += '$';
                 tpl.append(asmTemplate, i + 1, j - i - 1);
                 i = j - 1;
+            } else if (nx == '[') {
+                const size_t close = asmTemplate.find(']', i + 2);
+                if (close != std::string::npos) {
+                    const std::string name =
+                        asmTemplate.substr(i + 2, close - i - 2);
+                    auto it = namedOperands.find(name);
+                    if (it != namedOperands.end()) {
+                        tpl += '$';
+                        tpl += std::to_string(it->second);
+                    } else {
+                        tpl += ch;  // sema E2024 已拒绝；防御性直通
+                    }
+                    i = close;
+                } else {
+                    tpl += ch;
+                }
             } else {
                 tpl += ch;  // sema E2024 已拒绝；防御性直通
             }

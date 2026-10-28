@@ -291,8 +291,14 @@ compile-time-if     = 'compile_time' , '.' , 'if' , '(' , const-expr , ')' , blo
 (* [plan] CT-03 *)
 
 asm-statement       = 'asm' , [ 'volatile' ] , '(' , string-literal
-                      , [ ':' , asm-operands ] , ')' , ';' ;
-(* [impl] asm 约束模型见 DEC-09：模板/约束透传 LLVM，方言 AD_ATT，outputs 左值回写 *)
+                      , [ ':' , [ asm-operand-list ]
+                        , [ ':' , [ asm-operand-list ]
+                          , [ ':' , [ asm-clobber-list ] ] ] ] , ')' , ';' ;
+asm-operand-list    = asm-operand , { ',' , asm-operand } ;
+asm-operand         = [ '[' , identifier , ']' ] , string-literal , '(' , expr , ')' ;
+asm-clobber-list    = string-literal , { ',' , string-literal } ;
+(* [impl] asm 约束模型见 DEC-09：模板/约束透传 LLVM，方言 AD_ATT，outputs 左值回写。
+   SG-19 起接受 `[name]` 命名操作数，模板 `%[name]` 按 outputs→inputs 顺序翻译为 `$N`。 *)
 
 
 (* =========================================================================

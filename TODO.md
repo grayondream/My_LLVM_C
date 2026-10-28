@@ -45,7 +45,7 @@
 > **进度快照（2026-10-26，语法缺口 1–6 收口）**：先修 CG-05（rvalue 聚合成员按值读取，`make().x` 不再产生非法 GEP）与 MOD-03（前向类型按值使用报 incomplete；指针仍允许）。随后：①模块导入改为 parse 前预载，`export struct/class/using/template` 可用；②强制 `module` 首部/唯一/文件名匹配；③函数内 `static`/`thread_local` 静态变量与局部 `struct/union/enum` 定义；④通用括号声明符（函数返回函数指针、函数类型别名、指向数组的指针、函数指针数组）+ 表达式 callee 间接调用；⑤自引用类指针字段爆栈修复、类内/类外成员运算符重载调用；⑥函数体 `compile_time.if` 与嵌套 `offsetof(T, a.b)`/`offsetof(T, arr[i])`。全量 **1559/1559**；两个示例仍输出 `ALL FEATURES OK` / `FULL FEATURE OK`。提交线：a805740、53768f1、3d88e2b、c2d509b、4d77701、8dd88ca、2597f62。
 > **进度快照（2026-10-26，基础 C 声明/语句收口）**：补齐 9 项基础语法：空语句 `;`；聚合成员多声明符 `struct S { int32 a, b; }`；聚合成员直接函数指针字段与指向数组的指针字段；`sizeof`/`alignof` 的完整 type-id（数组/抽象函数指针）；后置限定符 `int32 const`；块内 `extern`；record 定义后的 attached 指针/函数声明符；多声明符中的复杂后继（`int32 (*f)(int), (*g)(int);`）。顺带把带方法的 `struct` 正确路由为 class 类型，并修复布局注解对 `ClassType` 的 UB 强转。全量 **1572/1572**；两个示例仍输出 OK。提交线：0bc3be2、88fca71、b07dc1f、42d3ed1、dfcb9cc、607ff32、dad042d、31a68fb、27a1242。
 > **进度快照（2026-10-27，语法缺口审计）**：对第三轮收口后的剩余语法缺口做规范+CLI 复核，按“规范已承诺 / C 兼容性 / 规范未覆盖扩展 / 非语法边界 / Non-goals”分类，详细清单见 **§24**（SG-01 ~ SG-11、SG-B01 ~ SG-B06）。本轮不改代码。
-> **进度快照（2026-10-27，语法缺口补充审计）**：在 §24 基础上继续补漏，新增 **§25**（SG-12 ~ SG-23、SG-B07 ~ SG-B09），覆盖数组/位域常量表达式、声明符递归与函数类型形参、静态成员类外定义、C 字面量、asm、模块/控制流/类模板扩展。新补项中 P1 为 SG-12、SG-14；SG-12、SG-13、SG-14、SG-15、SG-16、SG-17 与 SG-B07、SG-B09 已修复（SG-15 于 2026-10-28）；SG-18 已全部修复、SG-19 连续冒号部分已修复；SG-19 命名操作数、SG-20 ~ SG-23 仍挂账（SG-B07 ~ SG-B09 已全部修复）。
+> **进度快照（2026-10-27，语法缺口补充审计）**：在 §24 基础上继续补漏，新增 **§25**（SG-12 ~ SG-23、SG-B07 ~ SG-B09），覆盖数组/位域常量表达式、声明符递归与函数类型形参、静态成员类外定义、C 字面量、asm、模块/控制流/类模板扩展。新补项中 P1 为 SG-12、SG-14；SG-12、SG-13、SG-14、SG-15、SG-16、SG-17 与 SG-B07、SG-B09 已修复（SG-15 于 2026-10-28）；SG-18、SG-19 已全部修复；SG-20 ~ SG-23 仍挂账（SG-B07 ~ SG-B09 已全部修复）。
 
 
 > **进度快照（2026-10-19，语法遗漏收口完成）**：**语法层面审计 + 11 项特性/缺陷收口**（spec/plan `docs/superpowers/specs|plans/2026-10-18-syntax-gaps*`）。多行字符串 `"""..."""` 与 Unicode 标识符（LEX-16/18）；`char8/16/32` 类型（uint 别名）与 `thread_local`（TYP-05/CON-04）；`atomic` 限定符（整型标量，原子 load/store + atomicrmw 子集，CON-01）；默认参数（区间重载 + 少默认优先，FUN-09）；**未知类型名声明静默丢弃修复**（E2031，此前 `f16 x;` 零诊断消失）；compile_time 反射 `name_of/fields_of/attributes_of`（ReflectionRegistry 交接，CT-07/13）；protected 派生访问放宽（INH-06）；`alignof/offsetof` 独立关键字与 `nullptr`（PAR-14/TYP-24）。当前全量 **1418** 测试 0 失败（2 个既有 `GTEST_SKIP` 不变）。P1-09 剩余：仅 std.collections（STD-06~08，阻塞于「模块导出类型」语言缺口）。
@@ -904,7 +904,7 @@ float64 h = 0x1p3;         // 失败：十六进制浮点
 - **已修复（2026-10-28）**：lexer 支持前导小数点 `.5`、`LL`/`ULL` 后缀、`L'a'`/`u'a'`/`U'a'`/`u8'a'` 字符前缀、`L"..."`/`u"..."`/`U"..."` 字符串前缀、`R"(...)"` / `R"delim(...)delim"` 原始字符串、十六进制浮点 `0x1p3` / `0x1.8p1` / `0x.8p1`。`L` 字符串映射到 32 位 code unit（本语言无独立 `wchar_t`）。
 - 新增 `SyntaxGapsE2E.LeadingDotFloatAndLongLongSuffix`、`CCharLiteralPrefixes`、`CStringLiteralPrefixesAndRaw`、`HexFloatLiteral`；均先 RED 后 GREEN。
 
-#### SG-19 asm 连续冒号与命名操作数 `[partial][P2]`
+#### SG-19 asm 连续冒号与命名操作数 `[fixed][P2]`
 
 ```c
 asm("nop" ::: "memory");                  // 失败：`::` 被词法化为 COLON_COLON
@@ -916,7 +916,7 @@ asm("mov $1, %[v]" : [v] "=r"(x));        // 失败：命名操作数
 - 当前：clobber 段不是缺失，而是 `:::` 连续冒号在 lexer 层被切成 `COLON_COLON` + `COLON`，导致 parser 在模板后立即失败；`[name]` 命名操作数未实现。
 - 目标：若要吸收 GCC/C++ 写法，补 lexer 对 `:::` 的上下文处理（或 parser 兼容 `COLON_COLON`），并定义命名操作数的绑定；labels 仍随 `goto` Non-goal 不做。
 - 关联：PAR-16、CG-10、DEC-09。
-- **部分修复（2026-10-28）**：`parseAsmExpr()` 把 `COLON_COLON` 计作两个空段分隔符，`asm("nop" ::: "memory")` 已通过（新增 `SyntaxGapsE2E.AsmAdjacentEmptyOperandSections`）。**仍挂账**：`[name]` 命名操作数及其绑定。
+- **已修复（2026-10-28）**：`parseAsmExpr()` 把 `COLON_COLON` 计作两个空段分隔符，`asm("nop" ::: "memory")` 已通过；`[name]` 命名操作数在 parser 中解析、sema 校验重名/未知名、codegen 按 outputs→inputs 顺序把模板 `%[name]` 翻译为 `$N`。新增 `SyntaxGapsE2E.AsmAdjacentEmptyOperandSections`、`NamedAsmOperand`；两者先 RED 后 GREEN。
 
 ### 25.3 规范未覆盖的现代/C++ 兼容扩展（需先裁决）
 
@@ -986,7 +986,7 @@ template<typename T> T V<T>::f() { return this->x; }  // 解析失败
 
 1. **P1 规范收口（已完成）**：SG-12 数组常量维度、SG-14 显式转换完整 type-id 均已修复；§24.6 剩余 P1 为 SG-01 → SG-02 → SG-04 → SG-03。
 2. **P2 声明符/常量贯通（已完成）**：SG-15 静态数据类外定义、SG-16 括号/多函数声明符、SG-17 函数类型形参、SG-13 位域 enum/const 均已修复。
-3. **P2 C 兼容可选**：SG-18 已全部修复；SG-19 命名操作数仍挂账（连续冒号已修复）。
+3. **P2 C 兼容可选（已完成）**：SG-18、SG-19 已全部修复。
 4. **先裁决再实现**：SG-20 模块扩展、SG-21 控制流扩展、SG-22 struct/class 成员扩展、SG-23 模板类成员。
 5. **边界单列（已全部修复）**：SG-B07 类外静态方法、SG-B08 成员运算符调用、SG-B09 全局 `string_view` 字面量崩溃均已修复。
 

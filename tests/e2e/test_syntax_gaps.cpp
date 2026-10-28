@@ -337,6 +337,16 @@ TEST_F(SyntaxGapsE2E, LeadingDotFloatAndLongLongSuffix) {
     )", "syntax_c_literals.c"), 0);
 }
 
+TEST_F(SyntaxGapsE2E, NamedAsmOperand) {
+    EXPECT_EQ(runSyntaxSource(R"(
+        int32 main() {
+            int32 x = 0;
+            asm("movl $1, %[v]" : [v] "=r"(x));
+            return x - 1;
+        }
+    )", "syntax_asm_named_operand.c"), 0);
+}
+
 TEST_F(SyntaxGapsE2E, AsmAdjacentEmptyOperandSections) {
     EXPECT_EQ(runSyntaxSource(R"(
         int32 main() {

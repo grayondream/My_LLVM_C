@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <climits>
 #include <functional>
+#include <unordered_map>
 
 // Strip any number of typedef/alias layers, returning the underlying type.
 static Type* stripTypedef(Type* type) {
@@ -6240,6 +6241,23 @@ void SemanticAnalyzer::visit(AsmExprAST& node) {
         node.inputTypes.push_back(checkOperand(op, false, "input"));
     }
 
+    // SG-19: collect `[name]` operands; indices follow LLVM/GCC order
+    // (outputs first, then inputs).
+    std::unordered_map<std::string, unsigned> namedOperands;
+    auto registerName = [&](const AsmOperand& op, unsigned index) {
+        if (op.name.empty()) return;
+        if (!namedOperands.emplace(op.name, index).second) {
+            emitError(DiagnosticCode::SemAsmOperand,
+                      "duplicate asm operand name '" + op.name + "'", node);
+        }
+    };
+    for (unsigned i = 0; i < node.outputs.size(); ++i) {
+        registerName(node.outputs[i], i);
+    }
+    for (unsigned i = 0; i < node.inputs.size(); ++i) {
+        registerName(node.inputs[i], static_cast<unsigned>(node.outputs.size()) + i);
+    }
+
     const std::string& tpl = node.asmTemplate;
     for (size_t i = 0; i < tpl.size(); ++i) {
         if (tpl[i] != '%') continue;
@@ -6253,8 +6271,23 @@ void SemanticAnalyzer::visit(AsmExprAST& node) {
             ++i; // 已确认的一对（转义或操作数引用）整体跳过
             continue;
         }
+        if (next == '[') {
+            const size_t close = tpl.find(']', i + 2);
+            if (close == std::string::npos) {
+                emitError(DiagnosticCode::SemAsmTemplate,
+                          "invalid asm template: missing ']' after operand name", node);
+                break;
+            }
+            const std::string name = tpl.substr(i + 2, close - i - 2);
+            if (namedOperands.find(name) == namedOperands.end()) {
+                emitError(DiagnosticCode::SemAsmTemplate,
+                          "unknown asm operand name '" + name + "'", node);
+            }
+            i = close;
+            continue;
+        }
         emitError(DiagnosticCode::SemAsmTemplate,
-                  "invalid asm template: '%' must be followed by '%' or a digit", node);
+                  "invalid asm template: '%' must be followed by '%', a digit, or '[name]'", node);
         break;
     }
 }
