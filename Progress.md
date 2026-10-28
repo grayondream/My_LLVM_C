@@ -1044,3 +1044,10 @@
 - 修复 §25 **SG-15**：parser 识别 `type Class::name [= init];`；sema 用 `staticDataDecls` 把初始化器挂到类内 `staticMembers` 的 VarDeclAST 上，避免生成重复全局。
 - 新增 `SyntaxGapsE2E.OutOfClassStaticDataDefinition`，先 RED（unknown type 'x'）后 GREEN。
 - 全量 `ctest --test-dir build -j8` **1583/1583** 通过（2 个既有 `GTEST_SKIP`）。
+
+## 2026-10-28 — SG-19 asm 连续冒号（部分）
+
+- `parseAsmExpr()` 兼容 `TOKEN_COLON_COLON`：`::` 计作两个空段分隔符，`asm("nop" ::: "memory")` 不再因 lexer 折叠 `::` 而失败。
+- 新增 `SyntaxGapsE2E.AsmAdjacentEmptyOperandSections`，先 RED 后 GREEN。
+- `[name]` 命名操作数及绑定仍挂账。
+- 全量 `ctest --test-dir build -j8` **1584/1584** 通过（2 个既有 `GTEST_SKIP`）。

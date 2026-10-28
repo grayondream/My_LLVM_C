@@ -267,6 +267,16 @@ TEST_F(SyntaxGapsE2E, TypeIdArrayDimensionsAcceptConstExpressions) {
     )", "syntax_typeid_array_const_dim.c"), 0);
 }
 
+TEST_F(SyntaxGapsE2E, AsmAdjacentEmptyOperandSections) {
+    EXPECT_EQ(runSyntaxSource(R"(
+        int32 main() {
+            int32 x = 1;
+            asm("nop" ::: "memory");
+            return x - 1;
+        }
+    )", "syntax_asm_adjacent_colons.c"), 0);
+}
+
 TEST_F(SyntaxGapsE2E, OutOfClassStaticDataDefinition) {
     EXPECT_EQ(runSyntaxSource(R"(
         struct SStaticData { static int32 x; };

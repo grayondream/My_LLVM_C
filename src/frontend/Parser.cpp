@@ -782,6 +782,18 @@ std::unique_ptr<ExprAST> Parser::parseAsmExpr() {
 
     while (true) {
         if (check(TokenType::TOKEN_RPAREN)) break;
+        // GCC allows adjacent colons for empty sections (`:::` / `::`). The
+        // lexer folds `::` into TOKEN_COLON_COLON (for qualified names), so
+        // count it as two separators here.
+        if (check(TokenType::TOKEN_COLON_COLON)) {
+            advance();
+            section += 2;
+            if (section > 3) {
+                errorUnexpected("at most three asm operand sections");
+                return nullptr;
+            }
+            continue;
+        }
         if (check(TokenType::TOKEN_COLON)) {
             advance();
             ++section;
