@@ -1080,3 +1080,9 @@
 - codegen 把模板 `%[name]` 翻译为 LLVM `$N` 操作数引用，数字引用与 `%%` 转义保持原行为。
 - 新增 `SyntaxGapsE2E.NamedAsmOperand`（先 RED 后 GREEN）；`docs/spec/grammar.ebnf` 同步 asm 产生式。
 - 全量 `ctest --test-dir build -j8` **1591/1591** 通过（2 个既有 `GTEST_SKIP`）。
+
+## 2026-10-28 — §25 本轮收尾
+
+- SG-18（C 字面量兼容子集）与 SG-19（asm 连续冒号/命名操作数）已全部修复并分别提交。
+- 验证：全量 `ctest --test-dir build -j8` **1591/1591** 通过（2 个既有 `GTEST_SKIP`）；`examples/all_features.c` → `ALL FEATURES OK`，`examples/full_feature.c` → `FULL FEATURE OK`。
+- 用户裁决：SG-20 ~ SG-23 属于规范未覆盖的扩展，本轮暂不实现，保留为后续产品决策项。
