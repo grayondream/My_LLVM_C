@@ -267,6 +267,15 @@ TEST_F(SyntaxGapsE2E, TypeIdArrayDimensionsAcceptConstExpressions) {
     )", "syntax_typeid_array_const_dim.c"), 0);
 }
 
+TEST_F(SyntaxGapsE2E, LeadingDotFloatAndLongLongSuffix) {
+    EXPECT_EQ(runSyntaxSource(R"(
+        float64 a = .5;
+        int64 b = 1LL;
+        uint64 c = 2ULL;
+        int32 main() { return (a == .5 && b == 1 && c == 2) ? 0 : 1; }
+    )", "syntax_c_literals.c"), 0);
+}
+
 TEST_F(SyntaxGapsE2E, AsmAdjacentEmptyOperandSections) {
     EXPECT_EQ(runSyntaxSource(R"(
         int32 main() {

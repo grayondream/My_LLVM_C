@@ -356,22 +356,27 @@ void Lexer::validateDigitSeparators(const std::string& lexeme, int radix) {
 }
 
 LiteralKind Lexer::consumeIntegerSuffix() {
-    const char c0 = peek();
-    const bool isU = (c0 == 'u' || c0 == 'U');
-    const bool isL = (c0 == 'l' || c0 == 'L');
-    if(!isU && !isL) {
-        return LiteralKind::Int; // unsuffixed default
+    bool hasU = false;
+    int lCount = 0;
+    while(true) {
+        const char c = peek();
+        if((c == 'u' || c == 'U') && !hasU) {
+            hasU = true;
+            advance();
+            continue;
+        }
+        // Long/long-long spelling: `l`, `L`, `ll`, `LL`, `lL`, `Ll`.
+        if((c == 'l' || c == 'L') && lCount < 2) {
+            ++lCount;
+            advance();
+            continue;
+        }
+        break;
     }
-    advance();
-
-    const char c1 = peek();
-    const bool c1IsU = (c1 == 'u' || c1 == 'U');
-    const bool c1IsL = (c1 == 'l' || c1 == 'L');
-    if((isU && c1IsL) || (isL && c1IsU)) {
-        advance();
-        return LiteralKind::ULong; // 'ul' / 'lu'
-    }
-    return isU ? LiteralKind::UInt : LiteralKind::Long;
+    if(hasU && lCount > 0) return LiteralKind::ULong;
+    if(hasU) return LiteralKind::UInt;
+    if(lCount > 0) return LiteralKind::Long;
+    return LiteralKind::Int; // unsuffixed default
 }
 
 LiteralKind Lexer::consumeFloatSuffix() {
@@ -464,21 +469,29 @@ Token Lexer::scanNumber(){
         }
     }
 
-    // 十进制整数或浮点数
-    while(isDigitForRadix(peek(), 10) || peek() == '_') {
-        advance();
-    }
-
+    // 十进制整数或浮点数（允许 C 的前导小数点形式 `.5`）。
     bool hasFraction = false;
-    // LEX-05: the grammar allows an empty fraction after the decimal point
-    // (`1.` / `1.e3`), so a '.' directly following decimal digits always
-    // begins the fraction part. A following '_' is consumed here too so the
-    // existing LEX-17 separator validation can point at it (E0004).
     if(peek() == '.') {
         hasFraction = true;
-        advance(); // 小数点
+        advance(); // 前导小数点
         while(isDigitForRadix(peek(), 10) || peek() == '_') {
             advance();
+        }
+    } else {
+        while(isDigitForRadix(peek(), 10) || peek() == '_') {
+            advance();
+        }
+
+        // LEX-05: the grammar allows an empty fraction after the decimal point
+        // (`1.` / `1.e3`), so a '.' directly following decimal digits always
+        // begins the fraction part. A following '_' is consumed here too so
+        // the existing LEX-17 separator validation can point at it (E0004).
+        if(peek() == '.') {
+            hasFraction = true;
+            advance(); // 小数点
+            while(isDigitForRadix(peek(), 10) || peek() == '_') {
+                advance();
+            }
         }
     }
 
@@ -775,7 +788,7 @@ Token Lexer::scanToken() {
     // LEX-18: a UTF-8 multibyte sequence (high bit set) may start an identifier.
     if(std::isalpha(ch) or ch == '_' or (ch & 0x80) != 0) {
         return scanIdentifier();
-    }else if(std::isdigit(ch)) {
+    }else if(std::isdigit(ch) || (ch == '.' && std::isdigit(peekNext()))) {
         return scanNumber();
     }else if(ch == '"') {
         // scanString consumes the closing quote itself; return directly so the

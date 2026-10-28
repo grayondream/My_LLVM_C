@@ -1051,3 +1051,10 @@
 - 新增 `SyntaxGapsE2E.AsmAdjacentEmptyOperandSections`，先 RED 后 GREEN。
 - `[name]` 命名操作数及绑定仍挂账。
 - 全量 `ctest --test-dir build -j8` **1584/1584** 通过（2 个既有 `GTEST_SKIP`）。
+
+## 2026-10-28 — SG-18 前导小数点与 LL/ULL（部分）
+
+- lexer 支持 C 的前导小数点浮点 `.5`；`consumeIntegerSuffix` 改为消费 `u` + 最多两个 `l`，支持 `LL`/`ULL`（映射到 int64/uint64）。
+- 新增 `SyntaxGapsE2E.LeadingDotFloatAndLongLongSuffix`，先 RED 后 GREEN。
+- 仍挂账：字符/字符串前缀、raw delimiter、十六进制浮点。
+- 全量 `ctest --test-dir build -j8` **1585/1585** 通过（2 个既有 `GTEST_SKIP`）。
