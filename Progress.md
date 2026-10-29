@@ -1093,3 +1093,13 @@
 - 第 1 节补 SG-18 字面量：`.5`、`LL`/`ULL`、字符/字符串前缀、`R"(...)"`、十六进制浮点；第 15 节补 `if/else` 与 `do-while`；第 19 节补命名 asm 操作数与 `:::`。
 - 第 26 节覆盖近期修复：常量数组维度、enum 位域宽度、多函数声明符、括号声明符、函数类型形参 decay、类外静态数据/方法、成员 `operator[]`/`operator()`、全局 `string_view`。
 - 验证：`build/bin/my_llvm_c examples/all_features.c` + 运行输出 `ALL FEATURES OK`；全量 `ctest --test-dir build -j8` **1591/1591** 通过（2 个既有 `GTEST_SKIP`）；`examples/full_feature.c` 仍输出 `FULL FEATURE OK`。
+
+## 2026-10-29 — 语言易用性缺陷收口（Review 2.2–2.6）
+
+- **2.2 序列访问统一**：数组/切片/`string_view`/`string` 统一 `.len` 属性（方法形式保留为别名）；`string` 增加 `.capacity`/`.char_count`/`.data`；新增 `s[a:b]` 范围切片（字符串 → `string_view`，数组/切片 → `T[]`，运行时越界 panic）。
+- **2.3 空值字面量**：保留 `null` 为唯一拼写，移除 `nullptr` 关键字；文档明确 null 只隐式转指针，不转 optional/result。
+- **2.4 Optional/Result**：条件与 `!`/`&&`/`||`/三元条件按 `valid`/`ok` 取真值；新增 `is_some`/`is_none`/`unwrap`/`value_or` 与 `is_ok`/`is_err`/`unwrap`/`value_or`。
+- **2.5 字符串边界**：`string_view`/字面量只隐式转 `const char*`，可变 `char*` 需显式 cast；新增 `.data`；本地拥有型 `string` 在作用域退出时自动释放（显式 `destroy()` 仍幂等）。
+- **2.6 可存储闭包**：新增 `auto` 变量类型推导；有捕获 lambda 的闭包 struct 记录调用符号，`auto f = [..]{..}; f(args)` 可反复调用（按值/按引用捕获均验证）。
+- **附带修复**：parser 限定符不再污染共享标量单例（`const char*` 曾使全局 `char`/`int32` 变 const）；class 成员路径接受前导 `const/volatile/atomic`；本地 optional/result 未初始化时零初始化；C 绑定字符串参数改为 `const char*`。
+- **验证**：`examples/all_features.c` 输出 `ALL FEATURES OK`；`examples/full_feature.c` 输出 `FULL FEATURE OK`；全量 `ctest --test-dir build -j8` **1604/1604** 通过（2 个既有 `GTEST_SKIP`）。

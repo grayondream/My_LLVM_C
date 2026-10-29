@@ -26,7 +26,7 @@ llvm::Value* evalCondition(CodegenContext& ctx, ExprAST& expr) {
     if (expr.isLValue && expr.type && expr.type->kind != TypeKind::Array) {
         v = readLValue(ctx, expr, v);
     }
-    return ctx.coerceToBool(v);
+    return ctx.coerceToBool(v, expr.type);
 }
 
 } // namespace

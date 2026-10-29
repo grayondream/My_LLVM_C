@@ -60,6 +60,8 @@ static const std::unordered_map<std::string, TokenType> keywordMap = {
 
     // ===== 存储类 / 修饰符 =====
     {"const", TokenType::TOKEN_CONST},
+    // Review 2.6: type inference for storable closure values.
+    {"auto", TokenType::TOKEN_AUTO},
     {"constexpr", TokenType::TOKEN_CONSTEXPR},
     {"static", TokenType::TOKEN_STATIC},
     {"extern", TokenType::TOKEN_EXTERN},
@@ -86,8 +88,8 @@ static const std::unordered_map<std::string, TokenType> keywordMap = {
 
     // ===== 布尔（如果你支持）=====
     {"bool", TokenType::TOKEN_BOOL},
-    // TYP-24: nullptr is a synonym for the null pointer literal.
-    {"nullptr", TokenType::TOKEN_NULL},
+    // Review 2.3: `null` is the sole null-pointer spelling. `nullptr` is no
+    // longer a keyword (it resolves as an ordinary unknown identifier).
 
     // ===== 新增关键字 =====
     {"true", TokenType::TOKEN_TRUE},

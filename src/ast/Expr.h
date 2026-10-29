@@ -239,6 +239,8 @@ public:
     std::vector<DefaultArgValue> defaultArgValues;
     // Set by semantic analysis for calls through a function-pointer variable.
     bool isIndirect = false;
+    // Review 2.6: call through a captured-lambda closure value.
+    bool isClosureCall = false;
     // SEM-17: member `operator()` resolved via a class method; codegen passes
     // the object address as the implicit `this` argument.
     bool memberOperator = false;
@@ -387,6 +389,22 @@ public:
     llvm::Value* codegen(CodegenContext& ctx) override;
 };
 
+// Review 2.2: zero-copy range access `s[a:b]`. Either bound may be omitted;
+// strings yield a string_view, arrays/slices yield a T[] view. Bounds are
+// checked at runtime by codegen.
+class RangeExprAST : public ExprAST {
+public:
+    std::unique_ptr<ExprAST> object;
+    std::unique_ptr<ExprAST> begin;
+    std::unique_ptr<ExprAST> end;
+
+    RangeExprAST(std::unique_ptr<ExprAST> obj,
+                 std::unique_ptr<ExprAST> b,
+                 std::unique_ptr<ExprAST> e)
+        : object(std::move(obj)), begin(std::move(b)), end(std::move(e)) {}
+    llvm::Value* codegen(CodegenContext& ctx) override;
+};
+
 class MemberAccessExprAST : public ExprAST {
 public:
     MemberAccessKind accessKind;
@@ -423,6 +441,10 @@ enum class BuiltinMethod {
     StrFind,
     StrRFind,
     StrSub,
+    StrData,
+    StrCharCountProp,
+    // Review 2.2: method alias for array/slice `.len`.
+    SequenceLen,
     // string dynamic
     StringNew,
     StringDestroy,
@@ -430,6 +452,17 @@ enum class BuiltinMethod {
     StringPush,
     StringLen,
     StringCapacity,
+    StringData,
+    StringCharCount,
+    // Review 2.4: Optional/Result unpacking methods.
+    OptionalIsSome,
+    OptionalIsNone,
+    OptionalUnwrap,
+    OptionalValueOr,
+    ResultIsOk,
+    ResultIsErr,
+    ResultUnwrap,
+    ResultValueOr,
 };
 
 class MethodCallExprAST : public ExprAST {

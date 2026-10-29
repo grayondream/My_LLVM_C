@@ -304,12 +304,18 @@ llvm::BasicBlock* CodegenContext::getContinueBlock() const {
 
 void CodegenContext::pushDeferScope() {
     deferScopes.emplace_back();
+    cleanupScopes.emplace_back();
 }
 
 void CodegenContext::addDefer(ExprAST* expr) {
     if (expr && !deferScopes.empty()) {
         deferScopes.back().push_back(expr);
     }
+}
+
+void CodegenContext::addStringCleanup(llvm::Value* addr, Type* type) {
+    if (addr && type && !cleanupScopes.empty())
+        cleanupScopes.back().emplace_back(addr, type);
 }
 
 void CodegenContext::emitDefersFrom(size_t depth) {
@@ -319,6 +325,12 @@ void CodegenContext::emitDefersFrom(size_t depth) {
         for (auto it = scope.rbegin(); it != scope.rend(); ++it) {
             if (*it) (*it)->codegen(*this);
         }
+        if (i - 1 < cleanupScopes.size()) {
+            auto& cleanups = cleanupScopes[i - 1];
+            for (auto it = cleanups.rbegin(); it != cleanups.rend(); ++it) {
+                emitStringValueRelease(it->first, it->second);
+            }
+        }
     }
 }
 
@@ -326,11 +338,15 @@ void CodegenContext::popDeferScope() {
     if (deferScopes.empty()) return;
     emitDefersFrom(deferScopes.size() - 1);
     deferScopes.pop_back();
+    if (!cleanupScopes.empty()) cleanupScopes.pop_back();
 }
 
 void CodegenContext::discardDeferScope() {
     if (!deferScopes.empty()) {
         deferScopes.pop_back();
+    }
+    if (!cleanupScopes.empty()) {
+        cleanupScopes.pop_back();
     }
 }
 
@@ -346,6 +362,19 @@ size_t CodegenContext::getBreakDeferBoundary() const {
 size_t CodegenContext::getContinueDeferBoundary() const {
     if (continueDeferBoundaries.empty()) return 0;
     return continueDeferBoundaries.back();
+}
+
+llvm::Value* CodegenContext::coerceToBool(llvm::Value* val, Type* astType) {
+    if (!val) return nullptr;
+    Type* t = astType;
+    while (t && t->kind == TypeKind::Typedef)
+        t = static_cast<TypedefType*>(t)->aliasedType;
+    if (t && (t->kind == TypeKind::Optional || t->kind == TypeKind::Result)) {
+        if (val->getType()->isStructTy())
+            return builder.CreateExtractValue(val, {0}, "optres.bool");
+        return coerceToBool(val);
+    }
+    return coerceToBool(val);
 }
 
 llvm::Value* CodegenContext::coerceToBool(llvm::Value* val) {

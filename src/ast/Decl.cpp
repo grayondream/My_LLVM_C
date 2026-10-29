@@ -1041,6 +1041,8 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
         if (st && !initExpr && !isConstexpr) {
             bool needZero = st->kind == TypeKind::Slice ||
                             st->kind == TypeKind::String ||
+                            st->kind == TypeKind::Optional ||
+                            st->kind == TypeKind::Result ||
                             ((st->kind == TypeKind::Struct || st->kind == TypeKind::Class) &&
                              ctx.aggregateHasStringField(st));
             if (needZero) {
@@ -1128,6 +1130,14 @@ llvm::Value* VarDeclAST::codegen(CodegenContext& ctx) {
         } // if (!sliceLiteralInit)
     }
     ctx.declareVariable(name, alloca, type);
+
+    // Review 2.5: local owning strings are released at lexical scope exit.
+    // `destroy()` remains valid and idempotent (it zeroes the header).
+    {
+        Type* cleanupTy = stripTypedefs(type);
+        if (cleanupTy && cleanupTy->kind == TypeKind::String)
+            ctx.addStringCleanup(alloca, type);
+    }
 
     if (!sourceFile.empty()) {
         ctx.emitVariableDebug(alloca, name, type, sourceLine);

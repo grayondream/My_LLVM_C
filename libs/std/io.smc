@@ -5,18 +5,18 @@
 // private; only the helpers are exported (P0-04 / MOD-05).
 module std.io;
 
-extern int32    printf(char* format, ...);
+extern int32    printf(const char* format, ...);
 extern int32    putchar(int32 c);
 extern int32    getchar();
-extern int32    dprintf(int32 fd, char* format, ...);
-extern int32    scanf(char* format, ...);
+extern int32    dprintf(int32 fd, const char* format, ...);
+extern int32    scanf(const char* format, ...);
 
-extern void*  fopen(char* path, char* mode);
+extern void*  fopen(const char* path, const char* mode);
 extern int32    fclose(void* stream);
 extern usize  fread(void* ptr, usize size, usize count, void* stream);
 extern usize  fwrite(void* ptr, usize size, usize count, void* stream);
 extern char*  fgets(char* str, int32 n, void* stream);
-extern int32    fputs(char* s, void* stream);
+extern int32    fputs(const char* s, void* stream);
 extern int32    fgetc(void* stream);
 extern int32    fputc(int32 c, void* stream);
 
@@ -32,7 +32,7 @@ void print_char(char c) {
     putchar(c);
 }
 
-void print_str(char* s) {
+void print_str(const char* s) {
     printf("%s", s);
 }
 
@@ -48,7 +48,7 @@ void print_bool(int32 b) {
 // `dprintf(fd, ...)` writes to a raw file descriptor; fd 2 is stderr. This
 // avoids exposing the C `FILE` type (STD-23).
 
-void print_err_str(char* s) {
+void print_err_str(const char* s) {
     dprintf(2, "%s", s);
 }
 
@@ -89,7 +89,7 @@ int32 read_line(char* buf, int32 cap) {
 // ----- files -----
 // A `FILE*` is passed around as an opaque `void*` handle.
 
-void* file_open(char* path, char* mode) {
+void* file_open(const char* path, const char* mode) {
     return fopen(path, mode);
 }
 
@@ -121,7 +121,7 @@ int32 file_write_char(void* f, int32 c) {
     return fputc(c, f);
 }
 
-int32 file_write_str(void* f, char* s) {
+int32 file_write_str(void* f, const char* s) {
     return fputs(s, f);
 }
 

@@ -355,7 +355,9 @@ void section_arrays_slice() {
     check(sum2d(m) == 21, "multidim param");
     int32 a[3] = {7, 8, 9};
     int32[] s = a;                             // 数组 → 切片
-    check(s.len == 3 && s[1] == 8, "slice view");
+    check(s.len == 3 && s.len() == 3 && s[1] == 8, "slice view + len property/method");
+    int32[] tail = a[1:3];
+    check(tail.len == 2 && tail[0] == 8 && tail[1] == 9, "array range -> slice");
     bump(a);
     check(a[0] == 107, "slice write visible to caller");
     int32[] empty;
@@ -368,25 +370,26 @@ void section_arrays_slice() {
 class Greeter {
 public:
     int32 id;
-    char* to_string() { return "Greeter!"; }   // format 自定义渲染
+    const char* to_string() { return "Greeter!"; }   // format 自定义渲染
 };
 
 void section_strings() {
     println("== 10. strings ==");
     string_view sv = "hello";
-    check(sv.len() == 5, "string_view.len");
+    check(sv.len == 5 && sv.len() == 5, "string_view.len property/method");
     string_view uni = "h\xc3\xa9llo";
-    check(uni.len() == 6 && uni.char_count() == 5, "UTF-8 len vs char_count");
+    check(uni.len == 6 && uni.char_count == 5, "UTF-8 len vs char_count");
     check(sv.find("ll") == 2, "find");
-    check(sv.sub(1, 3) == "el", "sub");
-    char* cp = sv;                             // string_view → char*
-    check(cp[0] == 'h', "string_view -> char*");
+    check(sv.sub(1, 3) == "el" && sv[1:3] == "el", "sub + range syntax");
+    const char* cp = sv;                       // string_view → const char* (read-only)
+    check(cp[0] == 'h' && sv.data[0] == 'h', "string_view -> const char* / .data");
 
     string s = string.new("ab");               // 所有权字符串
     s.append("cd");
     s.push('!');
     check(s.len() == 5 && s[2] == 'c', "string.append/push/subscript");
-    check(s.capacity() >= 5, "string.capacity");
+    check(s.capacity >= 5 && s.capacity() >= 5, "string.capacity property/method");
+    check(s.data[0] == 'a', "string.data");
     string_view back = s;                      // string → string_view
     check(back == "abcd!", "string -> string_view");
     s.destroy();
@@ -437,13 +440,14 @@ result<int32, int32> divide(int32 a, int32 b) {
 void section_optional_result() {
     println("== 11. optional / result ==");
     int32? o = {true, 42};
-    check(o.valid && o.value == 42, "optional");
+    check(o.valid && o.value == 42 && o.unwrap() == 42, "optional + unwrap");
+    if (!o) { check(false, "optional condition"); }
     int32? none = {false, 0};
-    check(!none.valid, "invalid optional");
+    check(!none.valid && !none.is_some() && none.value_or(7) == 7, "invalid optional + value_or");
     result<int32, int32> r = divide(10, 2);
-    check(r.ok && r.value == 5, "result ok");
+    check(r.ok && r.value == 5 && r.is_ok() && r.unwrap() == 5, "result ok + unwrap");
     result<int32, int32> er = divide(10, 0);
-    check(!er.ok && er.error == -1, "result error");
+    check(!er.ok && er.error == -1 && er.is_err() && er.value_or(7) == 7, "result error + value_or");
     int32? g;
     check(!g.valid, "zero-init optional");
     optional<optional<int32>> nest = {true, {false, 0}};
@@ -697,7 +701,7 @@ void section_libc() {
     void* p = malloc(64);
     check(p != null, "malloc");
     char* buf = (char*)p;
-    char* src = "hello";                       // string_view → char*
+    const char* src = "hello";                 // literal → const char* (read-only)
     memcpy(buf, src, 5);
     buf[5] = 0;
     check(strlen(buf) == 5, "memcpy + strlen");
@@ -799,6 +803,13 @@ void section_lambda() {
     int32 b = 2;
     int32 cs = [=]() { return a + b; }();
     check(cs == 3, "capture all by value");
+    auto add = [cap](int32 x) -> int32 { return cap + x; };
+    cap = 0;
+    check(add(5) == 15, "stored closure (by value)");
+    int32 hits = 0;
+    auto hit = [&hits]() { hits = hits + 1; };
+    hit(); hit();
+    check(hits == 2, "stored closure (by reference)");
 }
 
 // ---------------------------------------------------------------------------

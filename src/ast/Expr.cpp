@@ -467,7 +467,7 @@ llvm::Value* BinaryExprAST::codegen(CodegenContext& ctx) {
             llvm::Value* v = e.codegen(ctx);
             if (!v) return nullptr;
             v = emitRValue(ctx, e, v);
-            return ctx.coerceToBool(v);
+            return ctx.coerceToBool(v, e.type);
         };
         llvm::Value* lhsV = evalTruthy(*left);
         if (!lhsV) return nullptr;
@@ -742,7 +742,7 @@ llvm::Value* UnaryExprAST::codegen(CodegenContext& ctx) {
             // Logical negation: normalize to i1 first, so `!x` is not bitwise
             // complement and `!p` (pointer) is well-typed.
             llvm::Value* operandVal = emitRValue(ctx, *operand, v);
-            return builder.CreateNot(ctx.coerceToBool(operandVal), "nottmp");
+            return builder.CreateNot(ctx.coerceToBool(operandVal, operand->type), "nottmp");
         }
         case UnaryOp::BitNot:    return builder.CreateNot(emitRValue(ctx, *operand, v), "bitnottmp");
         case UnaryOp::Deref: {
@@ -872,6 +872,29 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
             return ctx.getBuilder().CreateCall(fnType, fnPtr, callArgs);
         return ctx.getBuilder().CreateCall(fnType, fnPtr, callArgs, "icalltmp");
     }
+    // Review 2.6: captured-lambda closure call — pass the closure address as
+    // the hidden first argument.
+    if (isClosureCall) {
+        llvm::Value* closureAddr = ctx.lookupVariableAddr(callee);
+        if (!closureAddr) return nullptr;
+        llvm::Function* calleeFn = ctx.getModule().getFunction(mangledCallee);
+        if (!calleeFn) return nullptr;
+        std::vector<llvm::Value*> callArgs{closureAddr};
+        for (size_t i = 0; i < args.size(); ++i) {
+            llvm::Value* v = args[i]->codegen(ctx);
+            if (!v) return nullptr;
+            if (args[i]->isLValue) v = readLValue(ctx, *args[i], v);
+            if (i < resolvedParamTypes.size())
+                v = ctx.castValue(v, args[i]->type,
+                                  ctx.getLLVMType(resolvedParamTypes[i]));
+            callArgs.push_back(v);
+        }
+        if (type && type->kind != TypeKind::Void)
+            return ctx.getBuilder().CreateCall(calleeFn, callArgs, "closuretmp");
+        ctx.getBuilder().CreateCall(calleeFn, callArgs);
+        return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.getContext()), 0);
+    }
+
     // SEM-17: `obj(args)` through an overloaded `operator()` — call with the
     // object as the first argument.
     if (calleeExpr) {
@@ -904,7 +927,7 @@ llvm::Value* CallExprAST::codegen(CodegenContext& ctx) {
         llvm::Value* cond = args[0]->codegen(ctx);
         if (!cond) return nullptr;
         if (args[0]->isLValue) cond = readLValue(ctx, *args[0], cond);
-        cond = ctx.coerceToBool(cond);
+        cond = ctx.coerceToBool(cond, args[0]->type);
         if (!cond) return nullptr;
 
         llvm::Function* fn = builder.GetInsertBlock()->getParent();
@@ -1795,7 +1818,7 @@ llvm::Value* TernaryExprAST::codegen(CodegenContext& ctx) {
     if (cond->isLValue && cond->type && cond->type->kind != TypeKind::Array) {
         condVal = readLValue(ctx, *cond, condVal);
     }
-    condVal = ctx.coerceToBool(condVal);
+    condVal = ctx.coerceToBool(condVal, cond->type);
 
     auto& builder = ctx.getBuilder();
     llvm::Function* func = builder.GetInsertBlock()->getParent();
@@ -2160,6 +2183,102 @@ llvm::Value* ArrayAccessExprAST::codegen(CodegenContext& ctx) {
     return builder.CreateGEP(elemTy, arrVal, idxVal, "arrayidx");
 }
 
+llvm::Value* RangeExprAST::codegen(CodegenContext& ctx) {
+    auto& builder = ctx.getBuilder();
+    llvm::LLVMContext& c = ctx.getContext();
+    auto* i64Ty = llvm::Type::getInt64Ty(c);
+    auto* i8Ty = llvm::Type::getInt8Ty(c);
+
+    Type* objType = stripTypedefsT12(object->type);
+    if (!objType) return nullptr;
+
+    llvm::Value* basePtr = nullptr;
+    llvm::Value* totalLen = nullptr;
+    Type* elemType = nullptr;
+    bool stringLike = false;
+
+    if (objType->kind == TypeKind::Str || objType->kind == TypeKind::String) {
+        llvm::Value* v = object->codegen(ctx);
+        if (!v) return nullptr;
+        if (object->isLValue) v = readLValue(ctx, *object, v);
+        basePtr = builder.CreateExtractValue(v, 0, "range.ptr");
+        totalLen = builder.CreateExtractValue(v, 1, "range.len");
+        elemType = TypeContext::instance().getChar();
+        stringLike = true;
+    } else if (objType->kind == TypeKind::Slice) {
+        llvm::Value* v = object->codegen(ctx);
+        if (!v) return nullptr;
+        if (object->isLValue) v = readLValue(ctx, *object, v);
+        basePtr = builder.CreateExtractValue(v, 0, "range.ptr");
+        totalLen = builder.CreateExtractValue(v, 1, "range.len");
+        elemType = static_cast<SliceType*>(objType)->elementType;
+    } else if (objType->kind == TypeKind::Array) {
+        auto* at = static_cast<ArrayType*>(objType);
+        llvm::Value* addr = object->codegen(ctx);
+        if (!addr) return nullptr;
+        if (!object->isLValue) {
+            // Array expressions already denote a pointer to their first element.
+            basePtr = addr;
+        } else {
+            llvm::Type* arrLLVM = ctx.getLLVMType(objType);
+            basePtr = builder.CreateInBoundsGEP(
+                arrLLVM, addr,
+                {llvm::ConstantInt::get(i64Ty, 0),
+                 llvm::ConstantInt::get(i64Ty, 0)},
+                "range.base");
+        }
+        totalLen = llvm::ConstantInt::get(i64Ty, at->size);
+        elemType = at->elementType;
+    } else {
+        return nullptr;
+    }
+
+    auto indexValue = [&](ExprAST* e, llvm::Value* fallback) -> llvm::Value* {
+        if (!e) return fallback;
+        llvm::Value* v = e->codegen(ctx);
+        if (!v) return nullptr;
+        if (e->isLValue) v = readLValue(ctx, *e, v);
+        return builder.CreateSExtOrTrunc(v, i64Ty, "range.idx");
+    };
+
+    llvm::Value* beginV = indexValue(begin.get(), llvm::ConstantInt::get(i64Ty, 0));
+    if (!beginV) return nullptr;
+    llvm::Value* endV = indexValue(end.get(), totalLen);
+    if (!endV) return nullptr;
+
+    llvm::Function* fn = builder.GetInsertBlock()->getParent();
+    llvm::BasicBlock* okBB = llvm::BasicBlock::Create(c, "range.ok", fn);
+    llvm::BasicBlock* badBB = llvm::BasicBlock::Create(c, "range.bad", fn);
+    auto* neg = builder.CreateICmpSLT(beginV, llvm::ConstantInt::get(i64Ty, 0), "range.neg");
+    auto* inv = builder.CreateICmpSLT(endV, beginV, "range.inv");
+    auto* over = builder.CreateICmpSGT(endV, totalLen, "range.over");
+    auto* bad = builder.CreateOr(neg, builder.CreateOr(inv, over), "range.oob");
+    builder.CreateCondBr(bad, badBB, okBB);
+
+    builder.SetInsertPoint(badBB);
+    {
+        std::string prefix = nodeSourcePrefix(*this);
+        std::string msg = prefix.empty()
+            ? "panic: range: out of bounds\n"
+            : prefix + ": panic: range: out of bounds\n";
+        llvm::Value* fmt = builder.CreateGlobalString(msg, ".rangefmt");
+        emitDprintfAndAbort(ctx, fmt, {});
+        builder.CreateUnreachable();
+    }
+
+    builder.SetInsertPoint(okBB);
+    llvm::Type* elemLLVM = ctx.getLLVMType(elemType);
+    llvm::Value* subPtr = builder.CreateGEP(elemLLVM, basePtr, beginV, "range.ptr");
+    llvm::Value* subLen = builder.CreateSub(endV, beginV, "range.n");
+    llvm::Type* resTy = ctx.getLLVMType(type);
+    llvm::Value* res = llvm::Constant::getNullValue(resTy);
+    res = builder.CreateInsertValue(res, subPtr, {0});
+    res = builder.CreateInsertValue(res, subLen, {1});
+    (void)stringLike;
+    (void)i8Ty;
+    return res;
+}
+
 // Emit a GEP for a class field, following the base-class chain if the member
 // is inherited. The LLVM layout of a derived class is { %Base, ownFields... }.
 static llvm::Value* emitClassFieldGEP(CodegenContext& ctx, Type* aggType,
@@ -2286,6 +2405,45 @@ llvm::Value* MemberAccessExprAST::codegen(CodegenContext& ctx) {
             if (object->isLValue)
                 sliceVal = builder.CreateLoad(ctx.getLLVMType(st), sliceVal);
             return builder.CreateExtractValue(sliceVal, {1}, "slice.len");
+        }
+    }
+
+    // Review 2.2: property-first sequence access. The method forms remain
+    // accepted; both lower to the same fields.
+    {
+        Type* st = object->type;
+        while (st && st->kind == TypeKind::Typedef)
+            st = static_cast<TypedefType*>(st)->aliasedType;
+        if (st && st->kind == TypeKind::Array && memberName == "len") {
+            return llvm::ConstantInt::get(
+                llvm::Type::getInt64Ty(ctx.getContext()),
+                static_cast<ArrayType*>(st)->size);
+        }
+        if (st && (st->kind == TypeKind::Str || st->kind == TypeKind::String)) {
+            bool isString = st->kind == TypeKind::String;
+            if (memberName == "len" || memberName == "capacity" ||
+                memberName == "char_count" || memberName == "data") {
+                llvm::Value* v = object->codegen(ctx);
+                if (!v) return nullptr;
+                if (object->isLValue) v = readLValue(ctx, *object, v);
+                auto& builder = ctx.getBuilder();
+                if (memberName == "data")
+                    return builder.CreateExtractValue(v, 0,
+                        isString ? "string.data" : "str.data");
+                if (memberName == "len")
+                    return builder.CreateExtractValue(v, 1,
+                        isString ? "string.len" : "str.len");
+                if (memberName == "capacity")
+                    return builder.CreateExtractValue(v, 2, "string.cap");
+                // char_count: UTF-8 code-point scan (builder may be hijacked
+                // while synthesizing the helper).
+                auto savedIP = builder.saveIP();
+                llvm::Function* cntFn = ctx.getUtf8CharCountFn();
+                builder.restoreIP(savedIP);
+                llvm::Value* ptr = builder.CreateExtractValue(v, 0, "seq.ptr");
+                llvm::Value* len = builder.CreateExtractValue(v, 1, "seq.len");
+                return builder.CreateCall(cntFn, {ptr, len}, "seq.chars");
+            }
         }
     }
 
@@ -2873,10 +3031,27 @@ static llvm::Value* codegenBuiltinMethod(CodegenContext& ctx, MethodCallExprAST&
     auto* i64Ty = llvm::Type::getInt64Ty(c);
 
     switch (node.builtinMethod) {
+        case BuiltinMethod::SequenceLen: {
+            Type* st = node.object->type;
+            while (st && st->kind == TypeKind::Typedef)
+                st = static_cast<TypedefType*>(st)->aliasedType;
+            llvm::Value* obj = node.object->codegen(ctx);
+            if (!obj) return nullptr;
+            if (st && st->kind == TypeKind::Array)
+                return llvm::ConstantInt::get(i64Ty,
+                    static_cast<ArrayType*>(st)->size);
+            if (node.object->isLValue) obj = readLValue(ctx, *node.object, obj);
+            return builder.CreateExtractValue(obj, 1, "slice.len");
+        }
         case BuiltinMethod::StrLen: {
             llvm::Value* obj = builtinObjectValue(ctx, node);
             if (!obj) return nullptr;
             return builder.CreateExtractValue(obj, 1, "str.len");
+        }
+        case BuiltinMethod::StrData: {
+            llvm::Value* obj = builtinObjectValue(ctx, node);
+            if (!obj) return nullptr;
+            return builder.CreateExtractValue(obj, 0, "str.data");
         }
         case BuiltinMethod::StrCharCount: {
             // NOTE: getUtf8CharCountFn() may synthesize IR and re-point the
@@ -2997,12 +3172,100 @@ static llvm::Value* codegenBuiltinMethod(CodegenContext& ctx, MethodCallExprAST&
             v = builder.CreateInsertValue(v, subPtr, {0});
             return builder.CreateInsertValue(v, subLen, {1});
         }
+        case BuiltinMethod::OptionalIsSome:
+        case BuiltinMethod::OptionalIsNone: {
+            llvm::Value* obj = builtinObjectValue(ctx, node);
+            if (!obj) return nullptr;
+            llvm::Value* flag = builder.CreateExtractValue(obj, {0}, "opt.valid");
+            return node.builtinMethod == BuiltinMethod::OptionalIsSome
+                ? flag : builder.CreateNot(flag, "opt.none");
+        }
+        case BuiltinMethod::OptionalValueOr: {
+            llvm::Value* obj = builtinObjectValue(ctx, node);
+            if (!obj) return nullptr;
+            llvm::Value* flag = builder.CreateExtractValue(obj, {0}, "opt.valid");
+            llvm::Value* value = builder.CreateExtractValue(obj, {1}, "opt.value");
+            llvm::Value* fallback = node.args[0]->codegen(ctx);
+            if (!fallback) return nullptr;
+            if (node.args[0]->isLValue)
+                fallback = readLValue(ctx, *node.args[0], fallback);
+            fallback = ctx.castValue(fallback, node.args[0]->type,
+                                     ctx.getLLVMType(node.type));
+            return builder.CreateSelect(flag, value, fallback, "opt.valueor");
+        }
+        case BuiltinMethod::OptionalUnwrap: {
+            llvm::Value* obj = builtinObjectValue(ctx, node);
+            if (!obj) return nullptr;
+            llvm::Value* flag = builder.CreateExtractValue(obj, {0}, "opt.valid");
+            llvm::Value* value = builder.CreateExtractValue(obj, {1}, "opt.value");
+            llvm::Function* fn = builder.GetInsertBlock()->getParent();
+            llvm::BasicBlock* okBB = llvm::BasicBlock::Create(c, "opt.unwrap.ok", fn);
+            llvm::BasicBlock* badBB = llvm::BasicBlock::Create(c, "opt.unwrap.bad", fn);
+            builder.CreateCondBr(flag, okBB, badBB);
+            builder.SetInsertPoint(badBB);
+            {
+                std::string prefix = nodeSourcePrefix(node);
+                std::string msg = prefix.empty()
+                    ? "panic: optional.unwrap: invalid value\n"
+                    : prefix + ": panic: optional.unwrap: invalid value\n";
+                llvm::Value* fmt = builder.CreateGlobalString(msg, ".optunwrapfmt");
+                emitDprintfAndAbort(ctx, fmt, {});
+                builder.CreateUnreachable();
+            }
+            builder.SetInsertPoint(okBB);
+            return value;
+        }
+        case BuiltinMethod::ResultIsOk:
+        case BuiltinMethod::ResultIsErr: {
+            llvm::Value* obj = builtinObjectValue(ctx, node);
+            if (!obj) return nullptr;
+            llvm::Value* flag = builder.CreateExtractValue(obj, {0}, "res.ok");
+            return node.builtinMethod == BuiltinMethod::ResultIsOk
+                ? flag : builder.CreateNot(flag, "res.err");
+        }
+        case BuiltinMethod::ResultValueOr: {
+            llvm::Value* obj = builtinObjectValue(ctx, node);
+            if (!obj) return nullptr;
+            llvm::Value* flag = builder.CreateExtractValue(obj, {0}, "res.ok");
+            llvm::Value* value = builder.CreateExtractValue(obj, {1}, "res.value");
+            llvm::Value* fallback = node.args[0]->codegen(ctx);
+            if (!fallback) return nullptr;
+            if (node.args[0]->isLValue)
+                fallback = readLValue(ctx, *node.args[0], fallback);
+            fallback = ctx.castValue(fallback, node.args[0]->type,
+                                     ctx.getLLVMType(node.type));
+            return builder.CreateSelect(flag, value, fallback, "res.valueor");
+        }
+        case BuiltinMethod::ResultUnwrap: {
+            llvm::Value* obj = builtinObjectValue(ctx, node);
+            if (!obj) return nullptr;
+            llvm::Value* flag = builder.CreateExtractValue(obj, {0}, "res.ok");
+            llvm::Value* value = builder.CreateExtractValue(obj, {1}, "res.value");
+            llvm::Function* fn = builder.GetInsertBlock()->getParent();
+            llvm::BasicBlock* okBB = llvm::BasicBlock::Create(c, "res.unwrap.ok", fn);
+            llvm::BasicBlock* badBB = llvm::BasicBlock::Create(c, "res.unwrap.bad", fn);
+            builder.CreateCondBr(flag, okBB, badBB);
+            builder.SetInsertPoint(badBB);
+            {
+                std::string prefix = nodeSourcePrefix(node);
+                std::string msg = prefix.empty()
+                    ? "panic: result.unwrap: error value\n"
+                    : prefix + ": panic: result.unwrap: error value\n";
+                llvm::Value* fmt = builder.CreateGlobalString(msg, ".resunwrapfmt");
+                emitDprintfAndAbort(ctx, fmt, {});
+                builder.CreateUnreachable();
+            }
+            builder.SetInsertPoint(okBB);
+            return value;
+        }
         case BuiltinMethod::StringNew:
         case BuiltinMethod::StringDestroy:
         case BuiltinMethod::StringAppend:
         case BuiltinMethod::StringPush:
         case BuiltinMethod::StringLen:
         case BuiltinMethod::StringCapacity:
+        case BuiltinMethod::StringData:
+        case BuiltinMethod::StringCharCount:
             return codegenStringMethod(ctx, node);
         case BuiltinMethod::None:
             break;
@@ -3074,6 +3337,23 @@ static llvm::Value* codegenStringMethod(CodegenContext& ctx, MethodCallExprAST& 
             if (!addr) return nullptr;
             llvm::Value* v = builder.CreateLoad(strLLVM, addr, "string.v");
             return builder.CreateExtractValue(v, 2, "string.cap");
+        }
+        case BuiltinMethod::StringData: {
+            llvm::Value* addr = builtinObjectAddr(ctx, node);
+            if (!addr) return nullptr;
+            llvm::Value* v = builder.CreateLoad(strLLVM, addr, "string.v");
+            return builder.CreateExtractValue(v, 0, "string.data");
+        }
+        case BuiltinMethod::StringCharCount: {
+            llvm::Value* addr = builtinObjectAddr(ctx, node);
+            if (!addr) return nullptr;
+            llvm::Value* v = builder.CreateLoad(strLLVM, addr, "string.v");
+            llvm::Value* ptr = builder.CreateExtractValue(v, 0, "string.ptr");
+            llvm::Value* len = builder.CreateExtractValue(v, 1, "string.len");
+            auto savedIP = builder.saveIP();
+            llvm::Function* cntFn = ctx.getUtf8CharCountFn();
+            builder.restoreIP(savedIP);
+            return builder.CreateCall(cntFn, {ptr, len}, "string.chars");
         }
         case BuiltinMethod::StringNew: {
             // cap = max(len, 1); malloc(cap); memcpy(ptr, s.ptr, len).

@@ -134,6 +134,7 @@ private:
     bool isPointerOrArray(Type* type) const;
     // Scalar = arithmetic or pointer/array; the valid type for a condition.
     bool isScalarType(Type* type) const;
+    bool isConditionType(Type* type) const;
     bool typesCompatible(Type* left, Type* right) const;
     Type* getCommonType(Type* left, Type* right) const;
     std::string typeToString(Type* type) const;
@@ -170,6 +171,8 @@ private:
     bool tryAnalyzeStringStaticCall(MethodCallExprAST& node);
     void analyzeStrMethod(MethodCallExprAST& node, Type* objType);
     void analyzeStringMethod(MethodCallExprAST& node, Type* objType);
+    void analyzeOptionalMethod(MethodCallExprAST& node, Type* objType);
+    void analyzeResultMethod(MethodCallExprAST& node, Type* objType);
     bool lowerToString(CallExprAST& node, size_t argIndex, Type* argType);
     bool hasCircularInheritance(const std::string& className, const std::string& baseClass) const;
     // PAR-12 / INH-04: 聚合名义身份——`derived` 是否沿基类链是 `base` 的派生
@@ -266,6 +269,7 @@ private:
     void visit(CommaExprAST& node);
     void visit(PostfixIncDecExprAST& node);
     void visit(ArrayAccessExprAST& node);
+    void visit(RangeExprAST& node);
     void visit(MemberAccessExprAST& node);
     void visit(MethodCallExprAST& node);
     void visit(SizeofExprAST& node);

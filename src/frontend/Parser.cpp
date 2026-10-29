@@ -1293,8 +1293,31 @@ std::unique_ptr<ExprAST> Parser::parsePostfix(std::unique_ptr<ExprAST> lhs) {
             }
             case TokenType::TOKEN_LBRACKET: {
                 advance(); // consume '['
+                // Review 2.2: `s[a:b]`, `s[:b]`, `s[a:]`, `s[:]`.
+                if (match(TokenType::TOKEN_COLON)) {
+                    std::unique_ptr<ExprAST> end;
+                    if (!check(TokenType::TOKEN_RBRACKET)) {
+                        end = parseExpr();
+                        if (!end) return nullptr;
+                    }
+                    expect(TokenType::TOKEN_RBRACKET, "expected ']' after range");
+                    lhs = std::make_unique<RangeExprAST>(
+                        std::move(lhs), nullptr, std::move(end));
+                    break;
+                }
                 auto index = parseExpr();
                 if (!index) return nullptr;
+                if (match(TokenType::TOKEN_COLON)) {
+                    std::unique_ptr<ExprAST> end;
+                    if (!check(TokenType::TOKEN_RBRACKET)) {
+                        end = parseExpr();
+                        if (!end) return nullptr;
+                    }
+                    expect(TokenType::TOKEN_RBRACKET, "expected ']' after range");
+                    lhs = std::make_unique<RangeExprAST>(
+                        std::move(lhs), std::move(index), std::move(end));
+                    break;
+                }
                 expect(TokenType::TOKEN_RBRACKET, "expected ']' after array index");
                 lhs = std::make_unique<ArrayAccessExprAST>(std::move(lhs), std::move(index));
                 break;
@@ -2121,6 +2144,7 @@ bool Parser::isTypeStart() const {
         case TokenType::TOKEN_CHAR_KW:
         case TokenType::TOKEN_VOID:
         case TokenType::TOKEN_BOOL:
+        case TokenType::TOKEN_AUTO:
         case TokenType::TOKEN_STRUCT:
         case TokenType::TOKEN_UNION:
         case TokenType::TOKEN_ENUM:
@@ -2248,6 +2272,10 @@ Type* Parser::parseBaseType() {
     if (!tok) return nullptr;
 
     switch (tok->type) {
+        case TokenType::TOKEN_AUTO: {
+            advance();
+            return new Type(TypeKind::Auto);
+        }
         case TokenType::TOKEN_CHAR_KW: {
             advance();
             return TypeContext::instance().getChar();
@@ -2719,6 +2747,37 @@ Type* Parser::parseType() {
         }
     }
 
+    // Qualifiers must not mutate shared scalar singletons (`const char*` was
+    // poisoning the global char type, making every later char* const).
+    if (isConst || isVolatile) {
+        switch (baseType->kind) {
+            case TypeKind::Void:
+            case TypeKind::Char:
+            case TypeKind::Bool:
+            case TypeKind::Int8: case TypeKind::Int16:
+            case TypeKind::Int32: case TypeKind::Int64:
+            case TypeKind::Int128:
+            case TypeKind::UInt8: case TypeKind::UInt16:
+            case TypeKind::UInt32: case TypeKind::UInt64:
+            case TypeKind::UInt128:
+            case TypeKind::ISize: case TypeKind::USize:
+            case TypeKind::Float16: case TypeKind::Float32:
+            case TypeKind::Float64: case TypeKind::Float128: {
+                auto* copy = new Type(baseType->kind, baseType->base);
+                copy->isConst = baseType->isConst;
+                copy->isVolatile = baseType->isVolatile;
+                copy->isAtomic = baseType->isAtomic;
+                copy->isRestrict = baseType->isRestrict;
+                copy->ctDeadBranch = baseType->ctDeadBranch;
+                copy->deprecated = baseType->deprecated;
+                copy->deprecatedMsg = baseType->deprecatedMsg;
+                baseType = copy;
+                break;
+            }
+            default:
+                break;
+        }
+    }
     baseType->isConst = isConst;
     baseType->isVolatile = isVolatile;
     // CON-01: `atomic T` must NOT mutate the shared scalar singletons
@@ -3949,9 +4008,35 @@ std::unique_ptr<FunctionDeclAST> Parser::parseFunctionDecl(Type* returnType, con
 }
 
 std::unique_ptr<DeclAST> Parser::parseVariableDecl(Type* type, const std::string& name, bool isConstexpr) {
-    // constexpr implies const
+    // constexpr implies const. Never mutate a shared scalar singleton.
     if (isConstexpr) {
-        type->isConst = true;
+        bool scalar = false;
+        switch (type ? type->kind : TypeKind::Void) {
+            case TypeKind::Char: case TypeKind::Bool:
+            case TypeKind::Int8: case TypeKind::Int16:
+            case TypeKind::Int32: case TypeKind::Int64:
+            case TypeKind::Int128:
+            case TypeKind::UInt8: case TypeKind::UInt16:
+            case TypeKind::UInt32: case TypeKind::UInt64:
+            case TypeKind::UInt128:
+            case TypeKind::ISize: case TypeKind::USize:
+            case TypeKind::Float16: case TypeKind::Float32:
+            case TypeKind::Float64: case TypeKind::Float128:
+                scalar = true;
+                break;
+            default:
+                break;
+        }
+        if (scalar) {
+            auto* copy = new Type(type->kind, type->base);
+            copy->isConst = true;
+            copy->isVolatile = type->isVolatile;
+            copy->isAtomic = type->isAtomic;
+            copy->isRestrict = type->isRestrict;
+            type = copy;
+        } else {
+            type->isConst = true;
+        }
     }
 
     std::unique_ptr<ExprAST> init;
@@ -5054,7 +5139,8 @@ std::unique_ptr<StructDeclAST> Parser::parseClassDecl() {
         // type identifier '(' ... or operator symbol '('
         size_t savedPos = m_currentTokenPos;
 
-        if (isTypeStart()) {
+        if (isTypeStart() || check(TokenType::TOKEN_CONST) ||
+            check(TokenType::TOKEN_VOLATILE) || check(TokenType::TOKEN_ATOMIC)) {
             Type* declType = parseType();
             if (!declType) break;
 

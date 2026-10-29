@@ -220,6 +220,16 @@ bool isUnsignedIntegerType(Type* type) {
     return isUnsignedKind(type->kind);
 }
 
+static bool isConstCharPointer(Type* t) {
+    while (t && t->kind == TypeKind::Typedef)
+        t = static_cast<TypedefType*>(t)->aliasedType;
+    if (!t || t->kind != TypeKind::Pointer) return false;
+    Type* base = t->base;
+    while (base && base->kind == TypeKind::Typedef)
+        base = static_cast<TypedefType*>(base)->aliasedType;
+    return base && base->kind == TypeKind::Char && base->isConst;
+}
+
 int conversionRank(Type* from, Type* to) {
     if (!from || !to) return -1;
     if (typesEqual(from, to)) return 0;
@@ -237,16 +247,13 @@ int conversionRank(Type* from, Type* to) {
         typesEqual(static_cast<ArrayType*>(from)->elementType,
                    static_cast<SliceType*>(to)->elementType)) return 1;
 
-    // P1-06 (FMT-03): str decays to a char* byte view (drops the UTF-8
-    // guarantee and the length). char* -> str is NOT implicit.
-    if (from->kind == TypeKind::Str && to->kind == TypeKind::Pointer &&
-        to->base && to->base->kind == TypeKind::Char) return 1;
+    // Review 2.5: views/literals may become read-only C strings; mutable
+    // char* requires an explicit cast.
+    if ((from->kind == TypeKind::Str || from->kind == TypeKind::String) &&
+        isConstCharPointer(to)) return 1;
 
     // P1-06 (FMT-02): string converts to a str view (non-owning).
     if (from->kind == TypeKind::String && to->kind == TypeKind::Str) return 1;
-    // P1-06: and directly to a char* byte view of its buffer.
-    if (from->kind == TypeKind::String && to->kind == TypeKind::Pointer &&
-        to->base && to->base->kind == TypeKind::Char) return 2;
 
     // Enum types are strongly typed (TYP-09 / TYP-20): enum <-> integer/float
     // and enum <-> other enum require an explicit conversion. Exact-same-enum

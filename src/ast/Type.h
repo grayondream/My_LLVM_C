@@ -55,6 +55,9 @@ enum class TypeKind {
     // 使用点解析为具体实例类型后不再残留。
     TypeVar,
     TypeInstance,
+    // Review 2.6: parser placeholder for `auto name = init;`; sema replaces
+    // it with the initializer's type before codegen.
+    Auto,
 };
 
 class Type {
@@ -140,6 +143,12 @@ public:
     std::vector<FieldInfo> semanticFields;
     // P1-07 / AGG-06: 位域布局表（LayoutBuilder 物化时填充）——字段名 → 布局。
     std::unordered_map<std::string, BitFieldLayout> bitFields;
+    // Review 2.6: captured-lambda closure metadata. A closure value is a
+    // normal struct; these fields let a variable of that type be called.
+    bool isClosure = false;
+    std::string closureCallName;
+    std::vector<Type*> closureParamTypes;
+    Type* closureReturnType = nullptr;
 
     StructType(const std::string& n)
         : Type(TypeKind::Struct), name(n) {}

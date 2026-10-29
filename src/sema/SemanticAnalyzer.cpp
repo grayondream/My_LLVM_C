@@ -22,6 +22,15 @@ static Type* stripTypedef(Type* type) {
     return type;
 }
 
+// Review 2.5: a view/literal may implicitly become a read-only C string,
+// never a mutable char*. Explicit casts remain the interop escape hatch.
+static bool isConstCharPointer(Type* t) {
+    t = stripTypedef(t);
+    if (!t || t->kind != TypeKind::Pointer) return false;
+    Type* base = stripTypedef(t->base);
+    return base && base->kind == TypeKind::Char && base->isConst;
+}
+
 // P1-07 / SEM-12: bit-field base types — bool + the fixed-width integer
 // family (int8..int128 / uint8..uint128 / isize / usize). char and enum are
 // NOT allowed (spec §4.3).
@@ -321,6 +330,13 @@ bool SemanticAnalyzer::isScalarType(Type* type) const {
     return isArithmeticType(type) || isPointerOrArray(type);
 }
 
+bool SemanticAnalyzer::isConditionType(Type* type) const {
+    Type* t = stripTypedef(type);
+    if (!t) return false;
+    return isScalarType(t) || t->kind == TypeKind::Optional ||
+           t->kind == TypeKind::Result;
+}
+
 bool SemanticAnalyzer::typesCompatible(Type* left, Type* right) const {
     left = stripTypedef(left);
     right = stripTypedef(right);
@@ -354,23 +370,14 @@ bool SemanticAnalyzer::typesCompatible(Type* left, Type* right) const {
     // (target, source); a symmetric rule silently admitted `str s = p;`
     // with an uninitialized length field (final review C1). The reverse
     // direction falls through to the final `return false`.
-    if (left->kind == TypeKind::Pointer && right->kind == TypeKind::Str &&
-        typesEqual(left->base, typeCtx->getChar()))
+    if (isConstCharPointer(left) &&
+        (right->kind == TypeKind::Str || right->kind == TypeKind::String))
         return true;
     if (left->kind == TypeKind::Str && right->kind == TypeKind::Str)
         return true;
     // P1-06 (FMT-02): string -> str is an implicit (non-owning) view;
     // str -> string is NOT implicit (use string.new).
     if (left->kind == TypeKind::Str && right->kind == TypeKind::String)
-        return true;
-    // P1-06: a string may also be viewed directly as char* (its buffer is
-    // valid; the view is non-owning either way). Both orders accepted —
-    // callers use (target, source) or (lhs, rhs); the String side is always
-    // the conversion source.
-    if ((left->kind == TypeKind::String && right->kind == TypeKind::Pointer &&
-         typesEqual(right->base, typeCtx->getChar())) ||
-        (right->kind == TypeKind::String && left->kind == TypeKind::Pointer &&
-         typesEqual(left->base, typeCtx->getChar())))
         return true;
     if (left->kind == TypeKind::String && right->kind == TypeKind::String)
         return true;
@@ -435,6 +442,7 @@ std::string SemanticAnalyzer::typeToString(Type* type) const {
         case TypeKind::Result: return "result";
         case TypeKind::Str: return "string_view";
         case TypeKind::String: return "string";
+        case TypeKind::Auto: return "auto";
         case TypeKind::Pointer: {
             std::string baseStr = typeToString(type->base);
             if (type->isConst) baseStr = "const " + baseStr;
@@ -592,7 +600,7 @@ Type* SemanticAnalyzer::checkBinaryTypes(BinaryOp op, Type* left, Type* right, E
         case BinaryOp::Or:
             // 评审 I1: logical operands must be scalar — Optional/Result
             // reaching `and`/`br` produced invalid IR.
-            if (!isScalarType(left) || !isScalarType(right)) {
+            if (!isConditionType(left) || !isConditionType(right)) {
                 emitError("logical operator '" + binaryOpToString(op) +
                               "' requires scalar operands, got '" +
                               typeToString(left) + "' and '" + typeToString(right) + "'",
@@ -692,17 +700,14 @@ Type* SemanticAnalyzer::checkAssignmentTypes(Type* lhs, Type* rhs, ExprAST& node
     // P1-06 (FMT-03): str -> char* implicit byte view (drops the UTF-8
     // guarantee and the length); char* -> str is NOT implicit (use
     // str_from_c). Targets of type str are same-kind (above).
-    if (lhsS->kind == TypeKind::Pointer && rhsS->kind == TypeKind::Str &&
-        typesEqual(lhsS->base, typeCtx->getChar()))
+    if (isConstCharPointer(lhsS) &&
+        (rhsS->kind == TypeKind::Str || rhsS->kind == TypeKind::String))
         return lhsRaw;
     // P1-06 (FMT-02): string -> str implicit view. The reverse direction is
     // rejected below with the DEC-20 guidance (string.new).
     if (lhsS->kind == TypeKind::Str && rhsS->kind == TypeKind::String)
         return lhsRaw;
-    // P1-06: string -> char* direct view (composes string->str->char*).
-    if (lhsS->kind == TypeKind::Pointer && lhsS->base &&
-        lhsS->base->kind == TypeKind::Char && rhsS->kind == TypeKind::String)
-        return lhsRaw;
+
     // P1-06 (DEC-20): no implicit heap allocation — str/char* values do not
     // become `string`; construction is explicit.
     if (lhsS->kind == TypeKind::String &&
@@ -1830,7 +1835,16 @@ void SemanticAnalyzer::visit(BinaryExprAST& node) {
                 return false;
         }
     };
-    if (isOverloadOperand(leftType) || isOverloadOperand(rightType)) {
+    auto isOptionalOrResult = [](Type* t) {
+        t = stripTypedef(t);
+        return t && (t->kind == TypeKind::Optional ||
+                     t->kind == TypeKind::Result);
+    };
+    bool logicalOnOptional =
+        (node.op == BinaryOp::And || node.op == BinaryOp::Or) &&
+        (isOptionalOrResult(leftType) || isOptionalOrResult(rightType));
+    if (!logicalOnOptional &&
+        (isOverloadOperand(leftType) || isOverloadOperand(rightType))) {
         std::string mangledName = getOperatorMangledName(node.op, leftType, rightType);
         if (!mangledName.empty()) {
             // Look up by the unmangled operator name (e.g., "operator+")
@@ -1951,6 +1965,17 @@ void SemanticAnalyzer::visit(UnaryExprAST& node) {
     }
 
     Type* operandType = getExprType(*node.operand);
+
+    // Review 2.4: `!opt` / `!res` mean "invalid" / "error" before any
+    // user-defined operator overload lookup.
+    if (node.op == UnaryOp::Not) {
+        Type* ot = stripTypedef(operandType);
+        if (ot && (ot->kind == TypeKind::Optional || ot->kind == TypeKind::Result)) {
+            node.type = typeCtx->getInt32();
+            node.isLValue = false;
+            return;
+        }
+    }
 
     // SEM-17: unary operator overloading on aggregate operands. Resolve the
     // operator as a free function; when none exists, fall through to the
@@ -2379,8 +2404,8 @@ bool SemanticAnalyzer::tryAnalyzeAssertCall(CallExprAST& node) {    node.type = 
     if (!condType) {
         return true; // already reported
     }
-    if (!isScalarType(condType)) {
-        emitError("'assert' condition must be scalar, got '" + typeToString(condType) + "'", node);
+    if (!isConditionType(condType)) {
+        emitError("'assert' condition must be a scalar or optional/result, got '" + typeToString(condType) + "'", node);
         return true;
     }
     node.isAssert = true;
@@ -2517,6 +2542,18 @@ void SemanticAnalyzer::analyzeStrMethod(MethodCallExprAST& node, Type* objType) 
         node.type = typeCtx->getUSize();
         return;
     }
+    if (name == "data") {
+        if (!argTypes.empty()) {
+            emitError("'data()' takes no arguments", node);
+            node.type = nullptr;
+            return;
+        }
+        auto* ch = new Type(*typeCtx->getChar());
+        ch->isConst = true;
+        node.builtinMethod = BuiltinMethod::StrData;
+        node.type = new Type(TypeKind::Pointer, ch);
+        return;
+    }
     if (name == "char_at" || name == "char_len_at") {
         if (argTypes.size() != 1 || !isIntegerType(argTypes[0])) {
             emitError("'" + name + "()' requires exactly one integer argument", node);
@@ -2587,15 +2624,28 @@ void SemanticAnalyzer::analyzeStringMethod(MethodCallExprAST& node, Type* objTyp
         return t && (t->kind == TypeKind::Str || t->kind == TypeKind::String);
     };
 
-    if (name == "len" || name == "capacity") {
+    if (name == "len" || name == "capacity" || name == "char_count") {
         if (!argTypes.empty()) {
             emitError("'" + name + "()' takes no arguments", node);
             node.type = nullptr;
             return;
         }
-        node.builtinMethod =
-            name == "len" ? BuiltinMethod::StringLen : BuiltinMethod::StringCapacity;
+        if (name == "char_count")
+            node.builtinMethod = BuiltinMethod::StringCharCount;
+        else
+            node.builtinMethod =
+                name == "len" ? BuiltinMethod::StringLen : BuiltinMethod::StringCapacity;
         node.type = typeCtx->getUSize();
+        return;
+    }
+    if (name == "data") {
+        if (!argTypes.empty()) {
+            emitError("'data()' takes no arguments", node);
+            node.type = nullptr;
+            return;
+        }
+        node.builtinMethod = BuiltinMethod::StringData;
+        node.type = new Type(TypeKind::Pointer, typeCtx->getChar());
         return;
     }
     if (name == "destroy") {
@@ -2630,6 +2680,96 @@ void SemanticAnalyzer::analyzeStringMethod(MethodCallExprAST& node, Type* objTyp
     }
     emitError("no member named '" + name + "' in string", node);
     node.type = nullptr;
+}
+
+void SemanticAnalyzer::analyzeOptionalMethod(MethodCallExprAST& node, Type* objType) {
+    auto* opt = static_cast<OptionalType*>(stripTypedef(objType));
+    std::vector<Type*> argTypes;
+    for (auto& arg : node.args) argTypes.push_back(getExprType(*arg));
+
+    if (node.methodName == "is_some" || node.methodName == "is_none") {
+        if (!argTypes.empty()) {
+            emitError("'" + node.methodName + "()' takes no arguments", node);
+            node.type = nullptr;
+            return;
+        }
+        node.builtinMethod = node.methodName == "is_some"
+            ? BuiltinMethod::OptionalIsSome : BuiltinMethod::OptionalIsNone;
+        node.type = typeCtx->getBool();
+        node.isLValue = false;
+        return;
+    }
+    if (node.methodName == "unwrap") {
+        if (!argTypes.empty()) {
+            emitError("'unwrap()' takes no arguments", node);
+            node.type = nullptr;
+            return;
+        }
+        node.builtinMethod = BuiltinMethod::OptionalUnwrap;
+        node.type = opt->elementType;
+        node.isLValue = false;
+        return;
+    }
+    if (node.methodName == "value_or") {
+        if (argTypes.size() != 1 || !typesCompatible(opt->elementType, argTypes[0])) {
+            emitError("'value_or()' requires one value compatible with '" +
+                          typeToString(opt->elementType) + "'", node);
+            node.type = nullptr;
+            return;
+        }
+        node.builtinMethod = BuiltinMethod::OptionalValueOr;
+        node.type = opt->elementType;
+        node.isLValue = false;
+        return;
+    }
+    emitError("no member named '" + node.methodName + "' in optional", node);
+    node.type = nullptr;
+    node.isLValue = false;
+}
+
+void SemanticAnalyzer::analyzeResultMethod(MethodCallExprAST& node, Type* objType) {
+    auto* res = static_cast<ResultType*>(stripTypedef(objType));
+    std::vector<Type*> argTypes;
+    for (auto& arg : node.args) argTypes.push_back(getExprType(*arg));
+
+    if (node.methodName == "is_ok" || node.methodName == "is_err") {
+        if (!argTypes.empty()) {
+            emitError("'" + node.methodName + "()' takes no arguments", node);
+            node.type = nullptr;
+            return;
+        }
+        node.builtinMethod = node.methodName == "is_ok"
+            ? BuiltinMethod::ResultIsOk : BuiltinMethod::ResultIsErr;
+        node.type = typeCtx->getBool();
+        node.isLValue = false;
+        return;
+    }
+    if (node.methodName == "unwrap") {
+        if (!argTypes.empty()) {
+            emitError("'unwrap()' takes no arguments", node);
+            node.type = nullptr;
+            return;
+        }
+        node.builtinMethod = BuiltinMethod::ResultUnwrap;
+        node.type = res->successType;
+        node.isLValue = false;
+        return;
+    }
+    if (node.methodName == "value_or") {
+        if (argTypes.size() != 1 || !typesCompatible(res->successType, argTypes[0])) {
+            emitError("'value_or()' requires one value compatible with '" +
+                          typeToString(res->successType) + "'", node);
+            node.type = nullptr;
+            return;
+        }
+        node.builtinMethod = BuiltinMethod::ResultValueOr;
+        node.type = res->successType;
+        node.isLValue = false;
+        return;
+    }
+    emitError("no member named '" + node.methodName + "' in result", node);
+    node.type = nullptr;
+    node.isLValue = false;
 }
 
 void SemanticAnalyzer::visit(CallExprAST& node) {
@@ -2717,6 +2857,42 @@ void SemanticAnalyzer::visit(CallExprAST& node) {
         if (!userDefined || userDefined->empty()) {
             tryAnalyzeSplitCall(node);
             return;
+        }
+    }
+
+    // Review 2.6: call through a stored captured-lambda closure.
+    if (Symbol* sym = lookup(node.callee)) {
+        Type* st = stripTypedef(sym->type);
+        if (st && st->kind == TypeKind::Struct) {
+            auto* closure = static_cast<StructType*>(st);
+            if (closure->isClosure) {
+                sym->isUsed = true;
+                if (node.args.size() != closure->closureParamTypes.size()) {
+                    emitError("closure call expects " +
+                                  std::to_string(closure->closureParamTypes.size()) +
+                                  " argument(s), got " +
+                                  std::to_string(node.args.size()), node);
+                    node.type = nullptr;
+                    node.isLValue = false;
+                    return;
+                }
+                for (size_t i = 0; i < node.args.size(); ++i) {
+                    Type* at = getExprType(*node.args[i]);
+                    if (!at) continue;
+                    if (!typesCompatible(closure->closureParamTypes[i], at)) {
+                        emitError("closure argument " + std::to_string(i) +
+                                      ": expected '" +
+                                      typeToString(closure->closureParamTypes[i]) +
+                                      "', got '" + typeToString(at) + "'", node);
+                    }
+                }
+                node.isClosureCall = true;
+                node.mangledCallee = closure->closureCallName;
+                node.resolvedParamTypes = closure->closureParamTypes;
+                node.type = closure->closureReturnType;
+                node.isLValue = false;
+                return;
+            }
         }
     }
 
@@ -3070,8 +3246,8 @@ void SemanticAnalyzer::visit(TernaryExprAST& node) {
     Type* thenType = getExprType(*node.then);
     Type* elseType = getExprType(*node.elseExpr);
 
-    if (condType && !isScalarType(condType)) {
-        emitError("ternary condition must be scalar type, but got '" + typeToString(condType) + "'", node);
+    if (condType && !isConditionType(condType)) {
+        emitError("ternary condition must be scalar or optional/result, but got '" + typeToString(condType) + "'", node);
     }
 
     // 三元根因轮：分支类型须兼容——非算术对且 typesCompatible 不成立时
@@ -3111,13 +3287,19 @@ void SemanticAnalyzer::visit(CastExprAST& node) {
         Type* to = stripTypedef(node.castType);
         bool ok = true;
         const char* what = "cast";
+        // Review 2.5: explicit interop cast from a view/owning string to a
+        // raw char pointer. Implicit conversion is restricted separately.
+        bool explicitViewToPointer =
+            (from->kind == TypeKind::Str || from->kind == TypeKind::String) &&
+            to->kind == TypeKind::Pointer;
         switch (node.castKind) {
             case CastKind::Static:
                 // Arithmetic <-> arithmetic (incl. enum, which are integers) or
                 // pointer/array <-> pointer/array. Pointer <-> integer must use
                 // reinterpret_cast (or a C-style cast).
                 ok = (isArithmeticType(from) && isArithmeticType(to)) ||
-                     (isPointerOrArray(from) && isPointerOrArray(to));
+                     (isPointerOrArray(from) && isPointerOrArray(to)) ||
+                     explicitViewToPointer;
                 what = "static_cast";
                 break;
             case CastKind::Reinterpret:
@@ -3135,6 +3317,7 @@ void SemanticAnalyzer::visit(CastExprAST& node) {
                      (isPointerOrArray(from) && isPointerOrArray(to)) ||
                      (isPointerOrArray(from) && isIntegerType(to)) ||
                      (isIntegerType(from) && isPointerOrArray(to)) ||
+                     explicitViewToPointer ||
                      typesCompatible(exprType, node.castType);
                 what = "cast";
                 break;
@@ -3275,6 +3458,55 @@ void SemanticAnalyzer::visit(ArrayAccessExprAST& node) {
     node.isLValue = true;
 }
 
+void SemanticAnalyzer::visit(RangeExprAST& node) {
+    Type* objType = getExprType(*node.object);
+    if (!objType) {
+        node.type = nullptr;
+        node.isLValue = false;
+        return;
+    }
+    if (node.begin) {
+        Type* bt = getExprType(*node.begin);
+        if (bt && !isIntegerType(bt)) {
+            emitError("range begin must be an integer, got '" +
+                          typeToString(bt) + "'", node);
+        }
+    }
+    if (node.end) {
+        Type* et = getExprType(*node.end);
+        if (et && !isIntegerType(et)) {
+            emitError("range end must be an integer, got '" +
+                          typeToString(et) + "'", node);
+        }
+    }
+    Type* st = stripTypedef(objType);
+    if (!st) {
+        node.type = nullptr;
+        node.isLValue = false;
+        return;
+    }
+    switch (st->kind) {
+        case TypeKind::Str:
+        case TypeKind::String:
+            node.type = typeCtx->getStrType();
+            break;
+        case TypeKind::Array:
+            node.type = typeCtx->getSliceType(
+                static_cast<ArrayType*>(st)->elementType);
+            break;
+        case TypeKind::Slice:
+            node.type = typeCtx->getSliceType(
+                static_cast<SliceType*>(st)->elementType);
+            break;
+        default:
+            emitError("range access requires an array, slice, string_view, or string, got '" +
+                          typeToString(objType) + "'", node);
+            node.type = nullptr;
+            break;
+    }
+    node.isLValue = false;
+}
+
 void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
     // P1-04 / CT-04/05: compile_time 成员链特判——先于对象解析（根标识符是
     // 编译期命名空间，不是普通变量，普通路径会误报 undeclared）。
@@ -3356,6 +3588,56 @@ void SemanticAnalyzer::visit(MemberAccessExprAST& node) {
         }
         memberBaseType = strippedBase;
     } else {
+        // Review 2.2: property-first sequence API. `.len` works on arrays,
+        // slices, string_view, and string; `.capacity` / `.char_count` /
+        // `.data` are string properties. Method forms stay as aliases.
+        if (strippedObj->kind == TypeKind::Array) {
+            if (node.memberName == "len") {
+                node.type = TypeContext::instance().getInt64();
+                node.isLValue = false;
+                return;
+            }
+            emitError("no member named '" + node.memberName + "' in array", node);
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
+        }
+        if (strippedObj->kind == TypeKind::Str) {
+            if (node.memberName == "len" || node.memberName == "char_count") {
+                node.type = TypeContext::instance().getUSize();
+                node.isLValue = false;
+                return;
+            }
+            if (node.memberName == "data") {
+                auto* ch = new Type(*TypeContext::instance().getChar());
+                ch->isConst = true;
+                node.type = new Type(TypeKind::Pointer, ch);
+                node.isLValue = false;
+                return;
+            }
+            emitError("no member named '" + node.memberName + "' in string_view", node);
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
+        }
+        if (strippedObj->kind == TypeKind::String) {
+            if (node.memberName == "len" || node.memberName == "capacity" ||
+                node.memberName == "char_count") {
+                node.type = TypeContext::instance().getUSize();
+                node.isLValue = false;
+                return;
+            }
+            if (node.memberName == "data") {
+                node.type = new Type(TypeKind::Pointer,
+                                     TypeContext::instance().getChar());
+                node.isLValue = false;
+                return;
+            }
+            emitError("no member named '" + node.memberName + "' in string", node);
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
+        }
         // TYP-12: `.len` is the only member of a slice (D1: no `.ptr`).
         if (strippedObj->kind == TypeKind::Slice) {
             if (node.memberName == "len") {
@@ -3544,6 +3826,32 @@ void SemanticAnalyzer::visit(MethodCallExprAST& node) {
         node.type = nullptr;
         node.isLValue = false;
         return;
+    }
+
+    // Review 2.2: `len()` stays as a compatibility alias on arrays/slices.
+    {
+        Type* seq = stripTypedef(objType);
+        if (seq && (seq->kind == TypeKind::Array || seq->kind == TypeKind::Slice)) {
+            if (node.methodName == "len" && node.args.empty()) {
+                node.builtinMethod = BuiltinMethod::SequenceLen;
+                node.type = typeCtx->getInt64();
+                node.isLValue = false;
+                return;
+            }
+            emitError("no member named '" + node.methodName + "' in sequence type", node);
+            node.type = nullptr;
+            node.isLValue = false;
+            return;
+        }
+    }
+
+    // Review 2.4: Optional/Result unpacking methods.
+    {
+        Type* ot = stripTypedef(objType);
+        if (ot && ot->kind == TypeKind::Optional)
+            return analyzeOptionalMethod(node, ot);
+        if (ot && ot->kind == TypeKind::Result)
+            return analyzeResultMethod(node, ot);
     }
 
     // P1-06 (FMT-01): str builtin methods (identifier-based builtins, not
@@ -3951,6 +4259,11 @@ void SemanticAnalyzer::collectUsedNamesDecl(DeclAST* decl, std::unordered_set<st
 
 // PAR-11: lambda 表达式语义。无捕获 → 函数指针类型；有捕获 → 闭包 struct。
 void SemanticAnalyzer::visit(LambdaExprAST& node) {
+    // getExprType may revisit an already-analyzed initializer (e.g. `auto`
+    // inference followed by the normal initializer check). Keep the closure
+    // type stable — a second visit must not mint `__lambda___anon_1`.
+    if (node.type) return;
+
     // 1) 参数类型。
     std::vector<Type*> paramTypes;
     for (auto& p : node.params) {
@@ -4057,6 +4370,12 @@ void SemanticAnalyzer::visit(LambdaExprAST& node) {
     // 6) 表达式类型落定。
     auto* fnType = new FunctionType(retType, paramTypes);
     if (node.closureType) {
+        auto* closure = static_cast<StructType*>(node.closureType);
+        closure->isClosure = true;
+        closure->closureCallName = closure->name + "__call";
+        closure->closureParamTypes = paramTypes;
+        closure->closureReturnType = retType;
+        node.lambdaFnName = closure->closureCallName;
         node.type = node.closureType;
     } else {
         node.type = new Type(TypeKind::Pointer, fnType);
@@ -4495,8 +4814,8 @@ void SemanticAnalyzer::visit(ReturnStmtAST& node) {
 
 void SemanticAnalyzer::visit(IfStmtAST& node) {
     Type* condType = getExprType(*node.cond);
-    if (condType && !isScalarType(condType)) {
-        emitError("if condition must be scalar type, but got '" + typeToString(condType) + "'", node);
+    if (condType && !isConditionType(condType)) {
+        emitError("if condition must be scalar or optional/result, but got '" + typeToString(condType) + "'", node);
     }
     if (node.thenStmt) visit(*node.thenStmt);
     if (node.elseStmt) visit(*node.elseStmt);
@@ -4504,16 +4823,16 @@ void SemanticAnalyzer::visit(IfStmtAST& node) {
 
 void SemanticAnalyzer::visit(WhileStmtAST& node) {
     Type* condType = getExprType(*node.cond);
-    if (condType && !isScalarType(condType)) {
-        emitError("while condition must be scalar type, but got '" + typeToString(condType) + "'", node);
+    if (condType && !isConditionType(condType)) {
+        emitError("while condition must be scalar or optional/result, but got '" + typeToString(condType) + "'", node);
     }
     if (node.body) visit(*node.body);
 }
 
 void SemanticAnalyzer::visit(DoWhileStmtAST& node) {
     Type* condType = getExprType(*node.cond);
-    if (condType && !isScalarType(condType)) {
-        emitError("do-while condition must be scalar type, but got '" + typeToString(condType) + "'", node);
+    if (condType && !isConditionType(condType)) {
+        emitError("do-while condition must be scalar or optional/result, but got '" + typeToString(condType) + "'", node);
     }
     if (node.body) visit(*node.body);
 }
@@ -4523,8 +4842,8 @@ void SemanticAnalyzer::visit(ForStmtAST& node) {
     if (node.init) visit(*node.init);
     if (node.cond) {
         Type* condType = getExprType(*node.cond);
-        if (condType && !isScalarType(condType)) {
-            emitError("for condition must be scalar type, but got '" + typeToString(condType) + "'", node);
+        if (condType && !isConditionType(condType)) {
+            emitError("for condition must be scalar or optional/result, but got '" + typeToString(condType) + "'", node);
         }
     }
     if (node.inc) getExprType(*node.inc);
@@ -4554,6 +4873,21 @@ void SemanticAnalyzer::visit(ContinueStmtAST& node) {}
 void SemanticAnalyzer::visit(NullStmtAST& node) {}
 
 void SemanticAnalyzer::visit(VarDeclAST& node) {
+    // Review 2.6: `auto` infers the variable type from its initializer.
+    if (node.type && stripTypedef(node.type)->kind == TypeKind::Auto) {
+        if (!node.initExpr) {
+            emitError("'auto' variable '" + node.name +
+                          "' must have an initializer", node);
+            node.type = nullptr;
+            return;
+        }
+        Type* inferred = getExprType(*node.initExpr);
+        if (!inferred) {
+            node.type = nullptr;
+            return;
+        }
+        node.type = inferred;
+    }
     // AGG-10: out-of-class static data definition. Attach its initializer to
     // the in-class static member and do not declare/emit a second global.
     if (node.isOutOfClassStatic) {
@@ -6309,6 +6643,7 @@ void SemanticAnalyzer::visit(ExprAST& expr) {
     if (auto* e = dynamic_cast<CommaExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<PostfixIncDecExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<ArrayAccessExprAST*>(&expr)) { visit(*e); return; }
+    if (auto* e = dynamic_cast<RangeExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<MemberAccessExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<SizeofExprAST*>(&expr)) { visit(*e); return; }
     if (auto* e = dynamic_cast<OffsetOfExprAST*>(&expr)) { visit(*e); return; }
@@ -6696,6 +7031,12 @@ void SemanticAnalyzer::initWalkExpr(ExprAST* expr, std::unordered_set<std::strin
     if (auto* arr = dynamic_cast<ArrayAccessExprAST*>(expr)) {
         initWalkExpr(arr->array.get(), state);
         initWalkExpr(arr->index.get(), state);
+        return;
+    }
+    if (auto* range = dynamic_cast<RangeExprAST*>(expr)) {
+        initWalkExpr(range->object.get(), state);
+        initWalkExpr(range->begin.get(), state);
+        initWalkExpr(range->end.get(), state);
         return;
     }
     if (auto* mem = dynamic_cast<MemberAccessExprAST*>(expr)) {

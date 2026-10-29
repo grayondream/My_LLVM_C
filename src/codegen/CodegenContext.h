@@ -87,12 +87,16 @@ public:
     void popDeferScope();       // emit and drop the innermost scope
     void discardDeferScope();   // drop the innermost scope without emitting
     void addDefer(ExprAST* expr);
+    // Review 2.5: owning locals are released when their lexical scope exits.
+    void addStringCleanup(llvm::Value* addr, Type* type);
     void emitDefersFrom(size_t depth);  // emit scopes [size-1 .. depth], innermost first
     void emitAllDefers();
     size_t getBreakDeferBoundary() const;
     size_t getContinueDeferBoundary() const;
 
     llvm::Value* coerceToBool(llvm::Value* val);
+    // Review 2.4: Optional/Result conditions use their valid/ok flag.
+    llvm::Value* coerceToBool(llvm::Value* val, Type* astType);
 
     // Insert an implicit conversion of `val` to `targetLLVMType`, following the
     // usual C arithmetic conversion rules. Returns `val` unchanged when no
@@ -185,6 +189,7 @@ private:
     std::vector<llvm::BasicBlock*> continueBlocks;
 
     std::vector<std::vector<ExprAST*>> deferScopes;
+    std::vector<std::vector<std::pair<llvm::Value*, Type*>>> cleanupScopes;
     std::vector<size_t> breakDeferBoundaries;
     std::vector<size_t> continueDeferBoundaries;
 

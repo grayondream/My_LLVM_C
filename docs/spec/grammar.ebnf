@@ -93,7 +93,7 @@ escape-sequence     = '\' , ( "'" | '"' | '\' | 'n' | 't' | 'r' | '0'
 
 (* --- 布尔/空字面量 --- *)
 boolean-literal     = 'true' | 'false' ;
-null-literal        = 'null' | 'nullptr' ;                          (* [impl] nullptr ≡ null，TYP-24 *)
+null-literal        = 'null' ;                                      (* [impl] 唯一空指针拼写（Review 2.3） *)
 
 
 (* =========================================================================
@@ -205,7 +205,8 @@ parameter           = type , [ identifier ] , [ '=' , const-expr ] ;   (* [impl]
 
 (* --- 变量 --- *)
 variable-decl-list  = variable-decl , { ',' , variable-decl } , ';' ;
-variable-decl       = type , identifier , [ '[' , const-expr , ']' ] , [ '=' , initializer ] ;
+variable-decl       = type , identifier , [ '[' , const-expr , ']' ] , [ '=' , initializer ]
+                    | 'auto' , identifier , '=' , initializer ;    (* [impl] Review 2.6 仅限有初始化器的变量 *)
 
 (* --- 函数指针 --- *)
 function-pointer-type = type , '(' , '*' , identifier , ')'
@@ -343,6 +344,7 @@ cast-expr           = '(' , type , ')' , unary-expr
 
 postfix-expr        = primary-expr , { postfix-op } ;
 postfix-op          = '[' , expr , ']'
+                    | '[' , [ expr ] , ':' , [ expr ] , ']'          (* [impl] Review 2.2 范围切片 *)
                     | '(' , [ argument-list ] , ')'
                     | '.' , identifier
                     | '->' , identifier

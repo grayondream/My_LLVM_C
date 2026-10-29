@@ -340,8 +340,8 @@ void section_pointers() {
     int32 key = 4;
     int32* found = (int32*)bsearch(&key, ns, 5, 4, cmp_int);
     check(found != null && *found == 4, "bsearch callback");
-    int32* np = nullptr;
-    check(np == null, "nullptr literal");
+    int32* np = null;
+    check(np == null, "null pointer literal");
     int32 rarr[3] = {1, 2, 3};
     check(sum_restrict(rarr, 3) == 6, "restrict pointer param");
 }
@@ -384,7 +384,7 @@ void section_arrays_slice() {
 class Greeter {
 public:
     int32 id;
-    char* to_string() { return "Greeter!"; }   // format 自定义渲染
+    const char* to_string() { return "Greeter!"; }   // format 自定义渲染
 };
 
 void section_strings() {
@@ -395,8 +395,8 @@ void section_strings() {
     check(uni.len() == 6 && uni.char_count() == 5, "UTF-8 len vs char_count");
     check(sv.find("ll") == 2, "find");
     check(sv.sub(1, 3) == "el", "sub");
-    char* cp = sv;                             // string_view → char*
-    check(cp[0] == 'h', "string_view -> char*");
+    const char* cp = sv;                       // string_view → const char* (read-only)
+    check(cp[0] == 'h', "string_view -> const char*");
 
     string s = string.new("ab");               // 所有权字符串
     s.append("cd");
@@ -712,7 +712,7 @@ void section_libc() {
     void* p = malloc(64);
     check(p != null, "malloc");
     char* buf = (char*)p;
-    char* src = "hello";                       // string_view → char*
+    const char* src = "hello";                 // literal → const char* (read-only)
     memcpy(buf, src, 5);
     buf[5] = 0;
     check(strlen(buf) == 5, "memcpy + strlen");

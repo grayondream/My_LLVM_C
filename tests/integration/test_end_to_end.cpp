@@ -458,7 +458,7 @@ TEST_F(EndToEndTest, PrintFormatsHalfAndQuad) {
 TEST_F(EndToEndTest, Float16VarargPromotesToDouble) {
     testing::internal::CaptureStdout();
     EXPECT_EQ(runSource(
-        R"(extern int32 printf(char* format, ...);
+        R"(extern int32 printf(const char* format, ...);
 int32 main() { printf("%f\n", 1.5f16); return 0; })",
         "vararg_f16.c"), 0);
     EXPECT_EQ(testing::internal::GetCapturedStdout(), "1.500000\n");
@@ -482,7 +482,7 @@ TEST_F(EndToEndTest, PrintUsesFreeFunctionToString) {
     testing::internal::CaptureStdout();
     EXPECT_EQ(runSource(
         "struct P { int32 x; int32 y; };"
-        "char* to_string(struct P p) { return \"Point\"; }"
+        "const char* to_string(struct P p) { return \"Point\"; }"
         "int32 main() { struct P p; print(\"<{}>\", p); return 0; }",
         "print_to_string.c"), 0);
     EXPECT_EQ(testing::internal::GetCapturedStdout(), "<Point>");
@@ -491,7 +491,7 @@ TEST_F(EndToEndTest, PrintUsesFreeFunctionToString) {
 TEST_F(EndToEndTest, PrintUsesMethodToString) {
     testing::internal::CaptureStdout();
     EXPECT_EQ(runSource(
-        "class C { public: int32 x; public: char* to_string() { return \"C!\"; } };"
+        "class C { public: int32 x; public: const char* to_string() { return \"C!\"; } };"
         "int32 main() { C c; print(\"{}\", c); return 0; }",
         "print_method_to_string.c"), 0);
     EXPECT_EQ(testing::internal::GetCapturedStdout(), "C!");

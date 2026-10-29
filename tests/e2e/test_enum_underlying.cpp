@@ -125,7 +125,7 @@ TEST_F(EnumUnderlyingE2E, AnonymousEnumAliasWithUnderlyingType) {
 TEST_F(EnumUnderlyingE2E, VarArgPromotesSignedSmallEnum) {
     // int8 -1 must be sign-extended to int for printf-style varargs.
     EXPECT_EQ(runSource(R"(
-        extern int32 snprintf(char* s, usize n, char* format, ...);
+        extern int32 snprintf(char* s, usize n, const char* format, ...);
         enum S : int8 { Neg = -1 };
         int32 main() {
             char buf[16];
@@ -137,7 +137,7 @@ TEST_F(EnumUnderlyingE2E, VarArgPromotesSignedSmallEnum) {
 
 TEST_F(EnumUnderlyingE2E, VarArgPromotesUnsignedSmallEnum) {
     EXPECT_EQ(runSource(R"(
-        extern int32 snprintf(char* s, usize n, char* format, ...);
+        extern int32 snprintf(char* s, usize n, const char* format, ...);
         enum U : uint8 { Big = 200 };
         int32 main() {
             char buf[16];

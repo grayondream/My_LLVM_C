@@ -98,11 +98,11 @@ static int runSource(const std::string& source, const std::string& filename) {
 // ---- T2: 字面量 = str，基础互操作 ----
 
 TEST_F(StringE2E, LiteralToCharPointer) {
-    // FMT-03: str -> char* 隐式（字节视图，放弃 UTF-8 保证与长度）。
+    // Review 2.5: str -> const char* 隐式（只读字节视图）。
     EXPECT_EQ(runSource(R"(
         int32 main() {
             string_view s = "hi";
-            char* p = s;
+            const char* p = s;
             if (p[0] != 'h') { return 1; }
             if (p[1] != 'i') { return 2; }
             return 0;
@@ -192,7 +192,7 @@ TEST_F(StringE2E, StrCharLenAt) {
 TEST_F(StringE2E, StrFromCExec) {
     EXPECT_EQ(runSource(R"(
         int32 main() {
-            char* p = "abc";
+            const char* p = "abc";
             string_view s = str_from_c(p);
             if (s.len() != 3) { return 1; }
             return 0;
@@ -394,7 +394,7 @@ TEST_F(StringE2E, EmptyStringInvariants) {
             string s = string.new("");
             if (s.len() != 0) { return 1; }
             if (s.capacity() < 1) { return 2; }
-            char* p = s;
+            const char* p = s;
             // malloc 不清零：p[0] 内容未定义。不变量 = p 非空（cap>=1 保证）。
             if (p == null) { return 3; }
             return 0;
@@ -556,7 +556,7 @@ TEST_F(StringE2E, FormatStringArgExec) {
 
 TEST_F(StringE2E, FormatToStringExec) {
     EXPECT_EQ(runSource(R"(
-        class P { public: int32 x; public: char* to_string() { return "P!"; } };
+        class P { public: int32 x; public: const char* to_string() { return "P!"; } };
         int32 main() {
             P p;
             string s = format("{}", p);
@@ -821,7 +821,7 @@ TEST_F(StringE2E, LogicalOpsBlockProducingRhs) {
 // 缓冲容量，否则越界读栈。钉长 to_string（>64 字节动态缓冲）与长浮点字面量。
 TEST_F(StringE2E, FormatClampsTruncatedChunks) {
     EXPECT_EQ(runSource(R"(
-        class Big { public: int32 v; public: char* to_string() { return "0123456789012345678901234567890123456789012345678901234567890123456789"; } };
+        class Big { public: int32 v; public: const char* to_string() { return "0123456789012345678901234567890123456789012345678901234567890123456789"; } };
         int32 main() {
             Big big;
             string_view f = "[{}]";

@@ -802,13 +802,13 @@ TEST(PrintBuiltin, UnsupportedTypeNeedsToString) {
 
 TEST(PrintBuiltin, UsesFreeFunctionToString) {
     EXPECT_TRUE(analyzeOk(
-        "struct P { int32 x; }; char* to_string(struct P p) { return \"P\"; } "
+        "struct P { int32 x; }; const char* to_string(struct P p) { return \"P\"; } "
         "int32 main() { struct P p; print(\"{}\", p); return 0; }"));
 }
 
 TEST(PrintBuiltin, UsesMethodToString) {
     EXPECT_TRUE(analyzeOk(
-        "class C { public: int32 x; public: char* to_string() { return \"C\"; } }; "
+        "class C { public: int32 x; public: const char* to_string() { return \"C\"; } }; "
         "int32 main() { C c; print(\"{}\", c); return 0; }"));
 }
 
@@ -1895,8 +1895,8 @@ TEST(SliceSemTest, OptLtRejected) {
         "int32 main() { int32? a = {true, 5}; int32? b = {false, 0}; bool r = a < b; return 0; }"));
 }
 
-TEST(SliceSemTest, OptLogicalRejected) {
-    EXPECT_FALSE(analyzeOk(
+TEST(SliceSemTest, OptLogicalAccepted) {
+    EXPECT_TRUE(analyzeOk(
         "int32 main() { int32? a = {true, 5}; int32? b = {false, 0}; bool r = a && b; return 0; }"));
 }
 
@@ -2213,7 +2213,7 @@ TEST_F(SemanticAnalyzerTest, StrMethodDiagnostics) {
 // P1-06 / T3: str_from_c accepts char* only (no implicit str -> str_from_c).
 TEST_F(SemanticAnalyzerTest, StrFromCAcceptsCharPointer) {
     EXPECT_TRUE(analyzeFullyOk(
-        "int32 main() { char* p = \"abc\"; string_view s = str_from_c(p); return 0; }"));
+        "int32 main() { const char* p = \"abc\"; string_view s = str_from_c(p); return 0; }"));
     EXPECT_TRUE(analyzeFullyOk(
         "int32 main() { string_view s = str_from_c(\"abc\"); return 0; }"));
 }
@@ -2362,7 +2362,7 @@ TEST_F(SemanticAnalyzerTest, BuiltinFormatSema) {
         "int32 main() { string_view f = \"{}\"; string s = format(f, 1); return 0; }"));
     // Custom types lower through to_string (FMT-10).
     EXPECT_TRUE(analyzeFullyOk(
-        "class C { public: char* to_string() { return \"C\"; } };"
+        "class C { public: const char* to_string() { return \"C\"; } };"
         "int32 main() { C c; string s = format(\"{}\", c); return 0; }"));
     // A class without to_string cannot be formatted.
     EXPECT_FALSE(analyzeFullyOk(

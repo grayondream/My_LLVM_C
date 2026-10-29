@@ -83,7 +83,9 @@ namespace 前缀，`namespace std { void abort() { abort(); } }` 会自递归，
 
 `optional<T>`/`result<T,E>`（STD-02，2026-10-06）由**语言内建**承载：伪字段
 访问器 `.valid`/`.value`（optional）、`.ok`/`.value`/`.error`（result）可自由
-读写（显式判断，无 `?` 传播，NG-05）；无 trait/泛型前 stdlib 不另设包装函数。
+读写。条件位置直接使用 `if (opt)` / `if (!res)`（真值分别为 `valid` / `ok`）；
+另有 `is_some`/`is_none`/`unwrap`/`value_or`（optional）与
+`is_ok`/`is_err`/`unwrap`/`value_or`（result）。仍无 `?` 传播（NG-05）。
 
 ## 7. `std.io` `[impl]`
 
@@ -91,10 +93,10 @@ namespace 前缀，`namespace std { void abort() { abort(); } }` 会自递归，
 
 | 组 | 名字 | 签名 |
 |---|---|---|
-| stdout | `std::print_int` / `std::print_char` / `std::print_str` / `std::print_bool` | `void (int32)` / `void (char)` / `void (char*)` / `void (int32)` |
-| stderr | `std::print_err_str` / `std::print_err_int` | `void (char*)` / `void (int32)` |
+| stdout | `std::print_int` / `std::print_char` / `std::print_str` / `std::print_bool` | `void (int32)` / `void (char)` / `void (const char*)` / `void (int32)` |
+| stderr | `std::print_err_str` / `std::print_err_int` | `void (const char*)` / `void (int32)` |
 | stdin | `std::read_char` / `std::read_int` / `std::read_line` | `int32 ()` / `int32 ()` / `int32 (char*, int32)` |
-| 文件 | `std::file_open` / `std::file_close` | `void* (char*, char*)` / `int32 (void*)` |
+| 文件 | `std::file_open` / `std::file_close` | `void* (const char*, const char*)` / `int32 (void*)` |
 | 文件 | `std::file_read` / `std::file_write` | `usize (void*, void*, usize)` |
 | 文件 | `std::file_read_line` / `std::file_read_char` / `std::file_write_char` / `std::file_write_str` | 见 `libs/std/io.smc` |
 
@@ -114,6 +116,7 @@ namespace 前缀，`namespace std { void abort() { abort(); } }` 会自递归，
 
 **分层**：原语（内建，无需 import）+ 组合（`libs/std/string.smc`，`import std.string;`）。
 原语之所以是内建：`.smc` 层无法触达 `string_view` 内部字段、也无法从 `ptr+len` 构造切片值。
+`string_view`/字符串字面量只隐式转换为 `const char*`；可变 `char*` 需显式转换。
 
 ### 9.1 内建原语 `[impl]`
 | API | 语义 | 所有权 |
@@ -121,6 +124,10 @@ namespace 前缀，`namespace std { void abort() { abort(); } }` 会自递归，
 | `s.find(needle: string_view\|string) -> isize` | 首现字节下标；无 → `-1`；空 needle → `0` | 视图 |
 | `s.rfind(needle) -> isize` | 末现字节下标；无 → `-1`；空 needle → `len` | 视图 |
 | `s.sub(begin, end) -> string_view` | 字节区间零拷贝视图 `{ptr+begin, end-begin}` | 视图（见下） |
+| `s[begin:end]` | 范围切片语法；对 `string_view`/`string` 得 `string_view`，对数组/切片得 `T[]`；越界 panic | 视图 |
+| `s.len` / `s.char_count` | 属性形式；`len()`/`char_count()` 保留为别名 | — |
+| `string.data` | 拥有型缓冲裸指针（可写，生命周期同 `string`） | 借用 |
+| `string_view.data` | 只读视图指针（`const char*`） | 借用 |
 | `split(s, sep) -> string_view[]` | 贪心非重叠分割；元素为源数据视图；无分隔符 → 全串 1 段 | 数组 malloc（见下） |
 | `split_destroy(parts)` | 释放 split 的段数组（不触碰元素） | — |
 

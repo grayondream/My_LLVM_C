@@ -37,6 +37,7 @@
 | 关键字 | 状态 | 说明 |
 |---|---|---|
 | `const` | `[impl]` | |
+| `auto` | `[impl]` | 仅用于变量声明的类型推导，必须有初始化器（Review 2.6） |
 | `constexpr` | `[impl]` | 与 `compile_time` 关系见 DEC-05 |
 | `static` | `[impl]` | |
 | `extern` | `[impl]` | C 链接（MOD-09） |
@@ -91,7 +92,7 @@
 |---|---|---|
 | `constexpr` | `[impl]` | 见 §2 |
 | `true` / `false` | `[impl]` | 布尔字面量 |
-| `null` / `nullptr` | `[impl]` | 空字面量（nullptr ≡ null，TYP-24） |
+| `null` | `[impl]` | 唯一空指针字面量；`nullptr` 不再是关键字（Review 2.3） |
 | `comptime` | `[remove]` | 统一并入 `compile_time`；token 已移除（CT-01 / NG-12 / DEC-18） |
 | `compile_time` | `[impl]` | 编译期命名空间（非保留字，按标识符处理即可） |
 | `static_assert` | `[impl]` | 作为 `compile_time.static_assert`，**不设独立关键字**（NG-12） |
