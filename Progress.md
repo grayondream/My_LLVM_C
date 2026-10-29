@@ -1086,3 +1086,10 @@
 - SG-18（C 字面量兼容子集）与 SG-19（asm 连续冒号/命名操作数）已全部修复并分别提交。
 - 验证：全量 `ctest --test-dir build -j8` **1591/1591** 通过（2 个既有 `GTEST_SKIP`）；`examples/all_features.c` → `ALL FEATURES OK`，`examples/full_feature.c` → `FULL FEATURE OK`。
 - 用户裁决：SG-20 ~ SG-23 属于规范未覆盖的扩展，本轮暂不实现，保留为后续产品决策项。
+
+## 2026-10-29 — all_features.c 扩展到 26 节
+
+- 在 `examples/all_features.c` 中加入 `module all_features;` 与 `import std.math;`，并补 22 ~ 26 节：lambda、运算符重载、存储类/限定符、模块、声明符/静态成员/成员运算符。
+- 第 1 节补 SG-18 字面量：`.5`、`LL`/`ULL`、字符/字符串前缀、`R"(...)"`、十六进制浮点；第 15 节补 `if/else` 与 `do-while`；第 19 节补命名 asm 操作数与 `:::`。
+- 第 26 节覆盖近期修复：常量数组维度、enum 位域宽度、多函数声明符、括号声明符、函数类型形参 decay、类外静态数据/方法、成员 `operator[]`/`operator()`、全局 `string_view`。
+- 验证：`build/bin/my_llvm_c examples/all_features.c` + 运行输出 `ALL FEATURES OK`；全量 `ctest --test-dir build -j8` **1591/1591** 通过（2 个既有 `GTEST_SKIP`）；`examples/full_feature.c` 仍输出 `FULL FEATURE OK`。

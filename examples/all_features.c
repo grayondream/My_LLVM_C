@@ -5,12 +5,17 @@
 // 每一节先打印一行标题，随后用 check(...) 断言行为；全部通过 main 返回 0。
 //
 // 编译 + 运行：
-//   ./bin/my_llvm_c -c examples/all_features.c -o /tmp/all_features.o
-//   cc /tmp/all_features.o -o /tmp/all_features && /tmp/all_features
-//   (退出码 0 = 全部特性验证通过)
+//   ./build/bin/my_llvm_c examples/all_features.c -o /tmp/all_features
+//   /tmp/all_features
+//   (退出码 0 + 末行 ALL FEATURES OK = 全部特性验证通过)
 //
+// 文件声明 `module all_features;`，因此文件名必须保持 all_features.c；
+// `import std.math;` 演示模块导入。
 // 备注：本语言没有预处理宏 / int / float / double 关键字；定宽类型见第 1 节。
 // ============================================================================
+
+module all_features;
+import std.math;
 
 int32 fails = 0;
 
@@ -44,6 +49,22 @@ void section_types() {
     float128 q = 2.5f128;
     bool b     = true;
     char c     = '\x41';
+    // 最近补齐的 C 字面量形式（SG-18）。
+    float64 dot     = .5;          // 前导小数点
+    int64   ll      = 1LL;         // long long 后缀
+    uint64  ull     = 2ULL;        // unsigned long long 后缀
+    int32   wc      = L'A';        // 宽字符前缀
+    int32   uc      = u'A';        // UTF-16 字符前缀
+    int32   uc32    = U'A';        // UTF-32 字符前缀
+    int32   u8c     = u8'A';       // UTF-8 字符前缀
+    char16* u16str  = u"hi";       // u"..." -> char16*
+    char32* u32str  = U"hi";       // U"..." -> char32*
+    char32* wstr    = L"hi";       // L"..." -> 32 位 code unit
+    string_view raw  = R"(raw)";   // 原始字符串
+    string_view rawd = R"tag(raw)tag";
+    float64 hexA    = 0x1p3;       // 十六进制浮点
+    float64 hexB    = 0x1.8p1;
+    float64 hexC    = 0x.8p1;
 
     check(a8 == -128, "int8");
     check(u8 == 255, "uint8");
@@ -60,6 +81,14 @@ void section_types() {
     check(d == -1.5, "float64");
     check(b, "bool");
     check(c == 'A', "char literal");
+    check(dot == .5, "leading-dot float");
+    check(ll == 1 && ull == 2, "LL / ULL suffix");
+    check(wc == 'A' && uc == 'A' && uc32 == 'A' && u8c == 'A',
+          "character literal prefixes");
+    check(u16str[0] == 'h' && u32str[0] == 'h' && wstr[0] == 'h',
+          "wide / UTF string prefixes");
+    check(raw[0] == 'r' && rawd[0] == 'r', "raw string / delimiter");
+    check(hexA == 8.0 && hexB == 3.0 && hexC == 1.0, "hex float literals");
     println("  f16={} f128={} f32={} f64={}", h, q, f, d);
 }
 
@@ -515,11 +544,25 @@ void section_controlflow() {
     }
     check(sum == 55, "for loop");
 
+    int32 branch = 0;
+    if (sum == 55) {
+        branch = 1;
+    } else {
+        branch = 2;
+    }
+    check(branch == 1, "if / else");
+
     int32 w = 0;
     while (w < 3) {
         w = w + 1;
     }
     check(w == 3, "while loop");
+
+    int32 dw = 0;
+    do {
+        dw = dw + 1;
+    } while (dw < 3);
+    check(dw == 3, "do-while loop");
 
     int32 sw = 0;
     int32 n = 2;
@@ -634,11 +677,16 @@ void section_asm() {
     int32 out;
     asm volatile("mov $7, %0" : "=r"(out));
     check(out == 7, "asm output register");
+    int32 named = 0;
+    asm volatile("movl $9, %[v]" : [v] "=r"(named));
+    check(named == 9, "named asm operand");
     int32 x = 5;
     int32 y = 3;
     asm("add %1, %0" : "+r"(x) : "r"(y));
     check(x == 8, "asm read-write operand");
     asm volatile("nop");
+    asm("nop" ::: "memory");                   // 连续冒号的空操作数段
+    check(x == 8, "asm adjacent empty sections");
 }
 
 // ---------------------------------------------------------------------------
@@ -732,6 +780,149 @@ void section_conversions() {
     check(bag.data[0] == 9, "method array write-through");
 }
 
+// ---------------------------------------------------------------------------
+// 22. lambda：无捕获函数指针 / 立即调用 / 按值、按引用、全捕获
+// ---------------------------------------------------------------------------
+void section_lambda() {
+    println("== 22. lambda ==");
+    int32 (*fp)(int32) = [](int32 x) { return x * 2; };
+    check(fp(21) == 42, "no-capture lambda -> function pointer");
+    int32 imm = [](int32 x, int32 y) { return x + y; }(3, 4);
+    check(imm == 7, "immediate lambda");
+    int32 cap = 10;
+    int32 byval = [cap](int32 x) { return cap + x; }(5);
+    check(byval == 15, "capture by value");
+    int32 w = 0;
+    [&w]() { w = 9; }();
+    check(w == 9, "capture by reference");
+    int32 a = 1;
+    int32 b = 2;
+    int32 cs = [=]() { return a + b; }();
+    check(cs == 3, "capture all by value");
+}
+
+// ---------------------------------------------------------------------------
+// 23. 运算符重载：自由函数形式 +、==
+// ---------------------------------------------------------------------------
+struct Vec2 { int32 x; int32 y; };
+struct Vec2 operator+(struct Vec2 a, struct Vec2 b) {
+    struct Vec2 r;
+    r.x = a.x + b.x;
+    r.y = a.y + b.y;
+    return r;
+}
+bool operator==(struct Vec2 a, struct Vec2 b) {
+    return a.x == b.x && a.y == b.y;
+}
+
+void section_operator_overload() {
+    println("== 23. operator overloading ==");
+    struct Vec2 a = {1, 2};
+    struct Vec2 b = {3, 4};
+    struct Vec2 c = a + b;
+    check(c.x == 4 && c.y == 6, "operator+");
+    struct Vec2 expect = {4, 6};
+    check(c == expect, "operator==");
+}
+
+// ---------------------------------------------------------------------------
+// 24. 存储类与限定符：thread_local / atomic / volatile / inline
+// ---------------------------------------------------------------------------
+thread_local int32 tl_counter = 5;
+static int32 static_counter = 1;
+atomic int32 atomic_counter = 0;
+volatile int32 volatile_value = 3;
+inline int32 inline_add(int32 a, int32 b) { return a + b; }
+
+void section_storage() {
+    println("== 24. storage & qualifiers ==");
+    tl_counter = tl_counter + 1;
+    check(tl_counter == 6, "thread_local");
+    static_counter = static_counter + 1;
+    check(static_counter == 2, "static storage");
+    atomic_counter = atomic_counter + 1;
+    atomic_counter++;
+    check(atomic_counter == 2, "atomic load/store + increment");
+    check(volatile_value == 3, "volatile");
+    check(inline_add(20, 22) == 42, "inline function");
+}
+
+// ---------------------------------------------------------------------------
+// 25. 模块：module / import / export
+// ---------------------------------------------------------------------------
+export int32 exported_add(int32 a, int32 b) { return a + b; }
+
+void section_modules() {
+    println("== 25. modules ==");
+    check(exported_add(20, 22) == 42, "export declaration");
+    check(std::sqrt(16.0) == 4.0, "import std.math + qualified call");
+    check(std::PI > 3.1415 && std::PI < 3.1416, "imported constant");
+}
+
+// ---------------------------------------------------------------------------
+// 26. 声明符 / 静态成员 / 成员运算符 / 全局字面量（近期语法缺口收口）
+// ---------------------------------------------------------------------------
+enum BFEnum : uint8 { BF3 = 3, BF5 = 5 };
+struct EnumBF { uint8 a : BF3; uint8 b : BF5; };
+
+int32 multiOne(), multiTwo();
+int32 multiOne() { return 20; }
+int32 multiTwo() { return 22; }
+
+int32 (parenVar) = 7;
+int32 (parenFn)(void) { return 8; }
+int32 (parenArr)[2];
+
+int32 incFn(int32 x) { return x + 1; }
+int32 applyFnType(int32 cb(int32), int32 x);
+int32 applyFnType(int32 cb(int32), int32 x) { return cb(x); }
+
+struct StaticBox {
+    static int32 value;
+    static int32 get();
+};
+int32 StaticBox::value = 41;
+int32 StaticBox::get() { return StaticBox::value + 1; }
+
+class MemberOps {
+public:
+    int32 data[2];
+    int32 operator[](int32 i) { return this->data[i]; }
+    int32 operator()(int32 x) { return x + 1; }
+};
+
+string_view g_text = "global string_view";
+
+void section_declarations() {
+    println("== 26. declarators / static members / member operators ==");
+
+    const int32 LocalDim = 2;
+    int32 dims[LocalDim] = {1, 2};
+    check(LocalDim == 2 && dims[0] + dims[1] == 3, "const array dimension");
+
+    struct EnumBF ebf;
+    ebf.a = 3;
+    ebf.b = 5;
+    check(ebf.a == 3 && ebf.b == 5, "enum bit-field widths");
+
+    check(multiOne() + multiTwo() == 42, "multiple function declarators");
+    check(parenVar == 7, "parenthesized variable declarator");
+    check(parenFn() == 8, "parenthesized function declarator");
+    parenArr[0] = 1;
+    check(parenArr[0] == 1, "parenthesized array declarator");
+    check(applyFnType(incFn, 41) == 42, "function-type parameter decay");
+
+    check(StaticBox::value == 41, "out-of-class static data");
+    check(StaticBox::get() == 42, "out-of-class static method");
+
+    MemberOps ops;
+    ops.data[0] = 41;
+    ops.data[1] = 1;
+    check(ops[0] + ops[1] == 42, "member operator[]");
+    check(ops(41) == 42, "member operator()");
+    check(g_text == "global string_view", "global string_view");
+}
+
 // 全局 f() 已在文件前部定义（第 13 节 namespace 隔离用）
 
 int32 main() {
@@ -756,6 +947,11 @@ int32 main() {
     section_asm();
     section_libc();
     section_conversions();
+    section_lambda();
+    section_operator_overload();
+    section_storage();
+    section_modules();
+    section_declarations();
     if (fails == 0) {
         println("ALL FEATURES OK");
     }
